@@ -182,13 +182,16 @@ export class CalculoPreciosService {
         await this.monedasService.decimalesOficiales(tenantId),
       ));
 
-    // El día del local para el instante que decide: la apertura de la cuenta
-    // si la venta nace de una, y si no, ahora.
-    const fechaLocal = await fechaLocalTenant(
-      this.db,
+    // El día del local para el instante que decide la vigencia de las reglas:
+    // la apertura de la cuenta si la venta nace de una, y si no, ahora. La zona
+    // se resuelve UNA vez y la reusan los instantes de las promos
+    // (`resolverPromociones`): pedirla de nuevo ahí era un viaje repetido.
+    const instanteVigencia = await this.instanteDeVigencia(
       tenantId,
-      await this.instanteDeVigencia(tenantId, dto.cuentaId),
+      dto.cuentaId,
     );
+    const zona = await zonaHorariaTenant(this.db, tenantId);
+    const fechaLocal = instanteLocalEnZona(zona, instanteVigencia).fecha;
 
     // Catálogos del tenant cargados una vez e indexados por id.
     /**
@@ -437,7 +440,7 @@ export class CalculoPreciosService {
       dto,
       lineas,
       itemsBase,
-      fechaLocal,
+      zona,
     );
 
     const resultado = calcularVenta({
@@ -556,10 +559,25 @@ export class CalculoPreciosService {
   /**
    * Las promos del tenant que este carrito gana, ya arbitradas entre sí.
    *
-   * **Cero costo para el tenant sin promos:** si `cargarVigentes` vuelve vacía
-   * se corta acá, antes de resolver la zona horaria y antes de tocar
-   * `cuenta_lineas`. La única consulta que paga ese tenant es la de promos, y
-   * es la misma para un carrito de 1 línea que para uno de 40.
+   * **Primero los instantes, después las promos, y el orden es el arreglo.**
+   * Lo que se carga son las promos cuyo rango de fechas toca el de los días en
+   * que se pidieron las líneas, del más temprano al más tarde. Hasta el
+   * 2026-10-11 se cargaban las del día de la apertura de la cuenta: con la mesa
+   * sentada el 30 a las 23:30 y la cerveza pedida el 31 a las 00:30, la promo
+   * de "solo el 31" no se cargaba y su ventana nunca se miraba. Lo que se
+   * carga de más lo descarta `instanteEnVentana` por línea, que ya mira la
+   * fecha: la cerveza pedida el 1 no lleva la promo del 31 aunque se cargue.
+   *
+   * El rango sale de los instantes y no de "la apertura hasta hoy", aunque hoy
+   * cubran los mismos días (ninguna línea es más vieja que la apertura de su
+   * cuenta: al fusionar, el destino es la abierta primero). Esa es una regla de
+   * la fusión; sacado de las líneas, el rango es exacto por construcción.
+   *
+   * **El costo para el tenant sin promos:** sin cuenta, nada (la zona ya la
+   * resolvió `calcular()` y no hay líneas de cuenta que leer); con cuenta, la
+   * lectura de `cuenta_lineas` de `instantesDeLineas`, por su índice. Antes del
+   * arreglo no la pagaba, porque las promos se cargaban antes que los
+   * instantes.
    *
    * **Secuencial a propósito**, igual que los loaders de arriba: esto corre
    * dentro de `crearEnTransaccion` → `db.transaccion(...)`, o sea sobre un
@@ -583,15 +601,19 @@ export class CalculoPreciosService {
     dto: CalcularVentaDto,
     lineas: LineaResuelta[],
     itemsBase: ItemsBaseMap,
-    fechaLocal: string,
+    zona: string,
   ): Promise<AplicacionPromo[]> {
+    const instantes = await this.instantesDeLineas(tenantId, dto, zona);
+    if (instantes.length === 0) return [];
+
+    // `'YYYY-MM-DD'`: el orden lexicográfico es el del calendario.
+    const dias = instantes.map((i) => i.fecha).sort();
     const promos = await this.promocionesService.cargarVigentes(
       tenantId,
-      fechaLocal,
+      dias[0],
+      dias[dias.length - 1],
     );
     if (promos.length === 0) return [];
-
-    const instantes = await this.instantesDeLineas(tenantId, dto);
 
     const lineasPromo: LineaPromo[] = lineas.map((linea, index) => ({
       index,
@@ -636,17 +658,17 @@ export class CalculoPreciosService {
    * fila usa "ahora": es una línea AGREGADA en el cobro, y negarle la promo
    * sería no aplicarle un beneficio que el cliente sí acaba de ganar.
    *
-   * ⚠️ **UNA query a `cuenta_lineas` y UNA a la zona horaria**, no una por
+   * ⚠️ **UNA query a `cuenta_lineas`, y la zona llega resuelta**, no una por
    * línea: `instanteLocalTenant` resuelve la zona con una consulta cada vez,
    * así que colapsar N instantes con él serían N viajes idénticos a `tenants`.
-   * Por eso la zona se resuelve una sola vez y el colapso lo hace la mitad
-   * pura (`instanteLocalEnZona`).
+   * Por eso la zona la resuelve una sola vez `calcular()` y el colapso lo hace
+   * la mitad pura (`instanteLocalEnZona`).
    */
   private async instantesDeLineas(
     tenantId: string,
     dto: CalcularVentaDto,
+    zona: string,
   ): Promise<InstanteLocal[]> {
-    const zona = await zonaHorariaTenant(this.db, tenantId);
     const ahora = instanteLocalEnZona(zona, new Date());
     if (!dto.cuentaId) return dto.lineas.map(() => ahora);
 
@@ -675,8 +697,10 @@ export class CalculoPreciosService {
   }
 
   /**
-   * El instante que decide la vigencia: la apertura de la cuenta si hay una, y
-   * si no, ahora.
+   * El instante que decide la vigencia de las reglas que no viajan congeladas
+   * en la línea: la apertura de la cuenta si hay una, y si no, ahora. Las promos
+   * ya no salen de acá: las decide el instante de cada línea
+   * (`resolverPromociones`).
    *
    * Un `cuentaId` que no resuelve —inexistente, o de otro tenant— es 400 y no
    * un silencioso "entonces ahora": el descarte mudo esconde el error justo
@@ -825,11 +849,10 @@ export class CalculoPreciosService {
    * criterio para las reglas de línea: `resolverLinea` usa lo congelado y no
    * vuelve a evaluar vigencia contra `cuentas.abierta_el`.
    *
-   * ⚠️ **Lo que sigue saliendo de la apertura de la cuenta es `fechaLocal`**, el
-   * día que decide qué **promociones** se cargan (`instanteDeVigencia`). La hora
-   * de cada promo ya es por línea; el día todavía no. Mesa que se sienta el lunes
-   * 23:30 y pide el martes 00:30: el 2x1 de los martes no se evalúa. Es la grieta
-   * abierta del frente y está en `docs/agent/pendientes.md`.
+   * Las **promociones** tampoco salen de la apertura: desde el 2026-10-11 se
+   * cargan por el rango de días de las líneas (`resolverPromociones`), así que la
+   * promo que arranca el día después de que se sentó la mesa alcanza a lo que se
+   * pide ese día.
    *
    * ⚠️ **Cuesta hasta diez consultas, no cuatro** (medido con `log_statement=all`
    * sobre un `POST /cuentas/:id/lineas`): la zona horaria (1), y si el ítem tiene

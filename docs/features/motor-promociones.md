@@ -116,13 +116,22 @@ Lo que eso cambia en la práctica, y está fijado por test
 hoy **ya no** lleva la promo de la semana pasada; y una línea pedida con el descuento vivo
 lo conserva aunque venza antes de cobrar.
 
-⚠️ **Queda un borde angosto en la PRECARGA, y no es el que parece.** El día de la semana y
-la hora se evalúan por línea (`instanteEnVentana`), así que la cerveza pedida el martes 00:30
-sí recibe el 2x1 de los martes aunque la mesa se haya sentado el lunes. Lo que sale de
-`cuenta.abierta_el` es el filtro que decide **qué promos se cargan**, y solo por su rango de
-fechas: una promo cuyo rango empieza o termina entre la apertura y el pedido no se carga y su
-ventana nunca se mira. Una promo de un solo día es el caso puro. Detalle y estado en
-[`../agent/pendientes.md`](../agent/pendientes.md).
+✅ **La precarga también es por línea desde el 2026-10-11.** Fecha, día de la semana y hora
+ya se evaluaban contra el instante de cada línea (`instanteEnVentana`), pero antes de evaluar,
+`cargarVigentes` traía solo las promos cuyo rango contenía el día de `cuenta.abierta_el`. Una
+promo que empezaba después de que se sentó la mesa nunca llegaba a mirarse: promo "solo el
+31", mesa abierta el 30 a las 23:30, cerveza pedida el 31 a las 00:30 → sin promo. Ahora se
+cargan las promos cuyo rango **toca** el de los días de las líneas, del pedido más temprano al
+más tarde, en la misma única consulta. Lo cargado de más lo descarta `instanteEnVentana` por
+línea, así que el ejemplo del owner sigue igual: mesa abierta el 31 a las 23:30 y cerveza
+pedida el 1 a las 00:30 → sin la promo del 31.
+
+El rango sale de los instantes de las líneas y no de "la apertura hasta hoy" a propósito: es
+exacto por construcción y no depende de que ninguna línea sea más vieja que la apertura de
+su cuenta. Hoy eso vale (al fusionar, el destino es la cuenta abierta primero), pero es una
+regla de otro módulo. Lo fijan los cuatro casos de *"una promo de un solo día"* en
+`vigencia-cuenta.e2e-spec.ts`, por la precuenta y por el cierre. Volver a cargar por el día de
+la apertura da rojo el primero y el cuarto. Detalle en [`../agent/resueltos.md`](../agent/resueltos.md).
 
 ---
 
@@ -244,14 +253,19 @@ puerta y la venta de 65.536 unidades).
 ```
 CalculoPreciosService.calcular
   1. resuelve líneas (precio de lista unitario, convertido a moneda oficial)
-  2. cargarVigentes: 1 query batch (promos + scopes + items del tenant, vigentes por fecha)
-  3. instantesDeLineas: 1 query a cuenta_lineas (si hay cuentaId) + 1 a la zona del tenant
+  2. instantesDeLineas: 1 query a cuenta_lineas (si hay cuentaId); la zona del tenant ya
+     la resolvió calcular() para el día de la vigencia, una sola vez
+  3. cargarVigentes: 1 query batch (promos + scopes + items del tenant) cuyo rango de
+     fechas toca el de los días de las líneas
   4. evaluarPromos (puro) → aplicaciones candidatas
   5. calcularVenta({ …, promociones, config }) — el motor aplica y cierra
 ```
 
-Cero costo para un tenant sin promos: si `cargarVigentes` vuelve vacía, se corta antes de
-tocar `cuenta_lineas` o resolver la zona horaria.
+Costo para un tenant sin promos: **sin cuenta, ninguno**: la zona es la misma que ya se
+resolvió y no hay líneas de cuenta que leer. **Con cuenta, una lectura de `cuenta_lineas`**
+por el índice `(tenant_id, cuenta_id)`: hasta el 2026-10-11 no la pagaba, porque las promos
+se cargaban antes que los instantes, pero el rango de la carga ahora sale de ellos. El tenant
+con promos paga una consulta menos que antes, porque la zona ya no se pide dos veces.
 
 **Dentro del paso `descuentos` de cada línea**: primero las reglas de catálogo, después los
 montos de promo como monto fijo. Piso en cero y cuantización al cierre del paso aplican por
@@ -371,8 +385,8 @@ body (`crearEnTransaccion` pasa el canal real de la venta).
 - **Módulo**: `backend/src/modules/promociones/promociones.module.ts`
 - **Controller**: `promociones.controller.ts`
 - **Service**: `promociones.service.ts` — `findAll`, `cargarVigentes` (batch para el motor:
-  promos + scopes + items en 1 query, filtradas por `activo`+fecha; hora/día/canal se afinan
-  en memoria en el evaluador), `create`/`update`/`remove`, validaciones de forma y
+  promos + scopes + items en 1 query, filtradas por `activo` y por un rango de fechas que toca
+  el de los días de las líneas; fecha/hora/día/canal se afinan por línea en el evaluador), `create`/`update`/`remove`, validaciones de forma y
   cardinalidad de scopes por tipo.
 - **Evaluador**: `promociones.evaluator.ts` (puro, ver arriba).
 - **Entidades**: `entities/promocion.entity.ts`, `promocion-scope.entity.ts`,

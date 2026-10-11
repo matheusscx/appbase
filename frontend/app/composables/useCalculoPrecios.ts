@@ -31,11 +31,11 @@ export interface CalcularVentaInput {
   descuentosVentaIds?: string[]
   recargosVentaIds?: string[]
   /**
-   * Cuenta de salón cuyo `abierta_el` decide la vigencia de las reglas con
-   * fecha. Sin esto la previsualización de la cuenta evalúa "ahora" mientras
-   * el cobro evalúa la apertura: la mesa que se sienta con la promo vigente y
-   * paga después de que venció vería un total sin descuento en pantalla y
-   * cobrado con descuento.
+   * Cuenta de salón que se está previsualizando. Con ella el servidor arma la
+   * precuenta igual que el cobro: relee las líneas de la cuenta con su precio y
+   * sus reglas congeladas (ignora las de este body) y evalúa cada promo contra
+   * el instante en que se pidió cada línea. Sin ella la pantalla mostraría otro
+   * total que el que se cobra.
    */
   cuentaId?: string
   /**

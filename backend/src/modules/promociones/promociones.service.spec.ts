@@ -595,7 +595,11 @@ describe('PromocionesService', () => {
     it('arma el PromoElegible completo desde las filas del JOIN', async () => {
       dataSourceMock.query.mockResolvedValue([fila()]);
 
-      const promos = await service.cargarVigentes(TENANT, '2026-06-15');
+      const promos = await service.cargarVigentes(
+        TENANT,
+        '2026-06-15',
+        '2026-06-15',
+      );
 
       expect(promos).toEqual([
         {
@@ -667,7 +671,11 @@ describe('PromocionesService', () => {
         }),
       ]);
 
-      const promos = await service.cargarVigentes(TENANT, '2026-06-15');
+      const promos = await service.cargarVigentes(
+        TENANT,
+        '2026-06-15',
+        '2026-06-15',
+      );
 
       expect(promos).toHaveLength(1);
       expect(promos[0].scopes).toEqual([
@@ -697,16 +705,23 @@ describe('PromocionesService', () => {
         fila({ scope_id: null, slot: null, tipo_scope: null, cantidad: null }),
       ]);
 
-      expect(await service.cargarVigentes(TENANT, '2026-06-15')).toEqual([]);
+      expect(
+        await service.cargarVigentes(TENANT, '2026-06-15', '2026-06-15'),
+      ).toEqual([]);
     });
 
     // El filtro real lo cubre el e2e (acá el mock devuelve lo que se le pida);
     // lo que se prueba es la FORMA del SQL: que las tres condiciones estén y
-    // que la fecha entre por parámetro, nunca interpolada.
-    it('filtra por tenant, vivas, activas y en fecha — en UNA sola query', async () => {
+    // que las fechas entren por parámetro, nunca interpoladas.
+    //
+    // ⚠️ **El rango se cruza al revés a propósito**: la promo entra si su rango
+    // TOCA el de las líneas (`inicio <= hasta` y `fin >= desde`), no si lo
+    // contiene. Desde y hasta distintos en el fixture para que un `$2`/`$3`
+    // permutado no pase por casualidad.
+    it('filtra por tenant, vivas, activas y que toquen el rango — en UNA sola query', async () => {
       dataSourceMock.query.mockResolvedValue([]);
 
-      await service.cargarVigentes(TENANT, '2026-06-15');
+      await service.cargarVigentes(TENANT, '2026-06-14', '2026-06-15');
 
       expect(dataSourceMock.query).toHaveBeenCalledTimes(1);
       const [sql, params] = dataSourceMock.query.mock.calls[0] as [
@@ -714,11 +729,11 @@ describe('PromocionesService', () => {
         unknown[],
       ];
       expect(sql).toContain('p.activo = true');
-      expect(sql).toContain('p.fecha_inicio <= $2::date');
+      expect(sql).toContain('p.fecha_inicio <= $3::date');
       expect(sql).toContain('p.fecha_fin >= $2::date');
       // Las tres tablas del JOIN filtran borrado.
       expect(sql.match(/eliminado_el IS NULL/g)).toHaveLength(3);
-      expect(params).toEqual([TENANT, '2026-06-15']);
+      expect(params).toEqual([TENANT, '2026-06-14', '2026-06-15']);
     });
   });
 

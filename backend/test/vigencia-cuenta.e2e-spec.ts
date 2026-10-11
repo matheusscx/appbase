@@ -7,6 +7,11 @@ import type { App } from 'supertest/types';
 import { DataSource } from 'typeorm';
 import { randomUUID } from 'node:crypto';
 import { AppModule } from '../src/app.module';
+import {
+  fechaMenosDias,
+  instanteLocalEnZona,
+  zonaHorariaTenant,
+} from '../src/common/utils/rango-fecha.util';
 
 /**
  * **El instante que decide la vigencia por fecha es cuándo se PIDIÓ la línea.**
@@ -63,7 +68,11 @@ interface CuentaDetalle {
 }
 interface VentaDetalle {
   totalDescuentos: string;
-  detalles: { itemId: string; descuentoAplicado: string }[];
+  detalles: { id: string; itemId: string; descuentoAplicado: string }[];
+  promociones: { promocionId: string; detalleId: string; monto: string }[];
+}
+interface PrecuentaResponse {
+  lineas: { trazas: { promociones: { id: string; monto: string }[] } }[];
 }
 
 async function login(app: INestApplication<App>): Promise<string> {
@@ -427,6 +436,216 @@ describe('Vigencia por fecha — el instante lo decide el pedido (e2e)', () => {
       expect(Number(venta.totalDescuentos)).toBe(0);
       const linea = venta.detalles.find((d) => d.itemId === itemId);
       expect(Number(linea!.descuentoAplicado)).toBe(0);
+    });
+  });
+
+  /**
+   * **Una promo de un solo día la decide el día en que se pidió la línea**, no
+   * el día en que se sentó la mesa (owner, 2026-08-30; reconfirmada el
+   * 2026-10-11 con su ejemplo del 31).
+   *
+   * La hora y el día de la semana ya se medían por línea; lo que salía de la
+   * apertura era la PRECARGA: solo se cargaban las promos cuyo rango de fechas
+   * contenía el día de `cuentas.abierta_el`, y la de un día posterior nunca
+   * llegaba a evaluarse. Los cuatro casos van por la precuenta y por el cierre,
+   * porque la promo no se congela en la línea: se evalúa en los dos.
+   *
+   * El reloj se controla corriendo hacia atrás, por SQL, la apertura (y en
+   * los dos últimos también el pedido de ayer): por API no hay forma de abrir
+   * ni de pedir ayer. Lo que se fabrica es solo el paso del tiempo; la línea, la cuenta y
+   * la promo nacen por API. Catálogo propio —ítem y promo de cada test—: una
+   * promo del seed haría depender el resultado de lo que otra suite activó.
+   */
+  describe('una promo de un solo día: decide el día del pedido, no el de la apertura', () => {
+    let zona: string;
+
+    beforeAll(async () => {
+      zona = await zonaHorariaTenant(ds, PARIS_TENANT_ID);
+    });
+
+    /** Ítem propio (exento: el 10 % se lee sin IVA) y su cuenta con UNA línea. */
+    async function pedirCerveza(): Promise<{
+      cuentaId: string;
+      itemId: string;
+      diaDelPedido: string;
+    }> {
+      const itemId = (
+        await post<IdResponse>('/api/items', {
+          nombre: `Cerveza promo de un día E2E ${Date.now()}`,
+          tipo: 'servicio',
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          clasificacionTributaria: 'exento',
+        })
+      ).id;
+      const cuenta = await abrirCuentaCon(itemId);
+      // El día sale del `creado_el` real de la línea, no de un "hoy" calculado
+      // aparte: si la suite cruza la medianoche entre los dos, el test seguiría
+      // hablando del día correcto.
+      const [fila]: { creado_el: Date }[] = await ds.query(
+        `SELECT creado_el FROM cuenta_lineas
+          WHERE cuenta_id = $1 AND eliminado_el IS NULL`,
+        [cuenta.id],
+      );
+      return {
+        cuentaId: cuenta.id,
+        itemId,
+        diaDelPedido: instanteLocalEnZona(zona, fila.creado_el).fecha,
+      };
+    }
+
+    async function promoSoloEl(dia: string, itemId: string): Promise<string> {
+      return (
+        await post<IdResponse>('/api/promociones', {
+          nombre: `Promo solo el ${dia} E2E ${Date.now()}`,
+          tipo: 'porcentaje',
+          valorPorcentaje: '0.10',
+          fechaInicio: dia,
+          fechaFin: dia,
+          scopes: [{ tipoScope: 'items', itemIds: [itemId] }],
+        })
+      ).id;
+    }
+
+    /** Un día de calendario LOCAL para atrás, a la misma hora local. */
+    async function unDiaAntes(
+      tabla: 'cuentas' | 'cuenta_lineas',
+      columna: string,
+      cuentaId: string,
+    ) {
+      await ds.query(
+        `UPDATE ${tabla}
+            SET ${columna} = ((${columna} AT TIME ZONE $2) - interval '1 day') AT TIME ZONE $2
+          WHERE cuenta_id = $1`,
+        [cuentaId, zona],
+      );
+    }
+
+    async function promosDeLaPrecuenta(
+      cuentaId: string,
+      itemId: string,
+    ): Promise<string[]> {
+      const res = await request(app.getHttpServer())
+        .post('/api/calculo-precios/calcular')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ cuentaId, lineas: [{ itemId, cantidad: '1' }] });
+      expect(res.status).toBe(201);
+      return (res.body as PrecuentaResponse).lineas.flatMap((l) =>
+        l.trazas.promociones.map((p) => p.id),
+      );
+    }
+
+    it('la mesa se sentó AYER y la cerveza se pidió HOY: la promo de solo hoy la alcanza', async () => {
+      // La escena que fallaba: promo "solo el 31", mesa sentada el 30, cerveza
+      // pedida el 31 a las 00:30.
+      const { cuentaId, itemId, diaDelPedido } = await pedirCerveza();
+      const promoId = await promoSoloEl(diaDelPedido, itemId);
+      await unDiaAntes('cuentas', 'abierta_el', cuentaId);
+
+      expect(await promosDeLaPrecuenta(cuentaId, itemId)).toEqual([promoId]);
+      const venta = await detalleVenta(await cerrarSinCobrar(cuentaId));
+      expect(venta.promociones.map((p) => p.promocionId)).toEqual([promoId]);
+      expect(Number(venta.promociones[0].monto)).toBe(100);
+    });
+
+    it('la mesa se sentó AYER y la cerveza se pidió HOY: la promo de solo ayer NO la alcanza (el ejemplo del owner)', async () => {
+      // Promo "solo el 31", mesa sentada el 31 a las 23:30, cerveza pedida el
+      // 1 a las 00:30: ya no es 31. Cargar la promo de ayer —que el arreglo
+      // hace, porque ayer es el día de la apertura— no alcanza para aplicarla.
+      const { cuentaId, itemId, diaDelPedido } = await pedirCerveza();
+      const promoId = await promoSoloEl(
+        fechaMenosDias(diaDelPedido, 1),
+        itemId,
+      );
+      await unDiaAntes('cuentas', 'abierta_el', cuentaId);
+
+      expect(await promosDeLaPrecuenta(cuentaId, itemId)).not.toContain(
+        promoId,
+      );
+      const venta = await detalleVenta(await cerrarSinCobrar(cuentaId));
+      expect(venta.promociones.map((p) => p.promocionId)).not.toContain(
+        promoId,
+      );
+    });
+
+    it('la cerveza se pidió AYER y se cobra HOY: la promo de solo ayer la sigue alcanzando', async () => {
+      // El borde de abajo del rango: lo que se carga no puede empezar en "hoy".
+      // Mesa y pedido de ayer, cobro de hoy.
+      const { cuentaId, itemId, diaDelPedido } = await pedirCerveza();
+      const promoId = await promoSoloEl(
+        fechaMenosDias(diaDelPedido, 1),
+        itemId,
+      );
+      await unDiaAntes('cuentas', 'abierta_el', cuentaId);
+      await unDiaAntes('cuenta_lineas', 'creado_el', cuentaId);
+
+      expect(await promosDeLaPrecuenta(cuentaId, itemId)).toEqual([promoId]);
+      const venta = await detalleVenta(await cerrarSinCobrar(cuentaId));
+      expect(venta.promociones.map((p) => p.promocionId)).toEqual([promoId]);
+    });
+
+    it('la mesa pidió AYER y HOY: cada promo de un día alcanza solo a la línea de su día', async () => {
+      // Lo que se carga tiene que cubrir los DOS días de la cuenta: tomar solo el
+      // del primer pedido deja afuera la promo de hoy, y solo el último, la de
+      // ayer. Dos ítems para que sean dos líneas (el mismo ítem se juntaría en
+      // una), y las dos promos alcanzan a los dos: lo que decide es el día.
+      const { cuentaId, itemId: itemAyer, diaDelPedido } = await pedirCerveza();
+      await unDiaAntes('cuentas', 'abierta_el', cuentaId);
+      await unDiaAntes('cuenta_lineas', 'creado_el', cuentaId);
+      const itemHoy = (
+        await post<IdResponse>('/api/items', {
+          nombre: `Pisco promo de un día E2E ${Date.now()}`,
+          tipo: 'servicio',
+          precioBase: '1000',
+          monedaId: CLP_MONEDA_ID,
+          clasificacionTributaria: 'exento',
+        })
+      ).id;
+      await post(`/api/cuentas/${cuentaId}/lineas`, {
+        itemId: itemHoy,
+        cantidad: '1',
+      });
+
+      const nueva = async (dia: string) =>
+        (
+          await post<IdResponse>('/api/promociones', {
+            nombre: `Promo solo el ${dia} E2E ${Date.now()}`,
+            tipo: 'porcentaje',
+            valorPorcentaje: '0.10',
+            fechaInicio: dia,
+            fechaFin: dia,
+            scopes: [{ tipoScope: 'items', itemIds: [itemAyer, itemHoy] }],
+          })
+        ).id;
+      const promoAyer = await nueva(fechaMenosDias(diaDelPedido, 1));
+      const promoHoy = await nueva(diaDelPedido);
+
+      // La precuenta devuelve las líneas en el orden de la cuenta: la de ayer
+      // primero.
+      const res = await request(app.getHttpServer())
+        .post('/api/calculo-precios/calcular')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ cuentaId, lineas: [{ itemId: itemAyer, cantidad: '1' }] });
+      expect(res.status).toBe(201);
+      expect(
+        (res.body as PrecuentaResponse).lineas.map((l) =>
+          l.trazas.promociones.map((p) => p.id),
+        ),
+      ).toEqual([[promoAyer], [promoHoy]]);
+
+      const venta = await detalleVenta(await cerrarSinCobrar(cuentaId));
+      const itemDe = (detalleId: string) =>
+        venta.detalles.find((d) => d.id === detalleId)?.itemId;
+      expect(
+        venta.promociones
+          .map((p) => [p.promocionId, itemDe(p.detalleId)])
+          .sort(),
+      ).toEqual(
+        [
+          [promoAyer, itemAyer],
+          [promoHoy, itemHoy],
+        ].sort(),
+      );
     });
   });
 });

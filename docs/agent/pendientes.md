@@ -236,38 +236,6 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
   nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
   habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
 
-- [ ] **Una promo que arranca después de que se abrió la mesa no le llega a lo que se pide ese
-  día** (backend, motor de cálculo — **lista para tomar**, ⬇️ prioridad baja; reescrita el
-  2026-10-11 con el owner). Lo que quedaba del frente *"re-tasar una línea ya pedida tiene que
-  re-preciar, no re-validar"*. El resto del frente está cerrado y archivado en
-  [`resueltos.md`](resueltos.md): el cierre usa la personalización congelada (2026-08-31) y el
-  precio de la línea es el de cuando se pidió (`dd54f81d`).
-  - **La regla (owner, 2026-08-30; reconfirmada el 2026-10-11 en el chat de la orquestadora):** la
-    promo aplica según **cuándo se pidió el ítem**, no cuándo se abrió la mesa. El owner la
-    reconfirmó con su propio ejemplo: promo "solo el 31", mesa abierta el 31 a las 23:30, cerveza
-    pedida el 1 a las 00:30 → **no** recibe la promo, porque ya no es 31. Eso hoy ya anda.
-  - **La escena que falla:** promo "solo el 31". La mesa se abre el **30** a las 23:30 y la cerveza
-    se pide el **31** a las 00:30. Por la regla debería recibirla, y no la recibe.
-  - **Por qué:** la hora y el día de la semana se evalúan por línea, contra el instante en que se
-    pidió (`instanteEnVentana` en `promociones.evaluator.ts`, con los instantes de
-    `instantesDeLineas`). Pero antes, `cargarVigentes` precarga solo las promos cuyo **rango de
-    fechas** contiene `fechaLocal`, que sale de `instanteDeVigencia` = `cuentas.abierta_el`
-    (`calculo-precios.service.ts`, en `calcular()`). Una promo cuyo `fecha_inicio` cae después
-    del día de apertura no se carga y su ventana nunca se mira. Al revés no falla: lo que se carga
-    de más lo descarta `instanteEnVentana` por línea.
-  - **El arreglo:** que `cargarVigentes` cargue las promos cuyo rango toque **cualquiera** de los
-    días de las líneas (del más temprano al más tarde, en una sola consulta), no solo el de la
-    apertura. No necesita pregunta al owner: es su regla.
-  - **Antes de arreglarlo, medirlo:** está leído en el código, no medido. Montar un e2e con una
-    promo de un solo día, una cuenta de salón y el reloj controlado, confirmar que hoy da rojo y
-    que el caso del owner (31 → 1) sigue sin promo. El fixture no puede usar promos, grupos ni
-    recetas del seed: copiar el catálogo propio de los tests 20 a 23 de
-    `cuenta-precio-congelado.e2e-spec.ts`.
-  - **Va solo, con el sistema quieto** (`CLAUDE.md`, motor de cálculo). Al cerrarlo, corregir el
-    docblock de `calculo-precios.service.ts` que nombra esta grieta: hoy dice que el 2x1 de los
-    martes no se evalúa, y eso es falso (se evalúa por línea; lo que no se carga es la promo de
-    rango).
-
 - [ ] **Una orden de cobro de un alta de suscripción que quedó sin aclarar no tiene marcado manual**
   (backend + front de Pasarela; anotado el 2026-10-10 por el frente del cobro único del alta, con el
   acuerdo de la orquestadora). Desde ADR-029 § *"El alta de suscripción"*, si Transbank no contesta

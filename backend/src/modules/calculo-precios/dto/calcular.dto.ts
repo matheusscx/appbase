@@ -106,10 +106,13 @@ export class CalcularVentaDto {
   recargosVentaIds?: string[];
 
   /**
-   * Cuenta de salón cuyo instante de apertura decide la vigencia de las reglas.
+   * Cuenta de salón que se calcula. El servidor relee sus líneas congeladas y
+   * evalúa cada promo contra el instante en que se pidió cada una; la apertura
+   * solo decide la vigencia de las reglas de nivel venta.
    *
-   * Se manda el **id**, no la fecha: aceptar un instante del cliente sería la
-   * forma de hacer que una promo vencida aplique. El servidor lee `abierta_el`.
+   * Se manda el **id**, no una fecha: aceptar un instante del cliente sería la
+   * forma de hacer que una promo vencida aplique. Los instantes salen de la BD
+   * (`cuentas.abierta_el`, `cuenta_lineas.creado_el`).
    */
   @IsOptional()
   @IsUUID('4')

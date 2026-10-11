@@ -164,11 +164,13 @@ describe('CalculoPreciosService', () => {
       decimalesOficiales: jest.fn().mockResolvedValue(4),
     };
 
-    // `calcular()` ahora resuelve `fechaLocalTenant` siempre, no solo cuando
-    // una regla tiene fechas. Se mockea acá (default sin efecto real: ninguna
-    // regla del fixture base tiene `fechaInicio`/`fechaFin`) para que el resto
-    // del spec no dependa de `Db` de verdad ni de la fecha real del runner —
-    // el describe de vigencia la pisa por test con `mockResolvedValue`.
+    // `calcular()` resuelve la zona del tenant siempre —una vez, y con ella el
+    // día de la vigencia y los instantes de las promos—. Se mockea acá en UTC
+    // para que el resto del spec no dependa de `Db` de verdad; el día lo fija
+    // el reloj de cada test que lo necesita (`jest.setSystemTime`).
+    // `fechaLocalTenant` sigue mockeada por `congelarReglasDeItem`, que
+    // resuelve su día por su cuenta.
+    jest.spyOn(rangoFechaUtil, 'zonaHorariaTenant').mockResolvedValue('UTC');
     jest
       .spyOn(rangoFechaUtil, 'fechaLocalTenant')
       .mockResolvedValue('2026-01-01');
@@ -1037,15 +1039,19 @@ describe('CalculoPreciosService', () => {
     });
 
     // Las fechas del test son fijas: el instante entra por el service, nunca
-    // se afirma contra `new Date()` del runner — se pisa `fechaLocalTenant`
-    // (que ya vive mockeada en el `beforeEach` de arriba) con el valor fijo
-    // que cada test necesita.
+    // se afirma contra `new Date()` del runner — cada test fija el reloj al
+    // mediodía UTC del día que necesita (la zona del `beforeEach` es UTC).
+    const enElDia = (fecha: string) =>
+      jest.useFakeTimers().setSystemTime(new Date(`${fecha}T12:00:00Z`));
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
     it('una regla cuyo rango ya pasó llega al motor con vigente = false', async () => {
       // Fecha local del tenant: 2026-03-05. Rango: diciembre a enero.
       // Sin este chequeo la promo de verano descuenta en marzo.
-      jest
-        .spyOn(rangoFechaUtil, 'fechaLocalTenant')
-        .mockResolvedValue('2026-03-05');
+      enElDia('2026-03-05');
       descuentosService.findAll.mockResolvedValue([
         reglaConVigencia({
           fechaInicio: '2025-12-01',
@@ -1062,9 +1068,7 @@ describe('CalculoPreciosService', () => {
     });
 
     it('una regla dentro del rango llega con vigente = true', async () => {
-      jest
-        .spyOn(rangoFechaUtil, 'fechaLocalTenant')
-        .mockResolvedValue('2026-03-05');
+      enElDia('2026-03-05');
       descuentosService.findAll.mockResolvedValue([
         reglaConVigencia({
           fechaInicio: '2026-03-01',
@@ -1087,9 +1091,7 @@ describe('CalculoPreciosService', () => {
         }),
       ]);
       const aplicadoEn = async (fechaLocal: string) => {
-        jest
-          .spyOn(rangoFechaUtil, 'fechaLocalTenant')
-          .mockResolvedValue(fechaLocal);
+        enElDia(fechaLocal);
         const r = await service.calcular(TENANT, {
           lineas: [{ itemId: 'item-1', cantidad: '1' }],
         });
@@ -1109,9 +1111,7 @@ describe('CalculoPreciosService', () => {
     });
 
     it('una regla sin fechas está vigente siempre', async () => {
-      jest
-        .spyOn(rangoFechaUtil, 'fechaLocalTenant')
-        .mockResolvedValue('2026-03-05');
+      enElDia('2026-03-05');
       descuentosService.findAll.mockResolvedValue([reglaConVigencia()]);
 
       const r = await service.calcular(TENANT, {
@@ -1184,25 +1184,88 @@ describe('CalculoPreciosService', () => {
       jest.useRealTimers();
     });
 
-    it('carga las promos con la fecha local del tenant', async () => {
+    it('sin cuenta carga las promos del día local de hoy', async () => {
       await service.calcular(TENANT, {
         lineas: [{ itemId: 'item-1', cantidad: '1' }],
       });
 
       expect(promocionesService.cargarVigentes).toHaveBeenCalledWith(
         TENANT,
-        '2026-01-01', // lo que devuelve el mock de `fechaLocalTenant`
+        '2026-06-15',
+        '2026-06-15',
       );
     });
 
-    // Un tenant sin promos no paga NADA por esta feature: ni la zona horaria,
-    // ni las líneas de la cuenta, ni el evaluador.
-    it('sin promos vigentes no resuelve instantes ni consulta la cuenta', async () => {
+    // La regla del owner: la promo la decide cuándo se PIDIÓ cada línea. Lo que
+    // se precarga tiene que cubrir los días de las líneas, no el de la
+    // apertura. Los cuatro días son distintos a propósito —apertura el 12, líneas
+    // el 13 y el 14, hoy el 15— para que cada atajo dé otro par: el arreglo
+    // viejo cargaba ('12', '12'), "de la apertura a hoy" daría ('12', '15'), y
+    // tomar un solo extremo, ('13', '13') o ('14', '14').
+    it('con cuenta carga las promos del rango de días de sus líneas, no del de la apertura', async () => {
+      db.query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('FROM cuentas')
+            ? [{ abierta_el: new Date('2026-06-12T23:30:00Z') }]
+            : [
+                {
+                  item_id: 'item-1',
+                  cantidad: '1',
+                  precio_unitario: '100.0000',
+                  reglas_congeladas: { descuentos: [], recargos: [] },
+                  creado_el: new Date('2026-06-13T00:30:00Z'),
+                },
+                {
+                  item_id: 'item-2',
+                  cantidad: '1',
+                  precio_unitario: '100.0000',
+                  reglas_congeladas: { descuentos: [], recargos: [] },
+                  creado_el: new Date('2026-06-14T22:00:00Z'),
+                },
+              ],
+        ),
+      );
+
+      await service.calcular(TENANT, {
+        cuentaId: CUENTA_ID,
+        lineas: [
+          { itemId: 'item-1', cantidad: '1' },
+          { itemId: 'item-2', cantidad: '1' },
+        ],
+      });
+
+      expect(promocionesService.cargarVigentes).toHaveBeenCalledWith(
+        TENANT,
+        '2026-06-13',
+        '2026-06-14',
+      );
+    });
+
+    // Una cuenta sin líneas no tiene a qué aplicarle una promo: ni se consultan.
+    it('una cuenta sin líneas no consulta promos', async () => {
+      db.query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('FROM cuentas')
+            ? [{ abierta_el: new Date('2026-06-15T19:00:00Z') }]
+            : [],
+        ),
+      );
+
+      await service.calcular(TENANT, { cuentaId: CUENTA_ID, lineas: [] });
+
+      expect(promocionesService.cargarVigentes).not.toHaveBeenCalled();
+    });
+
+    // Sin cuenta, un tenant sin promos no paga nada extra por esta feature: la
+    // zona es la misma que ya resolvió el día de la vigencia, y no hay líneas
+    // de cuenta que leer. Con cuenta sí paga UNA lectura de `cuenta_lineas`:
+    // el rango de lo que se precarga sale de sus instantes.
+    it('sin promos vigentes y sin cuenta: una sola zona y ningún evaluador', async () => {
       await service.calcular(TENANT, {
         lineas: [{ itemId: 'item-1', cantidad: '1' }],
       });
 
-      expect(rangoFechaUtil.zonaHorariaTenant).not.toHaveBeenCalled();
+      expect(rangoFechaUtil.zonaHorariaTenant).toHaveBeenCalledTimes(1);
       expect(promocionesQueVieronElMotor()).toEqual([]);
     });
 
@@ -1405,7 +1468,8 @@ describe('CalculoPreciosService', () => {
         ]);
       });
 
-      // La zona se resuelve UNA vez para todas las líneas: `instanteLocalTenant`
+      // La zona se resuelve UNA vez en todo el cálculo: la misma sirve para el
+      // día de la vigencia y para el instante de cada línea. `instanteLocalTenant`
       // por línea sería un viaje a `tenants` por cada producto de la cuenta.
       it('resuelve la zona horaria una sola vez', async () => {
         promocionesService.cargarVigentes.mockResolvedValue([promoHappyHour()]);

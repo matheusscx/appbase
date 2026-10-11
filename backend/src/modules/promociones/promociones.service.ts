@@ -108,8 +108,11 @@ export class PromocionesService {
   }
 
   /**
-   * Las promos que el motor tiene que **considerar** para una venta de este
-   * día: vivas, no pausadas y con `fechaLocal` dentro de su rango.
+   * Las promos que el motor tiene que **considerar** para una venta cuyas líneas
+   * se pidieron entre `desde` y `hasta` (días locales, inclusivos): vivas, no
+   * pausadas y con un rango que **toca** ese. No que lo contenga: una promo de
+   * solo el 31 tiene que llegar a una cuenta con líneas del 30 y del 31, y es
+   * `instanteEnVentana` quien la descarta para la del 30.
    *
    * **Una sola consulta**, y por eso no reusa `findAll`: ahí son tres viajes
    * (promos → scopes → scope_items) porque el CRUD pagina y necesita las
@@ -126,7 +129,9 @@ export class PromocionesService {
    * que llegar al evaluador aunque ahora sean las 22:00: puede seguir aplicando
    * a la línea que se pidió a las 19:00. El canal lo descarta `evaluarPromos`
    * de una vez para toda la venta. Lo único que se filtra en SQL es lo que no
-   * depende de la línea: tenant, borrado, pausa y rango de fechas.
+   * depende de la línea: tenant, borrado, pausa, y que el rango de fechas toque
+   * el de las líneas (la fecha exacta de cada una también la mira el
+   * evaluador).
    *
    * ⚠️ **`to_char` y no la columna cruda.** `fecha_*` es `date` y `hora_*` es
    * `time`: node-postgres las devuelve como `Date` y como `'HH:MM:SS'`, y el
@@ -137,7 +142,8 @@ export class PromocionesService {
    */
   async cargarVigentes(
     tenantId: string,
-    fechaLocal: string,
+    desde: string,
+    hasta: string,
   ): Promise<PromoElegible[]> {
     const filas: FilaPromoVigente[] = await this.db.query(
       `SELECT p.promocion_id, p.nombre, p.tipo,
@@ -159,10 +165,10 @@ export class PromocionesService {
         WHERE p.tenant_id = $1
           AND p.eliminado_el IS NULL
           AND p.activo = true
-          AND p.fecha_inicio <= $2::date
+          AND p.fecha_inicio <= $3::date
           AND p.fecha_fin >= $2::date
         ORDER BY p.promocion_id, s.slot, si.item_id`,
-      [tenantId, fechaLocal],
+      [tenantId, desde, hasta],
     );
 
     const porPromo = new Map<string, PromoElegible>();

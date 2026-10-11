@@ -23,6 +23,97 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una promo de un solo día alcanza a lo que se pide ese día, aunque la mesa se haya sentado antes (cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Toca el motor de cálculo: fue sola, con el
+sistema quieto, y con el diseño aprobado por la orquestadora antes de escribir el código.
+
+**Qué se hizo.** `resolverPromociones` (`calculo-precios.service.ts`) resuelve primero el
+instante de cada línea y le pasa a `cargarVigentes` el rango de días que cubren, del pedido más
+temprano al más tarde. `cargarVigentes(tenantId, desde, hasta)` carga las promos cuyo rango
+**toca** ese (`fecha_inicio <= hasta AND fecha_fin >= desde`), en la misma única consulta de
+antes. Lo cargado de más lo descarta `instanteEnVentana` por línea, que ya miraba la fecha. La
+promo no se congela en la línea (`reglas_congeladas` solo guarda descuentos y recargos): se
+evalúa al calcular, así que el arreglo llega a la precuenta y al cierre sin tocar
+`precio_unitario` ni el congelado del cierre.
+
+**Por qué el rango sale de las líneas y no de "la apertura hasta hoy".** Las dos cubren los
+mismos días hoy, porque ninguna línea es más vieja que la apertura de su cuenta: al fusionar, el
+destino es la de menor `numero`, que entre cuentas abiertas a la vez es la abierta primero. Pero
+eso es una regla de la fusión, y si cambiara, la precarga perdería promos sin avisar. Sacado de
+los instantes, el rango es exacto por construcción.
+
+**El costo, medido.** La zona del tenant se resuelve una vez en `calcular()` y sirve para el día
+de la vigencia y para los instantes (antes se pedía dos veces). El tenant con promos paga una
+consulta menos. El tenant sin promos y con cuenta paga una lectura de `cuenta_lineas` que antes
+no pagaba, porque los instantes ahora van antes que la carga: es la consulta que ya existía y
+usa `idx_cuenta_lineas_cuenta` (`EXPLAIN`, Index Scan sobre la base del e2e). Sin cuenta, nada.
+
+**Qué lo fija.** Cuatro casos de *"una promo de un solo día"* en
+`backend/test/vigencia-cuenta.e2e-spec.ts`, cada uno por la precuenta y por el cierre, con ítem y
+promo propios y el reloj corrido por SQL (la apertura y, en los dos últimos, el pedido de ayer: por
+API no se puede abrir ni pedir ayer):
+
+| Escena | Antes | Después |
+|---|---|---|
+| Mesa sentada ayer, pedida hoy, promo de solo hoy | sin promo (medido, rojo) | la lleva |
+| Mesa sentada ayer, pedida hoy, promo de solo ayer (el ejemplo del owner) | sin promo | sin promo |
+| Pedida ayer, cobrada hoy, promo de solo ayer | la lleva | la lleva |
+| Una línea pedida ayer y otra hoy en la misma cuenta, una promo de cada día sobre las dos | la de hoy no llega a ninguna (medido con el código anterior, rojo) | cada una alcanza solo a la línea de su día |
+
+Los unitarios de `calculo-precios.service.spec.ts` fijan el rango que se pide con cuatro días
+distintos (apertura el 12, líneas el 13 y el 14, hoy el 15 → `('2026-06-13', '2026-06-14')`),
+para que cada atajo dé otro par. Mutantes, uno por corrida y restaurado cada uno:
+
+| Mutante | Cae |
+|---|---|
+| Los dos services como estaban antes (`git show HEAD:`) | e2e: el primero y el cuarto (2 de 9) |
+| Cargar por el día de la apertura | e2e: el primero y el cuarto; unit: el del rango |
+| Cargar de la apertura a hoy | unit: el del rango (en el e2e la apertura es ayer, y ese rango cubre los mismos días) |
+| Cargar solo hoy | e2e: el tercero y el cuarto |
+| Un solo extremo (`dias[0]` dos veces, o el último dos veces) | e2e: el cuarto; unit: el del rango |
+| El SQL pide que el rango contenga en vez de tocar (`$2`/`$3` cruzados) | unit: la forma de `cargarVigentes` |
+| Sin el corte de la cuenta sin líneas | unit: el de la cuenta sin líneas |
+| La zona pedida otra vez en `instantesDeLineas` | unit: los dos de "una sola zona" |
+
+### La entrada que cierra, como estaba en `pendientes.md`
+
+§ 3:
+
+- [ ] **Una promo que arranca después de que se abrió la mesa no le llega a lo que se pide ese
+  día** (backend, motor de cálculo — **lista para tomar**, ⬇️ prioridad baja; reescrita el
+  2026-10-11 con el owner). Lo que quedaba del frente *"re-tasar una línea ya pedida tiene que
+  re-preciar, no re-validar"*. El resto del frente está cerrado y archivado en
+  [`resueltos.md`](resueltos.md): el cierre usa la personalización congelada (2026-08-31) y el
+  precio de la línea es el de cuando se pidió (`dd54f81d`).
+  - **La regla (owner, 2026-08-30; reconfirmada el 2026-10-11 en el chat de la orquestadora):** la
+    promo aplica según **cuándo se pidió el ítem**, no cuándo se abrió la mesa. El owner la
+    reconfirmó con su propio ejemplo: promo "solo el 31", mesa abierta el 31 a las 23:30, cerveza
+    pedida el 1 a las 00:30 → **no** recibe la promo, porque ya no es 31. Eso hoy ya anda.
+  - **La escena que falla:** promo "solo el 31". La mesa se abre el **30** a las 23:30 y la cerveza
+    se pide el **31** a las 00:30. Por la regla debería recibirla, y no la recibe.
+  - **Por qué:** la hora y el día de la semana se evalúan por línea, contra el instante en que se
+    pidió (`instanteEnVentana` en `promociones.evaluator.ts`, con los instantes de
+    `instantesDeLineas`). Pero antes, `cargarVigentes` precarga solo las promos cuyo **rango de
+    fechas** contiene `fechaLocal`, que sale de `instanteDeVigencia` = `cuentas.abierta_el`
+    (`calculo-precios.service.ts`, en `calcular()`). Una promo cuyo `fecha_inicio` cae después
+    del día de apertura no se carga y su ventana nunca se mira. Al revés no falla: lo que se carga
+    de más lo descarta `instanteEnVentana` por línea.
+  - **El arreglo:** que `cargarVigentes` cargue las promos cuyo rango toque **cualquiera** de los
+    días de las líneas (del más temprano al más tarde, en una sola consulta), no solo el de la
+    apertura. No necesita pregunta al owner: es su regla.
+  - **Antes de arreglarlo, medirlo:** está leído en el código, no medido. Montar un e2e con una
+    promo de un solo día, una cuenta de salón y el reloj controlado, confirmar que hoy da rojo y
+    que el caso del owner (31 → 1) sigue sin promo. El fixture no puede usar promos, grupos ni
+    recetas del seed: copiar el catálogo propio de los tests 20 a 23 de
+    `cuenta-precio-congelado.e2e-spec.ts`.
+  - **Va solo, con el sistema quieto** (`CLAUDE.md`, motor de cálculo). Al cerrarlo, corregir el
+    docblock de `calculo-precios.service.ts` que nombra esta grieta: hoy dice que el 2x1 de los
+    martes no se evalúa, y eso es falso (se evalúa por línea; lo que no se carga es la promo de
+    rango).
+
+---
+
 ## La boleta de la tienda lleva el nombre con que se pagó (cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Frente fiscal (el nombre es el de la boleta), hecho
