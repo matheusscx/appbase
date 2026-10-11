@@ -350,14 +350,24 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
   `fallida` y suelta la clave, igual que un rechazo. Descartados: devolver la plata y repetir el
   alta (es nota de crédito, fiscal) y dejarla marcada para arreglarla a mano (hoy no hay forma de
   crear la suscripción sin cobrar). **Lista para tomar**, backend + front de Pasarela.
-  ⬇️ **Prioridad baja y botones *Aprobar / Rechazar* (owner, 2026-10-11, en el chat de la
-  orquestadora).** La documentación de Transbank dice que Oneclick devuelve el resultado del cobro
-  "inmediatamente" y que su estado se consulta "en cualquier momento"
-  ([Oneclick](https://www.transbankdevelopers.cl/documentacion/oneclick)). Por eso este caso pide
-  que fallen las dos llamadas, el cobro (30 s) y la consulta, y es raro. Al ver eso el owner la
-  bajó. Tampoco le gusta *Salió / No salió* para estos botones: van **Aprobar** (lo que arriba se
-  llama *Salió*) y **Rechazar** (*No salió*). La conducta decidida arriba no cambia. Los botones de
-  los reembolsos siguen como están: el owner habló de estos.
+  ⬇️ **Prioridad baja, y los botones son *Sincronizar / Aprobar / Rechazar*, también en los
+  reembolsos (owner, 2026-10-11, en el chat de la orquestadora).** La documentación de Transbank dice
+  que Oneclick devuelve el resultado del cobro "inmediatamente" y que su estado se consulta "en
+  cualquier momento" ([Oneclick](https://www.transbankdevelopers.cl/documentacion/oneclick)). Por
+  eso este caso pide que fallen las dos llamadas, el cobro (30 s) y la consulta, y es raro. Al ver
+  eso el owner la bajó. Tampoco le gusta *Salió / No salió*, y la orquestadora propuso que las dos
+  pantallas digan lo mismo. Quedó así:
+  - **Sincronizar** es lo que hoy se llama *Volver a consultar*: le pregunta a Transbank. Es el
+    botón principal.
+  - **Aprobar** (lo que arriba se llama *Salió*) sigue pidiendo el código de autorización.
+    **Rechazar** es *No salió*.
+  - Las dos marcas manuales confirman con el aviso *"Úsalo solo si lo viste en el portal de
+    Transbank"*. En los reembolsos *Rechazar* se puede leer como "le niego la devolución al
+    cliente", cuando quiere decir "la devolución no salió": el aviso es lo que lo aclara.
+  - **El mismo cambio va en los reembolsos**, en `ReembolsoSinConfirmar.vue`: es solo de textos,
+    y la conducta no cambia en ninguna de las dos pantallas. Hay que actualizar lo que los cita:
+    ADR-029, `pasarela-pagos.md` y `reembolsos-nota-credito.md` (ningún e2e de navegador los busca
+    por texto, grep del 2026-10-11).
 
 ### Los tres que dejó el frente del redondeo por país (2026-09-03)
 
