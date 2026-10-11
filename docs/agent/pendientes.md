@@ -495,29 +495,6 @@ fiscal y va solo:
   puede escribir. Falta construirlo. Va con la prioridad baja que el owner le dio a la pasarela el
   mismo día.
 
-- [ ] **`verificar` resuelve a `pagada` una orden de la tienda sin crear la venta y sin dejar el
-  aviso** (backend + producto; lo encontró la revisión independiente del frente D/E el 2026-10-10,
-  [`resueltos.md`](resueltos.md#la-orden-pagada-sin-venta-avisa-y-la-venta-online-no-lleva-vuelto-d-y-e-cerradas-2026-10-10);
-  es previo a ese frente). `CobrosService.verificar` acepta órdenes `en_proceso` o `expirada`. Si
-  Transbank dice pagada, hace `orden.estado = 'pagada'` y guarda, **sin pasar por
-  `CallbackDispatcherService`**. Una orden de la tienda llega ahí cuando el comprador pagó y el
-  retorno nunca volvió, o cuando `confirmarRetorno` la devolvió a `en_proceso` tras un error de
-  comunicación. Queda `pagada`, sin venta y sin `motivo_sin_venta`: el filtro "Pagada sin venta"
-  y la tarjeta de Inicio no la ven, y `/online/orden` dice `pagada`. **No se midió con un e2e**;
-  sale de leer `cobros.service.ts` (`verificar`). **La pregunta para el owner:** cuando
-  `verificar` encuentra pagada una orden de la tienda, ¿crea la venta en ese momento, que es lo
-  que el retorno habría hecho? ¿O la deja pagada sin venta con un motivo ("se confirmó por
-  verificación, sin venta") para que el admin la resuelva? La primera es crear la venta
-  "después", con un tercer "ahora", y la regla de no reintentar solo no la tiene que decidir el
-  agente.
-  **Decidido (owner, 2026-10-10, por AskUserQuestion de la orquestadora, con escena y costo de cada
-  opción): marcarla sin venta.** Cuando `verificar` encuentra pagada una orden de la tienda, la deja
-  `pagada` con `motivo_sin_venta` = "se confirmó por verificación", para que aparezca en el filtro y
-  en la tarjeta de Inicio. **No** crea la venta: con el recálculo de hoy caería igual sin venta, y
-  crearla "después" es otro "ahora". Se puede revisar cuando exista "vale lo que pagó" (la A de la
-  entrada de los dos "ahora"). Es chico. **Medir antes** con un e2e que el camino exista como se
-  leyó.
-
 - [ ] **La marca "Pagada sin venta" no se apaga si el admin registra la venta a mano** (producto;
   la vio la revisión del frente D/E, 2026-10-10). El aviso dice "devolvé el cargo o registrá la
   venta a mano", pero nada liga una venta hecha en el POS a la orden. Solo el reembolso total la
@@ -564,6 +541,21 @@ prohíbe.
   de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
 
 ## 5. Carreras de concurrencia
+
+- [ ] **`verificar` y el retorno de Webpay a la vez: el `save` de `verificar` pisa la orden ya
+  conciliada** (backend, `cobros.service.ts` `verificar`; lo vieron las dos revisiones del frente
+  "`verificar` deja el aviso", 2026-10-11; **leído, no medido**). `verificar` lee la orden con
+  `findOne`, sin lock, consulta al proveedor y guarda la entidad entera. Si en esos segundos el
+  retorno la reclama (`en_proceso` → `procesando`), crea la venta y la deja `conciliada`, el
+  `save` de `verificar` escribe lo que tiene en memoria: `estado = 'pagada'`, `venta_id = null`
+  y la `metadata` sin `resultadoPago`. La venta queda creada y suelta. Ya pasaba antes de ese
+  frente. Desde ese frente la orden de la tienda además queda con el motivo, así que el admin la
+  ve en "Pagada sin venta", y el drawer le sugiere reembolsar o registrar la venta a mano cuando
+  la venta sí existe. La ventana es lo que tarda la consulta a Transbank, y hace falta que una
+  llave del mismo tenant llame `verificar` justo cuando vuelve el comprador. **El arreglo, sin
+  decidir:** que `verificar` cierre con un UPDATE condicionado al estado (`WHERE estado IN
+  ('en_proceso','expirada')`), como el claim de `confirmarRetorno`, o con `bloquearOrden`. Tiene
+  que cubrir `venta_id` y `metadata`, no solo el motivo.
 
 ---
 

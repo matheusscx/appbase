@@ -151,9 +151,16 @@ construidas (2026-10-10):
   cobro vuelve atrás y la orden queda `en_proceso` para que el reintento la aclare (ADR-029),
   igual que ya pasaba cuando el precio subía.
 
-Dos cosas quedan abiertas, para el owner, en [`pendientes.md`](../agent/pendientes.md) § 4:
-`verificar` puede dejar una orden de la tienda pagada sin venta y sin aviso, y la marca no se
-apaga si la venta se registra a mano.
+- **`verificar` también deja el aviso (2026-10-11).** Si el retorno no volvió, o volvió con un
+  error de comunicación, la orden queda `en_proceso` y la cierra
+  `POST /pasarela/api/ordenes/:id/verificar`. Cuando el proveedor dice pagada, queda pagada sin
+  venta con el motivo *"El pago se confirmó por verificación, no en el retorno de la compra"*, y
+  el comprador ve `pagada_sin_venta` como en D. `verificar` no crea la venta: sería otro "ahora"
+  (owner, 2026-10-10). Se puede revisar cuando exista la A. Lo fija
+  `tienda-verificar-sin-venta.e2e-spec.ts`.
+
+Queda abierto, decidido y sin construir, en [`pendientes.md`](../agent/pendientes.md) § 3: la
+marca no se apaga si la venta se registra a mano.
 
 Un ítem pausado **no llega al catálogo**: las cuatro superficies de venta piden
 `GET /items?...&activo=true` y el filtro se resuelve en la query, no en el cliente

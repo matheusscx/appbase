@@ -1,7 +1,11 @@
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Db } from '../../../common/db/db.service';
-import { CobrosService, veredictoPorSaldo } from './cobros.service';
+import {
+  CobrosService,
+  MOTIVO_SIN_VENTA_POR_VERIFICACION,
+  veredictoPorSaldo,
+} from './cobros.service';
 import { InscripcionesService } from './inscripciones.service';
 import { TenantPasarelaService } from './tenant-pasarela.service';
 import { TransaccionesService } from './transacciones.service';
@@ -2185,6 +2189,53 @@ describe('CobrosService', () => {
     // la respuesta del proveedor se redacta antes de persistir en metadata
     expect(deps.transacciones.redactar).toHaveBeenCalledWith({
       tbk_user: 'secreto',
+    });
+  });
+
+  describe('verificar una orden pagada: el aviso de pagada sin venta', () => {
+    const verificarPagada = async (orden: Record<string, unknown>) => {
+      ordenRepo.findOne.mockResolvedValue({
+        ordenId: 'orden-1',
+        tenantId: 't-1',
+        estado: 'en_proceso',
+        codigoOrden: 'O-1',
+        tokenProveedor: null,
+        fechaExpiracion: null,
+        motivoSinVenta: null,
+        ...orden,
+      });
+      provider.consultarEstado.mockResolvedValue({
+        estado: 'pagada',
+        response: {},
+      });
+      await service.verificar('t-1', 'orden-1');
+      return ordenRepo.save.mock.calls.at(-1)![0] as {
+        estado: string;
+        motivoSinVenta: string | null;
+      };
+    };
+
+    it('la de la tienda (callback en proceso) queda con el motivo: su venta la crea el retorno', async () => {
+      const guardada = await verificarPagada({
+        origen: 'interno',
+        metadata: {
+          tenantPasarelaId: 'tp-1',
+          callbackModo: 'interno',
+          origenApp: 'tienda-online',
+        },
+      });
+      expect(guardada.estado).toBe('pagada');
+      expect(guardada.motivoSinVenta).toBe(MOTIVO_SIN_VENTA_POR_VERIFICACION);
+    });
+
+    it('la del alta de suscripción, también de origen interno, queda sin el motivo', async () => {
+      const guardada = await verificarPagada({
+        origen: 'interno',
+        solicitudIdempotenteId: 'sol-1',
+        metadata: { tenantPasarelaId: 'tp-1', inscripcionId: 'insc-1' },
+      });
+      expect(guardada.estado).toBe('pagada');
+      expect(guardada.motivoSinVenta).toBeNull();
     });
   });
 

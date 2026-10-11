@@ -336,6 +336,14 @@ el comprador pagó y la venta no existe. Hay tres consecuencias:
 ve resuelta. La plata se devuelve con el reembolso, o la venta se registra a mano.
 Las 4 URLs y el `callbackModo` (`interno`/`http`) viven en `orden.metadata`.
 
+`verificar` tampoco pasa por el dispatcher: resuelve la orden con lo que dice el
+proveedor y nada más. Si encuentra pagada una orden `interno` —hoy, solo la tienda—,
+la deja pagada sin venta con el motivo *"El pago se confirmó por verificación, no en
+el retorno de la compra"* (owner, 2026-10-10). No crea la venta, porque sería otro
+"ahora". Lo que se distingue es el `callbackModo`, no el `origen`: el alta de
+suscripción también es `origen='interno'`, pero no lleva `callbackModo` porque crea su
+venta en la misma request. Las órdenes `http` de una app por llave no cambian.
+
 ### Detalle real del pago (Webpay)
 
 El commit (`confirmarPago`) devuelve el detalle real de la transacción, que

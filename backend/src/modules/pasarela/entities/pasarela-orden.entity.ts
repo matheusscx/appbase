@@ -77,9 +77,10 @@ export class PasarelaOrden {
   solicitudIdempotenteId: string | null;
 
   /**
-   * Por qué el callback in-process no pudo crear la venta de una orden que el
-   * comprador SÍ pagó. Lo escribe solo `CallbackDispatcherService` y es texto
-   * legible del error de dominio, nunca un stack ni un SQL: lo lee el admin en
+   * Por qué no se creó la venta de una orden que el comprador SÍ pagó. Lo
+   * escriben `CallbackDispatcherService`, cuando el callback in-process falla, y
+   * `CobrosService.verificar`, que resuelve la orden sin pasar por el callback.
+   * Es texto legible, nunca un stack ni un SQL: lo lee el admin en
    * `/ordenes`. La orden sigue `pagada`; "pagada sin venta" es `pagada` con
    * este motivo (`esPagadaSinVenta`). Queda como rastro aunque se reembolse.
    */

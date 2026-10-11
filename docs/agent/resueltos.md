@@ -23,6 +23,78 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `verificar` deja el aviso en la orden de la tienda que encuentra pagada (cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § 3. Decisión del owner del 2026-10-10: marcarla sin
+venta, sin crearla.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **`verificar` resuelve a `pagada` una orden de la tienda sin crear la venta y sin dejar el
+  aviso** (backend + producto; lo encontró la revisión independiente del frente D/E el 2026-10-10,
+  [`resueltos.md`](resueltos.md#la-orden-pagada-sin-venta-avisa-y-la-venta-online-no-lleva-vuelto-d-y-e-cerradas-2026-10-10);
+  es previo a ese frente). `CobrosService.verificar` acepta órdenes `en_proceso` o `expirada`. Si
+  Transbank dice pagada, hace `orden.estado = 'pagada'` y guarda, **sin pasar por
+  `CallbackDispatcherService`**. Una orden de la tienda llega ahí cuando el comprador pagó y el
+  retorno nunca volvió, o cuando `confirmarRetorno` la devolvió a `en_proceso` tras un error de
+  comunicación. Queda `pagada`, sin venta y sin `motivo_sin_venta`: el filtro "Pagada sin venta"
+  y la tarjeta de Inicio no la ven, y `/online/orden` dice `pagada`. **No se midió con un e2e**;
+  sale de leer `cobros.service.ts` (`verificar`). **La pregunta para el owner:** cuando
+  `verificar` encuentra pagada una orden de la tienda, ¿crea la venta en ese momento, que es lo
+  que el retorno habría hecho? ¿O la deja pagada sin venta con un motivo ("se confirmó por
+  verificación, sin venta") para que el admin la resuelva? La primera es crear la venta
+  "después", con un tercer "ahora", y la regla de no reintentar solo no la tiene que decidir el
+  agente.
+  **Decidido (owner, 2026-10-10, por AskUserQuestion de la orquestadora, con escena y costo de cada
+  opción): marcarla sin venta.** Cuando `verificar` encuentra pagada una orden de la tienda, la deja
+  `pagada` con `motivo_sin_venta` = "se confirmó por verificación", para que aparezca en el filtro y
+  en la tarjeta de Inicio. **No** crea la venta: con el recálculo de hoy caería igual sin venta, y
+  crearla "después" es otro "ahora". Se puede revisar cuando exista "vale lo que pagó" (la A de la
+  entrada de los dos "ahora"). Es chico. **Medir antes** con un e2e que el camino exista como se
+  leyó.
+
+### Lo que se hizo
+
+- **Medido antes de tocar nada**, con `backend/test/tienda-verificar-sin-venta.e2e-spec.ts`
+  (proveedor falso, como `tienda-dos-ahoras`). Los dos caminos de la entrada existen como se
+  leyeron: el retorno con error de comunicación (502, la orden vuelve a `en_proceso`) y el
+  retorno que nunca llegó. En los dos, `verificar` dejaba la orden `pagada`, sin venta y con
+  `motivo_sin_venta` en `null`.
+- **Cómo se distingue la tienda.** Hay un solo llamador, `POST /pasarela/api/ordenes/:id/verificar`
+  (llave de API), y estos orígenes de orden:
+
+  | Quién la crea | `origen` | `metadata.callbackModo` |
+  |---|---|---|
+  | La tienda (`OnlineService` → `PagosRedirectService.iniciar`) | `interno` | `interno` |
+  | Una app por llave, redirect (`POST /pasarela/api/pagos`) | `api` | `http` |
+  | Una app por llave, Oneclick (`POST /pasarela/api/cobros`) | `api` | — |
+  | El alta de suscripción (`prepararCobro`) | `interno` | — |
+
+  `origen` no alcanza, porque el alta también es `interno`. `metadata.origenApp === 'tienda-online'`
+  sí la distingue, pero es la marca que pone y lee `online`, y ADR-009 deja a la pasarela sin
+  depender de los módulos de negocio. Gana `callbackModo === 'interno'`: es la orden cuya venta crea el retorno, y
+  hoy la pone solo la tienda.
+- **`CobrosService.verificar`**: si el proveedor dice `pagada` y la orden es `callbackModo:
+  'interno'`, guarda `motivo_sin_venta` = *"El pago se confirmó por verificación, no en el retorno
+  de la compra"*. Va sin punto final porque el drawer lo pinta como *"Motivo: … . Devolvé…"*. El
+  resto sale solo de D: el filtro, la tarjeta de Inicio, `pagada_sin_venta` en `/online/orden` y en
+  un retorno tardío de Webpay. La respuesta de la API por llave sigue diciendo `pagada`, porque es
+  un contrato.
+- **No crea la venta**, y los dos e2e lo afirman contando las ventas online.
+- **Queda afuera:** la carrera entre `verificar` y el retorno, que es anterior a este frente. El
+  `save` de `verificar` puede pisar una orden que el retorno acaba de conciliar, y ahora además
+  la marca. Quedó anotada en [`pendientes.md`](pendientes.md) § 5.
+
+### Mutantes
+
+| Mutante | Resultado |
+|---|---|
+| El código de antes (`git show HEAD`) | 2 rojos en el e2e: los dos caminos de la tienda |
+| Guard por `origen === 'interno'` | 1 rojo en `cobros.service.spec`: el alta de suscripción queda marcada |
+| Sin `consulta.estado === 'pagada'` | 1 rojo en el e2e: el control de la orden que el proveedor da `fallida` |
+
+---
+
 ## La orden pagada sin venta avisa, y la venta online no lleva vuelto (D y E, cerradas 2026-10-10)
 
 Sale de [`pendientes.md`](pendientes.md) § 3, de la entrada "La tienda calcula el total dos

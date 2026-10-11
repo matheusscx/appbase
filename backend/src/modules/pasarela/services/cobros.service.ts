@@ -104,6 +104,15 @@ const MOTIVO_NO_SALIO =
 const MOTIVO_NO_SALIO_MANUAL =
   'Marcado "no salió" después de revisar el portal de Transbank.';
 
+/**
+ * El aviso de la orden de la tienda que `verificar` encuentra pagada: la venta
+ * la crea el retorno (el callback en proceso), y `verificar` no la crea
+ * (owner, 2026-10-10). Mismo tono que los motivos del dispatcher: lo lee el
+ * admin en `/ordenes`, después de "Motivo:".
+ */
+export const MOTIVO_SIN_VENTA_POR_VERIFICACION =
+  'El pago se confirmó por verificación, no en el retorno de la compra';
+
 function mensajeNoSePuedeAclarar(monto: string): string {
   return `Hay un reembolso de $${new Decimal(monto).toString()} sin confirmar en esta orden y Transbank no pudo aclarar si salió. Revisalo en el portal de Transbank antes de volver a intentar.`;
 }
@@ -1757,6 +1766,16 @@ export class CobrosService {
 
     if (consulta.estado !== 'desconocido') {
       orden.estado = consulta.estado;
+      // La venta de una orden con callback en proceso (hoy, solo la tienda)
+      // la crea el retorno, por el dispatcher. Acá no se crea —sería otro
+      // "ahora"—, así que queda pagada sin venta, con el aviso de D. Las de
+      // una app por llave (`http`) y el alta de suscripción no llevan
+      // `callbackModo: 'interno'`: su venta no depende del retorno.
+      if (
+        consulta.estado === 'pagada' &&
+        orden.metadata?.callbackModo === 'interno'
+      )
+        orden.motivoSinVenta = MOTIVO_SIN_VENTA_POR_VERIFICACION;
       // Redactar la respuesta del proveedor antes de persistir (mismo invariante
       // que el historial de transacciones).
       orden.metadata = {
