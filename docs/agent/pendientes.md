@@ -293,110 +293,44 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
   nadie construyó. Hoy no molesta a nadie porque Google no está habilitado; el día que se
   habilite, sin esto la gente con cuenta local queda sin poder usar el botón nunca.
 
-- [ ] **Re-tasar una línea ya pedida tiene que re-preciar, no re-validar** (backend, motor
-  de cálculo — **frente propio, decidido por el owner el 2026-08-30**; los caminos
-  que *sacan* algo se cerraron con guards —cuatro se sacaron el 2026-09-14, ya innecesarios— y la
-  otra familia, medida el 2026-08-30, se cerró con el congelado del 2026-08-31)
-  — la causa de fondo era una sola: `resolverPersonalizacionReceta` /
-  `resolverPersonalizacionCombo` volvían a validar el snapshot congelado contra el catálogo
-  de hoy, y si algo ya no cuadraba la cuenta entera respondía 400 al cerrar. Eso se cerró el
-  2026-08-31 —el cierre usa la foto—. ⚠️ Esta entrada no se reescribió al cerrarse: varias notas
-  de abajo describen como pendiente lo que ya se construyó. Lo abierto de verdad es el caso de la
-  promo de un día y la pregunta de `useCalculoPrecios`.
+- [ ] **Una promo que arranca después de que se abrió la mesa no le llega a lo que se pide ese
+  día** (backend, motor de cálculo — **lista para tomar**, ⬇️ prioridad baja; reescrita el
+  2026-10-11 con el owner). Lo que quedaba del frente *"re-tasar una línea ya pedida tiene que
+  re-preciar, no re-validar"*. El resto del frente está cerrado y archivado en
+  [`resueltos.md`](resueltos.md): el cierre usa la personalización congelada (2026-08-31) y el
+  precio de la línea es el de cuando se pidió (`dd54f81d`).
+  - **La regla (owner, 2026-08-30; reconfirmada el 2026-10-11 en el chat de la orquestadora):** la
+    promo aplica según **cuándo se pidió el ítem**, no cuándo se abrió la mesa. El owner la
+    reconfirmó con su propio ejemplo: promo "solo el 31", mesa abierta el 31 a las 23:30, cerveza
+    pedida el 1 a las 00:30 → **no** recibe la promo, porque ya no es 31. Eso hoy ya anda.
+  - **La escena que falla:** promo "solo el 31". La mesa se abre el **30** a las 23:30 y la cerveza
+    se pide el **31** a las 00:30. Por la regla debería recibirla, y no la recibe.
+  - **Por qué:** la hora y el día de la semana se evalúan por línea, contra el instante en que se
+    pidió (`instanteEnVentana` en `promociones.evaluator.ts`, con los instantes de
+    `instantesDeLineas`). Pero antes, `cargarVigentes` precarga solo las promos cuyo **rango de
+    fechas** contiene `fechaLocal`, que sale de `instanteDeVigencia` = `cuentas.abierta_el`
+    (`calculo-precios.service.ts`, en `calcular()`). Una promo cuyo `fecha_inicio` cae después
+    del día de apertura no se carga y su ventana nunca se mira. Al revés no falla: lo que se carga
+    de más lo descarta `instanteEnVentana` por línea.
+  - **El arreglo:** que `cargarVigentes` cargue las promos cuyo rango toque **cualquiera** de los
+    días de las líneas (del más temprano al más tarde, en una sola consulta), no solo el de la
+    apertura. No necesita pregunta al owner: es su regla.
+  - **Antes de arreglarlo, medirlo:** está leído en el código, no medido. Montar un e2e con una
+    promo de un solo día, una cuenta de salón y el reloj controlado, confirmar que hoy da rojo y
+    que el caso del owner (31 → 1) sigue sin promo. El fixture no puede usar promos, grupos ni
+    recetas del seed: copiar el catálogo propio de los tests 20 a 23 de
+    `cuenta-precio-congelado.e2e-spec.ts`.
+  - **Va solo, con el sistema quieto** (`CLAUDE.md`, motor de cálculo). Al cerrarlo, corregir el
+    docblock de `calculo-precios.service.ts` que nombra esta grieta: hoy dice que el 2x1 de los
+    martes no se evalúa, y eso es falso (se evalúa por línea; lo que no se carga es la promo de
+    rango).
 
-  🔲 **Lo que queda abierto del frente es angosto, y más angosto de lo que se creyó.**
-
-  **La escena del 2x1 de los martes NO es la grieta, y la corrección importa.** El día de la
-  semana y la hora de una promo se evalúan **por línea**, contra el instante en que se pidió
-  (`promociones.evaluator.ts`, `instanteEnVentana`: mira `fecha`, `diaIso` y `hora` del
-  instante de la línea). O sea que la cerveza pedida el martes 00:30 **sí** recibe el 2x1 de
-  los martes aunque la mesa se haya sentado el lunes — siempre que la promo esté cargada.
-  
-  **Lo que sí sale de `cuentas.abierta_el` es el filtro de PRECARGA**: `cargarVigentes` trae
-  solo las promos cuyo **rango de fechas** contiene ese día (`fecha_inicio <= $2 <= fecha_fin`).
-  Si el rango no cubre el día en que se abrió la cuenta, la promo no se carga y su ventana
-  nunca se mira, por más que la línea caiga adentro.
-  
-  Queda entonces un caso, más angosto que el que el plan describía: **una promo cuyo rango de
-  fechas empieza o termina entre la apertura de la cuenta y el pedido de la línea.** Una promo
-  de un solo día es el ejemplo puro: mesa abierta el 30 a las 23:30, cerveza pedida el 31 a
-  las 00:30, promo válida solo el 31 → no se carga. Al revés no hay problema: si se carga de
-  más, `instanteEnVentana` la descarta por línea.
-  
-  ⚠️ **Leído en el código, no medido con una sonda.** Medirlo pide un fixture propio (promoción
-  con rango de un día + cuenta de salón + control del reloj por SQL) que todavía no existe.
-  Antes de arreglarlo, montarlo y confirmar que falla así.
-  
-  📌 **Y la primera versión de esta nota estaba mal**: decía que el 2x1 de los martes no se
-  cargaba. La escribí leyendo `fechaLocal` y sin abrir el evaluador, que es donde el día de la
-  semana sí se mira por línea. La corrección salió de ir a medirla.
-
-  El arreglo, si se toma: `cargarVigentes` tiene que cargar las promos cuyo rango toque
-  **cualquiera** de los días de las líneas de la cuenta, no solo el de la apertura. Es la
-  misma regla del owner, así que no necesita preguntarle nada — pero es un caso de borde,
-  no el agujero que el frente vino a cerrar.
-
-  ✅ **DECIDIDO (owner, 2026-08-30), en dos respuestas que juntas definen el frente:**
-
-  1. **Al cobrar manda lo que la mesa ya pidió, no la carta de hoy.** Re-tasar una línea
-     de una cuenta abierta deja de **re-validar**: la personalización congelada es un
-     hecho, no una entrada del cliente que haya que volver a aprobar. Eso cierra de una
-     todas las filas de la tabla de arriba —las medidas y las que falten—, en vez de un
-     guard por forma.
-  2. **El precio es el de cuando pidió.** Mesa 4 pidió el extra de queso a $700; si el
-     queso pasa a $1.200 mientras comen, esa mesa paga **$700**. El snapshot ya guarda
-     `precioExtra` por extra y por opción de grupo (`PersonalizacionRecetaSnapshot`), así
-     que la plata para tasar la línea **ya está congelada**: el resolver no necesita el
-     catálogo vivo para nada de la personalización.
-
-  📌 **Esto no reabre `1970ccbd`** (*"el precio de una línea lo calcula el servidor, no el
-  cliente"*): el servidor sigue calculando y el cliente sigue sin poder mandar un precio.
-  Lo que cambia es de dónde lee el servidor —de la foto que él mismo congeló, no de la
-  carta de hoy—.
-
-  ✅ **El precio del plato también está congelado, y ya está construido:**
-  `cuenta_lineas.precio_unitario` guarda `precioBase + Σ precioExtra` al pedir la línea
-  (`dd54f81d`, con la cita del owner del 2026-08-30 en el docblock de
-  `cuenta-linea.entity.ts`). Esta nota decía que era la pregunta pendiente, y ya no lo era: la
-  orquestadora se la volvió a hacer al owner el 2026-09-29 sin verificar, y contestó lo mismo que
-  ya estaba hecho (*A: $5.000, el precio de cuando pidió*). Queda anotado para que no se
-  pregunte una tercera vez.
-
-  ⚠️ **Y va solo, con el sistema quieto** (`CLAUDE.md`, primer punto de "Detenerse y
-  preguntar"): toca `resolverPersonalizacionReceta` / `resolverPersonalizacionCombo`, que
-  son motor de cálculo.
-
-  📌 **Esta nota decía que los cinco guards no se tiraban**, por el dato de operación que le
-  daban al admin (el mensaje que nombra la mesa). El owner decidió lo contrario para las cuatro
-  ediciones el 2026-09-14 ([`resueltos.md`](resueltos.md)); el del borrado del ítem sigue, con su
-  porqué por medir en § 2.
-
-  ⚠️ **Dos trampas medidas que el que tome esto se va a encontrar:**
-  1. **La precuenta validaba menos que el cierre** (antes del 2026-08-31). `puedeCostar()`
-     (`calculo-precios.service.ts`) saltea el resolver cuando la línea no tiene extras,
-     grupos ni componentes, así que una línea con **solo** `omitidos` rotos mostraba precio
-     normal en la precuenta y explotaba recién al cobrar. Hoy ninguno de los dos re-resuelve
-     la línea de una cuenta, pero si algo vuelve a hacerlo, reproducir por la precuenta y
-     concluir "no pasa nada" sigue siendo el error fácil.
-  2. **No todo lo que rompe grita.** Si un componente de combo se queda sin **ningún**
-     grupo asociado, `resolverPersonalizacionCombo` hace
-     `if (!catalogo.asociados.length) continue` y la opción elegida **desaparecía del
-     precio en silencio** (medido el 2026-08-30: 4500 → 4300). Desde el 2026-09-14 la
-     desasociación es alcanzable por acción de catálogo —su guard se sacó—, pero no llega al
-     cobro: el cierre usa la foto y no re-resuelve. Si algo vuelve a re-resolver, vuelve
-     callado y en otro lugar: el precio ya está congelado, así que lo que se pierde es el
-     stock que no se descuenta. El test 23 de `cuenta-precio-congelado.e2e-spec.ts` lo caza
-     por el stock (ver su comentario).
-
-  ⚠️ **El e2e de todo esto tiene una trampa conocida**: el fixture no puede usar grupos ni
-  recetas del seed, porque sacarles una pieza los rompe para las demás suites. Los tests 20 a 23
-  de `cuenta-precio-congelado.e2e-spec.ts` arman su propio catálogo — copiar de ahí.
-
-  ✅ **Y aparte, decidido (owner, 2026-09-29):** `useCalculoPrecios` se traga el 400 a
-  propósito y `lineaSubtotal` dibuja `—` en todas las líneas sin decir por qué. **La pantalla
-  tiene que marcar la línea que falló.** Cómo se decidió: en el selector interactivo de la
-  orquestadora eligió *A: que marque la línea que falló* (recomendada) por sobre *B: dejarlo
-  como está*. Es chico e independiente del resto de esta entrada.
+- [ ] **La pantalla de la cuenta no marca la línea que el servidor rechazó** (frontend; ✅
+  **decidido por el owner el 2026-09-29**, en el selector interactivo de la orquestadora: *A: que
+  marque la línea que falló*, recomendada, por sobre *B: dejarlo como está*). `useCalculoPrecios`
+  se traga el 400 a propósito y `lineaSubtotal` dibuja `—` en **todas** las líneas sin decir por
+  qué. Tiene que marcar la que falló. Chico e independiente; salió de la misma entrada que la de
+  arriba.
 
 - [ ] **Una orden de cobro de un alta de suscripción que quedó sin aclarar no tiene marcado manual**
   (backend + front de Pasarela; anotado el 2026-10-10 por el frente del cobro único del alta, con el
