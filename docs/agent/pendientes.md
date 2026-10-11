@@ -80,6 +80,18 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **El checkout de la tienda cobra un ítem tipo `ingrediente` que la venta después rechaza**
+  (backend; lo vio la sesión de "vale lo que pagó" el 2026-10-11, y la orquestadora lo verificó
+  leyendo, **no medido**). `OnlineService.prepararLineasCheckout` ataja el ítem pausado y el de
+  `serie` antes de `pagosRedirect.iniciar`, pero no el `tipo`. Si llega un `ingrediente`, `pagar`
+  lo cobra en Webpay y `VentasService.crear` lo rechaza con *"Los ingredientes no se pueden vender
+  directamente"*: es otro cargo sin venta, y la A ("vale lo que pagó") no lo cubre. El catálogo de
+  la tienda no los muestra (`useCatalogoVenta` pide solo `producto`, `receta` y `combo`), así que
+  solo llega con un carrito armado a mano, igual que el caso de `serie`. **El arreglo probable:** un
+  400 en el mismo lugar y con la misma forma que el guard de `serie`, antes de crear la orden.
+  **Medir antes** con un e2e: un `POST /online/pagar` con un ingrediente tiene que dar 400 y no
+  dejar orden.
+
 - [ ] **Los ~40 campos `@EsMontoCobrado` no tienen techo: un monto que no cabe en su columna llega
   al `INSERT`** (backend, DTOs con `@EsMontoCobrado()`; anotado el 2026-10-09 por el frente que cerró
   los seis 500 del monto suelto de caja y pagos; **leído, no medido** salvo esos seis). Ese frente le
