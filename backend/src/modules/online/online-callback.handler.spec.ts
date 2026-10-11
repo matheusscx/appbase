@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { OnlineCallbackHandler } from './online-callback.handler';
 import { PagoCallbackRegistry } from '../pasarela/services/pago-callback.registry';
@@ -45,6 +46,17 @@ describe('OnlineCallbackHandler', () => {
           totalFinal: '100.0000',
           usuarioId: 'u-1',
           customerNombre: 'user@x.cl',
+          congelado: {
+            resultado: { totales: { totalFinal: '100.0000' } },
+            lineas: [
+              {
+                precioUnitarioOrigen: '50.0000',
+                monedaIdOrigen: 'clp',
+                tasaCambio: '1.000000',
+                clasificacionTributaria: 'afecto',
+              },
+            ],
+          },
         },
         resultadoPago,
       },
@@ -79,6 +91,8 @@ describe('OnlineCallbackHandler', () => {
         ],
         customer: { nombre: 'user@x.cl' },
       }),
+      undefined,
+      (o.metadata as { checkout: { congelado: unknown } }).checkout.congelado,
     );
     expect(o.ventaId).toBe('venta-9');
   });
@@ -156,6 +170,8 @@ describe('OnlineCallbackHandler', () => {
           },
         ],
       }),
+      undefined,
+      expect.objectContaining({ lineas: expect.any(Array) }),
     );
   });
 
@@ -193,6 +209,51 @@ describe('OnlineCallbackHandler', () => {
       { pagos: { metodoPagoId: string }[] },
     ];
     expect(dto.pagos[0].metodoPagoId).toBe('mp-credito');
+  });
+
+  it('pasa a la venta lo congelado al pagar, y el pago es su total', async () => {
+    ventas.crear.mockResolvedValue({ id: 'venta-9' });
+    const o = orden();
+    const checkout = (o.metadata as { checkout: { congelado: unknown } })
+      .checkout;
+    await handler.onOrdenResuelta(o);
+
+    const [, , dto, clave, congelado] = ventas.crear.mock.calls[0] as unknown[];
+    expect(clave).toBeUndefined();
+    expect(congelado).toBe(checkout.congelado);
+    expect((dto as { pagos: { monto: string }[] }).pagos[0].monto).toBe(
+      '100.0000',
+    );
+  });
+
+  it('el pago es el total congelado aunque el snapshot traiga otro totalFinal', async () => {
+    ventas.crear.mockResolvedValue({ id: 'venta-9' });
+    const o = orden();
+    // El total que se calculó "otra vez" no pesa: manda lo que se autorizó.
+    (o.metadata as { checkout: { totalFinal: string } }).checkout.totalFinal =
+      '999.0000';
+    await handler.onOrdenResuelta(o);
+
+    const [, , dto] = ventas.crear.mock.calls[0] as [
+      string,
+      string,
+      { pagos: { monto: string }[] },
+    ];
+    expect(dto.pagos[0].monto).toBe('100.0000');
+  });
+
+  it('sin lo congelado (orden de antes del deploy) no recalcula: lanza y no crea la venta', async () => {
+    const o = orden();
+    delete (o.metadata as { checkout: { congelado?: unknown } }).checkout
+      .congelado;
+
+    const falla = handler.onOrdenResuelta(o);
+    await expect(falla).rejects.toBeInstanceOf(BadRequestException);
+    await expect(falla).rejects.toThrow(
+      'El pago se inició antes de una actualización del sistema y la orden no guarda lo que se cobró: devolvé el cargo o registrá la venta a mano',
+    );
+    expect(ventas.crear).not.toHaveBeenCalled();
+    expect(o.ventaId).toBeNull();
   });
 
   it('idempotente: si ya hay ventaId, no crea venta', async () => {

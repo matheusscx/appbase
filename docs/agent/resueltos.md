@@ -23,6 +23,188 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La venta online vale lo que se pagó (la A de los dos "ahora", cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § 3, de la entrada "La tienda calcula el total dos veces,
+con dos 'ahora'…", que **sale entera**: D y E ya estaban acá desde el 2026-10-10 y con la A no queda
+nada abierto en ella. Frente fiscal y de motor, hecho solo y con el sistema quieto
+([ADR-010](../adr/010-preparacion-sii-datos-fiscales.md)). Detalle de la conducta:
+[`tienda-online.md`](../features/tienda-online.md), [`ventas.md`](../features/ventas.md) y
+[ADR-009](../adr/009-callback-pasarela-venta-por-callback.md).
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **La tienda calcula el total dos veces, con dos "ahora": lo que cambia entre el pago y el
+  retorno deja un cargo sin venta** (backend + producto; lo vio la revisión de seguridad del frente
+  "reglas de línea salen del ítem", 2026-10-06; **medido el 2026-10-09** con
+  [`tienda-dos-ahoras.e2e-spec.ts`](../../backend/test/tienda-dos-ahoras.e2e-spec.ts), proveedor
+  falso, citas contra `0339f214`; **decidido por el owner el mismo día**, abajo). `POST /online/pagar` calcula y autoriza ese total en Webpay. Al
+  volver, `OnlineCallbackHandler` crea la venta con `VentasService.crear`, que **recalcula** desde
+  el snapshot (solo ítem y cantidad) y fija el pago en lo autorizado
+  (`online-callback.handler.ts:79`). Los dos cálculos van sin `cuentaId`, así que cada uno toma
+  su propio `new Date()`: el de las promos en `calculo-precios.service.ts:650` y el de la fecha de
+  las reglas en `:689`. Los dos leen el catálogo vivo: precio, reglas, promos y la tasa del día
+  (`:256`).
+  - **Lo medido** (ítem de $10.000 + IVA, Paris):
+
+    | Qué cambia entre el pago y el retorno | Autorizado | El retorno calcula | Resultado |
+    |---|---|---|---|
+    | nada (control) | 11.900 | 11.900 | venta, orden `conciliada` |
+    | la hora: promo 18:00–19:59, pago 19:59:30, retorno 20:00:30 | 9.520 | 11.900 | **sin venta** |
+    | la fecha: descuento con `fechaFin` hoy, 23:59:30 → 01:00:30 del día siguiente | 10.710 | 11.900 | **sin venta** |
+    | el precio sube a 12.000 | 11.900 | 14.280 | **sin venta** |
+    | el precio baja a 8.000 | 11.900 | 9.520 | **sin venta** (vuelto) |
+    | el precio baja, tarjeta con `permite_vuelto` | 11.900 | 9.520 | venta, **vuelto 2.380 sobre la tarjeta** |
+    | la tasa USD pasa de 950 a 1.000 (ítem de US$10) | 11.305 | 11.900 | **sin venta** |
+
+    Los dos casos de reloj se midieron con `Date` falso y **sin tocar el catálogo**: son los dos
+    "ahora" en estado puro. El mutante que no mueve el reloj en el retorno da rojo en los dos.
+    La tabla es la medición del 2026-10-09. Desde E (abajo), el caso de `permite_vuelto` ya no
+    crea la venta: también queda sin venta.
+  - **El cargo sin venta, como se midió el 2026-10-09** (D cambió lo que ve el comprador y el
+    admin, ver abajo; que no haya venta lo cierra la A). El callback mayor rechaza con *"Las ventas online requieren el
+    pago completo"* (`ventas.service.ts:1025`). El menor rechaza con *"…ningún método de pago
+    permite vuelto"* (`pagos.service.ts:270`). El dispatcher se traga el error
+    (`callback-dispatcher.service.ts:53-62`). Lo medido es esto:
+    - La orden queda `pagada`, sin `venta_id`, y no se crea ninguna venta.
+    - El motivo queda **solo** en un `logger.error`.
+    - El comprador recibe `estado=pagada` (`pagos-redirect.service.ts:76`), y
+      `GET /online/orden/:id` da `{estado: 'pagada', ventaId: null}`: la pantalla dice *"Tu
+      compra fue registrada correctamente"*.
+    - `POST /pasarela/api/ordenes/:id/verificar` da 400 *"La orden ya está resuelta (pagada)"*.
+    - **Lo único que funciona** es el reembolso manual del admin: queda aprobado, sin nota, y
+      la venta sigue sin existir.
+  - **El vuelto sobre la tarjeta es un hallazgo aparte.** Que una venta online cobrada con
+    tarjeta registre "vuelto" depende solo de que nadie prenda `permite_vuelto` en ese método.
+    Cuando pasa, la diferencia cobrada de más queda anotada como entregada y nadie la devuelve.
+    No se midió qué le hace eso a la cuadratura de la caja virtual.
+  - **Decidido (owner, 2026-10-09).** Se le preguntó vía la orquestadora con AskUserQuestion: la
+    escena en lenguaje de local, el costo de cada opción y la A marcada como recomendada. No pidió
+    pasada de investigación de mercado. Las otras opciones (B, solo congelar el instante, que cubría
+    2 de los 6 casos; C, reembolsar solo) quedaron afuera. Rehacer la venta sola nunca fue opción:
+    es un reintento automático y calcularía con un tercer "ahora".
+    - **A. "Vale lo que pagó": congelar en la orden lo que se cobró, y que el callback cree la
+      venta con eso, sin recalcular.** `pagar` guarda en el snapshot el resultado resuelto:
+      líneas, impuestos, reglas y promos aplicadas. Lo arma el servidor y nunca viene del
+      cliente. **Va como frente propio, con el sistema quieto:** toca el motor, y la boleta sale
+      de ahí. Es fiscal (ADR-010, "congelar el hecho fiscal en la transacción").
+      - *Hay precedente:* `crearEnTransaccion` ya tiene un canal interno, `lineasCongeladas`
+        (el tipo en `ventas.service.ts:392-404`, el parámetro en `:622`), que congela precio, tasa y reglas de línea. Probablemente
+        cuesta menos que una entrada nueva.
+      - *Lo que el precedente no cubre:* no congela promos ni la fecha de vigencia. La grieta del
+        salón está en `calculo-precios.service.ts:828-832`, y el caso de la hora la necesita.
+      - *Lo que A no cubre:* lo que no es precio. Un ítem borrado o sin stock entre el pago y el
+        retorno sigue dejando el cargo sin venta. Para eso va la D.
+    - ✅ **D. La orden pagada sin venta avisa y no miente** y ✅ **E. La venta online solo se crea
+      si lo pagado es igual al total, nunca con vuelto**: **hechas el 2026-10-10** en `63628bef`
+      (rama `claude/clever-volhard-b026ae`). El texto con el que se decidieron y lo
+      construido están en
+      [`resueltos.md`](resueltos.md#la-orden-pagada-sin-venta-avisa-y-la-venta-online-no-lleva-vuelto-d-y-e-cerradas-2026-10-10).
+      Lo único que queda abierto acá es la A.
+    - **Al construir la A:** `tienda-dos-ahoras.e2e-spec.ts` fija la conducta de hoy, así que cada
+      caso se da vuelta a propósito. Hoy afirma la orden pagada sin venta con su aviso (D). Con A,
+      los casos de precio, reloj y tasa crean la venta por lo cobrado. El control sin cambios tiene
+      que seguir igual.
+
+### La decisión del owner
+
+**"Vale lo que pagó"** (owner, 2026-10-09): `pagar` congela en la orden el resultado resuelto por el
+servidor —líneas, impuestos, reglas y promos aplicadas, total— y el callback crea la venta con eso,
+**sin recalcular**. Nunca viene del cliente. Se descartó congelar solo el instante (B) y reembolsar
+sin más (C).
+
+### Por qué no alcanzaba con `lineasCongeladas`
+
+El precedente del cierre de salón congela precio, tasa y reglas de línea, pero **el motor igual
+corre**: las promos se leen del catálogo vivo contra el reloj del retorno, y los impuestos se leen
+vivos a propósito. No cubría el caso de la hora ni lo que el owner pidió congelar. Cubrirlo exigía
+meter un "instante congelado" en el motor y la venta seguiría recalculando con promos e impuestos
+vivos. También se descartó crear la venta pendiente en `pagar`: descontaría stock y documentaría
+antes del cobro, preguntas de producto nuevas.
+
+### Lo que se construyó
+
+- **`OnlineService.pagar`** convierte el precio de cada línea como lo hace la venta y se lo pasa al
+  motor por el canal interno (`precioUnitarioResuelto`, con la config precargada). Es la misma
+  cuenta de siempre, así que el total autorizado no cambia. Guarda en el snapshot
+  `checkout.congelado`: el `ResultadoVenta` tal como se autorizó, más por línea el precio de origen,
+  su moneda, la tasa y la clasificación tributaria que decidió el IVA.
+- **`VentaCongelada`** (en `ventas.service.ts`, junto a `LineaCongelada`) es ese tipo. Canal
+  **interno**, nunca un campo de DTO: lleva plata ya resuelta.
+- **`VentasService.crearEnTransaccion`** gana el parámetro `ventaCongelada` (y `crear` /
+  `crearConReintento`, la puerta del callback). Con él la venta no carga la config, no convierte y
+  no llama a `calcular`: el resultado es el congelado, y `venta_detalles` toma de ahí origen, moneda,
+  tasa, clasificación y precio. Antes de escribir nada comprueba que lo congelado sea este carrito,
+  línea por línea y en orden; si no, lanza un `Error` (es del servidor, no del cliente).
+- **`OnlineCallbackHandler`** pasa `checkout.congelado` a `crear`, y el pago es su `totalFinal`. Una
+  orden sin congelado **lanza**: no hay vuelta a recalcular, que sería mantener vivo el camino de los
+  dos "ahora". La orden queda pagada sin venta, con el aviso de D.
+- **Quién puede escribir el congelado.** Solo el servidor arma `metadata.checkout`: la API externa
+  (`POST /pasarela/api/pagos`) llama a `iniciar` sin ese campo y sus órdenes despachan por HTTP;
+  `metadata` no sale en ninguna respuesta; y `precioUnitarioResuelto` no está en `LineaDto`, así que
+  el pipe global lo rechaza con 400.
+- **Lo que sigue vivo a propósito** en la venta: la caja virtual y el tipo de documento, que el ítem
+  exista y se pueda vender, el stock, el umbral de identidad de la boleta (mira el total congelado), el
+  pago exacto de E (que ahora se cumple por construcción) y `descripcion`, que sale del catálogo
+  del retorno y no es plata ni dato fiscal.
+- **Una ventana que se acepta:** la clasificación tributaria sale de la lectura de `pagar` y el
+  motor lee el ítem otra vez dentro de `calcular`. Si cambia justo entre las dos lecturas de la misma
+  request, lo congelado y lo cobrado difieren. Es la que ya tenía `crearEnTransaccion`.
+
+### Re-medido con `tienda-dos-ahoras.e2e-spec.ts` (dado vuelta a propósito)
+
+El archivo viejo contra el código nuevo dio 7 rojos de 8 (el control pasó): en los siete escenarios en
+que antes quedaba pagada sin venta, la orden terminaba `conciliada`. Reescrito, 10 de 10. Pago =
+autorizado y vuelto 0 se afirman en cada fila. "Retorno calculaba" es la columna de la medición del
+2026-10-09, la del cargo sin venta; la última es la de ahora.
+
+| Qué cambia entre el pago y el retorno | Autorizado | Retorno calculaba (2026-10-09) | Total de la venta ahora |
+|---|---|---|---|
+| nada (control) | 11.900 | 11.900, venta | 11.900, venta |
+| la hora: promo 18:00-19:59, pago 19:59:30, retorno 20:00:30 | 9.520 | 11.900, sin venta | 9.520, venta con su fila en `ventas_promociones` |
+| la fecha: descuento con `fechaFin` hoy, 23:59:30 a 01:00:30 | 10.710 | 11.900, sin venta | 10.710, venta con su fila en `ventas_descuentos` |
+| el precio sube a 12.000 | 11.900 | 14.280, sin venta | 11.900, venta; origen 10.000 |
+| el precio baja a 8.000 | 11.900 | 9.520, sin venta | 11.900, venta; origen 10.000, vuelto 0 |
+| el precio baja, tarjeta con `permite_vuelto` | 11.900 | 9.520, sin venta (desde E) | 11.900, venta; vuelto 0 |
+| la tasa USD pasa de 950 a 1.000 (ítem de US$10) | 11.305 | 11.900, sin venta | 11.305, venta con la tasa original |
+| **nuevo, fiscal:** el impuesto adicional del ítem pasa de 0,10 a 0,20 | 12.900 | no estaba medido | 12.900, venta con `porcentaje_aplicado` 0,1 y `valor_aplicado` 1.000 en `ventas_impuestos` |
+
+Los dos casos de reloj se miden con `Date` falso y sin tocar el catálogo, como el 2026-10-09.
+
+### Mutante
+
+| Mutante | Resultado |
+|---|---|
+| `OnlineCallbackHandler` llama a `crear` **sin** el congelado (último argumento `undefined`: vuelve a recalcular) | 7 rojos: los 6 casos dados vuelta (hora, fecha, precio que sube, precio que baja, precio que baja con `permite_vuelto`, tasa) y el fiscal. Siguen verdes 3: el control, el ítem borrado con reembolso y el aviso al admin |
+
+Se restauró y se volvió a correr el archivo: 10 de 10.
+
+### Lo que A no cubre
+
+Lo que no es plata. **Un ítem borrado entre el pago y el retorno** sigue dejando la orden pagada sin
+venta (*"Item no encontrado"*), con el aviso de D y el reembolso manual del admin: lo fijan dos casos
+del e2e, "lo que A no cubre", y los tests que antes fabricaban la orden sin venta subiendo el precio
+ahora la fabrican así. Un ítem sin stock en ese minuto cae por el mismo lado (el stock sigue vivo
+en la venta; **leído, no medido**). Tampoco entra una orden creada antes del deploy y resuelta
+después (sin congelado): **queda sin venta**, con el aviso de D, y no hay fallback a recalcular. El
+motivo que ve el admin es "El pago se inició antes de una actualización del sistema y la orden no guarda lo que se cobró: devolvé el cargo o registrá la venta a mano". Sin datos productivos es aceptable, pero consta. Tampoco entra la
+pasarela demo, que crea la venta por `POST /ventas` y recalcula (no hay cobro real). La tienda
+sigue sin reservar stock al pagar.
+
+### Punteros que quedan
+
+- **`verificar` se puede revisar ahora, y es una pregunta para el owner, no un cambio.** Desde
+  `verificar` deja el aviso (sección de arriba), la orden de la tienda que `verificar` encuentra
+  pagada queda sin venta con su motivo. La razón de entonces, *"crearla después es otro ahora"*, ya no
+  vale **para el precio**: con el congelado, crear la venta ahí no recalcularía. Sí sigue valiendo
+  para el ítem y el stock, que seguirían vivos al momento de `verificar`. Falta decidir si conviene
+  crearla ahí. No se tocó.
+- **"Ligar la orden pagada sin venta a una venta"** (`pendientes.md` § 3) retoma solo si, con esto
+  en producción, siguen apareciendo órdenes sin venta que el admin quiera registrar a mano. Casi
+  todas salían del recálculo, y eso ya no existe.
+
+---
+
 ## `verificar` deja el aviso en la orden de la tienda que encuentra pagada (cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Decisión del owner del 2026-10-10: marcarla sin
@@ -98,8 +280,9 @@ venta, sin crearla.
 ## La orden pagada sin venta avisa, y la venta online no lleva vuelto (D y E, cerradas 2026-10-10)
 
 Sale de [`pendientes.md`](pendientes.md) § 3, de la entrada "La tienda calcula el total dos
-veces, con dos 'ahora'…". **La entrada sigue abierta allá con la A** ("vale lo que pagó"), que
-es frente fiscal propio. Se mudan las dos opciones que se construyeron, en `63628bef`. Plan:
+veces, con dos 'ahora'…". **La A ("vale lo que pagó") se cerró el 2026-10-11**: está en
+[su propia sección](#la-venta-online-vale-lo-que-se-pagó-la-a-de-los-dos-ahora-cerrada-2026-10-11).
+Se mudan las dos opciones que se construyeron, en `63628bef`. Plan:
 [`2026-10-10-tienda-pagada-sin-venta.md`](../superpowers/plans/2026-10-10-tienda-pagada-sin-venta.md).
 
 ### Las opciones que cierra, como estaban en `pendientes.md` § 3

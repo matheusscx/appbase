@@ -56,3 +56,21 @@ orden nuevos: `pendiente` (conciliación demorada, modelado) y `conciliada`.
 - El `callbackModo` (`interno`/`http`) y las 4 URLs viven en `orden.metadata`.
 - El disparo `http` a externos queda como base (stub) para el consumo completo
   por apps externas en una fase posterior.
+
+## Actualización 2026-10-11 — el snapshot lleva lo cobrado
+
+El snapshot dejó de ser solo "qué se pidió" (ítem y cantidad). `pagar` guarda además, en
+`orden.metadata.checkout.congelado`, el resultado que autorizó en Webpay y, por línea, el precio de
+origen, su moneda, la tasa y la clasificación tributaria. El callback crea la venta con eso y **no
+recalcula**: antes lo hacía con el catálogo y el reloj del retorno, y cualquier cambio entre el
+pago y el retorno (una promo por hora, una regla que vence, un precio, una tasa) dejaba un cargo
+sin venta. Lo decidió el owner el 2026-10-09: la venta vale lo que se pagó, y es hecho fiscal
+congelado en la transacción ([ADR-010](010-preparacion-sii-datos-fiscales.md)).
+
+Lo que no cambia: la orden sigue siendo el registro de lo que se paga y la venta se crea en el
+callback. Lo que se agrega: una orden **sin congelado** (creada antes del cambio) hace fallar el
+handler, y el dispatcher la deja pagada sin venta con su aviso, en vez de volver a recalcular. El
+admin ve el motivo "El pago se inició antes de una actualización del sistema y la orden no guarda lo que se cobró: devolvé el cargo o registrá la venta a mano". Sin datos productivos es aceptable, pero consta. Lo
+que no es plata (que el ítem exista, el stock) sigue vivo al retorno. Detalle:
+[`tienda-online.md`](../features/tienda-online.md) y
+[`ventas.md`](../features/ventas.md#la-venta-online-no-recalcula-ventacongelada-2026-10-11).

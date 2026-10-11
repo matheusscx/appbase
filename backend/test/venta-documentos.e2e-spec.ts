@@ -7,6 +7,7 @@ import type { App } from 'supertest/types';
 import { randomUUID } from 'node:crypto';
 import { AppModule } from '../src/app.module';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
+import { CalculoPreciosService } from '../src/modules/calculo-precios/calculo-precios.service';
 import { OnlineCallbackHandler } from '../src/modules/online/online-callback.handler';
 import type { PasarelaOrden } from '../src/modules/pasarela/entities/pasarela-orden.entity';
 import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
@@ -699,6 +700,24 @@ describe('Documentos de la venta (e2e)', () => {
 
     it('la venta que crea el retorno de Webpay deja el código de autorización en pagos.referencia', async () => {
       const handler = app.get(OnlineCallbackHandler, { strict: false });
+      // Lo que `pagar` congela al autorizar: el resultado del motor y, por
+      // línea, el precio de origen del ítem. El callback no recalcula.
+      const resultado = await app
+        .get(CalculoPreciosService, { strict: false })
+        .calcular(TENANT_ID, {
+          lineas: [{ itemId: itemAfecto60, cantidad: '1' }],
+          canal: 'online',
+        });
+      const [item]: {
+        precio_base: string;
+        moneda_id: string;
+        clasificacion_tributaria: string | null;
+      }[] = await ds.query(
+        `SELECT precio_base, moneda_id, clasificacion_tributaria FROM items
+          WHERE item_id = $1 AND eliminado_el IS NULL`,
+        [itemAfecto60],
+      );
+      expect(item.moneda_id).toBe(CLP);
       const orden = {
         ordenId: randomUUID(),
         tenantId: TENANT_ID,
@@ -710,9 +729,21 @@ describe('Documentos de la venta (e2e)', () => {
             lineas: [{ itemId: itemAfecto60, cantidad: '1' }],
             metodoCreditoId: CREDITO_ID,
             metodoDebitoId: null,
-            totalFinal: '71400.0000',
+            totalFinal: resultado.totales.totalFinal,
             usuarioId,
             customerNombre: 'cliente@e2e.cl',
+            congelado: {
+              resultado,
+              lineas: [
+                {
+                  precioUnitarioOrigen: item.precio_base,
+                  monedaIdOrigen: item.moneda_id,
+                  // Moneda oficial: la tasa es 1, con la forma que escribe la venta.
+                  tasaCambio: '1.000000',
+                  clasificacionTributaria: item.clasificacion_tributaria,
+                },
+              ],
+            },
           },
           resultadoPago: {
             tipoPago: 'VN',

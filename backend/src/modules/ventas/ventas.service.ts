@@ -18,6 +18,7 @@ import { CalculoPreciosService } from '../calculo-precios/calculo-precios.servic
 import type {
   ConfigCalculo,
   Cuantizador,
+  ResultadoVenta,
   TrazaRegla,
 } from '../calculo-precios/calculo-precios.engine';
 import {
@@ -404,6 +405,28 @@ export interface LineaCongelada {
 }
 
 /**
+ * Lo que la tienda cobró, congelado en la orden al pagar (pendientes.md § 3, A:
+ * "vale lo que pagó"). Ver el parámetro `ventaCongelada` de `crearEnTransaccion`.
+ * Canal **interno**, nunca un campo de DTO: lleva plata ya resuelta.
+ */
+export interface VentaCongelada {
+  /** El resultado del motor tal como se autorizó en Webpay. */
+  resultado: ResultadoVenta;
+  /** 1:1 con `resultado.lineas` y con `dto.lineas`, en el mismo orden. */
+  lineas: LineaVentaCongelada[];
+}
+
+/** Lo que `venta_detalles` guarda de la línea y el motor no devuelve. */
+export interface LineaVentaCongelada {
+  /** En la moneda del ítem; con `tasaCambio` da `resultado.lineas[i].precioUnitario`. */
+  precioUnitarioOrigen: string;
+  monedaIdOrigen: string;
+  tasaCambio: string;
+  /** La que decidió el IVA cobrado. */
+  clasificacionTributaria: string | null;
+}
+
+/**
  * Payload de la boleta, armado desde la venta YA PERSISTIDA — nunca desde el
  * motor de cálculo. Un solo tipo para los dos caminos que la producen: el
  * cierre (`SalonesService.cerrarCuenta`, dentro de la misma transacción) y la
@@ -521,11 +544,12 @@ export class VentasService {
    * transacción externa, y si esa transacción abortó (deadlock), los tres
    * intentos fallarían igual con `25P02` ("current transaction is aborted")
    * en vez de un reintento útil. Verificado 2026-08-18: los únicos
-   * llamadores son `VentasController` y `OnlineCallbackHandler`, ninguno con
-   * transacción envolvente. Un caller que SÍ corre dentro de una transacción
-   * (p.ej. `SalonesService`/`SuscripcionesService` al cerrar una cuenta) debe
-   * llamar a `crearEnTransaccion(manager, …)` directamente, saltándose este
-   * loop — exactamente lo que hacen hoy.
+   * llamadores son `VentasController` y `OnlineCallbackHandler` (que además
+   * pasa `ventaCongelada`), ninguno con transacción envolvente. Un caller que
+   * SÍ corre dentro de una transacción (p.ej. `SalonesService`/
+   * `SuscripcionesService` al cerrar una cuenta) debe llamar a
+   * `crearEnTransaccion(manager, …)` directamente, saltándose este loop —
+   * exactamente lo que hacen hoy.
    */
   async crear(
     tenantId: string,
@@ -539,11 +563,16 @@ export class VentasService {
      * HTTP y ya es idempotente por orden (ADR-009).
      */
     clave?: string,
+    /**
+     * Lo que la tienda cobró, congelado al pagar: con esto la venta no vuelve
+     * al motor. Solo `OnlineCallbackHandler` lo pasa. Ver `crearEnTransaccion`.
+     */
+    ventaCongelada?: VentaCongelada,
   ) {
     // El rastro de un cobro en efectivo que no cabe en el esperado
     // (`EsperadoNoCabeError`), por fuera de la transacción y de sus reintentos.
     return this.cajaService.conRastroDeRechazo(tenantId, () =>
-      this.crearConReintento(tenantId, usuarioId, dto, clave),
+      this.crearConReintento(tenantId, usuarioId, dto, clave, ventaCongelada),
     );
   }
 
@@ -552,6 +581,7 @@ export class VentasService {
     usuarioId: string,
     dto: CreateVentaDto,
     clave?: string,
+    ventaCongelada?: VentaCongelada,
   ) {
     for (let intento = 0; ; intento++) {
       try {
@@ -562,6 +592,9 @@ export class VentasService {
               tenantId,
               usuarioId,
               dto,
+              undefined,
+              undefined,
+              ventaCongelada,
             );
             // `verTodas: true`, mismo porqué que `SalonesService.cerrarCuenta`:
             // el alcance por caja de `armarBoleta` (`filtroDeMisCajas`) existe
@@ -633,6 +666,22 @@ export class VentasService {
      * defendible, pero no es "no vuelve al catálogo para nada".
      */
     lineasCongeladas?: (LineaCongelada | undefined)[],
+    /**
+     * **Lo que la tienda cobró, congelado en la orden al pagar** (pendientes.md
+     * § 3, A: "vale lo que pagó"). Cuando viene, esta venta **no vuelve al
+     * motor**: no carga la config, no convierte y no llama a `calcular`. El
+     * resultado, los impuestos, las reglas y las promos son los que se
+     * autorizaron en Webpay. Recalcular al retorno era lo que dejaba el cargo
+     * sin venta cuando algo cambiaba en el medio: la hora, el precio, la tasa.
+     *
+     * Sigue vivo lo que no es plata: que el ítem exista, el stock, la caja
+     * virtual, el umbral de identidad. Por eso un ítem borrado entre el pago y
+     * el retorno sigue dejando la orden sin venta, con su aviso.
+     *
+     * Mismo régimen que `lineasCongeladas`: parámetro y no DTO, porque lleva
+     * plata. Solo `OnlineCallbackHandler` lo pasa (vía `crear`).
+     */
+    ventaCongelada?: VentaCongelada,
   ) {
     const canal = dto.canal ?? 'fisico';
 
@@ -803,6 +852,30 @@ export class VentasService {
       }
     }
 
+    // 2c. Lo congelado tiene que ser ESTE carrito, línea por línea y en orden:
+    //     los detalles se cruzan por posición. No calzar es un error del
+    //     servidor —el snapshot lo armó `pagar`—, así que se corta antes de
+    //     escribir nada. El ítem sin distinguir mayúsculas (el carrito trae el
+    //     UUID como lo escribió el cliente) y la cantidad como número.
+    if (ventaCongelada) {
+      const { resultado: r, lineas: lc } = ventaCongelada;
+      const calza =
+        r.lineas.length === dto.lineas.length &&
+        lc.length === dto.lineas.length &&
+        r.lineas.every(
+          (rl, i) =>
+            rl.itemId.toLowerCase() === items[i].id.toLowerCase() &&
+            new Decimal(rl.cantidad).equals(
+              cantidadesResueltas[i].cantidadCanonica,
+            ),
+        );
+      if (!calza) {
+        throw new Error(
+          'La venta congelada no corresponde a las líneas de la venta',
+        );
+      }
+    }
+
     // 3. Resolver la moneda oficial del tenant: la de su PAÍS (ADR-005). Se
     //    trae junto con las demás para armar el mapa de tasas de una sola
     //    consulta.
@@ -925,14 +998,20 @@ export class VentasService {
     // dos consultas nuevas. `decimalesMoneda` sale del `JOIN` de arriba —tampoco
     // es una consulta nueva—, así que `cargarConfig` no vuelve a resolver la
     // moneda oficial por su cuenta.
-    const configCalculo = await this.calculoPreciosService.cargarConfig(
-      tenantId,
-      Number(monedaOficial.decimales),
-    );
+    //
+    // Con la venta congelada no se carga: la config viene en el resultado que se
+    // autorizó, y acá solo servía para convertir.
+    const configCalculo =
+      ventaCongelada?.resultado.config ??
+      (await this.calculoPreciosService.cargarConfig(
+        tenantId,
+        Number(monedaOficial.decimales),
+      ));
 
     const lineasConversion = dto.lineas.map((linea, i) => {
       const item = items[i];
       const pers = personalizaciones[i];
+      const congelada = ventaCongelada?.lineas[i];
       const {
         cantidadCanonica,
         cantidadPresentacion,
@@ -958,7 +1037,9 @@ export class VentasService {
       // y `cerrarCuenta` arma el body en el servidor— y era el segundo canal por
       // el que un precio podía entrar desde afuera. El primero era el
       // `precioUnitario` de `LineaDto`, que salió en el mismo commit.
+      // Lo congelado de la tienda gana sobre el de salón y sobre el catálogo.
       const precioOrigen =
+        congelada?.precioUnitarioOrigen ??
         lineasCongeladas?.[i]?.precioUnitarioOrigen ??
         (pers != null
           ? new Decimal(item.precioBase).plus(pers.precioExtraTotal).toFixed(4)
@@ -970,6 +1051,7 @@ export class VentasService {
       // El congelado gana: ya está en moneda oficial y ya se redondeó con el
       // `modo_redondeo` del tenant cuando se pidió la línea.
       const precioConvertido =
+        ventaCongelada?.resultado.lineas[i].precioUnitario ??
         lineasCongeladas?.[i]?.precioUnitario ??
         this.calculoPreciosService.convertirAMonedaOficial(
           precioOrigen,
@@ -985,9 +1067,17 @@ export class VentasService {
         unidadCodigoPresentacion,
         unidadBaseCodigo,
         precioOrigen,
-        tasa: lineasCongeladas?.[i]?.tasaCambio ?? tasa.toFixed(6),
+        tasa:
+          congelada?.tasaCambio ??
+          lineasCongeladas?.[i]?.tasaCambio ??
+          tasa.toFixed(6),
         precioConvertido,
         personalizacion: pers?.snapshot ?? null,
+        // De lo cobrado, no del catálogo del retorno: la moneda con la que se
+        // leen origen y tasa, y la clasificación que decidió el IVA cobrado.
+        monedaIdOrigen: congelada?.monedaIdOrigen ?? item.monedaId,
+        clasificacionTributaria:
+          congelada?.clasificacionTributaria ?? item.clasificacionTributaria,
       };
     });
 
@@ -1019,12 +1109,15 @@ export class VentasService {
       canal,
     };
 
-    // 5. Calcular importes (sin persistencia)
-    const resultado = await this.calculoPreciosService.calcular(
-      tenantId,
-      calcularDto,
-      configCalculo,
-    );
+    // 5. Calcular importes (sin persistencia). Con lo cobrado congelado no se
+    //    recalcula: el total es el que se autorizó.
+    const resultado =
+      ventaCongelada?.resultado ??
+      (await this.calculoPreciosService.calcular(
+        tenantId,
+        calcularDto,
+        configCalculo,
+      ));
 
     // 6. Preparar pagos (puede ser vacío → cuenta por cobrar; online no admite cuenta por cobrar)
     const pagosDto = dto.pagos ?? [];
@@ -1108,18 +1201,20 @@ export class VentasService {
           cantidadPresentacion,
           unidadCodigoPresentacion,
           unidadBaseCodigo,
+          monedaIdOrigen,
+          clasificacionTributaria,
         } = lineasConversion[i];
         return manager.create(VentaDetalle, {
           ventaId: venta.id,
           itemId: rLinea.itemId,
-          monedaIdOrigen: item.monedaId,
+          monedaIdOrigen,
           precioUnitarioOrigen: precioOrigen,
           tasaCambio: tasa,
           precioUnitario: precioConvertido,
           descripcion: item.nombre,
           // Non-null garantizado por el guard del paso 2, que rechaza la venta
           // antes de escribir si algún ítem no tiene clasificación.
-          clasificacionTributaria: item.clasificacionTributaria!,
+          clasificacionTributaria: clasificacionTributaria!,
           cantidad: rLinea.cantidad,
           cantidadPresentacion,
           unidadCodigoPresentacion,

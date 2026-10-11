@@ -128,13 +128,28 @@ descarta (documentado en `online.service.ts`). Los `impuestoIds` de una línea t
 en las cuatro puertas del motor (owner, 2026-10-06, fiscal), y con ellos se cerró el mismo cargo sin
 venta —autorizado de menos o de más contra lo que el callback cobra con los impuestos del ítem—.
 
-**Lo que todavía lo deja abierto** (medido el 2026-10-09): el callback recalcula con el catálogo y
-el reloj del retorno. Una promo por hora que termina, una regla que vence a medianoche, o un precio o
-una tasa que cambian mientras el comprador está en Webpay dejan la orden `pagada` sin venta. Lo fija
-`tienda-dos-ahoras.e2e-spec.ts`. El owner decidió ese mismo día tres cosas: que la venta vale lo que
-se pagó (la **A**, frente fiscal propio, todavía abierta en [`pendientes.md`](../agent/pendientes.md)
-§ 3), que la orden sin venta avise y que una venta online no lleve vuelto. Las dos últimas están
-construidas (2026-10-10):
+**La venta vale lo que se pagó** (la **A** de "la tienda calcula el total dos veces", owner,
+2026-10-09; construida el 2026-10-11). `pagar` congela en la orden (`checkout.congelado`) lo que
+autorizó en Webpay: el resultado del motor —líneas, impuestos, reglas y promos aplicadas, total— y, por
+línea, el precio de origen, su moneda, la tasa y la clasificación tributaria que decidió el IVA. El
+callback crea la venta con eso y **no vuelve al motor**: el pago es ese `totalFinal` y no hay segundo
+cálculo con otro "ahora". Antes recalculaba con el catálogo y el reloj del retorno, y una promo por
+hora que terminaba, una regla que vencía a medianoche, o un precio o una tasa que cambiaban mientras
+el comprador estaba en Webpay dejaban la orden `pagada` sin venta (6 de 7 casos medidos el
+2026-10-09). Lo fija `tienda-dos-ahoras.e2e-spec.ts`, con la tabla antes y después en
+[`resueltos.md`](../agent/resueltos.md#la-venta-online-vale-lo-que-se-pagó-la-a-de-los-dos-ahora-cerrada-2026-10-11).
+El congelado lo escribe solo el servidor y nunca sale en una respuesta; el cliente sigue mandando
+qué quiere, no cuánto vale. El canal en la venta es `ventaCongelada`, ver
+[`ventas.md`](ventas.md#la-venta-online-no-recalcula-ventacongelada-2026-10-11).
+
+**Lo que A no cubre** es lo que no es plata, que sigue vivo al retorno: un ítem borrado entre el pago
+y el retorno deja la orden `pagada` sin venta, con el aviso de abajo y el reembolso manual (medido
+en el e2e). El ítem sin stock en ese minuto caería por el mismo lado, pero está leído en el código,
+no medido. Tampoco entra una orden creada antes del deploy y resuelta después (no trae
+congelado): falla igual y no se recalcula. El ítem sigue dando el nombre de la línea
+(`descripcion`) al retorno, que no es plata ni dato fiscal.
+
+El owner decidió ese mismo día dos cosas más, construidas el 2026-10-10:
 
 - **La orden pagada sin venta avisa y no miente (D).** El redirect lleva `estado=pagada_sin_venta`.
   `/tienda/retorno` dice *"Recibimos tu pago pero no pudimos registrar la compra; el local se
@@ -156,8 +171,9 @@ construidas (2026-10-10):
   `POST /pasarela/api/ordenes/:id/verificar`. Cuando el proveedor dice pagada, queda pagada sin
   venta con el motivo *"El pago se confirmó por verificación, no en el retorno de la compra"*, y
   el comprador ve `pagada_sin_venta` como en D. `verificar` no crea la venta: sería otro "ahora"
-  (owner, 2026-10-10). Se puede revisar cuando exista la A. Lo fija
-  `tienda-verificar-sin-venta.e2e-spec.ts`.
+  (owner, 2026-10-10). Con la A el precio ya no se recalcularía al crearla ahí, pero el ítem y el
+  stock seguirían vivos: queda como pregunta para el owner en
+  [`pendientes.md`](../agent/pendientes.md) § 5. Lo fija `tienda-verificar-sin-venta.e2e-spec.ts`.
 
 Queda abierto, decidido y sin construir, en [`pendientes.md`](../agent/pendientes.md) § 3: la
 marca no se apaga si la venta se registra a mano.

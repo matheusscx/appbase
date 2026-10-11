@@ -12,6 +12,7 @@ import {
   MENSAJE_NOTA_CREDITO_OTROS_DATOS,
   VentasService,
   faltaIdentidadDelPagador,
+  type VentaCongelada,
 } from './ventas.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import type { ConfigCalculo } from '../calculo-precios/calculo-precios.engine';
@@ -729,6 +730,35 @@ describe('VentasService', () => {
 
         expect(result).toBeDefined();
         expect(dataSourceMock.transaction).toHaveBeenCalledTimes(2);
+      });
+
+      it('deadlock: el reintento usa el mismo congelado y tampoco llama al motor', async () => {
+        const manager = buildManagerMock();
+        dataSourceMock.transaction
+          .mockRejectedValueOnce(deadlock)
+          .mockImplementationOnce((cb: (m: unknown) => unknown) => cb(manager));
+        const congelada = {
+          resultado: mockResultadoVenta,
+          lineas: [
+            {
+              precioUnitarioOrigen: '100.0000',
+              monedaIdOrigen: MONEDA_OFICIAL_ID,
+              tasaCambio: '1.000000',
+              clasificacionTributaria: 'afecto',
+            },
+          ],
+        };
+
+        await service.crear(
+          TENANT_ID,
+          USUARIO_ID,
+          { ...baseDto, canal: 'online' as const },
+          undefined,
+          congelada,
+        );
+
+        expect(dataSourceMock.transaction).toHaveBeenCalledTimes(2);
+        expect(calculoPreciosService.calcular).not.toHaveBeenCalled();
       });
 
       it('el error del driver también llega envuelto en `driverError`', async () => {
@@ -2868,6 +2898,263 @@ describe('VentasService', () => {
         service.crear(TENANT_ID, USUARIO_ID, dtoSinPago as any),
       ).rejects.toThrow(
         new BadRequestException('Las ventas online requieren el pago completo'),
+      );
+    });
+  });
+
+  /**
+   * "Vale lo que pagó" (pendientes.md § 3, A): la tienda congela en la orden lo
+   * que autorizó en Webpay, y la venta se crea con eso sin volver al motor.
+   */
+  describe('crear() — venta online congelada', () => {
+    const resultadoCongelado = {
+      ...mockResultadoVenta,
+      lineas: [
+        {
+          ...mockResultadoVenta.lineas[0],
+          precioUnitario: '9500.0000',
+          subtotalNeto: '9500.0000',
+          impuestoAplicado: '1805.0000',
+          totalLinea: '11305.0000',
+        },
+      ],
+      totales: {
+        ...mockResultadoVenta.totales,
+        subtotalNeto: '9500.0000',
+        totalImpuestos: '1805.0000',
+        totalFinal: '11305.0000',
+      },
+    };
+    const congelada: VentaCongelada = {
+      resultado: resultadoCongelado,
+      lineas: [
+        {
+          precioUnitarioOrigen: '10.0000',
+          monedaIdOrigen: 'moneda-extranjera',
+          tasaCambio: '950.000000',
+          clasificacionTributaria: 'exento',
+        },
+      ],
+    };
+    const dtoOnline = {
+      canal: 'online' as const,
+      lineas: [{ itemId: ITEM_ID, cantidad: '1' }],
+      pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '11305.0000' }],
+    };
+
+    const conManager = () => {
+      const manager = buildManagerMock();
+      dataSourceMock.transaction.mockImplementationOnce(
+        (cb: (m: typeof manager) => unknown) => cb(manager),
+      );
+      return manager;
+    };
+    const detallesGuardados = (manager: ReturnType<typeof buildManagerMock>) =>
+      manager.save.mock.calls.find(([e]) => e === VentaDetalle)?.[1] as Record<
+        string,
+        unknown
+      >[];
+
+    it('no vuelve al motor: ni config ni conversión ni calcular', async () => {
+      conManager();
+      await service.crear(
+        TENANT_ID,
+        USUARIO_ID,
+        dtoOnline,
+        undefined,
+        congelada,
+      );
+
+      expect(calculoPreciosService.calcular).not.toHaveBeenCalled();
+      expect(calculoPreciosService.cargarConfig).not.toHaveBeenCalled();
+      expect(
+        calculoPreciosService.convertirAMonedaOficial,
+      ).not.toHaveBeenCalled();
+    });
+
+    it('persiste lo congelado: precio, origen, moneda, tasa, clasificación y totales', async () => {
+      const manager = conManager();
+      const venta = await service.crear(
+        TENANT_ID,
+        USUARIO_ID,
+        dtoOnline,
+        undefined,
+        congelada,
+      );
+
+      expect(detallesGuardados(manager)).toEqual([
+        expect.objectContaining({
+          precioUnitario: '9500.0000',
+          precioUnitarioOrigen: '10.0000',
+          monedaIdOrigen: 'moneda-extranjera',
+          tasaCambio: '950.000000',
+          clasificacionTributaria: 'exento',
+          impuestoAplicado: '1805.0000',
+          totalLinea: '11305.0000',
+        }),
+      ]);
+      expect(venta.totalFinal).toBe('11305.0000');
+      expect(venta.configCalculo).toEqual(resultadoCongelado.config);
+    });
+
+    it('rechaza antes de escribir si el ítem congelado no es el de la línea', async () => {
+      const manager = conManager();
+      const otra: VentaCongelada = {
+        ...congelada,
+        resultado: {
+          ...resultadoCongelado,
+          lineas: [{ ...resultadoCongelado.lineas[0], itemId: 'otro-item' }],
+        },
+      };
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dtoOnline, undefined, otra),
+      ).rejects.toThrow(
+        'La venta congelada no corresponde a las líneas de la venta',
+      );
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('cantidad: rechaza si difiere, y la compara como número (1 = 1.0000)', async () => {
+      conManager();
+      const mismaCantidad: VentaCongelada = {
+        ...congelada,
+        resultado: {
+          ...resultadoCongelado,
+          lineas: [{ ...resultadoCongelado.lineas[0], cantidad: '1.0000' }],
+        },
+      };
+      await expect(
+        service.crear(
+          TENANT_ID,
+          USUARIO_ID,
+          dtoOnline,
+          undefined,
+          mismaCantidad,
+        ),
+      ).resolves.toBeDefined();
+
+      const manager = conManager();
+      const otraCantidad: VentaCongelada = {
+        ...congelada,
+        resultado: {
+          ...resultadoCongelado,
+          lineas: [{ ...resultadoCongelado.lineas[0], cantidad: '2' }],
+        },
+      };
+      await expect(
+        service.crear(
+          TENANT_ID,
+          USUARIO_ID,
+          dtoOnline,
+          undefined,
+          otraCantidad,
+        ),
+      ).rejects.toThrow(
+        'La venta congelada no corresponde a las líneas de la venta',
+      );
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('rechaza si la cantidad de líneas congeladas no es la del carrito', async () => {
+      const manager = conManager();
+      const sinLinea: VentaCongelada = { ...congelada, lineas: [] };
+      await expect(
+        service.crear(TENANT_ID, USUARIO_ID, dtoOnline, undefined, sinLinea),
+      ).rejects.toThrow(
+        'La venta congelada no corresponde a las líneas de la venta',
+      );
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('mayúsculas: el UUID del carrito en mayúsculas es el mismo ítem', async () => {
+      conManager();
+      const dtoMayusculas = {
+        ...dtoOnline,
+        lineas: [{ itemId: ITEM_ID.toUpperCase(), cantidad: '1' }],
+      };
+      await expect(
+        service.crear(
+          TENANT_ID,
+          USUARIO_ID,
+          dtoMayusculas,
+          undefined,
+          congelada,
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('dos líneas del mismo ítem: cada detalle lleva SU precio congelado, por posición', async () => {
+      const manager = conManager();
+      const linea = resultadoCongelado.lineas[0];
+      const dosLineas: VentaCongelada = {
+        resultado: {
+          ...resultadoCongelado,
+          lineas: [
+            { ...linea, precioUnitario: '9500.0000', totalLinea: '9500.0000' },
+            { ...linea, precioUnitario: '1805.0000', totalLinea: '1805.0000' },
+          ],
+        },
+        lineas: [
+          { ...congelada.lineas[0], precioUnitarioOrigen: '10.0000' },
+          { ...congelada.lineas[0], precioUnitarioOrigen: '1.9000' },
+        ],
+      };
+      await service.crear(
+        TENANT_ID,
+        USUARIO_ID,
+        {
+          ...dtoOnline,
+          lineas: [
+            { itemId: ITEM_ID, cantidad: '1' },
+            { itemId: ITEM_ID, cantidad: '1' },
+          ],
+        },
+        undefined,
+        dosLineas,
+      );
+
+      expect(
+        detallesGuardados(manager).map((d) => [
+          d.precioUnitario,
+          d.precioUnitarioOrigen,
+        ]),
+      ).toEqual([
+        ['9500.0000', '10.0000'],
+        ['1805.0000', '1.9000'],
+      ]);
+    });
+
+    it('receta: la personalización se resuelve viva (stock) pero el precio es el congelado', async () => {
+      const manager = conManager();
+      itemsService.cargarBasePorIds.mockImplementationOnce(
+        mapaDe({ ...mockItem, tipo: 'receta' }),
+      );
+      const snapshot = { omitidos: [], extras: [] };
+      (
+        itemsService.resolverPersonalizacionReceta as jest.Mock
+      ).mockResolvedValueOnce({
+        snapshot,
+        precioExtraTotal: '500.0000',
+      });
+
+      await service.crear(
+        TENANT_ID,
+        USUARIO_ID,
+        dtoOnline,
+        undefined,
+        congelada,
+      );
+
+      expect(detallesGuardados(manager)).toEqual([
+        expect.objectContaining({
+          precioUnitario: '9500.0000',
+          precioUnitarioOrigen: '10.0000',
+          personalizacion: snapshot,
+        }),
+      ]);
+      expect(itemsService.venderIngredientesReceta).toHaveBeenCalledWith(
+        expect.anything(),
+        expect.objectContaining({ snapshot }),
       );
     });
   });

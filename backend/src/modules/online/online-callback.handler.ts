@@ -1,4 +1,9 @@
-import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  OnModuleInit,
+} from '@nestjs/common';
 import { PasarelaOrden } from '../pasarela/entities/pasarela-orden.entity';
 import {
   PagoCallbackHandler,
@@ -12,6 +17,9 @@ import type { CheckoutSnapshot } from './online.service';
  * Callback in-process de la tienda online: cuando una orden de pasarela vuelve
  * `pagada`, crea la venta `canal:'online'` desde el snapshot del carrito y deja
  * `ventaId = venta.id`. Idempotente: si ya hay venta, no hace nada.
+ *
+ * La venta sale de lo que `pagar` congeló al autorizar (`checkout.congelado`),
+ * no de un recálculo: vale lo que se pagó. Sin congelado no hay venta (ver abajo).
  *
  * Se registra en el PagoCallbackRegistry al arrancar, evitando que la pasarela
  * dependa de `online`/`ventas` (el borde se cruza sólo en esta dirección).
@@ -45,6 +53,19 @@ export class OnlineCallbackHandler
       return;
     }
 
+    // "Vale lo que pagó" (pendientes.md § 3, A): la venta se crea con lo que
+    // `pagar` congeló, nunca recalculando. Una orden sin congelado (creada antes
+    // de este cambio) no se recalcula: falla, y el dispatcher la deja pagada
+    // sin venta. Es una `HttpException` a propósito: el dispatcher guarda su
+    // mensaje en `motivo_sin_venta`, que lo lee el admin, así que dice qué hacer.
+    // El `ordenId` no va en el mensaje: el dispatcher ya lo loguea.
+    const congelado = checkout.congelado;
+    if (!congelado) {
+      throw new BadRequestException(
+        'El pago se inició antes de una actualización del sistema y la orden no guarda lo que se cobró: devolvé el cargo o registrá la venta a mano',
+      );
+    }
+
     // Detalle real del pago (lo escribió PagosRedirectService al confirmar).
     const resultadoPago = (orden.metadata?.resultadoPago ?? {}) as {
       tipoPago?: string | null;
@@ -76,7 +97,7 @@ export class OnlineCallbackHandler
       pagos: [
         {
           metodoPagoId,
-          monto: checkout.totalFinal,
+          monto: congelado.resultado.totales.totalFinal,
           numeroCuotas: resultadoPago.numeroCuotas ?? undefined,
           tipoPago: resultadoPago.tipoPago ?? undefined,
           tarjetaUltimos4: resultadoPago.tarjetaUltimos4 ?? undefined,
@@ -92,6 +113,8 @@ export class OnlineCallbackHandler
       orden.tenantId,
       checkout.usuarioId,
       dto,
+      undefined,
+      congelado,
     );
     // El dispatcher persiste la orden (ventaId + estado conciliada).
     orden.ventaId = venta.id;

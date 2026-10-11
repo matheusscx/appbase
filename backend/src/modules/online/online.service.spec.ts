@@ -1,6 +1,7 @@
 import { BadRequestException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { ConfigService } from '@nestjs/config';
+import Decimal from 'decimal.js';
 import { OnlineService } from './online.service';
 import { CalculoPreciosService } from '../calculo-precios/calculo-precios.service';
 import { MetodosPagoService } from '../metodos-pago/metodos-pago.service';
@@ -9,6 +10,7 @@ import { PagosRedirectService } from '../pasarela/services/pagos-redirect.servic
 import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { VentasService } from '../ventas/ventas.service';
+import { MonedasService } from '../monedas/monedas.service';
 
 const UNIDADES = [
   { codigo: 'g', magnitud: 'masa', factorBase: '1' },
@@ -44,7 +46,21 @@ const mockResultado = {
 
 describe('OnlineService', () => {
   let service: OnlineService;
-  const calculo = { calcular: jest.fn().mockResolvedValue(mockResultado) };
+  const calculo = {
+    calcular: jest.fn().mockResolvedValue(mockResultado),
+    cargarConfig: jest.fn().mockResolvedValue({ modoRedondeo: 'FLOOR' }),
+    convertirAMonedaOficial: jest.fn(
+      (p: string, m: string, t: Map<string, string>) =>
+        new Decimal(p).times(t.get(m) ?? '1').toFixed(4),
+    ),
+  };
+  const monedas = {
+    decimalesOficiales: jest.fn().mockResolvedValue(0),
+    findMonedas: jest.fn().mockResolvedValue([
+      { monedaId: 'clp', valorDelDia: '1' },
+      { monedaId: 'usd', valorDelDia: '950.000000' },
+    ]),
+  };
   const metodos = {
     findMetodosPago: jest.fn(),
     resolverMetodoCredito: jest.fn(),
@@ -62,6 +78,9 @@ describe('OnlineService', () => {
     tipo: 'producto',
     unidadMedida: 'kg',
     activo: true,
+    precioBase: '10.0000',
+    monedaId: 'usd',
+    clasificacionTributaria: 'afecto',
     ...over,
   });
   const items = {
@@ -91,6 +110,7 @@ describe('OnlineService', () => {
         { provide: ItemsService, useValue: items },
         { provide: CatalogService, useValue: catalog },
         { provide: VentasService, useValue: ventas },
+        { provide: MonedasService, useValue: monedas },
       ],
     }).compile();
     service = module.get(OnlineService);
@@ -375,6 +395,7 @@ describe('OnlineService', () => {
       expect.objectContaining({
         lineas: [expect.objectContaining({ cantidad: '0.5' })],
       }),
+      expect.anything(),
     );
     const opts = pagosRedirect.iniciar.mock.calls[0][2] as {
       metadataExtra: { checkout: { lineas: unknown[] } };
@@ -385,6 +406,137 @@ describe('OnlineService', () => {
       cantidadPresentacion: '500',
       unidadCodigoPresentacion: 'g',
     });
+  });
+
+  it('pagar con Webpay: congela en la orden el resultado autorizado y lo que la venta necesita de cada línea', async () => {
+    tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+    metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+    metodos.findMetodosPago.mockResolvedValue([
+      { metodoPagoId: 'mp-credito', nombre: 'Crédito', habilitada: true },
+    ]);
+    pagosRedirect.iniciar.mockResolvedValue({ ordenId: 'o', urlWebpay: 'u' });
+
+    await service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dto);
+
+    // El motor recibe el precio ya convertido, por el canal interno, y la
+    // config con la que se convirtió.
+    expect(calculo.calcular).toHaveBeenCalledWith(
+      TENANT_ID,
+      expect.objectContaining({
+        lineas: [
+          expect.objectContaining({
+            precioUnitarioResuelto: '9500.0000',
+            precioUnitarioOrigenResuelto: '10.0000',
+          }),
+        ],
+      }),
+      { modoRedondeo: 'FLOOR' },
+    );
+    // El modo de redondeo de la config llega a la conversión: un modo fijo
+    // (p. ej. 'HALF_UP') desobedecería al tenant que eligió no redondear hacia arriba.
+    expect(calculo.convertirAMonedaOficial).toHaveBeenCalledWith(
+      '10.0000',
+      'usd',
+      expect.any(Map),
+      'FLOOR',
+    );
+    const opts = pagosRedirect.iniciar.mock.calls[0][2] as {
+      metadataExtra: { checkout: { congelado: unknown } };
+    };
+    expect(opts.metadataExtra.checkout.congelado).toEqual({
+      resultado: mockResultado,
+      lineas: [
+        {
+          precioUnitarioOrigen: '10.0000',
+          monedaIdOrigen: 'usd',
+          tasaCambio: '950.000000',
+          clasificacionTributaria: 'afecto',
+        },
+      ],
+    });
+  });
+
+  it('pagar: las tasas y la config se leen una vez por carrito, no por línea', async () => {
+    tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+    metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+    metodos.findMetodosPago.mockResolvedValue([]);
+    pagosRedirect.iniciar.mockResolvedValue({ ordenId: 'o', urlWebpay: 'u' });
+    const tres = {
+      lineas: [
+        { itemId: '550e8400-e29b-41d4-a716-446655440116', cantidad: '1' },
+        { itemId: '550e8400-e29b-41d4-a716-446655440117', cantidad: '1' },
+        { itemId: '550e8400-e29b-41d4-a716-446655440118', cantidad: '1' },
+      ],
+    };
+    calculo.calcular.mockResolvedValueOnce({
+      ...mockResultado,
+      lineas: tres.lineas.map((l) => ({
+        ...mockResultado.lineas[0],
+        itemId: l.itemId,
+      })),
+    });
+
+    await service.pagar(TENANT_ID, 'u-1', 'user@x.cl', tres);
+
+    expect(monedas.findMonedas).toHaveBeenCalledTimes(1);
+    expect(monedas.decimalesOficiales).toHaveBeenCalledTimes(1);
+    expect(calculo.cargarConfig).toHaveBeenCalledTimes(1);
+  });
+
+  it('pagar: cada línea congelada lleva la moneda y la tasa de su ítem', async () => {
+    tenantPasarela.resolverConfiguracionActiva.mockResolvedValue({});
+    metodos.resolverMetodoCredito.mockResolvedValue('mp-credito');
+    metodos.findMetodosPago.mockResolvedValue([]);
+    pagosRedirect.iniciar.mockResolvedValue({ ordenId: 'o', urlWebpay: 'u' });
+    const ID_CLP = '550e8400-e29b-41d4-a716-446655440116';
+    const ID_USD = '550e8400-e29b-41d4-a716-446655440117';
+    items.cargarBasePorIds.mockImplementationOnce((_t: string, ids: string[]) =>
+      Promise.resolve(
+        new Map(
+          ids.map((id) => [
+            id,
+            itemBase(
+              id,
+              id === ID_CLP
+                ? { precioBase: '5000.0000', monedaId: 'clp' }
+                : { precioBase: '10.0000', monedaId: 'usd' },
+            ),
+          ]),
+        ),
+      ),
+    );
+    calculo.calcular.mockResolvedValueOnce({
+      ...mockResultado,
+      lineas: [ID_CLP, ID_USD].map((itemId) => ({
+        ...mockResultado.lineas[0],
+        itemId,
+      })),
+    });
+
+    await service.pagar(TENANT_ID, 'u-1', 'user@x.cl', {
+      lineas: [
+        { itemId: ID_CLP, cantidad: '1' },
+        { itemId: ID_USD, cantidad: '1' },
+      ],
+    });
+
+    const opts = pagosRedirect.iniciar.mock.calls[0][2] as {
+      metadataExtra: { checkout: { congelado: { lineas: unknown[] } } };
+    };
+    expect(opts.metadataExtra.checkout.congelado.lineas).toEqual([
+      {
+        precioUnitarioOrigen: '5000.0000',
+        monedaIdOrigen: 'clp',
+        tasaCambio: '1.000000',
+        clasificacionTributaria: 'afecto',
+      },
+      {
+        precioUnitarioOrigen: '10.0000',
+        monedaIdOrigen: 'usd',
+        tasaCambio: '950.000000',
+        clasificacionTributaria: 'afecto',
+      },
+    ]);
   });
 
   it('resuelve las líneas del checkout con UNA carga, no una por línea', async () => {

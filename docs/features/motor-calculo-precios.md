@@ -492,6 +492,14 @@ Ventas carga la config con `cargarConfig` y se la pasa a `calcular` por
 `configPrecargada` — así convierte con el mismo `modo_redondeo` que el motor sin
 consultar las preferencias dos veces por venta.
 
+**La tienda online calcula una vez y no vuelve al motor (2026-10-11).** `POST /online/pagar`
+convierte con esta misma función, llama a `calcular` por el canal interno
+(`precioUnitarioResuelto`) y congela el resultado en la orden. La venta que crea el callback usa ese
+resultado tal cual: **no llama a `calcular` ni a `convertirAMonedaOficial`**. Es el único camino de
+venta que no pasa por el motor al persistir, a propósito: el total cobrado en Webpay es el de la
+venta, aunque entre el pago y el retorno cambien la hora, el precio, las reglas o la tasa. Ver
+[`ventas.md`](ventas.md#la-venta-online-no-recalcula-ventacongelada-2026-10-11).
+
 Dos decisiones, porque las dos parecen descuidos y solo una lo era:
 
 - **El modo sale de `modo_redondeo`** (desde el 2026-08-11; antes era el default de

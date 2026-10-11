@@ -197,78 +197,6 @@ oficial, `cashRounding`, el conteo por denominación, el envío diario del resum
 la acumulación de descuentos y compras— y el renombre de `moneda.decimales` se mudaron a
 [`desarrollo-nuevo.md`](desarrollo-nuevo.md) el 2026-10-06. Acá quedan las correcciones.
 
-- [ ] **La tienda calcula el total dos veces, con dos "ahora": lo que cambia entre el pago y el
-  retorno deja un cargo sin venta** (backend + producto; lo vio la revisión de seguridad del frente
-  "reglas de línea salen del ítem", 2026-10-06; **medido el 2026-10-09** con
-  [`tienda-dos-ahoras.e2e-spec.ts`](../../backend/test/tienda-dos-ahoras.e2e-spec.ts), proveedor
-  falso, citas contra `0339f214`; **decidido por el owner el mismo día**, abajo). `POST /online/pagar` calcula y autoriza ese total en Webpay. Al
-  volver, `OnlineCallbackHandler` crea la venta con `VentasService.crear`, que **recalcula** desde
-  el snapshot (solo ítem y cantidad) y fija el pago en lo autorizado
-  (`online-callback.handler.ts:79`). Los dos cálculos van sin `cuentaId`, así que cada uno toma
-  su propio `new Date()`: el de las promos en `calculo-precios.service.ts:650` y el de la fecha de
-  las reglas en `:689`. Los dos leen el catálogo vivo: precio, reglas, promos y la tasa del día
-  (`:256`).
-  - **Lo medido** (ítem de $10.000 + IVA, Paris):
-
-    | Qué cambia entre el pago y el retorno | Autorizado | El retorno calcula | Resultado |
-    |---|---|---|---|
-    | nada (control) | 11.900 | 11.900 | venta, orden `conciliada` |
-    | la hora: promo 18:00–19:59, pago 19:59:30, retorno 20:00:30 | 9.520 | 11.900 | **sin venta** |
-    | la fecha: descuento con `fechaFin` hoy, 23:59:30 → 01:00:30 del día siguiente | 10.710 | 11.900 | **sin venta** |
-    | el precio sube a 12.000 | 11.900 | 14.280 | **sin venta** |
-    | el precio baja a 8.000 | 11.900 | 9.520 | **sin venta** (vuelto) |
-    | el precio baja, tarjeta con `permite_vuelto` | 11.900 | 9.520 | venta, **vuelto 2.380 sobre la tarjeta** |
-    | la tasa USD pasa de 950 a 1.000 (ítem de US$10) | 11.305 | 11.900 | **sin venta** |
-
-    Los dos casos de reloj se midieron con `Date` falso y **sin tocar el catálogo**: son los dos
-    "ahora" en estado puro. El mutante que no mueve el reloj en el retorno da rojo en los dos.
-    La tabla es la medición del 2026-10-09. Desde E (abajo), el caso de `permite_vuelto` ya no
-    crea la venta: también queda sin venta.
-  - **El cargo sin venta, como se midió el 2026-10-09** (D cambió lo que ve el comprador y el
-    admin, ver abajo; que no haya venta lo cierra la A). El callback mayor rechaza con *"Las ventas online requieren el
-    pago completo"* (`ventas.service.ts:1025`). El menor rechaza con *"…ningún método de pago
-    permite vuelto"* (`pagos.service.ts:270`). El dispatcher se traga el error
-    (`callback-dispatcher.service.ts:53-62`). Lo medido es esto:
-    - La orden queda `pagada`, sin `venta_id`, y no se crea ninguna venta.
-    - El motivo queda **solo** en un `logger.error`.
-    - El comprador recibe `estado=pagada` (`pagos-redirect.service.ts:76`), y
-      `GET /online/orden/:id` da `{estado: 'pagada', ventaId: null}`: la pantalla dice *"Tu
-      compra fue registrada correctamente"*.
-    - `POST /pasarela/api/ordenes/:id/verificar` da 400 *"La orden ya está resuelta (pagada)"*.
-    - **Lo único que funciona** es el reembolso manual del admin: queda aprobado, sin nota, y
-      la venta sigue sin existir.
-  - **El vuelto sobre la tarjeta es un hallazgo aparte.** Que una venta online cobrada con
-    tarjeta registre "vuelto" depende solo de que nadie prenda `permite_vuelto` en ese método.
-    Cuando pasa, la diferencia cobrada de más queda anotada como entregada y nadie la devuelve.
-    No se midió qué le hace eso a la cuadratura de la caja virtual.
-  - **Decidido (owner, 2026-10-09).** Se le preguntó vía la orquestadora con AskUserQuestion: la
-    escena en lenguaje de local, el costo de cada opción y la A marcada como recomendada. No pidió
-    pasada de investigación de mercado. Las otras opciones (B, solo congelar el instante, que cubría
-    2 de los 6 casos; C, reembolsar solo) quedaron afuera. Rehacer la venta sola nunca fue opción:
-    es un reintento automático y calcularía con un tercer "ahora".
-    - **A. "Vale lo que pagó": congelar en la orden lo que se cobró, y que el callback cree la
-      venta con eso, sin recalcular.** `pagar` guarda en el snapshot el resultado resuelto:
-      líneas, impuestos, reglas y promos aplicadas. Lo arma el servidor y nunca viene del
-      cliente. **Va como frente propio, con el sistema quieto:** toca el motor, y la boleta sale
-      de ahí. Es fiscal (ADR-010, "congelar el hecho fiscal en la transacción").
-      - *Hay precedente:* `crearEnTransaccion` ya tiene un canal interno, `lineasCongeladas`
-        (el tipo en `ventas.service.ts:392-404`, el parámetro en `:622`), que congela precio, tasa y reglas de línea. Probablemente
-        cuesta menos que una entrada nueva.
-      - *Lo que el precedente no cubre:* no congela promos ni la fecha de vigencia. La grieta del
-        salón está en `calculo-precios.service.ts:828-832`, y el caso de la hora la necesita.
-      - *Lo que A no cubre:* lo que no es precio. Un ítem borrado o sin stock entre el pago y el
-        retorno sigue dejando el cargo sin venta. Para eso va la D.
-    - ✅ **D. La orden pagada sin venta avisa y no miente** y ✅ **E. La venta online solo se crea
-      si lo pagado es igual al total, nunca con vuelto**: **hechas el 2026-10-10** en `63628bef`
-      (rama `claude/clever-volhard-b026ae`). El texto con el que se decidieron y lo
-      construido están en
-      [`resueltos.md`](resueltos.md#la-orden-pagada-sin-venta-avisa-y-la-venta-online-no-lleva-vuelto-d-y-e-cerradas-2026-10-10).
-      Lo único que queda abierto acá es la A.
-    - **Al construir la A:** `tienda-dos-ahoras.e2e-spec.ts` fija la conducta de hoy, así que cada
-      caso se da vuelta a propósito. Hoy afirma la orden pagada sin venta con su aviso (D). Con A,
-      los casos de precio, reloj y tasa crean la venta por lo cobrado. El control sin cambios tiene
-      que seguir igual.
-
 - [ ] **El token de Google viaja por la URL** — ⬇️ **prioridad muy baja, reconfirmada por el
   owner el 2026-08-22** (backend + frontend, auditoría RBAC/auth 2026-08-15; **dos lentes
   ciegas entre sí lo vieron**).
@@ -519,13 +447,14 @@ fiscal y va solo:
   mismo tenant, monto, sin otra orden ligada. Queda rastro de quién la ligó y cuándo. **Descartar
   con un motivo escrito** y **"solo reembolsar"** quedaron descartados: el primero no deja prueba
   de que la venta exista. Costo medio.
-  ⏸ **En espera hasta después de "vale lo que pagó" (owner, 2026-10-11, en el chat de la
-  orquestadora).** Se lanzó y se canceló el mismo día, antes de escribir código. La razón: casi
-  todas las órdenes pagadas sin venta salen del recálculo al volver del banco (precio, hora, promo o
-  tasa que cambian), y eso lo elimina la A de la entrada de los dos "ahora". Después de la A, lo que
-  quede sin venta (ítem borrado o sin stock en ese minuto) se resuelve devolviendo la plata. **Se
-  retoma solo si, con la A en producción, siguen apareciendo órdenes sin venta que el admin quiera
-  registrar a mano.** Lo que la sesión cancelada dejó listo, para no rehacerlo:
+  ⏸ **En espera (owner, 2026-10-11, en el chat de la orquestadora): "vale lo que pagó" ya se
+  construyó, ver [`resueltos.md`](resueltos.md#la-venta-online-vale-lo-que-se-pagó-la-a-de-los-dos-ahora-cerrada-2026-10-11).**
+  Se lanzó y se canceló el mismo día, antes de escribir código. La razón: casi todas las órdenes
+  pagadas sin venta salían del recálculo al volver del banco (precio, hora, promo o tasa que
+  cambian), y eso lo eliminó esa entrada. Lo que quede sin venta (ítem borrado o sin stock en ese
+  minuto) se resuelve devolviendo la plata. **Se retoma solo si, con eso en producción, siguen
+  apareciendo órdenes sin venta que el admin quiera registrar a mano.**
+  Lo que la sesión cancelada dejó listo, para no rehacerlo:
   - La pasarela no lee `ventas`: la validación y la lista de candidatas irían por un contrato que
     implementa `ventas` (`VentaLigableRegistry`, patrón §13, como `PagoCallbackRegistry`).
   - `GET /pasarela/admin/ordenes/:id/ventas-candidatas` y `POST …/ordenes/:id/venta`, con

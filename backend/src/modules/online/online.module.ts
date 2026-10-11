@@ -3,6 +3,7 @@ import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module'
 import { MetodosPagoModule } from '../metodos-pago/metodos-pago.module';
 import { PasarelaModule } from '../pasarela/pasarela.module';
 import { VentasModule } from '../ventas/ventas.module';
+import { MonedasModule } from '../monedas/monedas.module';
 import { ItemsModule } from '../items/items.module';
 import { CatalogModule } from '../catalog/catalog.module';
 import { SuscripcionesModule } from '../suscripciones/suscripciones.module';
@@ -18,6 +19,7 @@ import { MediosPagoOnlineService } from './medios-pago-online.service';
     MetodosPagoModule,
     PasarelaModule,
     VentasModule,
+    MonedasModule,
     ItemsModule,
     CatalogModule,
     SuscripcionesModule, // cascada de cancelación al eliminar una tarjeta

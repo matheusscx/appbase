@@ -851,6 +851,26 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 5. Calcular excedente; validar `permite_vuelto` si hay excedente; determinar estado
 6. `db.transaccion`: **reclamar la `Idempotency-Key`** (primera sentencia; si ya estaba, reproducir y cortar acá) → guardar cabecera → detalles → trazas de reglas → customer → inventario (`salida/venta` por producto, ingrediente, componente u opción, cada una con su línea: `venta_detalle_id`) → pagos → movimientos de caja (efectivo) → **documentos de la venta** (`VentaDocumentosService.documentarVenta`) → guardar la respuesta junto a la clave
 
+### La venta online no recalcula: `ventaCongelada` (2026-10-11)
+
+El paso 4 tiene una excepción: la venta que crea el callback de la tienda. `crear` y
+`crearEnTransaccion` aceptan un parámetro interno `ventaCongelada`, el resultado del motor que
+`pagar` ya autorizó en Webpay más, por línea, el precio de origen, su moneda, la tasa y la
+clasificación tributaria. Con él la venta **no carga la config, no convierte y no llama a
+`calcular`**: el total, las trazas y `config_calculo` son los que se cobraron. Recalcular al
+retorno, con otro "ahora", era lo que dejaba el cargo sin venta (ver
+[`tienda-online.md`](tienda-online.md)).
+
+Es el mismo régimen que `lineasCongeladas` del cierre de salón —parámetro y nunca un campo de DTO,
+porque lleva plata—, pero más ancho: aquel congela precio, tasa y reglas de línea y el motor igual
+corre con las promos y los impuestos vivos; este lo reemplaza. Antes de escribir nada comprueba que
+lo congelado sea este carrito, línea por línea y en orden, y si no lanza.
+
+**Qué queda vivo, a propósito:** la caja virtual y el tipo de documento, que el ítem exista y se
+pueda vender (un ítem borrado deja la orden pagada sin venta), el stock, el umbral de identidad de
+la boleta, el pago exacto (sin vuelto) y el nombre de la línea (`descripcion`), que sale del
+catálogo del retorno.
+
 ### Dependencias reutilizadas
 
 | Servicio | Uso |

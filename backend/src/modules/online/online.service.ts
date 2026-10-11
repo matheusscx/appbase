@@ -15,6 +15,11 @@ import { PagosRedirectService } from '../pasarela/services/pagos-redirect.servic
 import { ItemsService } from '../items/items.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { VentasService } from '../ventas/ventas.service';
+import type {
+  VentaCongelada,
+  LineaVentaCongelada,
+} from '../ventas/ventas.service';
+import { MonedasService } from '../monedas/monedas.service';
 import {
   assertPresentacionPareada,
   resolverCantidadDesdePresentacion,
@@ -39,10 +44,8 @@ export interface CheckoutResponse {
 export interface CheckoutSnapshot {
   origenApp: 'tienda-online';
   checkout: {
-    // Solo itemId + cantidad (NO precioUnitario): VentasService reconvierte desde
-    // la moneda del ítem, así que fijar el precio ya convertido lo re-convertiría
-    // (doble conversión en ítems no-oficiales). El monto cobrado se preserva en
-    // totalFinal y se registra como el pago.
+    // Solo itemId + cantidad (NO precioUnitario): qué se pidió, no cuánto vale.
+    // El precio cobrado de cada línea va en `congelado`, no acá.
     lineas: CheckoutLineaSnapshot[];
     // Ambos métodos se resuelven server-side; el callback elige según el
     // payment_type_code real de Transbank (VD → débito, resto → crédito).
@@ -51,6 +54,12 @@ export interface CheckoutSnapshot {
     totalFinal: string;
     usuarioId: string;
     customerNombre: string;
+    /**
+     * Lo que se autorizó en Webpay, resuelto por el servidor (pendientes.md § 3,
+     * A: "vale lo que pagó"). El callback crea la venta con esto, sin volver al
+     * motor: recalcular al retorno, con otro "ahora", dejaba el cargo sin venta.
+     */
+    congelado: VentaCongelada;
   };
 }
 
@@ -83,6 +92,7 @@ export class OnlineService {
     private readonly itemsService: ItemsService,
     private readonly catalogService: CatalogService,
     private readonly ventasService: VentasService,
+    private readonly monedasService: MonedasService,
   ) {}
 
   async checkout(
@@ -149,13 +159,55 @@ export class OnlineService {
       };
     }
 
-    const { calcularDto, lineasSnapshot } = await this.prepararLineasCheckout(
+    const { calcularDto, lineasSnapshot, itemsBase } =
+      await this.prepararLineasCheckout(tenantId, dto);
+
+    // "Vale lo que pagó" (pendientes.md § 3, A): lo que se autoriza acá se
+    // congela en la orden, y el callback crea la venta con eso. El precio se
+    // convierte ACÁ —igual que en `VentasService.crearEnTransaccion`— y entra al
+    // motor por el canal interno. Así el origen, la tasa y el convertido que
+    // guarda `venta_detalles` salen de la misma lectura y no se contradicen.
+    // Una lectura de tasas y una de config por carrito, no por línea.
+    const config = await this.calculoPreciosService.cargarConfig(
       tenantId,
-      dto,
+      await this.monedasService.decimalesOficiales(tenantId),
+    );
+    const tasaMap = new Map(
+      (await this.monedasService.findMonedas(tenantId)).map((m) => [
+        m.monedaId,
+        m.valorDelDia ?? '1',
+      ]),
+    );
+    const lineasCongeladas: LineaVentaCongelada[] = calcularDto.lineas.map(
+      (l) => {
+        const item = itemsBase.get(l.itemId)!;
+        return {
+          precioUnitarioOrigen: item.precioBase,
+          monedaIdOrigen: item.monedaId,
+          // Misma forma que escribe la venta (`tasa.toFixed(6)`).
+          tasaCambio: new Decimal(tasaMap.get(item.monedaId) ?? '1').toFixed(6),
+          clasificacionTributaria: item.clasificacionTributaria,
+        };
+      },
     );
     const resultado = await this.calculoPreciosService.calcular(
       tenantId,
-      calcularDto,
+      {
+        ...calcularDto,
+        lineas: calcularDto.lineas.map((l, i) => ({
+          ...l,
+          precioUnitarioResuelto:
+            this.calculoPreciosService.convertirAMonedaOficial(
+              lineasCongeladas[i].precioUnitarioOrigen,
+              lineasCongeladas[i].monedaIdOrigen,
+              tasaMap,
+              config.modoRedondeo,
+            ),
+          precioUnitarioOrigenResuelto:
+            lineasCongeladas[i].precioUnitarioOrigen,
+        })),
+      },
+      config,
     );
     const totalFinal = resultado.totales.totalFinal;
     // Antes de Webpay: el callback crea la venta con el cobro ya hecho.
@@ -172,6 +224,7 @@ export class OnlineService {
         totalFinal,
         usuarioId,
         customerNombre: usuarioNombre || 'Cliente online',
+        congelado: { resultado, lineas: lineasCongeladas },
       },
     };
 
@@ -248,6 +301,7 @@ export class OnlineService {
   ): Promise<{
     calcularDto: CalcularVentaDto;
     lineasSnapshot: CheckoutLineaSnapshot[];
+    itemsBase: Awaited<ReturnType<ItemsService['cargarBasePorIds']>>;
   }> {
     const unidades = await this.catalogService.findAllUnidadesMedida();
     const catalogo: UnidadCat[] = unidades.map((u) => ({
@@ -387,6 +441,7 @@ export class OnlineService {
         lineas: calcularLineas,
       },
       lineasSnapshot,
+      itemsBase,
     };
   }
 }
