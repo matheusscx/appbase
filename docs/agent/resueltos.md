@@ -23,6 +23,165 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Cabeceras de seguridad, CORS por lista y apagado ordenado del backend (cerrada 2026-10-11)
+
+Salen de [`pendientes.md`](pendientes.md) § Endurecimiento para producción. `helmet` es
+dependencia nueva, aprobada por el owner el 2026-10-11 (chat de la orquestadora). No toca el
+sistema de tokens, el motor de precios ni lo fiscal.
+
+**Dónde vive.** `backend/src/arranque.ts`: `instalarSeguridadHttp(app)` y
+`habilitarApagadoOrdenado(app)`, que `main.ts` llama. Separado porque `main.ts` no se puede
+importar sin arrancar la app: así lo prueba por unidad `arranque.spec.ts`, y de punta a punta
+el e2e de abajo, que corre el `main.ts` real. Los specs que arman su app a mano no se tocaron:
+no miran ni cabeceras ni el apagado.
+
+**Cabeceras.** `helmet()` con su configuración por defecto. **Swagger no necesitó relajar la
+CSP (medido):** la pista de la entrada era que la CSP por defecto lo rompía, pero
+`@nestjs/swagger` 11 sirve sus tres scripts como archivos del mismo origen y los `<style>` inline
+ya los permite el `style-src 'self' https: 'unsafe-inline'` de helmet. En el navegador
+`/api/docs` renderiza, "Try it out" de `GET /api/health` devuelve 200 y la consola queda vacía.
+Lo que lo rompería es un `<script>` inline en una versión futura: el e2e lo frena (exige `src`
+en todo `<script>` del HTML de `/api/docs`). **No medido:** la CSP por defecto incluye
+`upgrade-insecure-requests`, y Swagger servido por **http** (solo en desarrollo) podría quedar en
+blanco en Safari si sube sus scripts a https; en Chrome sobre `http://localhost` no pasa. Las cabeceras del **frontend** (los documentos que
+sirve Nuxt) son otro tema y quedaron anotadas en `pendientes.md`.
+
+**CORS.** `CORS_ORIGINS` coma-separado (trim, filter), `credentials: true`. Sin ella vale el
+origen de `FRONTEND_URL`, que es lo que había: **prod no necesita ninguna variable nueva**. Para
+un navegador, `FRONTEND_URL=https://host` se comporta igual que antes; cambian tres valores, los
+tres para mejor (revisión independiente, leyendo `cors`): vacía y `'*'`, que `cors` volvía
+`Access-Control-Allow-Origin: *`, ahora son el frontend de desarrollo y un origen que no coincide
+con nada, y con ruta o barra final, que antes no coincidía nunca, ahora sí. `CORS_ORIGINS` con `'*'` (también como comodín de subdominio, `https://*.x.cl`, que
+`new URL` acepta como host), una ruta, una barra final o un esquema que no sea http(s) frena el
+arranque (el paquete `cors` compara igualdad exacta: no matchearía nunca, sin avisar). `FRONTEND_URL` **no** se
+valida así, a propósito: es la base de los links de mails y retornos de pago y puede traer ruta;
+de ella se toma el origen, vacía cuenta como ausente, y si no tiene origen (sin esquema) se usa tal
+cual con un aviso en el log: no coincide con ningún `Origin`, que para un navegador es lo mismo
+que antes. Un valor de Railway que hoy anda no puede
+volverse un arranque roto por este cambio, y no se pudo leer cuál es sin abrir sus variables. En
+el compose de desarrollo ninguna de las dos llega al backend (el compose enumera sus variables y
+no las incluye), así que ahí vale `http://localhost:5173`, igual que antes.
+Medido con curl y fijado en el e2e: un origen ajeno **no se rechaza**, se atiende y sale sin
+`Access-Control-Allow-Origin`; por eso no frena el proxy de Nuxt (que reenvía el `Origin` del
+navegador) ni el retorno de Webpay (un POST de navegación con `Origin` de Transbank).
+
+**HTTPS: no aplica en el backend detrás de Railway (por documentación, no medido contra el
+demo).** Según la doc de Railway (*Networking › Specs & Limits*), todo el tráfico entrante es
+TLS, un GET por HTTP recibe 301 a HTTPS en el borde, y `X-Forwarded-Proto` llega **siempre**
+como `https`. El contenedor recibe HTTP plano, así que un redirect por `req.secure` mandaría a
+HTTPS también el healthcheck y el proxy interno del frontend. No se puso redirect ni `trust
+proxy` (nada lee `req.ip`, `req.protocol` ni `req.secure`; la cookie de refresh decide `secure`
+por `NODE_ENV`). Queda HSTS vía helmet (`max-age=31536000; includeSubDomains`), que el navegador
+recibe en el dominio del frontend porque el proxy reenvía las cabeceras de la respuesta.
+
+**Apagado.** `enableShutdownHooks(['SIGTERM', 'SIGINT'], { useProcessExit: true })`. Medido con
+`node dist/main`, un login bloqueado por un `LOCK TABLE usuarios` y un cliente keep-alive (como
+el proxy de Nitro), en tres pasos:
+
+- **Con solo `enableShutdownHooks`:** el login en vuelo terminó (401) y la conexión nueva dio
+  `ECONNREFUSED`, pero la respuesta salió con `connection: keep-alive` y el proceso **seguía
+  vivo 5 s después**: `server.close()` espera a que se cierren todas las conexiones, y el socket
+  ocioso del cliente no se cerraba. Murió recién al soltar el cliente.
+- **Con `Connection: close` desde la señal** (lo que está en vuelo y lo que entre por una
+  conexión ya abierta mientras corren los hooks previos): la respuesta sale `connection: close` y
+  el proceso sale **50 ms** después de contestar.
+- **`useProcessExit`**: sin él Nest se reenvía la señal para morir, y `node` como PID 1
+  (`Dockerfile.prod`) ignora una señal sin handler — medido: `node:22-alpine` como PID 1 seguía
+  vivo 3 s después de un `docker kill -s TERM`. Con `process.exit` no depende de que el event
+  loop quede vacío.
+
+Tope de 25 s (salida con código 1 y log) para que un request colgado —el deadlock de ADR-020—
+no deje el proceso vivo, ni trabe `nest start --watch`, que espera la muerte del proceso viejo
+antes de levantar el nuevo.
+
+**Lo que corre fuera de un request.** El servidor espera los requests; lo que no ve es el trabajo
+en segundo plano. Hay tres (búsqueda por conducta de la revisión independiente: promesas sin
+`await` en todo `backend/src`). Dos quedaban a medias y se esperan:
+
+- **Cron** (`CronRunnerService`, `beforeApplicationShutdown`): no arranca corridas nuevas y
+  espera la que está en curso. Cortada, la fila de `cron_ejecuciones` quedaba en `en_curso`
+  para siempre, porque el registro de cierre ya no tenía pool.
+- **Callback HTTP de pagos** (`CallbackDispatcherService.dispatchHttp`, fire-and-forget hacia la
+  app externa, `onApplicationShutdown`): se espera. Cortado, la app externa podía haber recibido
+  el aviso y la orden quedar `pagada` en vez de `conciliada`, sin reintento. Va en
+  `onApplicationShutdown` y no antes porque un retorno que el servidor termina de drenar puede
+  lanzar uno nuevo; corre antes de que cierre el pool porque Nest apaga los módulos `@Global`
+  (el de TypeORM lo es; `PasarelaModule` no) al final. El callback **interno** (el monolito) ya
+  estaba cubierto: se espera dentro del request del retorno.
+
+El tercero se deja cortar a propósito: `ApiKeysService.validar` actualiza `ultimo_uso_el` de la
+API key sin esperar (`api-keys.service.ts`). Cortado, se pierde ese dato de uso, no plata ni
+estado.
+
+**Railway: `drainingSeconds: 30` en `backend/railway.json`.** El default de Railway es **0**
+(doc *Deployment Teardown* y guía de rotación de credenciales): SIGTERM seguido de SIGKILL, y
+nada de lo anterior tendría tiempo de correr. Va en el config-as-code y no como variable
+(`RAILWAY_DEPLOYMENT_DRAINING_SECONDS`) para que quede versionado. El frontend no se tocó.
+
+**Qué lo fija.**
+- `test/arranque.e2e-spec.ts` arranca el `main.ts` real en un proceso hijo (ts-node
+  transpile-only, ~4 s) con `CORS_ORIGINS` de dos orígenes y mide: cabeceras de helmet sin
+  `X-Powered-By`; CORS que refleja los dos orígenes (recortados), no refleja uno ajeno ni el de
+  `FRONTEND_URL` y aun así contesta 200; preflight; el retorno de Webpay con `Origin` de Transbank
+  llega al controller (400 suyo); Swagger con sus scripts externos; y el apagado con señal real:
+  login bloqueado en vuelo → SIGTERM → `ECONNREFUSED` con el login todavía pendiente → COMMIT →
+  401 con `connection: close` → el hijo sale con 0, sin `ERROR` en el log. Mutantes que revierten
+  cada pieza (main sin `habilitarApagadoOrdenado`, sin `Connection: close`, sin helmet, CORS de
+  antes): los cuatro mueren.
+- `src/arranque.spec.ts`: el parseo de la lista y sus rechazos, el respaldo de `FRONTEND_URL`, las
+  señales y `useProcessExit`, `Connection: close` en vuelo y en lo nuevo, y el tope. Mutantes (sin
+  `useProcessExit`, sin `close` en vuelo, sin `close` en lo nuevo, otro tope, sin validar
+  orígenes): mueren.
+- `cron-runner.service.spec.ts` y `callback-dispatcher.service.spec.ts`: el apagado espera la
+  corrida y el callback en vuelo, y el cron no arranca corridas nuevas. Mutantes (sin esperar, sin
+  frenar ticks, sin registrar el callback): mueren.
+
+**Para prod:** ninguna variable nueva obligatoria. `CORS_ORIGINS` solo si se quiere más de un
+origen (el día que haya dominio propio: `CORS_ORIGINS=https://app.tudominio.cl`).
+
+- [x] **Cabeceras de seguridad + CORS whitelist + HTTPS** (backend) — `main.ts`: `helmet`,
+  forzar HTTPS, y **CORS por whitelist env-driven**. Hoy `enableCors` permite un solo origen
+  (`FRONTEND_URL ?? http://localhost:5173`, `credentials: true`); generalizar a lista blanca:
+  `CORS_ORIGINS` (coma-separado) → `.split(',').map(trim).filter(Boolean)` → array a `origin`
+  (el paquete `cors` lo refleja si está, rechaza si no). Con `credentials: true` **no** se puede
+  usar `'*'`; la lista debe ser explícita. Documentar la var en `.env.example`. Prod define
+  `CORS_ORIGINS=https://app.tudominio.com[,...]`; dev queda con el default localhost.
+  **Nota de alcance:** CORS solo guarda al **navegador** (evita que la web de otro origen use la
+  sesión/cookie del usuario contra la API); no frena curl/Postman/servidor-a-servidor. El control
+  de acceso real es el JWT ya implementado — la whitelist es defensa en profundidad, no el candado.
+  📌 **Desde ADR-022 (2026-08-23) CORS ya no está en el camino real de la app.** El navegador
+  habla solo con el origen del frontend, que hace de proxy de `/api`; lo que sostiene la
+  sesión es que la llamada es **same-origin**, no una cabecera. La whitelist sigue valiendo y
+  sigue habiendo que hacerla, pero como defensa en profundidad para lo que pegue **directo** a
+  la API (curl, un cliente móvil futuro) — no como lo que hace andar la pantalla.
+
+  ⚠️ **Si al tomar esta entrada aparece la idea de revertir el proxy «ahora que CORS está
+  bien»: tener CORS bien NO es la condición, y esto está medido.** El 2026-08-23 el demo
+  respondía `access-control-allow-credentials: true` con el `allow-origin` correcto —CORS
+  impecable— y el login **igual** no completaba. Lo que no viajaba era la **cookie**, y eso lo
+  decide `SameSite`, no CORS. Son dos mecanismos distintos que se confunden por vecindad: CORS
+  gobierna si el JS puede **leer la respuesta**; `SameSite` gobierna si la cookie **se manda**.
+  Arreglar uno no toca al otro.
+
+  **Lo que sí habilitaría revertir**, si alguna vez se quisiera: que frontend y backend
+  compartan **dominio registrable** (`app.` y `api.` del mismo dominio propio), con lo que
+  pasan a ser same-site y `Lax` alcanza; **o** pasar la cookie a `SameSite=None; Secure`, que
+  roza la invariante 4 de `CLAUDE.md` y deja la sesión más expuesta.
+
+  📌 **Y aun cumpliéndose, revertir es opcional y no se recomienda.** El proxy no molesta con
+  dominio propio, y es lo que hace **imposible** que el bug vuelva el día que alguien despliegue
+  en dos dominios distintos. Revertirlo exige devolverle al navegador una URL de backend
+  configurable — justo la perilla que ADR-022 sacó a propósito, porque mientras exista el bug
+  puede volver por configuración y nada avisa.
+- [x] **Graceful shutdown** (backend) — cierre ordenado de conexiones al recibir SIGTERM,
+  para no cortar requests en vuelo durante un deploy. Verificado el 2026-08-11: `main.ts`
+  no llama a `enableShutdownHooks()` y no hay ningún `onApplicationShutdown` en el proyecto.
+  **La otra mitad de esta entrada ya está hecha** (`75b253d3`): el endpoint de readiness con
+  chequeo real de BD es `GET /api/health` (`app.service.ts`), y es el `healthcheckPath` del
+  backend en Railway. Queda solo el apagado.
+
+---
+
 ## Tres huecos entre el chequeo de stock y la venta: el mostrador y lo apartado, el lote vencido, el grupo obligatorio en la tienda (cerradas 2026-10-11)
 
 Salen de [`pendientes.md`](pendientes.md) § 2, anotadas el mismo día por el frente "la tienda

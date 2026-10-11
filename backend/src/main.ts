@@ -3,6 +3,7 @@ import { ClassSerializerInterceptor } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import cookieParser from 'cookie-parser';
 import { AppModule } from './app.module';
+import { habilitarApagadoOrdenado, instalarSeguridadHttp } from './arranque';
 import { validacionGlobal } from './common/pipes/validacion-global.pipe';
 
 async function bootstrap() {
@@ -10,10 +11,8 @@ async function bootstrap() {
 
   app.setGlobalPrefix(process.env.API_PREFIX ?? '/api');
 
-  app.enableCors({
-    origin: process.env.FRONTEND_URL ?? 'http://localhost:5173',
-    credentials: true,
-  });
+  instalarSeguridadHttp(app);
+  habilitarApagadoOrdenado(app);
 
   app.use(cookieParser());
 

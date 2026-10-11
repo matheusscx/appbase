@@ -181,4 +181,34 @@ describe('CallbackDispatcherService', () => {
     await service.dispatch(o);
     expect(fetchMock).not.toHaveBeenCalled();
   });
+
+  it('al apagar, espera el callback HTTP en vuelo y deja la orden conciliada', async () => {
+    let responder!: (r: Response) => void;
+    global.fetch = jest.fn(
+      () =>
+        new Promise<Response>((res) => {
+          responder = res;
+        }),
+    );
+    const o = orden({
+      metadata: { callbackModo: 'http', urls: { callback: 'https://ext/cb' } },
+    });
+    await service.dispatch(o);
+
+    let apagado = false;
+    const apagar = service.onApplicationShutdown().then(() => {
+      apagado = true;
+    });
+    await new Promise((r) => setImmediate(r));
+    expect(apagado).toBe(false);
+
+    expect(ordenRepo.update).not.toHaveBeenCalled();
+
+    responder({ ok: true, status: 200 } as Response);
+    await apagar;
+    expect(ordenRepo.update).toHaveBeenCalledWith(
+      { ordenId: 'orden-1', estado: 'pagada' },
+      { estado: 'conciliada' },
+    );
+  });
 });

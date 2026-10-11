@@ -462,7 +462,7 @@ Applied to: `pages/index.vue` (dashboard)
 | `GOOGLE_CLIENT_ID` | — | Google OAuth app ID |
 | `GOOGLE_CLIENT_SECRET` | — | Google OAuth app secret |
 | `GOOGLE_CALLBACK_URL` | `http://localhost:3000/api/auth/google/callback` | OAuth redirect URI |
-| `FRONTEND_URL` | `http://localhost:5173` | CORS origin (for login redirects) |
+| `FRONTEND_URL` | `http://localhost:5173` | Frontend base for login redirects; its origin is the CORS default when `CORS_ORIGINS` is empty |
 
 ### Google Cloud Setup
 

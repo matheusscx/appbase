@@ -33,7 +33,8 @@ frontend `5173+N`. Los escribe `entorno.sh` en el `.env` y los lee el compose.
 startup-app/
 ├── backend/
 │   ├── src/
-│   │   ├── main.ts               # Bootstrap: CORS, ValidationPipe, Swagger
+│   │   ├── main.ts               # Bootstrap: seguridad HTTP, apagado, ValidationPipe, Swagger
+│   │   ├── arranque.ts           # helmet, CORS por lista y apagado ordenado (los usa main.ts)
 │   │   ├── app.module.ts         # Módulo raíz, importa todos los feature modules
 │   │   └── modules/
 │   │       ├── auth/             # JWT (access + refresh), Google OAuth, switch-tenant
@@ -136,15 +137,34 @@ prohibidos por lint fuera de la fachada, el seeder y los specs — ver
 
 ### Bootstrap (`main.ts`)
 
-1. **CORS** — origen `FRONTEND_URL` (dev: `http://localhost:5173`). Desde ADR-022 **ya no
-   está en el camino del navegador**, que llega por el proxy del frontend; sigue puesto
-   para clientes que peguen directo a la API.
-2. **ValidationPipe** — global, valida todos los DTOs con `class-validator` y **rechaza con 400
+Lo que se monta en `src/arranque.ts` lo usa también `test/arranque.e2e-spec.ts`, que corre
+el `main.ts` real en un proceso aparte (el resto del e2e arma su app y no pasa por acá).
+
+1. **Cabeceras de seguridad** — `helmet()` con su configuración por defecto (CSP, HSTS,
+   `nosniff`, `X-Frame-Options`, sin `X-Powered-By`). Swagger (`/api/docs`) funciona bajo
+   esa CSP sin relajarla: sus scripts son archivos del mismo origen, y el e2e falla si una
+   versión nueva mete uno inline. **No hay redirect a HTTPS en el backend**: en Railway TLS
+   termina en el borde, que ya redirige HTTP→HTTPS y manda `X-Forwarded-Proto: https`
+   siempre; el contenedor recibe HTTP, así que un redirect por `req.secure` mandaría todo a
+   HTTPS, healthcheck y proxy interno incluidos. Tampoco hay `trust proxy`: nada lee
+   `req.ip`/`req.protocol`, y encenderlo sin un lector solo vuelve confiable `X-Forwarded-*`.
+2. **CORS por lista** — `CORS_ORIGINS` (coma-separado); sin ella, el origen de
+   `FRONTEND_URL` (dev: `http://localhost:5173`). Desde ADR-022 **no está en el camino del
+   navegador**, que llega por el proxy del frontend; es defensa en profundidad para lo que
+   pegue directo a la API. Un origen ajeno no se rechaza: se atiende y sale sin
+   `Access-Control-Allow-Origin` (por eso no frena ni el proxy ni el retorno de Webpay).
+3. **Apagado ordenado** — SIGTERM (deploy) o SIGINT: deja de aceptar conexiones, termina lo
+   que está en vuelo (las respuestas salen con `Connection: close` para que un cliente
+   keep-alive no lo retenga), espera el tick de cron y los callbacks HTTP de pagos en curso,
+   cierra el pool y sale con `process.exit` (`node` es PID 1 en el contenedor). Tope de 25 s;
+   Railway da 30 (`drainingSeconds` en `backend/railway.json`; su default es 0, o sea SIGKILL
+   inmediato).
+4. **ValidationPipe** — global, valida todos los DTOs con `class-validator` y **rechaza con 400
    lo que el DTO no declara** (`forbidNonWhitelisted`, desde 2026-09-27; antes lo borraba en
    silencio). Se construye en `src/common/pipes/validacion-global.pipe.ts`, que también usa el e2e
-3. **ClassSerializerInterceptor** — excluye campos anotados con `@Exclude()`
-4. **Swagger** — docs en `/api/docs` con soporte Bearer
-5. **Prefijo global** `/api`
+5. **ClassSerializerInterceptor** — excluye campos anotados con `@Exclude()`
+6. **Swagger** — docs en `/api/docs` con soporte Bearer
+7. **Prefijo global** `/api`
 
 ### Estructura de un módulo feature
 
@@ -296,7 +316,8 @@ const data = await useApiFetch<ResponseType>(`${apiUrl}/endpoint`)
 | `JWT_EXPIRATION` | Vida del access token (ej. `15m`) |
 | `JWT_REFRESH_SECRET` | Firma del refresh token |
 | `JWT_REFRESH_EXPIRATION` | Vida del refresh token (ej. `1h`) |
-| `FRONTEND_URL` | Origen CORS permitido |
+| `FRONTEND_URL` | Base de los links al frontend (mails, retornos de pago); su origen es el CORS por defecto |
+| `CORS_ORIGINS` | Orígenes CORS permitidos, coma-separados; vacía → el de `FRONTEND_URL` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL` | Google OAuth |
 
 ### Frontend
@@ -315,7 +336,7 @@ rompía el demo desplegado — ver [ADR-022](./adr/022-navegador-un-solo-origen.
 - Docker Compose: todos los servicios en red `tecnica_network` (bridge)
 - Datos de PostgreSQL: volumen nombrado `postgres_data`
 - Variables de entorno: archivo `.env` en la raíz del repo, compartido entre servicios
-- En producción: reemplazar `synchronize: true` por migraciones TypeORM; endurecer CORS
+- En producción: reemplazar `synchronize: true` por migraciones TypeORM
 
 ### Demo en Railway
 

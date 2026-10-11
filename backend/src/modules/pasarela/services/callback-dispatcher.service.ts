@@ -1,4 +1,9 @@
-import { HttpException, Injectable, Logger } from '@nestjs/common';
+import {
+  HttpException,
+  Injectable,
+  Logger,
+  type OnApplicationShutdown,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Db } from '../../../common/db/db.service';
@@ -21,10 +26,19 @@ import { PagoCallbackRegistry } from './pago-callback.registry';
  * sin venta, con el motivo en `motivo_sin_venta`. Con eso el comprador recibe un
  * estado propio y el admin la encuentra en `/ordenes` (pendientes.md § 3, D).
  * Nada la convierte en venta después, sola: no hay reintento automático.
+ *
+ * Al apagar se esperan los callbacks HTTP en vuelo: el retorno ya redirigió y
+ * el servidor ya no los ve, así que cortados a mitad la app externa podía haber
+ * recibido el aviso y la orden quedar `pagada` en vez de `conciliada`, sin
+ * reintento. Va en `onApplicationShutdown` porque un retorno que el servidor
+ * termina de drenar puede lanzar uno después de `beforeApplicationShutdown`; y
+ * corre antes de que cierre el pool porque este módulo no es `@Global` y el de
+ * TypeORM sí (Nest apaga los globales al final).
  */
 @Injectable()
-export class CallbackDispatcherService {
+export class CallbackDispatcherService implements OnApplicationShutdown {
   private readonly logger = new Logger(CallbackDispatcherService.name);
+  private readonly callbacksEnVuelo = new Set<Promise<void>>();
 
   constructor(
     @InjectRepository(PasarelaOrden)
@@ -32,6 +46,10 @@ export class CallbackDispatcherService {
     private readonly registry: PagoCallbackRegistry,
     private readonly db: Db,
   ) {}
+
+  async onApplicationShutdown(): Promise<void> {
+    await Promise.all(this.callbacksEnVuelo);
+  }
 
   /** Se invoca tras resolver la orden. Solo concilia el camino pagado. */
   async dispatch(orden: PasarelaOrden): Promise<void> {
@@ -116,7 +134,7 @@ export class CallbackDispatcherService {
     const url = urls.callback;
     if (!url) return;
     // Fire-and-forget: no bloquea el redirect del usuario.
-    void fetch(url, {
+    const callback = fetch(url, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ ordenId: orden.ordenId }),
@@ -140,7 +158,9 @@ export class CallbackDispatcherService {
         this.logger.error(
           `Callback HTTP a ${url} falló (orden ${orden.ordenId}): ${String(e)}`,
         );
-      });
+      })
+      .finally(() => this.callbacksEnVuelo.delete(callback));
+    this.callbacksEnVuelo.add(callback);
   }
 }
 

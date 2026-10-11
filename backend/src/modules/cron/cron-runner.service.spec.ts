@@ -97,4 +97,37 @@ describe('CronRunnerService', () => {
     expect(intentoCierre.estado).toBe('ok');
     expect(intentoCierre.detalle).toBe('detalle real del job exitoso');
   });
+
+  describe('al apagar', () => {
+    it('espera la corrida en curso: el registro de cierre se escribe antes de que cierre el pool', async () => {
+      let release!: () => void;
+      const bloqueado = new Promise<string>((res) => {
+        release = () => res('terminó');
+      });
+      const corrida = service.ejecutar('demo', () => bloqueado);
+      await new Promise((r) => setImmediate(r)); // ya insertó el 'en_curso'
+
+      let apagado = false;
+      const apagar = service.beforeApplicationShutdown().then(() => {
+        apagado = true;
+      });
+      await new Promise((r) => setImmediate(r));
+      expect(apagado).toBe(false);
+      expect(saveMock).toHaveBeenCalledTimes(1);
+
+      release();
+      await apagar;
+      expect(saveMock).toHaveBeenCalledTimes(2);
+      expect(saveMock.mock.calls.at(-1)![0].estado).toBe('ok');
+      await corrida;
+    });
+
+    it('no arranca corridas nuevas', async () => {
+      await service.beforeApplicationShutdown();
+      const fn = jest.fn(() => Promise.resolve('no debería correr'));
+      await service.ejecutar('demo', fn);
+      expect(fn).not.toHaveBeenCalled();
+      expect(saveMock).not.toHaveBeenCalled();
+    });
+  });
 });

@@ -712,40 +712,15 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   (no del repo, no de variables de entorno en texto plano en el CI), con rotación. Auditar que
   ningún secreto real quedó commiteado. La `PASARELA_ENCRYPTION_KEY` es especialmente sensible:
   cifra credenciales de pasarela de pago.
-- [ ] **Cabeceras de seguridad + CORS whitelist + HTTPS** (backend) — `main.ts`: `helmet`,
-  forzar HTTPS, y **CORS por whitelist env-driven**. Hoy `enableCors` permite un solo origen
-  (`FRONTEND_URL ?? http://localhost:5173`, `credentials: true`); generalizar a lista blanca:
-  `CORS_ORIGINS` (coma-separado) → `.split(',').map(trim).filter(Boolean)` → array a `origin`
-  (el paquete `cors` lo refleja si está, rechaza si no). Con `credentials: true` **no** se puede
-  usar `'*'`; la lista debe ser explícita. Documentar la var en `.env.example`. Prod define
-  `CORS_ORIGINS=https://app.tudominio.com[,...]`; dev queda con el default localhost.
-  **Nota de alcance:** CORS solo guarda al **navegador** (evita que la web de otro origen use la
-  sesión/cookie del usuario contra la API); no frena curl/Postman/servidor-a-servidor. El control
-  de acceso real es el JWT ya implementado — la whitelist es defensa en profundidad, no el candado.
-  📌 **Desde ADR-022 (2026-08-23) CORS ya no está en el camino real de la app.** El navegador
-  habla solo con el origen del frontend, que hace de proxy de `/api`; lo que sostiene la
-  sesión es que la llamada es **same-origin**, no una cabecera. La whitelist sigue valiendo y
-  sigue habiendo que hacerla, pero como defensa en profundidad para lo que pegue **directo** a
-  la API (curl, un cliente móvil futuro) — no como lo que hace andar la pantalla.
-
-  ⚠️ **Si al tomar esta entrada aparece la idea de revertir el proxy «ahora que CORS está
-  bien»: tener CORS bien NO es la condición, y esto está medido.** El 2026-08-23 el demo
-  respondía `access-control-allow-credentials: true` con el `allow-origin` correcto —CORS
-  impecable— y el login **igual** no completaba. Lo que no viajaba era la **cookie**, y eso lo
-  decide `SameSite`, no CORS. Son dos mecanismos distintos que se confunden por vecindad: CORS
-  gobierna si el JS puede **leer la respuesta**; `SameSite` gobierna si la cookie **se manda**.
-  Arreglar uno no toca al otro.
-
-  **Lo que sí habilitaría revertir**, si alguna vez se quisiera: que frontend y backend
-  compartan **dominio registrable** (`app.` y `api.` del mismo dominio propio), con lo que
-  pasan a ser same-site y `Lax` alcanza; **o** pasar la cookie a `SameSite=None; Secure`, que
-  roza la invariante 4 de `CLAUDE.md` y deja la sesión más expuesta.
-
-  📌 **Y aun cumpliéndose, revertir es opcional y no se recomienda.** El proxy no molesta con
-  dominio propio, y es lo que hace **imposible** que el bug vuelva el día que alguien despliegue
-  en dos dominios distintos. Revertirlo exige devolverle al navegador una URL de backend
-  configurable — justo la perilla que ADR-022 sacó a propósito, porque mientras exista el bug
-  puede volver por configuración y nada avisa.
+- [ ] **Cabeceras de seguridad del frontend (los documentos que sirve Nuxt)** (frontend;
+  anotado el 2026-10-11 al cerrar las del backend, [`resueltos.md`](resueltos.md)). El backend ya
+  manda las de `helmet`, pero solo en `/api/**`: la página la sirve Nitro, y medido sobre el
+  build (`node .output/server/index.mjs`, `GET /` y `GET /login`) no trae **ninguna** —sin CSP,
+  sin `X-Frame-Options`/`frame-ancestors`, sin HSTS ni `nosniff`— y sí `x-powered-by: Nuxt`. Lo
+  que más pesa es el framing: la pantalla de login y la del POS se pueden embeber en un
+  `<iframe>` de otro sitio (clickjacking). El candidato natural es `routeRules` con `headers` en
+  `nuxt.config.ts` o un middleware de Nitro; la CSP de una SPA de Nuxt pide medir qué scripts
+  inline genera el build antes de fijarla, y no es lo mismo que la de la API.
 - [ ] **Observabilidad: logs estructurados + error tracking + alertas** (backend/infra) —
   logging estructurado que **no filtre PII ni `tenant_id` cruzado**, captura de errores
   (Sentry/equivalente), y alertas de error-rate/latencia para enterarse en minutos, no cuando
@@ -753,12 +728,6 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
 - [ ] **Backups automáticos + restore probado (Postgres)** (infra) — datos financieros
   multi-tenant: backups automáticos + point-in-time recovery, y **restore probado** (un backup
   que nunca se restauró no es un backup). Tópico aparte del deploy de la app.
-- [ ] **Graceful shutdown** (backend) — cierre ordenado de conexiones al recibir SIGTERM,
-  para no cortar requests en vuelo durante un deploy. Verificado el 2026-08-11: `main.ts`
-  no llama a `enableShutdownHooks()` y no hay ningún `onApplicationShutdown` en el proyecto.
-  **La otra mitad de esta entrada ya está hecha** (`75b253d3`): el endpoint de readiness con
-  chequeo real de BD es `GET /api/health` (`app.service.ts`), y es el `healthcheckPath` del
-  backend en Railway. Queda solo el apagado.
 - [ ] **Escaneo de dependencias en CI** (harness) — `npm audit` / Dependabot como paso del
   gate, para no arrastrar CVEs conocidos a prod.
 - [ ] **Pre-push que corre el gate completo local (todas las suites)** (harness) — hoy

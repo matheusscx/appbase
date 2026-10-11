@@ -114,9 +114,10 @@ Pasarlo a `*.railway.internal` exige antes que el backend escuche en IPv6 —`ma
 **Cuándo revisarla.** No cuando exista la whitelist de CORS: CORS ya estaba bien el día que
 el demo no dejaba entrar, y no es lo que gobierna si la cookie viaja. La condición sería que
 frontend y backend pasen a compartir dominio registrable, y aun así revertir sería opcional
-—el proxy no estorba ahí y sigue impidiendo que el bug vuelva por configuración—. La nota
-larga, para quien tome el endurecimiento de CORS, está en
-[`docs/agent/pendientes.md`](../agent/pendientes.md) § «Endurecimiento para producción».
+—el proxy no estorba ahí y sigue impidiendo que el bug vuelva por configuración—. La whitelist
+de CORS se hizo el 2026-10-11 y la nota larga quedó con ella, en
+[`docs/agent/resueltos.md`](../agent/resueltos.md) § «Cabeceras de seguridad, CORS por lista y
+apagado ordenado del backend».
 
 ## Alternatives considered
 
