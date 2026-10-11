@@ -458,6 +458,8 @@ describe('VentasService', () => {
             resolverPersonalizacionCombo: jest.fn(),
             venderIngredientesReceta: jest.fn().mockResolvedValue([]),
             venderComponentesCombo: jest.fn().mockResolvedValue([]),
+            // Lo apartado por las mesas (venta directa): alcanza, por defecto.
+            validarStockAlPedir: jest.fn().mockResolvedValue(undefined),
             // Frente de bodegas y traslados: el 400 enriquecido del tope al
             // cobrar. Rechaza distinto del genérico de `registrarMovimiento`
             // para que los tests de este archivo puedan distinguir "el catch de
@@ -1438,6 +1440,54 @@ describe('VentasService', () => {
           itemId: ITEM_ID,
         }),
       );
+    });
+
+    describe('lo que las mesas ya pidieron (owner, 2026-10-11)', () => {
+      it('la venta directa lo revisa antes de mover el stock, en la cantidad canónica', async () => {
+        await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+        expect(itemsService.validarStockAlPedir).toHaveBeenCalledWith(
+          TENANT_ID,
+          [
+            {
+              itemId: ITEM_ID,
+              cantidad: baseDto.lineas[0].cantidad,
+              personalizacion: null,
+            },
+          ],
+          [],
+          { soloLoApartado: true },
+        );
+        expect(
+          itemsService.validarStockAlPedir.mock.invocationCallOrder[0],
+        ).toBeLessThan(
+          inventarioService.registrarMovimiento.mock.invocationCallOrder[0],
+        );
+      });
+
+      it('si lo apartado no deja, no se mueve nada', async () => {
+        itemsService.validarStockAlPedir.mockRejectedValueOnce(
+          new BadRequestException('apartado-mock'),
+        );
+
+        await expect(
+          service.crear(TENANT_ID, USUARIO_ID, baseDto),
+        ).rejects.toThrow('apartado-mock');
+        expect(inventarioService.registrarMovimiento).not.toHaveBeenCalled();
+      });
+
+      it('el cierre de una cuenta no lo revisa: se frenaría contra lo que ella misma apartó', async () => {
+        await service.crearEnTransaccion(
+          buildManagerMock() as never,
+          TENANT_ID,
+          USUARIO_ID,
+          baseDto,
+          'cuenta-1',
+        );
+
+        expect(itemsService.validarStockAlPedir).not.toHaveBeenCalled();
+        expect(inventarioService.registrarMovimiento).toHaveBeenCalled();
+      });
     });
 
     describe('productos con número de serie: quien vende elige las unidades', () => {

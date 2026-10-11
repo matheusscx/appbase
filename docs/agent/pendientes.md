@@ -111,43 +111,16 @@ destapa una decisión que no es mía).
   request deja abierta la página del POS (un `networkidle` que nunca llega suele ser un polling o
   un stream). No bloquea la integración.
 
-- [ ] **Un carrito armado a mano con un combo o receta de grupo obligatorio se cobra en la tienda y
-  la venta no se crea** (backend, tienda online; anotado el 2026-10-11 por el frente del componente
-  fraccionario de combo, a pedido de la orquestadora. **Leído, no medido.**) **Alcance:** la
-  pantalla de la tienda no lo ofrece, porque su catálogo pide solo `producto`
-  (`frontend/app/pages/tienda/index.vue`, `tipos: ['producto']`) y un producto no lleva grupos. Lo
-  alcanza un carrito armado contra la API, el mismo caso que ya ataja el guard de ingrediente
-  (`online.service.ts`, "esto ataja el carrito armado a mano"). **El mecanismo:** `OnlineService`
-  descarta la personalización al armar el cálculo (el comentario de `personalizacion: undefined`),
-  sin ella `/calcular` no resuelve (`puedeCostar`), y `prepararLineasCheckout` no mira grupos, así
-  que el checkout manda a Webpay. La venta del callback (`online-callback.handler.ts` →
-  `VentasService.crear` con `ventaCongelada`; `lineasCongeladas` llega `undefined`) **sí** resuelve:
-  el loop de `personalizaciones` de `ventas.service.ts` llama a `resolverPersonalizacionCombo` (o
-  `…Receta`) sin personalización, y el grupo obligatorio tira 400 *"El grupo … requiere elegir entre
-  1 y 1 unidades"* con el pago ya hecho: orden pagada sin venta. Desde el 2026-10-11 cae igual un
-  combo cuyos únicos grupos obligatorios eran de un componente con cantidad menor que 1 (antes, el
-  loop de cero vueltas no exigía nada). **Qué medir:** por HTTP contra el checkout (pasarela demo),
-  con un combo de grupo obligatorio en el body, y leer la orden y el motivo del rechazo. **Arreglo
-  probable:** atajarlo en `prepararLineasCheckout` antes de Webpay, como `serie` e ingrediente. Es
-  pregunta para el owner si la tienda algún día ofrece combos o recetas.
-
-- [ ] **El mostrador vende lo que una mesa ya apartó** (backend, `ventas.service.ts` → el
-  chokepoint `InventarioService.registrarMovimiento`; anotado el 2026-10-11 por el frente "la tienda
-  revisa el stock antes de Webpay", a pedido del owner vía la orquestadora; **leído, no medido**).
-  La venta directa del POS descuenta contra el saldo del local y no resta lo comprometido por las
-  cuentas abiertas del salón (`comprometidoPorItem`). Escena: queda una botella, la mesa 4 la
-  pidió y no la cobró, y el cajero la vende en el mostrador: la venta entra y la mesa 4 no puede
-  cobrar esa línea. La tienda, desde ese frente, sí respeta lo apartado (owner, 2026-10-11), así
-  que hoy son dos reglas. **Medir:** reproducirlo por API (mesa con la última unidad + `POST
-  /ventas` de esa unidad) y ver qué ve la mesa al cerrar; qué hacer es del owner (§ 4).
-
-- [ ] **Un lote con saldo solo vencido pasa el chequeo de stock y la venta lo rechaza** (backend,
-  `ItemsService.validarStockAlPedir`; anotado el 2026-10-11 por el mismo frente; **leído, no
-  medido**). El chequeo lee `stock_ubicacion`, que suma los lotes vencidos
-  (`recalcularStockLote`), y la venta los salta (`MOTIVOS_QUE_SALTAN_VENCIDOS`). En la tienda eso
-  es un carrito que se cobra y queda pagado sin venta; en el salón, una mesa que pide y no puede
-  cobrar. **Medir** con un producto por lote cuyo único lote venció ayer, por la tienda y por una
-  cuenta.
+- [ ] **El catálogo muestra como disponible un lote que ya venció** (backend, `GET /items` y
+  `GET /items/:id`; anotado el 2026-10-11 al cerrar el chequeo sin vencidos, ver
+  [`resueltos.md`](resueltos.md); **leído, no medido**). `stockVendible` sale de `stock_ubicacion`
+  del local, que suma los lotes vencidos (`recalcularStockLote`), así que `stockDisponible` los
+  ofrece. Desde ese cierre la mesa ya no puede pedirlo y la tienda no lo cobra, pero el menú del
+  salón, el POS y el catálogo de la tienda lo siguen mostrando con stock: la mesa lo elige y
+  rebota al pedir. **Medir:** un producto por lote con su único lote vencido, y leer su fila en
+  `GET /items`. **Arreglo probable:** el mismo descuento de vencidos en el `stockVendible` del
+  catálogo, en la misma consulta. Ojo: `stock` sigue siendo el físico, y ahí los vencidos sí
+  cuentan, porque están en el local hasta que se mermen.
 
 - [ ] **Los ~40 campos `@EsMontoCobrado` no tienen techo: un monto que no cabe en su columna llega
   al `INSERT`** (backend, DTOs con `@EsMontoCobrado()`; anotado el 2026-10-09 por el frente que cerró

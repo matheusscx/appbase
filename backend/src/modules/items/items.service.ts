@@ -3737,6 +3737,62 @@ export class ItemsService {
   }
 
   /**
+   * De estas recetas y combos, cuáles **no se pueden vender sin elegir**: los
+   * que tienen un grupo obligatorio, propio o de un componente. Es la misma
+   * validación de la venta —los mismos resolvers, sin personalización, que es
+   * como llega una línea de la tienda— dicha antes, para quien no puede
+   * ofrecer la elección (`OnlineService`, antes de Webpay: si no, la venta del
+   * callback rechazaba con el cobro hecho). Los catálogos van precargados en
+   * una sola tanda, así que los resolvers no tocan la base por línea. Sin
+   * personalización, lo único que un resolver puede rechazar es el mínimo de
+   * un grupo.
+   */
+  async exigenPersonalizacion(
+    tenantId: string,
+    items: { itemId: string; tipo: string }[],
+  ): Promise<Set<string>> {
+    const unicos = [
+      ...new Map(
+        items
+          .filter((i) => i.tipo === 'receta' || i.tipo === 'combo')
+          .map((i) => [i.itemId, i]),
+      ).values(),
+    ];
+    const exigen = new Set<string>();
+    if (!unicos.length) return exigen;
+    const precargado = await this.cargarCatalogosPersonalizacion(
+      this.db,
+      tenantId,
+      unicos,
+    );
+    for (const { itemId, tipo } of unicos) {
+      try {
+        if (tipo === 'combo') {
+          await this.resolverPersonalizacionCombo(
+            this.db,
+            tenantId,
+            itemId,
+            undefined,
+            precargado,
+          );
+        } else {
+          await this.resolverPersonalizacionReceta(
+            this.db,
+            tenantId,
+            itemId,
+            undefined,
+            precargado,
+          );
+        }
+      } catch (e) {
+        if (!(e instanceof BadRequestException)) throw e;
+        exigen.add(itemId);
+      }
+    }
+    return exigen;
+  }
+
+  /**
    * Precarga, en **dos a cinco consultas que no crecen con la cantidad de
    * líneas**, todo lo que
    * `resolverPersonalizacionReceta` y `…Combo` leerían por su cuenta una vez por
@@ -5751,9 +5807,9 @@ export class ItemsService {
    *    cuando no hay transacción en el contexto (ALS, ver `db.service.ts`): sin
    *    transacción, el lock del statement 2 se suelta al terminar su
    *    transacción implícita y el saldo del 2b se lee sin lock, o sea con el
-   *    guard apagado y en silencio. Hoy los dos llamadores que lockean
-   *    (`SalonesService.agregarLinea` y el de editar línea) abren
-   *    `db.transaccion`; el llamador que se agregue mañana también tiene que,
+   *    guard apagado y en silencio. Hoy los tres llamadores que lockean
+   *    (`SalonesService.agregarLinea`, el de editar línea y la venta directa
+   *    de `VentasService.crearEnTransaccion`) corren en `db.transaccion`; el llamador que se agregue mañana también tiene que,
    *    salvo que no escriba nada después y pase `bloquear: false` (la tienda,
    *    ver abajo).
    * 3. Recién **después** del lock se lee el comprometido. El orden es
@@ -5780,12 +5836,26 @@ export class ItemsService {
    * su propio lock. Tomar el `FOR UPDATE` no compraría nada y el checkout no
    * corre en una transacción, así que la precondición de arriba no aplica: sin
    * lock, el statement 2 lee lo mismo y no encola a nadie.
+   *
+   * ## `soloLoApartado: true`: la venta directa del POS
+   *
+   * El mostrador también respeta lo que las mesas ya pidieron (owner,
+   * 2026-10-11, opción A): `VentasService.crearEnTransaccion` llama acá, con
+   * lock y dentro de su transacción, antes de mover el stock. En este modo solo
+   * se rechaza lo que alcanzaría en el local si no fuera por las cuentas
+   * abiertas, con un mensaje propio; lo que no alcanza ni así se deja pasar
+   * para que lo rechace el chokepoint de la venta con el mensaje que ya tenía.
+   * El cierre de una cuenta no pasa por acá: lo que la mesa pidió ya se validó
+   * al pedirlo, y contra lo apartado se frenaría a sí misma.
    */
   async validarStockAlPedir(
     tenantId: string,
     lineasNuevas: LineaConsumo[],
     lineasPrevias: LineaConsumo[] = [],
-    { bloquear = true }: { bloquear?: boolean } = {},
+    {
+      bloquear = true,
+      soloLoApartado = false,
+    }: { bloquear?: boolean; soloLoApartado?: boolean } = {},
   ): Promise<void> {
     const consumoNuevo = await this.consumoDeLineas(tenantId, lineasNuevas);
     // Segunda expansión, también ANTES del lock: no lee stock, así que alargar
@@ -5834,15 +5904,32 @@ export class ItemsService {
       .filter(([, c]) => c.cantidadBloqueante.greaterThan(0))
       .map(([itemId, c]) => [itemId, c, netoDe(itemId, c)] as const)
       .filter(([, , neto]) => neto.greaterThan(0));
-    if (!bloqueantes.length) return;
+    // La venta directa (`soloLoApartado`) lockea TODO lo que va a mover, no
+    // solo lo que frena, y aunque no frene nada: después mueve también lo no
+    // bloqueante, y si acá tomara solo un subconjunto, dos ventas con
+    // bloqueantes cruzados (X frena en una e Y en la otra, cada uno no
+    // bloqueante en la otra) se bloqueaban en cruz. Así toma todo en un solo
+    // statement ordenado, como el salón, la merma y el traslado, y su loop de
+    // movimientos ya no pide ningún lock de `item_producto` nuevo (salvo una
+    // receta editada entre esta lectura del catálogo y la del loop: la cubre el
+    // reintento por deadlock). Esto lockea `item_producto` antes del `FOR SHARE`
+    // de la ubicación que toma después `registrarMovimiento` (la venta directa
+    // es la primera que lo hace en ese orden): no cierra ciclo, porque quien toma la ubicación en
+    // exclusivo (`UbicacionesService.update`/`remove`/`restaurar`) no toca
+    // `item_producto`.
+    if (!bloqueantes.length && !soloLoApartado) return;
 
-    const ids = bloqueantes.map(([itemId]) => itemId);
+    const ids = soloLoApartado
+      ? [...consumoNuevo.keys()]
+      : bloqueantes.map(([itemId]) => itemId);
+    if (!ids.length) return;
     // Una vez por request, no por fila. No hace falta que esté ANTES del lock
     // de abajo: es config del tenant, no stock, así que no compite por la fila.
     const localId = await this.ubicacionesService.localDe(tenantId);
     const stockRows: {
       item_id: string;
       unidad_medida: string;
+      modo_inventario: string;
     }[] = await this.db.query(
       // `FOR UPDATE OF ip` y no `FOR UPDATE` a secas, por lo mismo que
       // `registrarMovimiento`: sin el `OF`, Postgres lockearía también la fila
@@ -5872,7 +5959,7 @@ export class ItemsService {
       // aparte, abajo, ya con el lock en la mano. Mismo arreglo y mismo porqué
       // que el chokepoint (`inventario.service.ts`), ver
       // `docs/patterns/backend.md` §15.
-      `SELECT ip.item_id, ip.unidad_medida
+      `SELECT ip.item_id, ip.unidad_medida, ip.modo_inventario
          FROM item_producto ip
          JOIN items i ON i.item_id = ip.item_id
         WHERE ip.item_id = ANY($1::uuid[])
@@ -5883,6 +5970,7 @@ export class ItemsService {
       [ids, tenantId],
     );
     const stockPorItem = new Map(stockRows.map((r) => [r.item_id, r]));
+    if (!bloqueantes.length) return;
 
     // El saldo del local, ya bajo el lock de arriba: este statement toma
     // snapshot nuevo y ve lo que commiteó quien acaba de soltarlo.
@@ -5898,6 +5986,26 @@ export class ItemsService {
       [ids, localId],
     );
     const saldoPorItem = new Map(saldoRows.map((r) => [r.item_id, r.stock]));
+
+    // Lo que está en lotes vencidos se ve en el saldo pero no se vende: la
+    // venta los salta y este chequeo los contaba, así que dejaba pedir en la
+    // mesa, o cobrar en la tienda, algo que la venta después rechazaba (medido
+    // el 2026-10-11: la mesa no podía cerrar y la orden de la tienda quedaba
+    // pagada sin venta). El saldo del local de un ítem por lote es la suma de
+    // sus lotes vivos (`recalcularStockLote`), así que restarle los vencidos
+    // da lo que la venta puede sacar. Solo se consulta si el pedido trae algún
+    // ítem por lote, y es una consulta para todos.
+    const idsPorLote = stockRows
+      .filter((r) => r.modo_inventario === 'lote')
+      .map((r) => r.item_id);
+    const vencidoPorItem = idsPorLote.length
+      ? await this.inventarioService.saldoEnLotesVencidos(
+          this.db,
+          tenantId,
+          idsPorLote,
+          localId,
+        )
+      : new Map<string, string>();
 
     // ⚠️ Esto corre **sosteniendo el lock de arriba** —tiene que ser así, ver
     // el paso 3 del docblock—, así que su costo es tiempo de lock sobre los
@@ -5934,9 +6042,23 @@ export class ItemsService {
           `No se puede verificar el stock de "${c.nombre}": el ítem ya no está disponible en el catálogo`,
         );
       }
-      const restante = new Decimal(saldoPorItem.get(itemId) ?? '0').minus(
-        comprometido.get(itemId) ?? 0,
+      const vendible = new Decimal(saldoPorItem.get(itemId) ?? '0').minus(
+        vencidoPorItem.get(itemId) ?? 0,
       );
+      const restante = vendible.minus(comprometido.get(itemId) ?? 0);
+      if (soloLoApartado) {
+        // Lo que no hay ni sin contar a las mesas lo rechaza la venta misma,
+        // con su mensaje de siempre (el del local y las bodegas, o el de
+        // lotes): acá solo se frena lo que alcanza en el local pero ya pidió
+        // una mesa. Ver `soloLoApartado` en el docblock.
+        if (neto.lessThanOrEqualTo(restante) || neto.greaterThan(vendible))
+          continue;
+        throw new BadRequestException({
+          message: `"${c.nombre}": lo que queda ya lo pidió una mesa`,
+          itemId,
+          itemNombre: c.nombre,
+        });
+      }
       if (neto.greaterThan(restante)) {
         // El mensaje nombra el ítem que faltó, no el plato: en una receta de
         // seis ingredientes "no hay stock" manda al garzón a adivinar. Y

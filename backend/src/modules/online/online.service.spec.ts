@@ -90,6 +90,7 @@ describe('OnlineService', () => {
         Promise.resolve(new Map(ids.map((id) => [id, itemBase(id)]))),
       ),
     validarStockAlPedir: jest.fn().mockResolvedValue(undefined),
+    exigenPersonalizacion: jest.fn().mockResolvedValue(new Set()),
   };
   const catalog = {
     findAllUnidadesMedida: jest.fn().mockResolvedValue(UNIDADES),
@@ -273,6 +274,31 @@ describe('OnlineService', () => {
         service.pagar(TENANT_ID, 'u-1', 'user@x.cl', dosLineas),
       ).rejects.toBeInstanceOf(BadRequestException);
       expect(pagosRedirect.iniciar).not.toHaveBeenCalled();
+    });
+  });
+
+  /**
+   * Una receta o un combo con un grupo obligatorio no se cobra online: la
+   * tienda no ofrece elegir y la venta del callback rechazaba con el cobro
+   * hecho (medido el 2026-10-11).
+   */
+  describe('grupo obligatorio', () => {
+    it('pregunta por todo el carrito de una vez y rechaza nombrando el ítem, sin revisar stock ni calcular', async () => {
+      items.cargarBasePorIds.mockResolvedValueOnce(
+        new Map([
+          [ITEM_ID, itemBase(ITEM_ID, { tipo: 'receta', nombre: 'Lomo' })],
+        ]),
+      );
+      items.exigenPersonalizacion.mockResolvedValueOnce(new Set([ITEM_ID]));
+
+      await expect(service.checkout(TENANT_ID, dto)).rejects.toThrow(
+        new BadRequestException('«Lomo» se vende solo en el local'),
+      );
+      expect(items.exigenPersonalizacion).toHaveBeenCalledWith(TENANT_ID, [
+        { itemId: ITEM_ID, tipo: 'receta' },
+      ]);
+      expect(items.validarStockAlPedir).not.toHaveBeenCalled();
+      expect(calculo.calcular).not.toHaveBeenCalled();
     });
   });
 

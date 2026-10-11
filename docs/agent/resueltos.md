@@ -23,6 +23,124 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Tres huecos entre el chequeo de stock y la venta: el mostrador y lo apartado, el lote vencido, el grupo obligatorio en la tienda (cerradas 2026-10-11)
+
+Salen de [`pendientes.md`](pendientes.md) § 2, anotadas el mismo día por el frente "la tienda
+revisa el stock antes de Webpay" (`c17cceef`) y el del componente fraccionario de combo. Las tres
+se midieron por e2e antes de tocar nada (fixture propio, garzón propio, sin stock ni recetas del
+seed) y las tres se confirmaron. No escriben en `movimientos_inventario` de una forma nueva, no
+tocan `modo_inventario`, el motor de precios ni lo fiscal.
+
+**Lo medido.**
+- **El mostrador:** producto con stock 1 que la mesa ya pidió → `POST /ventas` de esa unidad: 201
+  → cerrar la cuenta: 400 *"Stock insuficiente de "X" en el local: quedan 0 unidad…"*. La cuenta
+  entera quedaba sin poder cobrarse.
+- **El lote vencido:** producto por lote con su único lote vencido. En la mesa, pedirlo daba 201 y
+  cerrar, 400 *"Stock insuficiente en lotes en esta ubicación (disponible: 0, requerido: 1); hay 1
+  más en lotes vencidos"*. En la tienda, `pagar` mandaba a Webpay y la orden quedaba pagada sin
+  venta con ese mismo motivo.
+- **El grupo obligatorio:** una receta con un grupo `min: 1`, y un combo cuyo componente es esa
+  receta, por `POST /online/pagar`: Webpay cobraba y la orden quedaba pagada sin venta con *"El
+  grupo "…" requiere elegir entre 1 y 1 unidades"*. Confirma el mecanismo que la entrada leía.
+
+**Cómo se decidió el mostrador.** Era regla de negocio, así que no se construyó de oficio: la
+pregunta fue a la orquestadora con la escena (queda una botella de pisco de $15.000, la mesa 4
+la pidió y no pagó, el cajero la vende en el mostrador) y tres opciones con su costo. A: el
+mostrador respeta lo apartado, como la tienda (recomendada). B: lo vende con un aviso que el
+cajero confirma. C: dejarlo como estaba. El owner eligió **A** el 2026-10-11, en un
+AskUserQuestion de la orquestadora. Pidió además tres cuidados: una sola fuente de lo
+comprometido y sin N+1; que el cierre de la propia cuenta no se rechace por lo que ella apartó,
+con test; y nombrar la mesa en el mensaje solo si salía en la misma consulta. No sale (lo
+comprometido se agrega por ítem), así que el mensaje no la nombra.
+
+**Qué se hizo.**
+- **Mostrador** (`ventas.service.ts`, antes del paso 7f): la venta directa (sin `cuentaId` ni
+  `ventaCongelada`) llama a `ItemsService.validarStockAlPedir` con `soloLoApartado: true`, con
+  lock y en su transacción. Es el mismo tope y la misma fuente (`comprometidoPorItem`) que el
+  salón y la tienda. En ese modo solo rechaza lo que alcanzaría si no fuera por las mesas,
+  con *«"Nombre": lo que queda ya lo pidió una mesa»*. Lo que no alcanza ni así sigue, para que
+  el chokepoint lo rechace con el mensaje de siempre. El cierre de cuenta no pasa por ahí. En ese
+  modo lockea **todo** lo que la venta va a mover, no solo lo que frena: la revisión independiente
+  encontró que, lockeando solo lo bloqueante, dos ventas con bloqueantes cruzados (X frena en una
+  e Y en la otra, cada uno no bloqueante en la otra) se bloqueaban en cruz en el loop de
+  movimientos. Con el lock entero en un statement ordenado, ese loop ya no pide locks nuevos de
+  `item_producto`, salvo que alguien edite la receta entre las dos lecturas del catálogo; esa
+  ventana la cubre el reintento por deadlock de `crearConReintento`.
+- **Lote vencido** (`validarStockAlPedir`): al saldo del local se le resta lo que está en lotes
+  vencidos en el local (`InventarioService.saldoEnLotesVencidos`, al lado de su gemelo; la
+  invariante `dia-negocio` deja el "hoy" de reloj solo en ese archivo). Es gemelo de la
+  auto-selección FEFO de `moverCantidad`: el mismo cast
+  `fecha_vencimiento::date`, el mismo "hoy" (`fechaLocalTenant`, lo que usa `hoyLocal`), y el que
+  vence hoy todavía cuenta. Es una consulta para todos los ítems por lote del pedido, y solo si
+  hay alguno. Vale para los tres llamadores: la mesa, la tienda y el mostrador.
+- **Grupo obligatorio** (`OnlineService.prepararLineasCheckout`): `ItemsService.exigenPersonalizacion`
+  corre los resolvers de la venta sin personalización, con los catálogos precargados en una tanda
+  (`cargarCatalogosPersonalizacion`). El checkout rechaza antes de Webpay con *"«Nombre» se vende
+  solo en el local"*, el texto del producto con serie. Con grupos solo opcionales se cobra igual
+  que antes.
+
+**Qué lo fija.** E2E en `reserva-stock-mesa.e2e-spec.ts` ("El mostrador respeta…", "Un lote
+vencido no se puede pedir") y `tienda-dos-ahoras.e2e-spec.ts` (el lote vencido en checkout y
+pagar, con control del que vence hoy; "un carrito armado a mano con un grupo obligatorio", con
+control de grupo opcional). Unitarios en `ventas.service.spec.ts`, `online.service.spec.ts` e
+`items.service.spec.ts` (el alcance del lock).
+Mutantes, cada uno corrido contra su e2e:
+
+| Mutante | Lo mata |
+|---|---|
+| sacar la resta de vencidos (el código de antes) | lote vencido en checkout, pagar y mesa (3) |
+| `< $4` → `<= $4` (el que vence hoy cuenta como vencido) | el control del que vence hoy |
+| sacar la llamada del mostrador | "la última unidad que pidió la mesa no se vende…" |
+| que el cierre de cuenta también pase (`!ventaCongelada` solo) | el mismo caso: la mesa ya no cierra |
+| sin el `continue` de lo que no alcanza ni sin las mesas | "lo que no alcanza ni sin las mesas sigue con el mensaje de siempre" |
+| sacar el guard del checkout | receta en checkout y pagar, y combo (3) |
+| que la venta directa lockee solo lo que frena | el unitario "con `soloLoApartado`… lockea también lo que no frena" |
+
+**Qué quedó afuera.** El catálogo (`GET /items`) sigue ofreciendo como disponible un lote vencido.
+Es otra entrada en `pendientes.md` § 2.
+
+**El texto con que se anotaron:**
+
+- [x] **Un carrito armado a mano con un combo o receta de grupo obligatorio se cobra en la tienda y
+  la venta no se crea** (backend, tienda online; anotado el 2026-10-11 por el frente del componente
+  fraccionario de combo, a pedido de la orquestadora. **Leído, no medido.**) **Alcance:** la
+  pantalla de la tienda no lo ofrece, porque su catálogo pide solo `producto`
+  (`frontend/app/pages/tienda/index.vue`, `tipos: ['producto']`) y un producto no lleva grupos. Lo
+  alcanza un carrito armado contra la API, el mismo caso que ya ataja el guard de ingrediente
+  (`online.service.ts`, "esto ataja el carrito armado a mano"). **El mecanismo:** `OnlineService`
+  descarta la personalización al armar el cálculo (el comentario de `personalizacion: undefined`),
+  sin ella `/calcular` no resuelve (`puedeCostar`), y `prepararLineasCheckout` no mira grupos, así
+  que el checkout manda a Webpay. La venta del callback (`online-callback.handler.ts` →
+  `VentasService.crear` con `ventaCongelada`; `lineasCongeladas` llega `undefined`) **sí** resuelve:
+  el loop de `personalizaciones` de `ventas.service.ts` llama a `resolverPersonalizacionCombo` (o
+  `…Receta`) sin personalización, y el grupo obligatorio tira 400 *"El grupo … requiere elegir entre
+  1 y 1 unidades"* con el pago ya hecho: orden pagada sin venta. Desde el 2026-10-11 cae igual un
+  combo cuyos únicos grupos obligatorios eran de un componente con cantidad menor que 1 (antes, el
+  loop de cero vueltas no exigía nada). **Qué medir:** por HTTP contra el checkout (pasarela demo),
+  con un combo de grupo obligatorio en el body, y leer la orden y el motivo del rechazo. **Arreglo
+  probable:** atajarlo en `prepararLineasCheckout` antes de Webpay, como `serie` e ingrediente. Es
+  pregunta para el owner si la tienda algún día ofrece combos o recetas.
+
+- [x] **El mostrador vende lo que una mesa ya apartó** (backend, `ventas.service.ts` → el
+  chokepoint `InventarioService.registrarMovimiento`; anotado el 2026-10-11 por el frente "la tienda
+  revisa el stock antes de Webpay", a pedido del owner vía la orquestadora; **leído, no medido**).
+  La venta directa del POS descuenta contra el saldo del local y no resta lo comprometido por las
+  cuentas abiertas del salón (`comprometidoPorItem`). Escena: queda una botella, la mesa 4 la
+  pidió y no la cobró, y el cajero la vende en el mostrador: la venta entra y la mesa 4 no puede
+  cobrar esa línea. La tienda, desde ese frente, sí respeta lo apartado (owner, 2026-10-11), así
+  que hoy son dos reglas. **Medir:** reproducirlo por API (mesa con la última unidad + `POST
+  /ventas` de esa unidad) y ver qué ve la mesa al cerrar; qué hacer es del owner (§ 4).
+
+- [x] **Un lote con saldo solo vencido pasa el chequeo de stock y la venta lo rechaza** (backend,
+  `ItemsService.validarStockAlPedir`; anotado el 2026-10-11 por el mismo frente; **leído, no
+  medido**). El chequeo lee `stock_ubicacion`, que suma los lotes vencidos
+  (`recalcularStockLote`), y la venta los salta (`MOTIVOS_QUE_SALTAN_VENCIDOS`). En la tienda eso
+  es un carrito que se cobra y queda pagado sin venta; en el salón, una mesa que pide y no puede
+  cobrar. **Medir** con un producto por lote cuyo único lote venció ayer, por la tienda y por una
+  cuenta.
+
+---
+
 ## Anular un plato, y cobrarlo, consume lo que se pidió y no lo que hoy dice el catálogo (cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § 3. Escribe en `movimientos_inventario`, así que fue

@@ -1190,6 +1190,66 @@ describe('Tienda: la venta vale lo que se pagó, aunque algo cambie entre el pag
         expect(await intentar('pagar', itemId)).toBe(`«${nombre}» se agotó`);
       });
 
+      /**
+       * El chequeo leía el saldo del local, que suma los lotes vencidos, y la
+       * venta los salta: medido el 2026-10-11, `pagar` mandaba a Webpay y el
+       * callback rechazaba con *"Stock insuficiente en lotes en esta ubicación
+       * (disponible: 0, requerido: 1); hay 1 más en lotes vencidos"*: pagada
+       * sin venta. Ahora el chequeo cuenta igual que la venta.
+       */
+      const productoConUnLote = async (nombre: string, vence: string) => {
+        const itemId = await crearItem('1000', {
+          nombre,
+          tipo: 'producto',
+          modoInventario: 'lote',
+        });
+        const entrada = await request(app.getHttpServer())
+          .patch(`/api/items/${itemId}/stock`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            tipo: 'entrada',
+            motivo: 'compra',
+            ubicacionId: await localDelTenant(),
+            cantidad: '1',
+            lote: {
+              codigoLote: `DOS-AHORAS-${randomUUID()}`,
+              fechaVencimiento: vence,
+            },
+          });
+        expect(entrada.status).toBe(200);
+        return itemId;
+      };
+
+      it.each(['checkout', 'pagar'] as const)(
+        'producto por lote con su único lote vencido ayer, POST /online/%s: se agotó, sin orden ni cobro',
+        async (ruta) => {
+          const hoy = instanteLocalEnZona(zona, new Date()).fecha;
+          const nombre = `Lote vencido dos ahoras E2E ${randomUUID()}`;
+          const itemId = await productoConUnLote(nombre, sumarDias(hoy, -1));
+
+          expect(await intentar(ruta, itemId)).toBe(`«${nombre}» se agotó`);
+        },
+      );
+
+      it('control: el lote que vence hoy todavía se vende, y se cobra', async () => {
+        const hoy = instanteLocalEnZona(zona, new Date()).fecha;
+        const itemId = await productoConUnLote(
+          `Lote vence hoy dos ahoras E2E ${randomUUID()}`,
+          hoy,
+        );
+        const ventasAntes = await ventasOnline();
+
+        const { ordenId, autorizado } = await pagar(itemId);
+        const location = await volver(ordenId);
+
+        await afirmarVentaPorLoCobrado(
+          ordenId,
+          location,
+          ventasAntes,
+          autorizado,
+        );
+      });
+
       it('receta con un insumo bloqueante agotado: nombra el insumo, no el plato', async () => {
         const insumo = `Insumo agotado dos ahoras E2E ${randomUUID()}`;
         const insumoId = await ingredienteConStock('1', insumo);
@@ -1240,10 +1300,9 @@ describe('Tienda: la venta vale lo que se pagó, aunque algo cambie entre el pag
       });
 
       /**
-       * Más estricta que la venta, a propósito (owner, 2026-10-11): la tienda
-       * respeta lo que una mesa del salón ya pidió y todavía no cobró. El
-       * mostrador, en cambio, se lo lleva igual (anotado aparte en
-       * `pendientes.md`).
+       * La tienda respeta lo que una mesa del salón ya pidió y todavía no
+       * cobró (owner, 2026-10-11), igual que el mostrador desde el mismo día
+       * (`reserva-stock-mesa.e2e-spec.ts`).
        */
       describe('lo que una mesa ya apartó', () => {
         let garzon: { id: string; pin: string };
@@ -1378,6 +1437,140 @@ describe('Tienda: la venta vale lo que se pagó, aunque algo cambie entre el pag
         expect(autorizados).toHaveLength(autorizadosAntes);
       },
     );
+  });
+
+  describe('un carrito armado a mano con un grupo obligatorio', () => {
+    /**
+     * La tienda no ofrece elegir opciones (manda la línea sin
+     * personalización) y la venta del callback sí valida el grupo: medido el
+     * 2026-10-11, una receta o un combo con un grupo obligatorio se cobraba en
+     * Webpay y la orden quedaba pagada sin venta, con *"El grupo … requiere
+     * elegir entre 1 y 1 unidades"*. La pantalla de la tienda pide solo
+     * `producto`: se llega por la API.
+     */
+    const borrarGrupo = async (grupoId: string) => {
+      const res = await request(app.getHttpServer())
+        .delete(`/api/grupos-modificadores/${grupoId}`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBeLessThan(300);
+    };
+
+    /** Una receta con un grupo de una opción, con el `min` que se pida. */
+    const recetaConGrupo = async (min: number) => {
+      const opcionId = await crearItem('0');
+      const grupo = await request(app.getHttpServer())
+        .post('/api/grupos-modificadores')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Salsa dos ahoras E2E ${randomUUID()}`,
+          opciones: [{ itemId: opcionId, cantidad: '1', precioExtra: '0' }],
+        });
+      expect(grupo.status).toBe(201);
+      const grupoId = (grupo.body as { grupoModificadorId: string })
+        .grupoModificadorId;
+      const insumoId = await crearItem('0', {
+        nombre: `Insumo grupo dos ahoras E2E ${randomUUID()}`,
+        tipo: 'ingrediente',
+        unidadMedida: 'unidad',
+        stock: '10',
+        costo: '100',
+      });
+      const nombre = `Receta con salsa dos ahoras E2E ${randomUUID()}`;
+      const recetaId = await crearItem('3000', {
+        nombre,
+        tipo: 'receta',
+        ingredientes: [
+          {
+            ingredienteItemId: insumoId,
+            cantidad: '1',
+            unidadCodigo: 'unidad',
+            bloqueante: true,
+          },
+        ],
+        gruposModificadores: [{ grupoModificadorId: grupoId, min, max: 1 }],
+      });
+      return { recetaId, nombre, grupoId };
+    };
+
+    const comboDe = async (recetaId: string) => {
+      const nombre = `Combo con salsa dos ahoras E2E ${randomUUID()}`;
+      const comboId = await crearItem('5000', {
+        nombre,
+        tipo: 'combo',
+        componentes: [
+          { componenteItemId: recetaId, cantidad: '1', bloqueante: true },
+        ],
+      });
+      return { comboId, nombre };
+    };
+
+    /** 400 con su mensaje, sin orden y sin cobro. */
+    const rechazado = async (
+      ruta: 'checkout' | 'pagar',
+      itemId: string,
+    ): Promise<string> => {
+      const servicioId = await crearItem('1000');
+      const ordenesAntes = await ordenesDelTenant();
+      const autorizadosAntes = autorizados.length;
+      const res = await request(app.getHttpServer())
+        .post(`/api/online/${ruta}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          lineas: [
+            { itemId: servicioId, cantidad: '1' },
+            { itemId, cantidad: '1' },
+          ],
+        });
+      expect(res.status).toBe(400);
+      expect(await ordenesDelTenant()).toBe(ordenesAntes);
+      expect(autorizados).toHaveLength(autorizadosAntes);
+      return (res.body as { message: string }).message;
+    };
+
+    it.each(['checkout', 'pagar'] as const)(
+      'una receta, POST /online/%s: se vende solo en el local, sin orden ni cobro',
+      async (ruta) => {
+        const { recetaId, nombre, grupoId } = await recetaConGrupo(1);
+
+        expect(await rechazado(ruta, recetaId)).toBe(
+          `«${nombre}» se vende solo en el local`,
+        );
+        await borrarItem(recetaId);
+        await borrarGrupo(grupoId);
+      },
+    );
+
+    it('un combo cuyo componente lo tiene: lo mismo, nombrando el combo', async () => {
+      const { recetaId, grupoId } = await recetaConGrupo(1);
+      const { comboId, nombre } = await comboDe(recetaId);
+
+      expect(await rechazado('pagar', comboId)).toBe(
+        `«${nombre}» se vende solo en el local`,
+      );
+      await borrarItem(comboId);
+      await borrarItem(recetaId);
+      await borrarGrupo(grupoId);
+    });
+
+    it('control: con el grupo opcional, la receta y el combo se cobran y la venta se crea', async () => {
+      const { recetaId, grupoId } = await recetaConGrupo(0);
+      const { comboId } = await comboDe(recetaId);
+
+      for (const itemId of [recetaId, comboId]) {
+        const ventasAntes = await ventasOnline();
+        const { ordenId, autorizado } = await pagar(itemId);
+        const location = await volver(ordenId);
+        await afirmarVentaPorLoCobrado(
+          ordenId,
+          location,
+          ventasAntes,
+          autorizado,
+        );
+      }
+      await borrarItem(comboId);
+      await borrarItem(recetaId);
+      await borrarGrupo(grupoId);
+    });
   });
 
   describe('el aviso al admin, con un rol que no es admin', () => {

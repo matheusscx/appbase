@@ -1420,7 +1420,9 @@ export class VentasService {
     // orden de bloqueo lo decidía el cliente. Dos ventas simultáneas con los
     // mismos dos productos en orden inverso se bloqueaban en cruz y Postgres
     // abortaba una — venta caída con un error opaco, sin corrupción pero sin
-    // explicación. Un orden global fijo hace el deadlock imposible.
+    // explicación. Un orden global fijo hace el deadlock imposible. En la venta
+    // directa, además, `validarStockAlPedir` (abajo) ya tomó de una y ordenado
+    // el lock de todo lo que este loop mueve, ingredientes incluidos.
     // Arranca con lo que avisó el motor de precios (descuento topeado por el piso
     // en cero, regla pausada, impuesto pausado, ítem pausado) y se le suma lo de
     // recetas/combos más abajo. Se renderizan
@@ -1449,6 +1451,27 @@ export class VentasService {
     // sería una consulta por línea de venta, N+1 en el camino más caliente
     // del sistema.
     const ubicacionLocalId = await this.ubicacionesService.localDe(tenantId);
+    // El mostrador respeta lo que las mesas ya pidieron (owner, 2026-10-11,
+    // opción A): hasta ese día la venta directa miraba solo el saldo del local,
+    // se llevaba la última unidad que una mesa tenía pedida y la mesa no podía
+    // cerrar. Es la misma regla de la tienda y del salón al pedir, con la misma
+    // fuente de lo apartado (`validarStockAlPedir` → `comprometidoPorItem`),
+    // con lock y en esta transacción, antes de mover nada. Ni el cierre de una
+    // cuenta (`cuentaId`: lo suyo se validó al pedirlo, y contra lo apartado se
+    // frenaría a sí misma) ni la tienda (`ventaCongelada`: ya cobró, y lo
+    // revisó antes de mandar a Webpay) pasan por acá.
+    if (!cuentaId && !ventaCongelada) {
+      await this.itemsService.validarStockAlPedir(
+        tenantId,
+        lineasConversion.map((l) => ({
+          itemId: l.item.id,
+          cantidad: l.cantidadCanonica,
+          personalizacion: l.personalizacion,
+        })),
+        [],
+        { soloLoApartado: true },
+      );
+    }
     for (const i of ordenLocks) {
       const { item, linea, personalizacion, cantidadCanonica } =
         lineasConversion[i];

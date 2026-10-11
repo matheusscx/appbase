@@ -522,7 +522,10 @@ liberar. El porqué completo de los tres enfoques está en la
 **Dos puertas crean compromiso, y las dos están topeadas** — `ItemsService.validarStockAlPedir`
 es el único guard y lo llaman las dos (desde el 2026-10-11 lo llama también la tienda antes de
 Webpay, con `bloquear: false`: lee el mismo tope sin crear compromiso,
-[`tienda-online.md`](tienda-online.md)):
+[`tienda-online.md`](tienda-online.md); y la venta directa del POS, con `soloLoApartado: true`:
+el mostrador no se lleva lo que una mesa ya pidió, [`ventas.md`](ventas.md#post-apiventas)).
+Desde ese mismo día el tope descuenta del saldo del local lo que está en **lotes vencidos**, que la
+venta salta: antes la mesa pedía el único lote, vencido, y no podía cerrar:
 
 | Camino | Qué valida |
 |---|---|

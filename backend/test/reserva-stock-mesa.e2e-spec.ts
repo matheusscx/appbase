@@ -1187,4 +1187,115 @@ describe('Reserva de stock al pedir (e2e)', () => {
       );
     });
   });
+
+  describe('El mostrador respeta lo que una mesa ya pidió', () => {
+    /**
+     * Hasta el 2026-10-11 la venta directa del POS miraba solo el saldo del
+     * local: medido ese día, con una unidad que la mesa ya tenía pedida, el
+     * `POST /ventas` daba 201 y la mesa no podía cerrar (400 *"Stock
+     * insuficiente…"*), con la cuenta entera trabada. El owner eligió que el
+     * mostrador respete lo apartado, igual que la tienda (opción A).
+     */
+    async function venderEnElMostrador(itemId: string, cantidad: string) {
+      const res = await request(app.getHttpServer())
+        .post('/api/ventas')
+        .set('Idempotency-Key', randomUUID())
+        .set('Authorization', `Bearer ${token}`)
+        .send({ lineas: [{ itemId, cantidad }], pagos: [] });
+      const message = (res.body as { message?: string | string[] }).message;
+      return {
+        status: res.status,
+        message: Array.isArray(message) ? message.join(' ') : (message ?? ''),
+      };
+    }
+
+    it('la última unidad que pidió la mesa no se vende en el mostrador, y la mesa la cobra', async () => {
+      const prod = await crearProducto('Pisco apartado', '1');
+      const cuentaId = await abrirCuenta();
+      await agregarLinea(cuentaId, prod.id, '1');
+
+      const venta = await venderEnElMostrador(prod.id, '1');
+
+      expect(venta).toEqual({
+        status: 400,
+        message: `"${prod.nombre}": lo que queda ya lo pidió una mesa`,
+      });
+      // El cierre de la propia mesa no choca contra lo que ella apartó.
+      await cerrarCuenta(cuentaId);
+      expect((await filaDelCatalogo(prod.nombre, prod.id)).stock).toBe(
+        '0.0000',
+      );
+    });
+
+    it('control: lo que sobra después de lo apartado se vende', async () => {
+      const prod = await crearProducto('Pisco que sobra', '2');
+      const cuentaId = await abrirCuenta();
+      await agregarLinea(cuentaId, prod.id, '1');
+
+      expect((await venderEnElMostrador(prod.id, '1')).status).toBe(201);
+    });
+
+    it('lo que no alcanza ni sin las mesas sigue con el mensaje de siempre', async () => {
+      const prod = await crearProducto('Pisco que no alcanza', '1');
+      const cuentaId = await abrirCuenta();
+      await agregarLinea(cuentaId, prod.id, '1');
+
+      const venta = await venderEnElMostrador(prod.id, '2');
+
+      expect(venta.status).toBe(400);
+      expect(venta.message).toBe(
+        `Stock insuficiente de "${prod.nombre}" en el local: quedan 1 unidad y lo que se está agregando necesita 2 unidad`,
+      );
+    });
+  });
+
+  describe('Un lote vencido no se puede pedir', () => {
+    /**
+     * El chequeo al pedir leía el saldo del local, que suma los lotes
+     * vencidos, y la venta los salta: medido el 2026-10-11, la mesa pedía el
+     * único lote, vencido, con 201 y al cerrar recibía *"Stock insuficiente en
+     * lotes en esta ubicación (disponible: 0, requerido: 1); hay 1 más en
+     * lotes vencidos"*.
+     */
+    it('el único lote venció: rebota al pedirlo, no al cobrar', async () => {
+      const nombre = nombreUnico('Queso vencido');
+      const { id } = await post<IdResponse>('/api/items', {
+        nombre,
+        precioBase: '1000',
+        monedaId: CLP_MONEDA_ID,
+        tipo: 'producto',
+        unidadMedida: 'unidad',
+        modoInventario: 'lote',
+      });
+      const ubicaciones = await request(app.getHttpServer())
+        .get('/api/ubicaciones')
+        .set('Authorization', `Bearer ${token}`);
+      expect(ubicaciones.status).toBe(200);
+      const localId = (ubicaciones.body as { id: string; tipo: string }[]).find(
+        (u) => u.tipo === 'local',
+      )!.id;
+      const entrada = await request(app.getHttpServer())
+        .patch(`/api/items/${id}/stock`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          tipo: 'entrada',
+          motivo: 'compra',
+          ubicacionId: localId,
+          cantidad: '1',
+          lote: {
+            codigoLote: `VENCIDO-${randomUUID()}`,
+            fechaVencimiento: '2020-01-01',
+          },
+        });
+      expect(entrada.status).toBe(200);
+      const cuentaId = await abrirCuenta();
+
+      const pedido = await intentarLinea(cuentaId, id, '1');
+
+      expect(pedido).toEqual({
+        status: 400,
+        message: `Stock insuficiente de "${nombre}" en el local: quedan 0 unidad y lo que se está agregando necesita 1 unidad`,
+      });
+    });
+  });
 });

@@ -208,6 +208,15 @@ callback, con el cobro hecho. El catálogo no los ofrece; un carrito armado a ma
 junto a otra línea rebota en el checkout con *"«Nombre» es un ingrediente: no se vende
 directamente"*, también antes de iniciar el pago.
 
+**Una receta o un combo con un grupo obligatorio tampoco** (2026-10-11). La tienda no ofrece
+elegir opciones: la línea viaja sin personalización. La venta del callback sí valida el grupo, y
+medido ese día la orden quedaba pagada sin venta con *"El grupo … requiere elegir entre 1 y 1
+unidades"*. El checkout corre los mismos resolvers de la venta sin personalización
+(`ItemsService.exigenPersonalizacion`, con los catálogos precargados de una vez) y rechaza antes
+de iniciar el pago con *"«Nombre» se vende solo en el local"*, el mismo texto que el producto con
+serie. Con grupos solo opcionales se cobra como siempre. El catálogo de la tienda pide solo
+`producto`, así que esto ataja el carrito armado a mano.
+
 **Lo que ya no hay no se cobra** (owner, 2026-10-11). El carrito vive en el navegador y el stock
 baja recién cuando el callback crea la venta, así que un carrito viejo —agotado entre que se armó
 y que se paga— terminaba cobrado en Webpay y con la orden pagada sin venta. Ahora
@@ -219,14 +228,14 @@ agotó"* —el producto, o el insumo que faltó— antes de iniciar el pago, sin
 solo el nombre: cuánto queda y en qué bodega es del local. Lo no bloqueante no frena, igual que en
 el POS.
 
-- **Más estricta que la venta, a propósito** (owner, 2026-10-11, entre "gemela de la venta" y
-  "respetar lo apartado"): si una mesa pidió la última botella y no la cobró, la tienda dice que
-  se agotó. El mostrador, en cambio, sí se la lleva (abierto en
-  [`pendientes.md`](../agent/pendientes.md) § 2).
+- **Respeta lo apartado** (owner, 2026-10-11, entre "gemela de la venta" y "respetar lo
+  apartado"): si una mesa pidió la última botella y no la cobró, la tienda dice que se agotó.
+  Desde el mismo día el mostrador tampoco se la lleva ([`ventas.md`](ventas.md#post-apiventas)).
 - **Sin lock** (`bloquear: false`): no se escribe nada después, y lo que descuenta de verdad es la
   venta del callback, bajo su propio lock.
-- **No cubre** el minuto en Webpay (sigue en D, arriba) ni un lote cuyo único saldo está vencido:
-  el chequeo lee el saldo del local, que lo cuenta, y la venta lo salta.
+- **No cubre** el minuto en Webpay (sigue en D, arriba).
+- **Un lote vencido no cuenta**, igual que en la venta, que lo salta: un producto cuyo único lote
+  venció se agotó. Hasta el 2026-10-11 el chequeo lo contaba y la orden quedaba pagada sin venta.
 
 Aun así el checkout lo revalida, y no es redundante: el carrito vive en el navegador,
 así que el ítem se puede pausar **después** de que el cliente lo agregó.

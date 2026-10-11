@@ -8404,6 +8404,66 @@ describe('ItemsService', () => {
       expect(sql).toContain('i.eliminado_el IS NULL');
     });
 
+    it('con `soloLoApartado` (la venta directa) lockea también lo que no frena, aunque nada frene', async () => {
+      // La venta mueve después lo no bloqueante: si acá se lockeara solo lo que
+      // frena, dos ventas con bloqueantes cruzados se bloquearían en cruz.
+      jest.spyOn(service, 'consumoDeLineas').mockResolvedValueOnce(
+        new Map([
+          [
+            PAPAS,
+            {
+              cantidad: new Decimal(1),
+              cantidadBloqueante: new Decimal(0),
+              nombre: NOMBRE,
+            },
+          ],
+        ]),
+      );
+      dataSource.query.mockResolvedValueOnce([
+        {
+          item_id: PAPAS,
+          unidad_medida: 'unidad',
+          modo_inventario: 'cantidad',
+        },
+      ]);
+
+      await service.validarStockAlPedir(
+        TENANT,
+        [{ itemId: PAPAS, cantidad: '1', personalizacion: null }],
+        [],
+        { soloLoApartado: true },
+      );
+
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(sql).toContain('FOR UPDATE OF ip');
+      expect(params[0]).toEqual([PAPAS]);
+    });
+
+    it('sin `soloLoApartado`, lo que no frena no se lockea ni se mira', async () => {
+      jest.spyOn(service, 'consumoDeLineas').mockResolvedValueOnce(
+        new Map([
+          [
+            PAPAS,
+            {
+              cantidad: new Decimal(1),
+              cantidadBloqueante: new Decimal(0),
+              nombre: NOMBRE,
+            },
+          ],
+        ]),
+      );
+
+      await service.validarStockAlPedir(TENANT, [
+        { itemId: PAPAS, cantidad: '1', personalizacion: null },
+      ]);
+
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+
     it('con `bloquear: false` (la tienda antes de Webpay) no lockea, pero topea igual contra lo apartado', async () => {
       // 3 físicos, 2 apartados por una mesa, la tienda pide 2: no alcanza.
       mockearPedidoDeProducto({ stock: '3', comprometido: '2' });

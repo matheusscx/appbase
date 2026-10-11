@@ -341,6 +341,37 @@ export class InventarioService {
     return hoy;
   }
 
+  /**
+   * Cuánto hay, por ítem, en lotes **vencidos** de una ubicación: lo que la
+   * venta no puede sacar aunque esté en el saldo. Gemelo exacto de la
+   * auto-selección FEFO de `moverCantidad` con un motivo de
+   * `MOTIVOS_QUE_SALTAN_VENCIDOS`: vencido es el lote vivo cuyo día
+   * (`fecha_vencimiento::date`, el mismo cast) ya pasó en el calendario del
+   * local (`fechaLocalTenant`, lo mismo que `hoyLocal`); el que vence hoy
+   * todavía se vende. Lo usa `ItemsService.validarStockAlPedir` para contar
+   * igual que la venta. Un ítem sin lotes vencidos no aparece.
+   */
+  async saldoEnLotesVencidos(
+    db: Db,
+    tenantId: string,
+    itemIds: string[],
+    ubicacionId: string,
+  ): Promise<Map<string, string>> {
+    const hoy = await fechaLocalTenant(db, tenantId, new Date());
+    const rows: { item_id: string; cantidad: string }[] = await db.query(
+      `SELECT l.item_id, SUM(lu.cantidad) AS cantidad
+         FROM item_lote l
+         JOIN lote_ubicacion lu ON lu.lote_id = l.lote_id
+        WHERE l.item_id = ANY($1::uuid[]) AND l.tenant_id = $2
+          AND lu.ubicacion_id = $3 AND lu.cantidad > 0
+          AND l.eliminado_el IS NULL
+          AND l.fecha_vencimiento::date::text < $4
+        GROUP BY l.item_id`,
+      [itemIds, tenantId, ubicacionId, hoy],
+    );
+    return new Map(rows.map((r) => [r.item_id, r.cantidad]));
+  }
+
   async registrarMovimiento(
     manager: EntityManager,
     params: RegistrarMovimientoParams,

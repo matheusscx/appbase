@@ -388,6 +388,27 @@ export class OnlineService {
       }
     }
 
+    // Una receta o un combo con un grupo obligatorio no se vende online: la
+    // tienda no ofrece elegir (ver `personalizacion: undefined` más abajo) y la
+    // venta del callback, que sí valida el grupo, rechazaba con el cobro ya
+    // hecho —orden pagada sin venta, medido el 2026-10-11—. Es la regla de la
+    // venta dicha antes de cobrar (`exigenPersonalizacion` corre sus mismos
+    // resolvers), con el mismo mensaje que el producto con serie. El catálogo
+    // de la tienda pide solo `producto`: esto ataja el carrito armado a mano.
+    // Se corta ANTES de `pagosRedirect.iniciar`, sin orden.
+    const exigenElegir = await this.itemsService.exigenPersonalizacion(
+      tenantId,
+      [...itemsBase.values()].map((i) => ({ itemId: i.id, tipo: i.tipo })),
+    );
+    for (const linea of dto.lineas) {
+      const item = itemsBase.get(linea.itemId)!;
+      if (exigenElegir.has(item.id)) {
+        throw new BadRequestException(
+          `«${item.nombre}» se vende solo en el local`,
+        );
+      }
+    }
+
     for (const linea of dto.lineas) {
       const item = itemsBase.get(linea.itemId)!;
       const { unidadBaseCodigo, forzarConteo } = resolverUnidadBaseDeItem(item);
@@ -440,8 +461,8 @@ export class OnlineService {
     // Webpay y con la orden pagada sin venta (medido en
     // `tienda-dos-ahoras.e2e-spec.ts`). Es la regla del salón al pedir —lo
     // bloqueante de productos, recetas y combos contra el saldo del local—, y
-    // por decisión del owner también respeta lo que las mesas ya apartaron, así
-    // que es más estricta que la venta: el mostrador sí se lleva lo apartado.
+    // por decisión del owner también respeta lo que las mesas ya apartaron, igual
+    // que el mostrador desde el mismo día (`soloLoApartado` en la venta directa).
     // No cubre el minuto en Webpay: eso sigue en el aviso de la orden sin venta.
     //
     // El comprador lee el nombre y nada más: cuánto queda y en qué bodega es

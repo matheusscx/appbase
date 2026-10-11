@@ -373,6 +373,8 @@ al final, y con el mismo vencimiento decide la llegada y después el código del
 **vencido** —su fecha ya pasó en el calendario del local; el día del vencimiento todavía se
 vende— **no se vende**: la venta lo salta, y elegido a mano se rechaza. Tampoco viaja en un
 traslado sin lote elegido. **Sí se merma**, y la merma sin lote elegido se lo lleva primero.
+Desde el 2026-10-11 tampoco se puede **pedir** en una mesa ni **pagar** en la tienda: el chequeo
+de stock antes de vender lo cuenta igual que la venta.
 
 **Qué unidad con serie sale** (implementado 2026-10-03, [`features/inventario-serializado.md`](features/inventario-serializado.md#quién-elige-qué-unidad-con-serie-sale)):
 en un producto con número de serie **la unidad la elige quien vende**, nunca el sistema: el cajero
@@ -479,6 +481,12 @@ pedir**, que es cuando todavía puede ofrecer otra cosa.
   lo que consumirían las líneas vivas de las cuentas **abiertas**, calculada cuando se
   pregunta. La reserva **no toca `movimientos_inventario`** y el stock sigue saliendo recién
   al cerrar la cuenta ([`inventario-kardex.md`](./features/inventario-kardex.md)).
+- **El mostrador también lo respeta** (owner, 2026-10-11, opción A, igual que la tienda). Si
+  queda una botella y la mesa 4 ya la pidió, la venta directa del POS rechaza *«"Pisco": lo que
+  queda ya lo pidió una mesa»*. Hasta ese día la venta entraba y la mesa 4 no podía cobrar. Lo
+  que no alcanza ni sin contar a las mesas sigue con el mensaje de siempre, el del local y las
+  bodegas. El cierre de la propia cuenta no choca contra lo que ella apartó. El mensaje todavía
+  no dice qué mesa lo tiene.
 
 Dos reglas **nuevas desde el 2026-09-01**. La primera se siente en el local desde el primer
 día; **la segunda recién desde el 2026-09-02**, y el porqué está en su propia viñeta:

@@ -287,6 +287,16 @@ distintos con el mismo cuerpo = dos notas, porque la segunda devolución legíti
   (`correccion_venta_id`). El `REFUND` en sí es idempotente por intento desde el 2026-10-04, con
   su propia clave del lado de la pasarela ([ADR-029](../adr/029-reembolso-con-efecto-externo.md)).
 
+**El mostrador no se lleva lo que una mesa ya pidió (owner, 2026-10-11, opción A).** Antes de
+mover el stock, la venta directa pasa por `ItemsService.validarStockAlPedir` con
+`soloLoApartado: true`, en su transacción y lockeando de una, ordenado, todo lo que después mueve: el mismo tope y la misma fuente de lo
+apartado (`comprometidoPorItem`) que el salón al pedir y la tienda antes de Webpay. Solo rechaza
+lo que alcanzaría en el local si no fuera por las cuentas abiertas, con *«"Nombre": lo que
+queda ya lo pidió una mesa»*. Lo que no alcanza ni así lo rechaza el chokepoint, con el mensaje
+de siempre. No pasan por ahí el cierre de una cuenta (`cuentaId`: lo suyo se validó al pedirlo, y
+contra lo apartado se frenaría a sí mismo) ni la venta de la tienda (`ventaCongelada`: ya cobró, y
+lo revisó antes). Hasta ese día la venta entraba y la mesa no podía cerrar.
+
 **Un producto con número de serie se vende eligiendo la unidad (2026-10-03).** Quien vende
 decide cuál sale; el servidor no elige. La línea de un producto en modo `serie` **tiene que traer
 `unidadIds`**, con tantas unidades como `cantidad` (entera) y sin repetir dentro de la venta; en un
@@ -849,7 +859,7 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 3. Convertir precios a moneda oficial (`precioOrigen × tasa_cambio`)
 4. Llamar `calculoPreciosService.calcular` → importes autoritativos
 5. Calcular excedente; validar `permite_vuelto` si hay excedente; determinar estado
-6. `db.transaccion`: **reclamar la `Idempotency-Key`** (primera sentencia; si ya estaba, reproducir y cortar acá) → guardar cabecera → detalles → trazas de reglas → customer → inventario (`salida/venta` por producto, ingrediente, componente u opción, cada una con su línea: `venta_detalle_id`) → pagos → movimientos de caja (efectivo) → **documentos de la venta** (`VentaDocumentosService.documentarVenta`) → guardar la respuesta junto a la clave
+6. `db.transaccion`: **reclamar la `Idempotency-Key`** (primera sentencia; si ya estaba, reproducir y cortar acá) → guardar cabecera → detalles → trazas de reglas → customer → lo apartado por las mesas (solo la venta directa) → inventario (`salida/venta` por producto, ingrediente, componente u opción, cada una con su línea: `venta_detalle_id`) → pagos → movimientos de caja (efectivo) → **documentos de la venta** (`VentaDocumentosService.documentarVenta`) → guardar la respuesta junto a la clave
 
 ### La venta online no recalcula: `ventaCongelada` (2026-10-11)
 
