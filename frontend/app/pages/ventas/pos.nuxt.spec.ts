@@ -122,8 +122,15 @@ let clavesDeVenta: (string | undefined)[] = []
 let respuestasVenta: (Error | { status: number, data: unknown } | Record<string, unknown>)[] = []
 /** Lo que devuelve `GET /tipos-documento`, en el orden del servidor (por nombre). */
 let tiposDocumentoMock: unknown[] = []
-/** El total que devuelve `POST /calculo-precios/calcular`; `null` = el `[]` de siempre. */
-let totalCalculoMock: string | null = null
+/**
+ * El total que devuelve `POST /calculo-precios/calcular`. Siempre contesta un resultado
+ * con `totales`, aunque el test no mire el total: el debounce de `useVenta` (300 ms)
+ * puede dispararse a mitad de un test si el host frena el event loop, y hasta el
+ * 2026-10-12 ese cálculo caía en el `[]` del catch-all. Un `resultado` sin `totales`
+ * rompe el `totalFinal` de `pos.vue` como *unhandled rejection* y vitest sale con 1
+ * con todos los tests en verde (`docs/agent/resueltos.md`).
+ */
+let totalCalculoMock = '0'
 /** Si no es `null`, `POST /calculo-precios/calcular` se rechaza con esto (gana sobre el total). */
 let calculoFallaCon: unknown = null
 /** La página de catálogo que devuelve `GET /items`. */
@@ -155,7 +162,7 @@ mockNuxtImport('useApiFetch', () => {
     if (ruta.endsWith('/calculo-precios/calcular') && calculoFallaCon !== null) {
       return Promise.reject(calculoFallaCon)
     }
-    if (ruta.endsWith('/calculo-precios/calcular') && totalCalculoMock !== null) {
+    if (ruta.endsWith('/calculo-precios/calcular')) {
       return Promise.resolve({
         lineas: [],
         totales: {
@@ -222,7 +229,7 @@ beforeEach(() => {
   clavesDeVenta = []
   respuestasVenta = []
   tiposDocumentoMock = []
-  totalCalculoMock = null
+  totalCalculoMock = '0'
   calculoFallaCon = null
   itemsCatalogoMock = []
   unidadesVendiblesMock = []

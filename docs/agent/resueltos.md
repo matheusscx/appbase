@@ -23,6 +23,56 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El *unhandled rejection* de `pos.nuxt.spec.ts` en `pos.vue:165` (cerrada 2026-10-12)
+
+**La causa está en el mock, no en la pantalla.** En `pos.nuxt.spec.ts`, `POST
+/calculo-precios/calcular` contestaba un resultado solo si el test fijaba `totalCalculoMock`. Si
+no, caía en el catch-all, que devuelve `[]`. Un `[]` como `resultado` no trae `totales`, y el
+`totalFinal` de `pos.vue` (`resultado.value?.totales.totalFinal`) revienta en el render. El API
+real siempre manda `totales`, así que solo el mock produce ese estado.
+
+**Quién llama a `/calcular` en el test que se nombró:** solo el debounce de `useVenta` (300 ms).
+`confirmarCobro` no pasa por `asegurarVigente()`. El test agrega la línea, espera 20 ms y cobra.
+El cobro termina en `limpiar()`, que apaga el timer. Si el timer dispara antes de eso, el `[]`
+entra.
+
+**Lo medido el 2026-10-12:**
+
+| Corrida | N | Rojas | Carga (load 1 min) |
+|---|---|---|---|
+| El spec solo, con 16 procesos `yes` sobre 12 núcleos | 11 | 0 | 11–40 |
+| El spec solo, con `npm test` entero (2228 tests) corriendo en paralelo | 30 | 0 | 7,5–28 |
+| Sonda: el mismo spec con la espera tras confirmar las unidades estirada de 20 a 400 ms, sin arreglo | 3 | 3 | host libre |
+| La misma sonda, con el arreglo | 3 | 0 | host libre |
+
+La sonda reproduce la firma exacta: *"Cannot read properties of undefined (reading
+'totalFinal')"* en `pos.vue:165:52`, y vitest nombra el mismo test como el último en curso
+(*"confirmar crea la línea con las unidades y el cobro manda sus unidadIds"*). En el orden
+natural no reprodujo en 41 corridas cargadas. No se midió qué orden de timers dejó pasar al
+debounce en la corrida original. El arreglo no depende de eso: cierra todos los caminos al `[]`.
+
+**Cómo se cerró:** `totalCalculoMock` pasa a valer `'0'` por defecto, y `/calcular` contesta
+siempre un `ResultadoVenta` con `totales`. Los tests que fijan un total siguen fijándolo. Gemelo
+revisado: `tienda/index.nuxt.spec.ts` también deja `/calcular` en su catch-all, pero ahí solo se
+agrega al carrito en los tests donde el cálculo falla a propósito, así que el `[]` no tiene camino.
+`tienda/pasarela.nuxt.spec.ts` sí carga líneas en `useTiendaCarrito` (debounce de 300 ms) y su mock
+contesta `[]` a `/calcular`, pero `pasarela.vue` lee los `totales` del checkout (`tienda-checkout`),
+no los del cálculo: si el timer dispara, el `[]` queda guardado y nadie lo rinde.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Intermitente de vitest: `pos.nuxt.spec.ts` deja un *unhandled rejection* en `pos.vue:165`**
+  (frontend unit; visto el 2026-10-11 en el frente de dependencias, que en el POS solo cambia la
+  versión de nuxt). *"Cannot read properties of undefined (reading 'totalFinal')"*: `resultado`
+  existe y no trae `totales`. Los 2228 tests pasan, pero vitest sale con 1 por el error. Apareció
+  una vez, con `test:e2e` corriendo en paralelo en el host. Solo ese spec, 6 de 6 limpias con nuxt
+  4.5.2 y 6 de 6 con la 4.4.8 anterior; `npm test` entero con el host libre, 2 de 2 limpias.
+  **Primera vez anotado.** Si vuelve, mirar qué mock de ese spec contesta un cálculo sin `totales`
+  después de que el test terminó (el último test en curso fue "confirmar crea la línea con las
+  unidades y el cobro manda sus unidadIds").
+
+---
+
 ## La ventana de consulta de Webpay Plus son 7 días, medido (cerrada 2026-10-12)
 
 **Medido** el 2026-10-12 15:06 UTC por la orquestadora, con el pago de integración de la medición

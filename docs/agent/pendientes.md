@@ -127,32 +127,6 @@ destapa una decisión que no es mía).
   (`aprobada` o `error`), consultar el estado en vez de confirmar. O leer ese 4xx como "sin
   confirmar" y no como rechazo.
 
-- [ ] **Intermitente de Playwright: `caja/historial-cajero.spec.ts:91` no ve el toast a tiempo**
-  (frontend e2e; visto el 2026-10-11 en el Playwright entero del frente del salón, `b6721c3a`, que
-  no toca caja). El toast "El historial de cajas es solo para supervisión" no apareció en 5 s en
-  la 2ª de tres corridas; en la 1ª y en la 3ª pasó, y solo dio 8/8. **Primera vez anotado.** Junto
-  con el de abajo son dos intermitentes nuevos el mismo día bajo carga: si alguno vuelve, correrlo
-  en loop con la suite cargando antes de subirle el timeout (memoria del repo: un intermitente se
-  cierra corriéndolo en loop, no subiendo el número).
-
-- [ ] **Intermitente de Playwright: `menu-lateral.spec.ts:83` no llega a `networkidle` en `/ventas/pos`**
-  (frontend e2e; visto el 2026-10-11 en el Playwright entero del frente "ingrediente + stock",
-  `3c5b6858`, que no toca el POS). `page.goto('/ventas/pos')` no alcanzó `networkidle` en 30 s:
-  114/115, con RestartCount 0, OOMKilled false y load ~3,5. Solo, 8/8 verde. **Primera vez
-  anotado**: si vuelve a aparecer, correrlo en loop con el resto de la suite cargando y mirar qué
-  request deja abierta la página del POS (un `networkidle` que nunca llega suele ser un polling o
-  un stream). No bloquea la integración.
-
-- [ ] **Intermitente de vitest: `pos.nuxt.spec.ts` deja un *unhandled rejection* en `pos.vue:165`**
-  (frontend unit; visto el 2026-10-11 en el frente de dependencias, que en el POS solo cambia la
-  versión de nuxt). *"Cannot read properties of undefined (reading 'totalFinal')"*: `resultado`
-  existe y no trae `totales`. Los 2228 tests pasan, pero vitest sale con 1 por el error. Apareció
-  una vez, con `test:e2e` corriendo en paralelo en el host. Solo ese spec, 6 de 6 limpias con nuxt
-  4.5.2 y 6 de 6 con la 4.4.8 anterior; `npm test` entero con el host libre, 2 de 2 limpias.
-  **Primera vez anotado.** Si vuelve, mirar qué mock de ese spec contesta un cálculo sin `totales`
-  después de que el test terminó (el último test en curso fue "confirmar crea la línea con las
-  unidades y el cobro manda sus unidadIds").
-
 - [ ] **Los ~40 campos `@EsMontoCobrado` no tienen techo: un monto que no cabe en su columna llega
   al `INSERT`** (backend, DTOs con `@EsMontoCobrado()`; anotado el 2026-10-09 por el frente que cerró
   los seis 500 del monto suelto de caja y pagos; **leído, no medido** salvo esos seis). Ese frente le
@@ -1037,6 +1011,45 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   esperar la siguiente.
   ⛔ **No subir el `connectTimeoutMillis`** (ADR-020): taparía el síntoma y debilitaría la defensa
   que hace fallar ruidoso a un pool agotado.
+
+- [ ] **Intermitente de Playwright: `caja/historial-cajero.spec.ts:91` no vio el toast en 5 s: no
+  reprodujo en 45 corridas cargadas** (frontend e2e; **pasado a vigilancia el 2026-10-12** por el
+  frente de los intermitentes). Cayó una vez, el 2026-10-11, en la 2ª de tres corridas del
+  Playwright entero del frente del salón (`b6721c3a`, que no toca caja): el toast *"El historial
+  de cajas es solo para supervisión"* no apareció en 5 s.
+  **Lo medido el 2026-10-12** (stack propio, QZ Tray abierto en el host, carga con 12 procesos
+  `yes` sobre 12 núcleos; RestartCount 0 y OOMKilled false antes y después):
+  - el test solo, `--repeat-each 30`: **30/30 verdes**, load de 25 a 48;
+  - con una sonda que mide en paralelo cuándo resuelve el `goto` y cuándo se ve el toast:
+    **15/15**. El `goto` resolvió en ~25 ms y el toast se vio a los 325–879 ms. Con los 5 s de vida
+    del toast, le sobran ~5,3 s. Queda descartado que el toast salga y se vaya antes de que el
+    `expect` empiece a mirar.
+  **Qué falta saber:** para fallar, el toast tiene que tardar más de 5 s en aparecer, o sea, más de
+  5 s entre el arranque de la SPA, el `GET` de la caja y el 403. Con CPU cargada no pasó del
+  segundo. Lo que no se probó es la suite entera cargando el stack (memoria de la VM, el dev
+  server de Nuxt compilando otras páginas).
+  **Qué lo reabre:** otra caída. Antes de subir el timeout, mirar en el trace de Playwright cuándo
+  salió el `GET /caja/:id` y cuándo volvió.
+
+- [ ] **Intermitente de Playwright: `layout/menu-lateral.spec.ts:83` no llegó a `networkidle` en
+  `/ventas/pos`: no reprodujo en 50 corridas cargadas** (frontend e2e; **pasado a vigilancia el
+  2026-10-12** por el frente de los intermitentes). Cayó una vez, el 2026-10-11, en el Playwright
+  entero del frente "ingrediente + stock" (`3c5b6858`, que no toca el POS): el `goto` del caso
+  del vendedor no alcanzó `networkidle` en 30 s (114/115, RestartCount 0, OOMKilled false, load
+  ~3,5).
+  **Lo medido el 2026-10-12** (mismo entorno que la de arriba):
+  - el caso `/ventas/pos`, `--repeat-each 30`: **30/30 verdes**, load de 11 a 44;
+  - con una sonda que registra cada request del `goto` y cuánto tarda: **20/20**. Llegó a
+    `networkidle` en 1,0–1,08 s, sin ninguna request de más de 2 s.
+  **Descartado, medido:** QZ Tray abierto en el host. El spec no usa el fixture `sin-qz-tray`,
+  pero el POS no conecta a QZ al montar: solo importa `qz-tray` al imprimir (`useImpresoras.ts`).
+  Las 50 corridas fueron con QZ escuchando en 8181/8182. Tampoco hay polling ni stream en el POS:
+  el único `setInterval` de la app es `useRefrescoPeriodico`, que vive en el Inicio.
+  **Qué falta saber:** para caer, una request tuvo que quedar abierta 30 s. Con CPU cargada, el POS
+  no tuvo ninguna de más de 2 s. Lo que no se probó es la suite entera, ni un backend que se
+  reinicie a mitad de la corrida (`start:dev` con el fuente montado, si alguien toca un `.ts`).
+  **Qué lo reabre:** otra caída. Antes de cambiar el `waitUntil`, mirar en el trace qué request
+  quedó pendiente.
 
 - [ ] **El alta tiene que revivir una cuenta soft-borrada — inerte hasta que exista la baja
   de usuarios** (backend + BD, decisión del owner 2026-08-11; **reescrita el 2026-08-22 al
