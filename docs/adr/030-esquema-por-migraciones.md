@@ -82,8 +82,8 @@ prod" y "más adelante".
 - **Las bases que armó `synchronize` no arrancan con este código**: la línea base intenta crear
   tablas que ya existen (`relation "usuarios" already exists`) y la app sale con error, sin tocar
   nada salvo una tabla `migrations` vacía. Se recrean una vez: `./scripts/reset-db.sh` o
-  `./scripts/entorno.sh db` en local; en el demo, el reset de un solo paso que coordina la
-  orquestadora con el owner.
+  `./scripts/entorno.sh db` en local; el demo se recreó el 2026-10-12, vaciando el esquema
+  mientras Railway construía la imagen (cómo y lo medido: [`resueltos.md`](../agent/resueltos.md)).
 - TypeORM compara índices por nombre, unicidad y columnas, **no por `where`**: cambiar el `where`
   de un `@Index` no genera migración y hay que escribirla a mano.
 - `startup-pos.sql` sigue siendo documentación de referencia; no lo ejecuta nadie.

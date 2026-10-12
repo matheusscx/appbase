@@ -23,6 +23,62 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## `synchronize` → migraciones, y el corte del demo (cerrada 2026-10-12)
+
+Código en `4a520380` ([ADR-030](../adr/030-esquema-por-migraciones.md)): el esquema lo arman las
+migraciones en todos los entornos, `synchronize` apagado y `migration:check` en el CI.
+
+**El corte del demo se hizo en otro orden que el que dejaba la entrada** (owner, 2026-10-12, por
+AskUserQuestion de la orquestadora: "vaciala mientras corre el CI"). En vez de esperar el
+deployment `FAILED` y redeployar —la orden de redeploy ya la bloqueó el clasificador otras
+veces—, la orquestadora subió `4a520380` y vació el esquema **apenas el CI salió verde**, con
+Railway construyendo la imagen. Así el deploy de las migraciones arrancó sobre la base vacía, sin
+deploy fallido ni redeploy, y la ventana con el backend viejo sobre la base vacía fue de segundos
+(el riesgo que marcó la sesión: si ese contenedor se reiniciaba, `synchronize` rearmaba el esquema
+sin la tabla `migrations` y el deploy nuevo chocaba).
+
+**Medido:** CI `38293479664` verde a las 19:11:37 UTC; `DROP SCHEMA` a las 19:11:40, con 0
+tablas comprobadas después; deployment `49a7a79d` en `SUCCESS`, con `Running dev seed...` y
+`Seed complete.` en sus logs y sin `Migration … failed`; la base del demo quedó con 128 tablas
+(las 127 más `migrations`), 1 migración aplicada y 16 usuarios sembrados;
+`smoke-produccion.sh` exit 0.
+
+### La entrada que cierra, como estaba en `pendientes.md` § Endurecimiento
+
+- [ ] **`synchronize: true` → migraciones (CRÍTICO, bloqueante de prod)** (backend) —
+  hoy el esquema lo crea `synchronize` al bootstrap (dev + CI, porque `NODE_ENV != production`).
+  En prod `synchronize` **puede dropear columnas y perder datos** al arrancar tras un cambio
+  de entidad. Antes de cualquier deploy real: apagar `synchronize` en prod, adoptar
+  migraciones TypeORM (generar desde el estado actual, versionar), y que el deploy corra
+  `migration:run`. `startup-pos.sql` deja de ser solo referencia y pasa a ser el baseline
+  de la primera migración. Es dinero y multi-tenant: sin esto un deploy puede corromper datos.
+  ✅ **Decidido (owner, 2026-10-12, por AskUserQuestion de la orquestadora, con el costo de cada
+  opción): "Desde ya, en el demo".** Se arma todo, el demo de Railway pasa a usar migraciones
+  ahora y el CI frena cualquier cambio de esquema que no traiga su migración. Costo aceptado: cada
+  sesión que cambie el esquema tarda unos minutos más. Descartadas: "se arma ahora y se prende al
+  salir a prod" y "más adelante".
+  ✅ **Hecho en código** ([ADR-030](../adr/030-esquema-por-migraciones.md)): `migrationsRun` y
+  `synchronize: false` en todos los entornos; línea base generada **desde las entities**, no desde
+  `startup-pos.sql` (que es documentación y diverge), más `uuid-ossp` y los 14 índices de
+  expresión que antes creaba el seeder; `npm run migration:check` en el CI antes del e2e. Medido:
+  `pg_dump --schema-only` de línea base + seeder contra `synchronize` + seeder, idéntico salvo la
+  tabla `migrations` y el token `\restrict` de pg_dump. Lo que corrige de la entrada: en Railway
+  `NODE_ENV` no es `production` (el backend loguea `Running dev seed...` en cada arranque), así que
+  el demo sí corría `synchronize`, y los 14 índices de expresión no existían en ninguna base con
+  `production` porque el seeder no corre ahí.
+  ⏳ **Falta el corte del demo, una sola vez** (lo coordina la orquestadora con el owner; la skill
+  `railway-sync-db` tiene un paso que bloquea el clasificador). La base del demo la armó
+  `synchronize`: el primer deploy con este código intenta la línea base, choca con
+  `relation "usuarios" already exists`, sale con error a los ~30 s sin tocar nada (solo deja una
+  tabla `migrations` vacía, que el deployment viejo ignora) y no pasa el healthcheck. Medido en
+  local con `Dockerfile.prod` contra una copia armada por `synchronize`. El paso, **después** de que
+  ese deployment quede `FAILED`: vaciar el esquema (el primer comando del paso 2 de
+  `railway-sync-db`, **sin** importar el volcado) y `railway redeploy --service backend --yes`. El
+  backend nuevo corre la línea base sobre la base vacía y el seeder la siembra; verificar con el
+  paso 4 de la skill y que los logs de ese deployment no traigan `Migration … failed`. Entre el
+  vaciado y el deploy nuevo, el demo responde con error.
+  Al cerrar el corte, esta entrada se muda a `resueltos.md`.
+
 ## Auditoría de secretos en el historial: ninguno real, y un chequeo para que siga así (cerrada 2026-10-12)
 
 **Es la parte de auditoría de "Secrets fuera del repo + rotación".** Lo que queda —secret

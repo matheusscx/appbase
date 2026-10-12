@@ -74,6 +74,13 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
+- [ ] **Un comentario de `backend/test/papelera.e2e-spec.ts` (~línea 1614) dice que `descuentos`,
+  `recargos` y `turnos` no tienen índice único de nombre, y sí lo tienen** (anotado el 2026-10-12
+  por el frente de migraciones, [ADR-030](../adr/030-esquema-por-migraciones.md); ya era falso
+  antes: los creaba el seeder, hoy la línea base). Los tests siguen valiendo, porque prueban que
+  `restaurar()` valide el nombre; lo falso es el porqué. Corregir el comentario contra
+  `pg_indexes`, no contra `startup-pos.sql`.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
@@ -551,39 +558,6 @@ los arreglos de las secciones 1 a 4. Los cuatro proyectos que esperan una sesió
 decimales, fechas y zonas horarias, serie y lote, moneda de los descuentos fijos y "sin
 mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bloquean esta sección.
 
-- [ ] **`synchronize: true` → migraciones (CRÍTICO, bloqueante de prod)** (backend) —
-  hoy el esquema lo crea `synchronize` al bootstrap (dev + CI, porque `NODE_ENV != production`).
-  En prod `synchronize` **puede dropear columnas y perder datos** al arrancar tras un cambio
-  de entidad. Antes de cualquier deploy real: apagar `synchronize` en prod, adoptar
-  migraciones TypeORM (generar desde el estado actual, versionar), y que el deploy corra
-  `migration:run`. `startup-pos.sql` deja de ser solo referencia y pasa a ser el baseline
-  de la primera migración. Es dinero y multi-tenant: sin esto un deploy puede corromper datos.
-  ✅ **Decidido (owner, 2026-10-12, por AskUserQuestion de la orquestadora, con el costo de cada
-  opción): "Desde ya, en el demo".** Se arma todo, el demo de Railway pasa a usar migraciones
-  ahora y el CI frena cualquier cambio de esquema que no traiga su migración. Costo aceptado: cada
-  sesión que cambie el esquema tarda unos minutos más. Descartadas: "se arma ahora y se prende al
-  salir a prod" y "más adelante".
-  ✅ **Hecho en código** ([ADR-030](../adr/030-esquema-por-migraciones.md)): `migrationsRun` y
-  `synchronize: false` en todos los entornos; línea base generada **desde las entities**, no desde
-  `startup-pos.sql` (que es documentación y diverge), más `uuid-ossp` y los 14 índices de
-  expresión que antes creaba el seeder; `npm run migration:check` en el CI antes del e2e. Medido:
-  `pg_dump --schema-only` de línea base + seeder contra `synchronize` + seeder, idéntico salvo la
-  tabla `migrations` y el token `\restrict` de pg_dump. Lo que corrige de la entrada: en Railway
-  `NODE_ENV` no es `production` (el backend loguea `Running dev seed...` en cada arranque), así que
-  el demo sí corría `synchronize`, y los 14 índices de expresión no existían en ninguna base con
-  `production` porque el seeder no corre ahí.
-  ⏳ **Falta el corte del demo, una sola vez** (lo coordina la orquestadora con el owner; la skill
-  `railway-sync-db` tiene un paso que bloquea el clasificador). La base del demo la armó
-  `synchronize`: el primer deploy con este código intenta la línea base, choca con
-  `relation "usuarios" already exists`, sale con error a los ~30 s sin tocar nada (solo deja una
-  tabla `migrations` vacía, que el deployment viejo ignora) y no pasa el healthcheck. Medido en
-  local con `Dockerfile.prod` contra una copia armada por `synchronize`. El paso, **después** de que
-  ese deployment quede `FAILED`: vaciar el esquema (el primer comando del paso 2 de
-  `railway-sync-db`, **sin** importar el volcado) y `railway redeploy --service backend --yes`. El
-  backend nuevo corre la línea base sobre la base vacía y el seeder la siembra; verificar con el
-  paso 4 de la skill y que los logs de ese deployment no traigan `Migration … failed`. Entre el
-  vaciado y el deploy nuevo, el demo responde con error.
-  Al cerrar el corte, esta entrada se muda a `resueltos.md`.
 - [ ] **CI como portón de deploy + branch protection** (harness/infra) — hoy
   `.github/workflows/ci.yml` dispara `on: push: [main]` → corre DESPUÉS del push (detector),
   y `main` **no está protegida**. Para prod: (1) el job de deploy declara `needs: [gate]`
