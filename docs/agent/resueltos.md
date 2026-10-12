@@ -23,6 +23,40 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El pre-push con el gate completo se cierra, superado por Wait for CI (cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § Endurecimiento. **Decidido por el owner el 2026-10-11**
+(AskUserQuestion de la orquestadora, recomendada: "cerrarla", por sobre "pre-push solo con lo
+rápido"). La entrada existía para que un rojo no llegara al demo, porque Railway desplegaba en
+paralelo al CI. Desde el mismo día Railway tiene **Wait for CI** (`backend` y `frontend`) y el owner
+eligió que las suites pesadas enteras corran en CI (`CLAUDE.md`, bloque 🚦): un pre-push que las
+corriera contradice esa decisión, y uno solo con lo rápido repite el cierre de cada sesión. Lo que
+queda sin cubrir es deliberado: un push con errores deja `main` en rojo (sin desplegar) hasta el
+arreglo, que va primero. `.githooks/pre-push` sigue como estaba: solo `codegraph sync`, no bloqueante.
+
+### La entrada que cierra, como estaba
+
+- [ ] **Pre-push que corre el gate completo local (todas las suites)** (harness) — hoy
+  `.githooks/pre-push` solo hace `codegraph sync` (no-bloqueante); el gate real corre en CI
+  DESPUÉS del push (fue lo que dejó `main` en rojo el 2026-07-23). Mover ese gate a un pre-push
+  BLOQUEANTE para atajarlo antes de subir. Diseño acordado:
+  (1) **Gate determinista primero** (rápido, sin infra, cero falsos rojos): backend `lint:check`
+  + `typecheck` + `test` (unit); frontend `test` (vitest) + `typecheck:ratchet` + `design:check`
+  + `build`. Si algo falla, corta acá sin tocar Docker.
+  (2) **e2e con DB fresca**: `./scripts/reset-db.sh` → `npm run test:e2e`. El script ya existe
+  (jul-2026) y resuelve esta parte: borra el volumen, levanta y **espera el `Seed complete`** —
+  no alcanza con esperar a Postgres healthy, porque el contenedor levanta antes de que el seed
+  termine y una suite que arranca a mitad falla con errores que no son regresiones. La DB limpia
+  es imprescindible: contra la DB de dev acumulada da **falsos rojos** por polución de seed
+  ([[e2e-cumulative-stock-pollution]]) → entrena `--no-verify` y mata el hook. NO usar `--build`:
+  el e2e levanta su Nest en el host y solo necesita Postgres fresco.
+  (3) **Solo el bloque pesado (Docker + e2e) si el rango a pushear tocó `backend/`**; el gate
+  determinista corre siempre. Evita 4 min de stack+e2e en un push de solo-docs.
+  (4) Bloqueante; escape `git push --no-verify`. Es el enforcement de [[rigor-sobre-velocidad]].
+  Complementa (no reemplaza) el CI, que sigue siendo la verdad con DB fresca de verdad.
+
+---
+
 ## Las alertas de Dependabot quedan activas, sin PRs (cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § 4. **Decidido por el owner el 2026-10-11** (AskUserQuestion

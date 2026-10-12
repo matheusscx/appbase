@@ -580,6 +580,9 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   `docs/ARCHITECTURE.md` § Demo en Railway y el bloque 🚦 de `CLAUDE.md`). Queda abierta la (2),
   branch protection con PRs, que choca con la regla de desarrollo de commitear directo a `main`
   y es decisión del owner para el paso a producción.
+  ✅ **Decidido (owner, 2026-10-11, AskUserQuestion de la orquestadora con el costo de cada
+  opción): la (2) va al paso a producción**, no antes. Hasta ese día, directo a `main` con Wait for
+  CI. El repo es público (verificado), así que la protección de rama está disponible sin plan pago.
 - [ ] **Smoke post-deploy automático en el CI** (harness/infra, anotado 2026-08-11) — hoy
   `./scripts/smoke-produccion.sh` existe y funciona, pero **se corre a mano**, así que la
   única red que corre sola tras un push es el `healthcheckPath`, y ése prueba el arranque,
@@ -773,24 +776,6 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
     `node_modules/reka-ui` 2.9.9, que cumple los dos rangos, y validando con npm 10 que el lock
     no cambia. Comprobación: `node -e` sobre `package-lock.json`, una sola clave que termine en
     `node_modules/reka-ui`.
-- [ ] **Pre-push que corre el gate completo local (todas las suites)** (harness) — hoy
-  `.githooks/pre-push` solo hace `codegraph sync` (no-bloqueante); el gate real corre en CI
-  DESPUÉS del push (fue lo que dejó `main` en rojo el 2026-07-23). Mover ese gate a un pre-push
-  BLOQUEANTE para atajarlo antes de subir. Diseño acordado:
-  (1) **Gate determinista primero** (rápido, sin infra, cero falsos rojos): backend `lint:check`
-  + `typecheck` + `test` (unit); frontend `test` (vitest) + `typecheck:ratchet` + `design:check`
-  + `build`. Si algo falla, corta acá sin tocar Docker.
-  (2) **e2e con DB fresca**: `./scripts/reset-db.sh` → `npm run test:e2e`. El script ya existe
-  (jul-2026) y resuelve esta parte: borra el volumen, levanta y **espera el `Seed complete`** —
-  no alcanza con esperar a Postgres healthy, porque el contenedor levanta antes de que el seed
-  termine y una suite que arranca a mitad falla con errores que no son regresiones. La DB limpia
-  es imprescindible: contra la DB de dev acumulada da **falsos rojos** por polución de seed
-  ([[e2e-cumulative-stock-pollution]]) → entrena `--no-verify` y mata el hook. NO usar `--build`:
-  el e2e levanta su Nest en el host y solo necesita Postgres fresco.
-  (3) **Solo el bloque pesado (Docker + e2e) si el rango a pushear tocó `backend/`**; el gate
-  determinista corre siempre. Evita 4 min de stack+e2e en un push de solo-docs.
-  (4) Bloqueante; escape `git push --no-verify`. Es el enforcement de [[rigor-sobre-velocidad]].
-  Complementa (no reemplaza) el CI, que sigue siendo la verdad con DB fresca de verdad.
 
 ---
 
