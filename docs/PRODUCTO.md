@@ -873,7 +873,11 @@ el food-cost y las mermas valorizadas.
   proveedor de una línea— queda guardado por proveedor, así que la próxima factura de ese mismo
   proveedor llega ya calzada. **"No es mercadería"** es un estado igual de aprendido: un flete o
   una garantía de envase se aparta la primera vez y las siguientes facturas llegan con esa línea
-  ya apartada, sin que nadie tenga que acordarse de sacarla cada vez. **Aceptar o reclamar la
+  ya apartada, sin que nadie tenga que acordarse de sacarla cada vez. **El descuento de la
+  factura no toca la garantía de envases**: un descuento en % del proveedor se calcula sobre lo
+  que vende, no sobre el depósito por los envases (ni sobre lo que la factura marca como "no
+  venta" o "a rebajar"), porque el formato del SII no deja cómo incluirlos; la pantalla lo
+  explica al lado del descuento para que el encargado no lo crea un error. **Aceptar o reclamar la
   factura ante el SII (Ley 19.983) se sigue haciendo en el SII**: leer el XML para pre-llenar no
   es tomar posición sobre el documento, y el sistema lo dice en pantalla para que nadie confunda
   cargar la compra con aceptarla. Spec:

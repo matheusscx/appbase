@@ -238,16 +238,57 @@ export function bodyLectura(doc: DocumentoDte, proveedorId?: string): Record<str
 }
 
 /**
+ * Lo que un `IndExe` deja fuera de toda base de un descuento global en %.
+ * Formato DTE v2.5 (SII, 2026-02), pág. 44: la base es de afectas (sin
+ * `IndExeDR`), exentas (`IndExeDR` 1) o no facturables (`IndExeDR` 2), y el
+ * schema (`DTE_v10.xsd`) no admite otro valor; el formato no nombra las líneas
+ * 3, 4 y 5 (pág. 36–37) al hablar de descuentos, pero se deduce que ninguno
+ * las toma. El texto es el motivo, en lenguaje de local.
+ */
+const FUERA_DE_TODA_BASE = {
+  '3': 'es garantía de envases, un depósito que se devuelve',
+  '4': 'la factura dice que no es una venta',
+  '5': 'rebaja una guía de despacho anterior',
+} as const
+
+type IndExeFueraDeBase = keyof typeof FUERA_DE_TODA_BASE
+
+/** `Object.hasOwn`, no `in`: el `IndExe` es texto libre del XML, y `in`
+ *  también calza con "toString" o "__proto__" del prototipo. */
+function quedaFueraDeTodaBase(indExe: string | null): indExe is IndExeFueraDeBase {
+  return indExe != null && Object.hasOwn(FUERA_DE_TODA_BASE, indExe)
+}
+
+/** Un descuento global en % y las líneas que su `IndExe` dejó fuera de su base. */
+export interface DescuentoConLineasFueraDte {
+  /** `ValorDR` tal cual vino en el XML, en puntos ("2" = 2%): solo para
+   *  mostrar, nunca para calcular — el monto ya lo cerró `descuentoDeFactura`. */
+  valorDR: string
+  /** La suma de `MontoItem` sobre la que se calculó. */
+  base: string
+  lineas: { descripcion: string, montoItem: string | null, indExe: IndExeFueraDeBase }[]
+}
+
+export interface DescuentoDeFacturaDte {
+  monto: string | null
+  avisos: string[]
+  fueraDeLaBase: DescuentoConLineasFueraDte[]
+}
+
+/**
  * El descuento de la factura (spec § 3.3): en `$` tal cual, en `%` sobre la
  * suma de `montoItem` de las líneas con el mismo `indExe` que `indExeDR`
  * (ausente calza con ausente), cuantizado a la escala de la moneda. Un
- * recargo no se carga — se avisa con su monto.
+ * recargo no se carga — se avisa con su monto. `fueraDeLaBase` anota, por
+ * descuento en %, las líneas que ninguna base toma (`FUERA_DE_TODA_BASE`):
+ * no cambia el monto, es para que la pantalla explique por qué no pesaron.
  */
 export function descuentoDeFactura(
   doc: DocumentoDte,
   decimalesMoneda: number,
-): { monto: string | null, avisos: string[] } {
+): DescuentoDeFacturaDte {
   const avisos: string[] = []
+  const fueraDeLaBase: DescuentoConLineasFueraDte[] = []
   let monto: Decimal | null = null
 
   for (const dg of doc.descuentosGlobales) {
@@ -262,18 +303,44 @@ export function descuentoDeFactura(
       avisos.push('La factura trae un descuento global que no se pudo leer')
       continue
     }
-    const montoDescuento = dg.tipoValor === '$'
-      ? valor
-      : doc.lineas
-          .filter(l => l.indExe === dg.indExeDR)
-          .reduce((acc, l) => acc.plus(l.montoItem ?? 0), new Decimal(0))
-          .times(valor)
-          .div(100)
-          .toDecimalPlaces(decimalesMoneda, Decimal.ROUND_HALF_UP)
-    monto = (monto ?? new Decimal(0)).plus(montoDescuento)
+    if (dg.tipoValor === '$') {
+      monto = (monto ?? new Decimal(0)).plus(valor)
+      continue
+    }
+    const base = doc.lineas
+      .filter(l => l.indExe === dg.indExeDR)
+      .reduce((acc, l) => acc.plus(l.montoItem ?? 0), new Decimal(0))
+    monto = (monto ?? new Decimal(0)).plus(
+      base.times(valor).div(100).toDecimalPlaces(decimalesMoneda, Decimal.ROUND_HALF_UP),
+    )
+    // Una línea que ESTE descuento sí tomó no está fuera, aunque su `IndExe`
+    // sea 3, 4 o 5: pasa con un `IndExeDR` que el schema no admite.
+    const fuera = doc.lineas.flatMap(l => quedaFueraDeTodaBase(l.indExe) && l.indExe !== dg.indExeDR
+      ? [{ descripcion: l.descripcion, montoItem: l.montoItem, indExe: l.indExe }]
+      : [])
+    if (fuera.length) fueraDeLaBase.push({ valorDR: dg.valor, base: base.toFixed(), lineas: fuera })
   }
 
-  return { monto: monto ? monto.toFixed() : null, avisos }
+  return { monto: monto ? monto.toFixed() : null, avisos, fueraDeLaBase }
+}
+
+/**
+ * "El 2% se calculó sobre $50.000: GARANTIA ENVASES ($6.000) no lleva
+ * descuento porque es garantía de envases, un depósito que se devuelve." —
+ * una frase por descuento en %, para mostrar junto al campo del descuento.
+ */
+export function explicacionDescuentoDte(
+  fueraDeLaBase: DescuentoConLineasFueraDte[],
+  formatMonto: (v: string) => string,
+): string[] {
+  return fueraDeLaBase.map((d) => {
+    const lineas = d.lineas.map((l) => {
+      const monto = l.montoItem != null ? ` (${formatMonto(l.montoItem)})` : ''
+      return `${l.descripcion}${monto} no lleva descuento porque ${FUERA_DE_TODA_BASE[l.indExe]}`
+    })
+    const porcentaje = new Decimal(d.valorDR).toFixed().replace('.', ',')
+    return `El ${porcentaje}% se calculó sobre ${formatMonto(d.base)}: ${lineas.join('; ')}.`
+  })
 }
 
 /** "COCA COLA 350ML CJ12 · 10 CJ · $9.600": lo que la línea muestra de la factura. */
@@ -362,14 +429,14 @@ export function precargaDescuento(
   doc: DocumentoDte,
   decimalesMoneda: number,
   faltaAlgunPrecio: boolean,
-): { monto: string | null, avisos: string[] } {
+): DescuentoDeFacturaDte {
   if (doc.preciosConIva) {
-    return { monto: null, avisos: ['Esta factura trae los precios con IVA incluido: tipeá el neto'] }
+    return { monto: null, avisos: ['Esta factura trae los precios con IVA incluido: tipeá el neto'], fueraDeLaBase: [] }
   }
   if (faltaAlgunPrecio) {
     return doc.descuentosGlobales.length
-      ? { monto: null, avisos: ['La factura trae un descuento, pero hay líneas sin precio: revisalas para que se cargue'] }
-      : { monto: null, avisos: [] }
+      ? { monto: null, avisos: ['La factura trae un descuento, pero hay líneas sin precio: revisalas para que se cargue'], fueraDeLaBase: [] }
+      : { monto: null, avisos: [], fueraDeLaBase: [] }
   }
   return descuentoDeFactura(doc, decimalesMoneda)
 }

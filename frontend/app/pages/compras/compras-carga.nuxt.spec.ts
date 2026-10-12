@@ -117,7 +117,10 @@ let retenerProductos: Promise<void> | null = null
 
 const FIXTURES_DTE = join(__dirname, '../../composables/__fixtures__/dte')
 function documentoAndina(): DocumentoDte {
-  const buf = readFileSync(join(FIXTURES_DTE, 'andina-33.xml'))
+  return documentoDeFixture('andina-33.xml')
+}
+function documentoDeFixture(nombre: string): DocumentoDte {
+  const buf = readFileSync(join(FIXTURES_DTE, nombre))
   const bytes = buf.buffer.slice(buf.byteOffset, buf.byteOffset + buf.byteLength) as ArrayBuffer
   const resultado = leerDte(bytes)
   if (!resultado.ok) throw new Error(`fixture inválido: ${resultado.error}`)
@@ -851,6 +854,52 @@ describe('compras/[id] — cargar desde el XML (tarea 4)', () => {
     // destraba solo, y el aviso de "sin precio" desaparece.
     expect(descuentoInput(wrapper).props('modelValue')).toBe('2100')
     expect(wrapper.find('[data-qa="compra-dte-aviso"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('garantía de envases (IndExe 3): el 2% sale sobre la cerveza sola ($1.000) y la pantalla explica por qué', async () => {
+    const wrapper = await montar()
+    await emitirCargar(wrapper, {
+      documento: documentoDeFixture('garantia-envases.xml'),
+      lectura: {
+        ...respuestaAndina(),
+        asociaciones: [
+          { clave: 'CODIGO:INT1:CER-LAGER-24', destino: null },
+          { clave: 'NOMBRE:GARANTIA ENVASES', destino: null },
+        ],
+      },
+      proveedorId: PROVEEDOR_ANDINA.id,
+      rutProveedor: null,
+    })
+
+    // 2% de $50.000 (la cerveza), no de $56.000: la garantía no entra en
+    // ninguna base de descuento (Formato DTE v2.5, pág. 44).
+    expect(descuentoInput(wrapper).props('modelValue')).toBe('1000')
+    const explicacion = wrapper.findAll('[data-qa="compra-descuento-explicacion"]')
+    expect(explicacion).toHaveLength(1)
+    expect(explicacion[0]!.text()).toBe(
+      'El 2% se calculó sobre $50.000: GARANTIA ENVASES ($6.000) no lleva descuento '
+      + 'porque es garantía de envases, un depósito que se devuelve.',
+    )
+
+    // Con el campo vacío (lo borró el encargado, o lo vació una línea sin
+    // precio) no queda un "se calculó" al lado de un descuento que no está.
+    await emitir(descuentoInput(wrapper), '')
+    expect(wrapper.find('[data-qa="compra-descuento-explicacion"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('sin líneas fuera de la base (andina-33.xml), el descuento no trae explicación', async () => {
+    const wrapper = await montar()
+    await emitirCargar(wrapper, {
+      documento: documentoAndina(),
+      lectura: respuestaAndina(),
+      proveedorId: PROVEEDOR_ANDINA.id,
+      rutProveedor: null,
+    })
+
+    expect(descuentoInput(wrapper).props('modelValue')).toBe('2100')
+    expect(wrapper.find('[data-qa="compra-descuento-explicacion"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

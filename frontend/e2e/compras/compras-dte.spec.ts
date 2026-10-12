@@ -142,21 +142,21 @@ function rutGenerado(sello: number): string {
 
 /** El XML de la plantilla con el RUT y el folio de esta corrida, ya
  *  codificado en ISO-8859-1 — igual que el archivo que bajaría del SII. */
-function xmlConValores(rut: string, folio: string): Buffer {
-  const texto = PLANTILLA_XML.replace('__RUT__', rut).replace('__FOLIO__', folio)
+function xmlConValores(rut: string, folio: string, plantilla: string): Buffer {
+  const texto = plantilla.replace('__RUT__', rut).replace('__FOLIO__', folio)
   return Buffer.from(texto, 'latin1')
 }
 
 /** Abre el modal y sube el XML de esta corrida. No cierra el modal: cada
  *  escenario decide qué esperar después (auto-cargar, "proveedor" o
  *  "bloqueado"). */
-async function subirXml(page: Page, rut: string, folio: string) {
+async function subirXml(page: Page, rut: string, folio: string, plantilla = PLANTILLA_XML) {
   await page.locator('[data-qa="compra-cargar-dte"]').click()
   await expect(page.locator('[data-qa="cargar-dte-modal"]')).toBeVisible()
   await page.locator('input[data-qa="cargar-dte-archivo"]').setInputFiles({
     name: 'andina.xml',
     mimeType: 'application/xml',
-    buffer: xmlConValores(rut, folio),
+    buffer: xmlConValores(rut, folio, plantilla),
   })
 }
 
@@ -382,6 +382,34 @@ test('el XML pre-llena, aprende el código del proveedor y avisa cuando la factu
   await page.locator('[data-qa="cargar-dte-abrir"]').click()
   await page.waitForURL(new RegExp(`/compras/${compraFactura1Id}$`))
   await expect(page.locator('[data-qa="compra-confirmada"]')).toBeVisible()
+})
+
+/** La escena de la cerveza (owner, 2026-10-12): 10 cajas a $50.000 + la
+ *  garantía de envases a $6.000 con `IndExe` 3 y un 2% de descuento global
+ *  sin `IndExeDR`. Mismos montos que
+ *  `frontend/app/composables/__fixtures__/dte/garantia-envases.xml`. */
+const PLANTILLA_GARANTIA_XML = readFileSync(
+  resolve(process.cwd(), 'e2e/compras/fixtures/garantia-envases-dte.xml'),
+  'latin1',
+)
+
+test('la garantía de envases no lleva el descuento de la factura, y la pantalla dice por qué', async ({ page, request }) => {
+  const sello = Date.now() + 2
+  const rut = rutGenerado(sello)
+  await crearProveedor(request, sello, rut)
+
+  await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
+  await page.goto('/compras/nueva', { waitUntil: 'networkidle' })
+  await subirXml(page, rut, `E2E5-${sello}`, PLANTILLA_GARANTIA_XML)
+  await expect(page.locator('[data-qa="cargar-dte-modal"]')).toHaveCount(0)
+
+  // 2% de los $50.000 de cerveza, no de $56.000: la garantía no entra en
+  // ninguna base de descuento global (Formato DTE v2.5, pág. 44).
+  await expect(page.locator('input[data-qa="compra-descuento"]')).toHaveValue(/1\.000/)
+  await expect(page.locator('[data-qa="compra-descuento-explicacion"]')).toHaveText(
+    'El 2% se calculó sobre $50.000: GARANTIA ENVASES ($6.000) no lleva descuento '
+    + 'porque es garantía de envases, un depósito que se devuelve.',
+  )
 })
 
 test('salir con el XML leído sin guardar pide confirmación', async ({ page, request }) => {

@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="ISO-8859-1"?>
+<DTE xmlns="http://www.sii.cl/SiiDte" version="1.0">
+  <Documento ID="F77T33">
+    <Encabezado>
+      <IdDoc>
+        <TipoDTE>33</TipoDTE>
+        <Folio>__FOLIO__</Folio>
+        <FchEmis>2026-10-12</FchEmis>
+      </IdDoc>
+      <Emisor>
+        <RUTEmisor>__RUT__</RUTEmisor>
+        <RznSoc>Cervecera e2e Ltda</RznSoc>
+      </Emisor>
+      <Receptor>
+        <RUTRecep>76123456-7</RUTRecep>
+        <RznSocRecep>Resto Demo SpA</RznSocRecep>
+      </Receptor>
+      <Totales>
+        <MntNeto>49000</MntNeto>
+        <TasaIVA>19</TasaIVA>
+        <IVA>9310</IVA>
+        <GrntDep>6000</GrntDep>
+        <MntTotal>64310</MntTotal>
+      </Totales>
+    </Encabezado>
+    <Detalle>
+      <NroLinDet>1</NroLinDet>
+      <CdgItem>
+        <TpoCodigo>INT1</TpoCodigo>
+        <VlrCodigo>CER-LAGER-24</VlrCodigo>
+      </CdgItem>
+      <NmbItem>CERVEZA LAGER 350ML CJ24</NmbItem>
+      <QtyItem>10</QtyItem>
+      <UnmdItem>CJ</UnmdItem>
+      <PrcItem>5000</PrcItem>
+      <MontoItem>50000</MontoItem>
+    </Detalle>
+    <Detalle>
+      <NroLinDet>2</NroLinDet>
+      <NmbItem>GARANTIA ENVASES</NmbItem>
+      <IndExe>3</IndExe>
+      <QtyItem>10</QtyItem>
+      <UnmdItem>CJ</UnmdItem>
+      <PrcItem>600</PrcItem>
+      <MontoItem>6000</MontoItem>
+    </Detalle>
+    <DscRcgGlobal>
+      <NroLinDR>1</NroLinDR>
+      <TpoMov>D</TpoMov>
+      <GlosaDR>Descuento cliente frecuente</GlosaDR>
+      <TpoValor>%</TpoValor>
+      <ValorDR>2</ValorDR>
+    </DscRcgGlobal>
+  </Documento>
+</DTE>

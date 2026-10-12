@@ -1,12 +1,13 @@
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import type { DocumentoDte } from './useDte'
+import type { DescuentoGlobalDte, DocumentoDte, LineaDte } from './useDte'
 import {
   TAMANO_MAXIMO_DTE,
   bodyLectura,
   debeLlenarDescuentoDte,
   descuentoDeFactura,
+  explicacionDescuentoDte,
   fraseOrigenDte,
   leerDte,
   lineaFormDesdeDte,
@@ -65,7 +66,7 @@ describe('leerDte — andina-33.xml (la escena de la spec)', () => {
   })
 
   it('descuentoDeFactura: 2% de (91.200 + 8.800 + 5.000) = 2% de 105.000 = 2.100, el flete adentro de la base', () => {
-    expect(descuentoDeFactura(doc, 0)).toEqual({ monto: '2100', avisos: [] })
+    expect(descuentoDeFactura(doc, 0)).toEqual({ monto: '2100', avisos: [], fueraDeLaBase: [] })
   })
 })
 
@@ -199,6 +200,143 @@ describe('descuentoDeFactura — descuentos y recargos globales', () => {
     expect(monto).toBe('3500')
     expect(avisos).toHaveLength(1)
     expect(avisos[0]).toContain('$800')
+  })
+})
+
+// Formato DTE v2.5 (SII, 2026-02): un descuento global en % se reparte en tres
+// bases —afectas (sin IndExeDR), exentas (IndExeDR 1) y no facturables
+// (IndExeDR 2), pág. 44— y el schema no admite otro IndExeDR. Una línea con
+// IndExe 3 (garantía de envases), 4 (no venta) o 5 (a rebajar) no entra en
+// ninguna: el monto no cambia, pero la pantalla tiene que poder decir por qué.
+describe('descuentoDeFactura — las líneas que su IndExe deja fuera de toda base', () => {
+  function linea(descripcion: string, montoItem: string | null, indExe: string | null): LineaDte {
+    return {
+      clave: `NOMBRE:${descripcion}`,
+      descripcion,
+      cantidad: null,
+      unidadFactura: null,
+      precioListado: null,
+      precioUnitario: null,
+      conAjusteDeLinea: false,
+      montoItem,
+      indExe,
+    }
+  }
+  function documento(lineas: LineaDte[], descuentosGlobales: DescuentoGlobalDte[]): DocumentoDte {
+    const base = documentoOk(leerDte(leerFixture('garantia-envases.xml')))
+    return { ...base, lineas, descuentosGlobales }
+  }
+  const DOS_POR_CIENTO: DescuentoGlobalDte = { tipoMov: 'D', tipoValor: '%', valor: '2', indExeDR: null }
+
+  it('la escena: cerveza $50.000 + garantía de envases $6.000 (IndExe 3), 2% → $1.000 sobre $50.000, y la garantía queda anotada', () => {
+    const doc = documentoOk(leerDte(leerFixture('garantia-envases.xml')))
+    expect(descuentoDeFactura(doc, 0)).toEqual({
+      monto: '1000',
+      avisos: [],
+      fueraDeLaBase: [{
+        valorDR: '2',
+        base: '50000',
+        lineas: [{ descripcion: 'GARANTIA ENVASES', montoItem: '6000', indExe: '3' }],
+      }],
+    })
+  })
+
+  it('anota las de IndExe 4 y 5, no las exentas (1) ni las no facturables (2): esas tienen su propia base', () => {
+    const doc = documento([
+      linea('CERVEZA', '50000', null),
+      linea('PAN EXENTO', '20000', '1'),
+      linea('BONIFICACION', '3000', '2'),
+      linea('MUESTRA SIN COSTO', '4000', '4'),
+      linea('REBAJA GUIA 120', '1500', '5'),
+    ], [DOS_POR_CIENTO])
+    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0)
+    expect(monto).toBe('1000')
+    expect(fueraDeLaBase).toEqual([{
+      valorDR: '2',
+      base: '50000',
+      lineas: [
+        { descripcion: 'MUESTRA SIN COSTO', montoItem: '4000', indExe: '4' },
+        { descripcion: 'REBAJA GUIA 120', montoItem: '1500', indExe: '5' },
+      ],
+    }])
+  })
+
+  it('un descuento en $ no tiene base: no anota nada', () => {
+    const doc = documento(
+      [linea('CERVEZA', '50000', null), linea('GARANTIA ENVASES', '6000', '3')],
+      [{ tipoMov: 'D', tipoValor: '$', valor: '1000', indExeDR: null }],
+    )
+    expect(descuentoDeFactura(doc, 0).fueraDeLaBase).toEqual([])
+  })
+
+  it('un recargo en % no se carga (va a avisos): tampoco se explica su base', () => {
+    const doc = documento(
+      [linea('CERVEZA', '50000', null), linea('GARANTIA ENVASES', '6000', '3')],
+      [{ tipoMov: 'R', tipoValor: '%', valor: '2', indExeDR: null }],
+    )
+    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0)
+    expect(monto).toBeNull()
+    expect(fueraDeLaBase).toEqual([])
+  })
+
+  it('un IndExe que no está en el formato (ni un nombre del prototipo, como "toString") no se anota', () => {
+    const doc = documento(
+      [linea('CERVEZA', '50000', null), linea('RARO', '1000', 'toString'), linea('OTRO', '1000', '__proto__')],
+      [DOS_POR_CIENTO],
+    )
+    expect(descuentoDeFactura(doc, 0).fueraDeLaBase).toEqual([])
+  })
+
+  it('un IndExeDR fuera del schema ("3") que SÍ toma la garantía en su base: esa línea no se anota como fuera', () => {
+    const doc = documento(
+      [linea('CERVEZA', '50000', null), linea('GARANTIA ENVASES', '6000', '3')],
+      [{ tipoMov: 'D', tipoValor: '%', valor: '2', indExeDR: '3' }],
+    )
+    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0)
+    expect(monto).toBe('120')
+    expect(fueraDeLaBase).toEqual([])
+  })
+
+  it('dos descuentos en % (afectas y exentas): cada uno con su base, y la garantía anotada en los dos', () => {
+    const doc = documento(
+      [linea('CERVEZA', '50000', null), linea('PAN EXENTO', '20000', '1'), linea('GARANTIA ENVASES', '6000', '3')],
+      [DOS_POR_CIENTO, { tipoMov: 'D', tipoValor: '%', valor: '10', indExeDR: '1' }],
+    )
+    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0)
+    expect(monto).toBe('3000')
+    expect(fueraDeLaBase.map(f => [f.valorDR, f.base, f.lineas.length])).toEqual([['2', '50000', 1], ['10', '20000', 1]])
+  })
+})
+
+describe('explicacionDescuentoDte — el porqué, en el lenguaje del local', () => {
+  it('la escena de la cerveza: base, línea con su monto y el motivo', () => {
+    expect(explicacionDescuentoDte([{
+      valorDR: '2',
+      base: '50000',
+      lineas: [{ descripcion: 'GARANTIA ENVASES', montoItem: '6000', indExe: '3' }],
+    }], formatMontoStub)).toEqual([
+      'El 2% se calculó sobre $50.000: GARANTIA ENVASES ($6.000) no lleva descuento '
+      + 'porque es garantía de envases, un depósito que se devuelve.',
+    ])
+  })
+
+  it('un motivo por IndExe, separados; un % con decimales con coma; sin MontoItem, sin paréntesis', () => {
+    expect(explicacionDescuentoDte([{
+      valorDR: '2.5',
+      base: '50000',
+      lineas: [
+        { descripcion: 'MUESTRA SIN COSTO', montoItem: '4000', indExe: '4' },
+        { descripcion: 'REBAJA GUIA 120', montoItem: null, indExe: '5' },
+      ],
+    }], formatMontoStub)).toEqual([
+      'El 2,5% se calculó sobre $50.000: MUESTRA SIN COSTO ($4.000) no lleva descuento '
+      + 'porque la factura dice que no es una venta; REBAJA GUIA 120 no lleva descuento '
+      + 'porque rebaja una guía de despacho anterior.',
+    ])
+  })
+
+  it('sin nada fuera de la base, sin explicación', () => {
+    expect(explicacionDescuentoDte([], formatMontoStub)).toEqual([])
   })
 })
 
@@ -379,7 +517,7 @@ describe('precargaDescuento', () => {
   const doc = documentoOk(leerDte(leerFixture('andina-33.xml')))
 
   it('sin líneas sin precio y sin precios brutos: carga el descuento de descuentoDeFactura (2.100)', () => {
-    expect(precargaDescuento(doc, 0, false)).toEqual({ monto: '2100', avisos: [] })
+    expect(precargaDescuento(doc, 0, false)).toEqual({ monto: '2100', avisos: [], fueraDeLaBase: [] })
   })
 
   it('con precios brutos: no carga nada y avisa que hay que tipear el neto, sin llamar a descuentoDeFactura', () => {
@@ -387,6 +525,7 @@ describe('precargaDescuento', () => {
     expect(precargaDescuento(bruto, 0, false)).toEqual({
       monto: null,
       avisos: ['Esta factura trae los precios con IVA incluido: tipeá el neto'],
+      fueraDeLaBase: [],
     })
   })
 
@@ -395,11 +534,12 @@ describe('precargaDescuento', () => {
     expect(r.monto).toBeNull()
     expect(r.avisos).toHaveLength(1)
     expect(r.avisos[0]).toMatch(/sin precio/)
+    expect(r.fueraDeLaBase).toEqual([])
   })
 
   it('con alguna línea sin precio y SIN descuento global en la factura: no avisa nada (no hay nada que no se cargó)', () => {
     const sinDescuento: DocumentoDte = { ...doc, descuentosGlobales: [] }
-    expect(precargaDescuento(sinDescuento, 0, true)).toEqual({ monto: null, avisos: [] })
+    expect(precargaDescuento(sinDescuento, 0, true)).toEqual({ monto: null, avisos: [], fueraDeLaBase: [] })
   })
 })
 

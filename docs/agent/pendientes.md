@@ -438,29 +438,6 @@ transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-al
 Prisma y Drizzle tienen el mismo modelo manual de transacciones que TypeORM. No es un
 pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evaluación.
 
-- [ ] **El descuento global en % de una factura deja afuera de su base las líneas con `IndExe`
-  3, 4 o 5** (garantía de depósito por envases, entre otras) — hallazgo de la lectura del XML del
-  DTE (tarea 4, 2026-09-27), fuera de esa pieza porque decidir el tratamiento tributario de una
-  línea es materia fiscal (⛔ ADR-010, primer punto de "Detenerse y preguntar" de `CLAUDE.md`).
-  **Qué pasa hoy** (`descuentoDeFactura`,
-  `frontend/app/composables/useDte.ts:254`): un `DscRcgGlobal` con `TpoValor '%'` calcula su base
-  sumando el `MontoItem` de las líneas cuyo `IndExe` **calza exactamente** con el `IndExeDR` del
-  descuento — ausente con ausente (afectas), `'1'` (exentas), `'2'` (no facturables). Una línea con
-  `IndExe` `'3'` (garantía de envases), `'4'` o `'5'` **nunca entra en ninguna base**, porque
-  ningún `IndExeDR` vale eso: no hay descuento (ausente, exentas o no facturables) que la sume.
-  **Ejemplo con montos:** bebidas afectas por $50.000 + una línea de garantía de envases de
-  $6.000 con `IndExe='3'`, y un descuento del 2% sin `IndExeDR` (afectas) → la base es **$50.000**
-  (los envases quedan fuera) → **$1.000** de descuento, no $1.120 si el 2% también tomara los
-  $6.000. **Cómo lo ve el encargado hoy:** el monto del descuento llega precargado en el
-  formulario (ya con esa base acotada) y la línea de envases llega como una línea más del XML —
-  por asociar a un producto o apartada con "No es mercadería" — sin que la pantalla explique por
-  qué esa línea no pesó en el descuento. **Por qué va solo:** el estado fiscal por línea (qué es
-  "exento", qué es "no facturable", qué es una garantía que no tributa) es un invariante del
-  sistema — `CLAUDE.md` invariante 5, "exento es un estado fiscal explícito, nunca la ausencia de
-  impuesto", que sale de [ADR-011](../adr/011-catalogo-impuestos-sistema.md) — y una decisión con
-  implicancia tributaria que ADR-010 saca de cualquier tarea de arrastre: no se resuelve como
-  efecto colateral de leer un XML.
-
 ---
 
 ## 7. Acción del owner fuera del código

@@ -2,7 +2,7 @@
 import type { CompraDetalle, LineaCompra as LineaDetalle, PresentacionCompra, TotalDocumentoTipo } from '~/composables/useCompras'
 import { hoyLocal } from '~/composables/useVigenciaRegla'
 import type { DestinoCodigo, DocumentoDte, LecturaDteRespuesta, LineaDte } from '~/composables/useDte'
-import { debeLlenarDescuentoDte, fraseOrigenDte, lineaFormDesdeDte, precargaDescuento, repartirLineas } from '~/composables/useDte'
+import { debeLlenarDescuentoDte, explicacionDescuentoDte, fraseOrigenDte, lineaFormDesdeDte, precargaDescuento, repartirLineas } from '~/composables/useDte'
 import type { LineaForm, ProductoOpt } from '~/components/compras/LineaCompraForm.vue'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -529,6 +529,16 @@ const descuentoDte = computed(() => {
   return precargaDescuento(origenDte.value.documento, decimales, algunaSinPrecio)
 })
 
+// Por qué una línea del XML no pesó en el descuento en % (garantía de envases,
+// no venta, a rebajar): el monto no cambia, la pantalla lo explica. Con el
+// campo vacío no se explica nada: "se calculó" no va al lado de un descuento
+// que no está.
+const explicacionDescuento = computed(() =>
+  form.value.descuentoTotal
+    ? explicacionDescuentoDte(descuentoDte.value?.fueraDeLaBase ?? [], formatMonto)
+    : [],
+)
+
 // Llena `descuentoTotal` apenas `descuentoDte` tiene un monto para dar, pero
 // nunca más de una vez por lectura (`debeLlenarDescuentoDte`): ni cuando el
 // encargado ya tipeó algo, ni de vuelta si lo borró después de que se llenara
@@ -1043,6 +1053,14 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
             </UFormField>
             <p v-if="!descuentoHabilitado" class="text-xs text-muted" data-qa="compra-descuento-ayuda">
               Se carga cuando todas las líneas tienen precio.
+            </p>
+            <p
+              v-for="(texto, i) in explicacionDescuento"
+              :key="i"
+              class="max-w-md text-right text-xs text-muted"
+              data-qa="compra-descuento-explicacion"
+            >
+              {{ texto }}
             </p>
             <div class="flex items-center gap-3 text-sm font-medium">
               <span>Total</span>

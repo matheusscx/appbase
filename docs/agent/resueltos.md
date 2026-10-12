@@ -23,6 +23,95 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El descuento global en % de una factura y las líneas con `IndExe` 3, 4 o 5: queda como está, y la pantalla lo explica (cerrada 2026-10-12)
+
+**Decisión del owner** (2026-10-12, por AskUserQuestion de la orquestadora, con la escena "10 cajas
+de cerveza $50.000 + préstamo de envases $6.000, descuento 2%"): *"Dejalo como está y agregá la
+explicación"*. El descuento sigue saliendo sobre $50.000 ($1.000, no $1.120) y la pantalla le
+dice al encargado por qué la garantía no pesó. Descartadas: "incluir los envases" e "investigar
+primero". El owner no es experto del dominio y la recomendación se apoyó en una lectura del formato
+del SII que hizo la orquestadora ("la garantía de envases no es una venta, es un depósito"), así
+que antes de tocar código se confirmó contra la fuente.
+
+**Lo que dice el SII** — Formato Documentos Tributarios Electrónicos, **versión 2.5 (2026-02)**
+(`formato_dte_202602.pdf`), y el schema oficial (`schema_dte.zip`, `DTE_v10.xsd`), leídos el
+2026-10-12:
+
+- § D "Información de descuentos o recargos" (pág. 44): un `DscRcgGlobal` toma las afectas (sin
+  `IndExeDR`), las exentas (`IndExeDR` 1) o las no facturables (`IndExeDR` 2); *"si el descuento
+  afecta a todos, deben haber tres líneas"*. El XSD enumera `IndExeDR` solo como `1` y `2`.
+- `MntNeto` y `MntExe` (campos 107 y 108, pág. 29) son los que restan los descuentos globales;
+  `GrntDep` (campo 120, pág. 31) es *"la sumatoria de las líneas de detalle"* con `IndExe` 3.
+- `IndExe` (campo 5 del detalle, págs. 36–37): 3 garantía de depósito por envases, 4 ítem no
+  venta, 5 ítem a rebajar (guías no venta que rebajan una anterior).
+
+O sea, **por deducción** —el formato no lo dice con esas palabras, porque al hablar de descuentos
+no nombra las líneas 3, 4 y 5—: no deja ningún `IndExeDR` con el que un descuento global tome una
+de esas líneas, y los totales que restan descuentos no las suman. El cálculo de hoy es el que se
+desprende del formato, no un hueco. (La revisión independiente marcó la diferencia entre cita y
+deducción; por eso está escrito así.)
+
+**Lo medido antes de tocar nada** (fixture nuevo `garantia-envases.xml`, la escena del owner):
+`descuentoDeFactura` → `{ monto: '1000', avisos: [] }`, y en pantalla el descuento llegaba
+precargado en $1.000 sin una palabra sobre la garantía, que llegaba como una línea más por asociar.
+
+**Cómo se cerró:** `descuentoDeFactura` suma `fueraDeLaBase` —por cada descuento en %, su base y
+las líneas que su `IndExe` deja fuera— sin cambiar el monto; `explicacionDescuentoDte` lo pasa a
+texto, y `pages/compras/[id].vue` lo muestra debajo del campo del descuento: *"El 2% se calculó
+sobre $50.000: GARANTIA ENVASES ($6.000) no lleva descuento porque es garantía de envases, un
+depósito que se devuelve."* Un recargo no se explica (no se carga, no hay base). Detalle en
+[`features/compras.md`](../features/compras.md) § "La lectura del XML", paso 7.
+
+**Tests y mutantes:** `useDte.spec.ts` (la escena, 4 y 5 sí, 1 y 2 no, $ y recargo sin
+explicación, dos descuentos con dos bases; un `IndExe` "toString" —el `in` del primer intento
+calzaba con el prototipo, lo cazó la revisión— y un `IndExeDR` "3" que sí toma la garantía; el
+texto de cada motivo), `compras-carga.nuxt.spec.ts` (la explicación en pantalla, que se va con
+el campo vacío, y su ausencia con `andina-33.xml`) y `compras-dte.spec.ts` (Playwright,
+`fixtures/garantia-envases-dte.xml`). Mutantes medidos sobre el código final, uno por vez con
+`npx vitest run app/composables/useDte.spec.ts app/pages/compras/compras-carga.nuxt.spec.ts`
+(103 tests; sin mutante, todos verdes):
+
+| Mutante | Mueren |
+|---|---|
+| la pantalla no pinta la explicación (`v-for` sobre `[]`) | 1 (y el Playwright) |
+| `fueraDeLaBase` nunca se llena (el `push` apagado) | 4 |
+| la garantía entra en la base (el cálculo que el owner descartó) | 3, los del monto |
+| `in` en vez de `Object.hasOwn` | 1 |
+| sin excluir la línea que el propio descuento tomó | 1 |
+| la explicación se muestra con el campo vacío | 1 |
+
+**Lo que quedó afuera, a propósito:** `IndExe` 6 (no facturable negativo) tampoco entra hoy en
+ninguna base y no se explica: el formato resta las líneas 6 en `MontoNF` (campo 125, pág. 32)
+pero no dice si un descuento con `IndExeDR` 2 las toma, y eso no se adivina. Si aparece en una factura real,
+abre su propio frente fiscal.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 6
+
+- [ ] **El descuento global en % de una factura deja afuera de su base las líneas con `IndExe`
+  3, 4 o 5** (garantía de depósito por envases, entre otras) — hallazgo de la lectura del XML del
+  DTE (tarea 4, 2026-09-27), fuera de esa pieza porque decidir el tratamiento tributario de una
+  línea es materia fiscal (⛔ ADR-010, primer punto de "Detenerse y preguntar" de `CLAUDE.md`).
+  **Qué pasa hoy** (`descuentoDeFactura`,
+  `frontend/app/composables/useDte.ts:254`): un `DscRcgGlobal` con `TpoValor '%'` calcula su base
+  sumando el `MontoItem` de las líneas cuyo `IndExe` **calza exactamente** con el `IndExeDR` del
+  descuento — ausente con ausente (afectas), `'1'` (exentas), `'2'` (no facturables). Una línea con
+  `IndExe` `'3'` (garantía de envases), `'4'` o `'5'` **nunca entra en ninguna base**, porque
+  ningún `IndExeDR` vale eso: no hay descuento (ausente, exentas o no facturables) que la sume.
+  **Ejemplo con montos:** bebidas afectas por $50.000 + una línea de garantía de envases de
+  $6.000 con `IndExe='3'`, y un descuento del 2% sin `IndExeDR` (afectas) → la base es **$50.000**
+  (los envases quedan fuera) → **$1.000** de descuento, no $1.120 si el 2% también tomara los
+  $6.000. **Cómo lo ve el encargado hoy:** el monto del descuento llega precargado en el
+  formulario (ya con esa base acotada) y la línea de envases llega como una línea más del XML —
+  por asociar a un producto o apartada con "No es mercadería" — sin que la pantalla explique por
+  qué esa línea no pesó en el descuento. **Por qué va solo:** el estado fiscal por línea (qué es
+  "exento", qué es "no facturable", qué es una garantía que no tributa) es un invariante del
+  sistema — `CLAUDE.md` invariante 5, "exento es un estado fiscal explícito, nunca la ausencia de
+  impuesto", que sale de [ADR-011](../adr/011-catalogo-impuestos-sistema.md) — y una decisión con
+  implicancia tributaria que ADR-010 saca de cualquier tarea de arrastre: no se resuelve como
+  efecto colateral de leer un XML.
+
+---
+
 ## `synchronize` → migraciones, y el corte del demo (cerrada 2026-10-12)
 
 Código en `4a520380` ([ADR-030](../adr/030-esquema-por-migraciones.md)): el esquema lo arman las

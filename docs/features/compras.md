@@ -742,6 +742,31 @@ seguridad.
    mercadería", y ahí se destraba solo, sin que nadie toque el campo — se llena **como mucho una
    vez por lectura**, así que si el encargado ya tipeó o borró el descuento a mano no se pisa. Un
    recargo global no se carga (la compra no tiene recargos): aviso con el monto.
+
+   **Una línea con `IndExe` 3, 4 o 5 no entra en la base de ningún descuento en %, y la pantalla
+   dice por qué.** Con 10 cajas de cerveza por $50.000, la garantía de envases por $6.000
+   (`IndExe` 3) y un 2% sin `IndExeDR`, el descuento es **$1.000**, no $1.120, y debajo del campo
+   se lee *"El 2% se calculó sobre $50.000: GARANTIA ENVASES ($6.000) no lleva descuento porque es
+   garantía de envases, un depósito que se devuelve."* El motivo cambia con el indicador: 4 *"la
+   factura dice que no es una venta"*, 5 *"rebaja una guía de despacho anterior"*. Sale del
+   formato del SII, no de una elección nuestra —**por deducción**: el formato no nombra las
+   líneas 3, 4 y 5 al hablar de descuentos, pero no deja cómo tomarlas—. En el **Formato DTE v2.5
+   (2026-02)**, § D "Información de
+   descuentos o recargos" (pág. 44), un descuento global toma las afectas (sin `IndExeDR`), las
+   exentas (`IndExeDR` 1) o las no facturables (`IndExeDR` 2) —*"si el descuento afecta a todos,
+   deben haber tres líneas"*—, y el schema oficial (`DTE_v10.xsd`, `schema_dte.zip`) no admite
+   otro `IndExeDR`. Los descuentos globales se restan en `MntNeto` y `MntExe` (campos 107 y 108,
+   pág. 29), que suman solo afectas y exentas; la garantía va aparte, en `GrntDep` (campo 120,
+   pág. 31: la suma de las líneas con `IndExe` 3), y los valores de
+   `IndExe` están en el campo 5 del detalle (págs. 36–37). El cálculo no cambió con esto (owner,
+   2026-10-12: *"dejalo como está y agregá la explicación"*); lo que se agregó es
+   `fueraDeLaBase` en `descuentoDeFactura` y el texto, `explicacionDescuentoDte`; con el campo
+   del descuento vacío la explicación no se muestra (no hay un "se calculó" al lado de un descuento
+   que no está). Un `IndExe` fuera del formato no se explica, ni una línea que el propio descuento
+   tomó por un `IndExeDR` que el schema no admite. Solo para
+   descuentos: un recargo no se carga, así que no hay base que explicar. ⚠️ `IndExe` 6 (no
+   facturable negativo) tampoco entra en ninguna base y **no** se explica: el formato no dice si
+   un descuento con `IndExeDR` 2 lo toma, y eso no se adivina.
 8. **Guardar** exige que toda línea del XML tenga producto y unidad o presentación, y cantidad
    (*"Faltan N líneas por asociar"*). Al guardar, cada línea con `claveProveedor` y las
    `apartadas` enseñan su destino — ver "Qué se aprende" abajo.
@@ -827,7 +852,9 @@ que vino del XML.
 - **Unitario, el lector (`useDte.spec.ts`, con `happy-dom`):** tildes en ISO-8859-1; un envío con
   varios documentos y un DTE suelto; `<!DOCTYPE` y un archivo que no es DTE, rechazados; el precio
   con el descuento de la línea ($9.120, no $9.600); `MntBruto=1` sin precios; descuento global en
-  $ y en % (2% de $105.000 = $2.100); un recargo → aviso; una línea sin código → clave por texto.
+  $ y en % (2% de $105.000 = $2.100); un recargo → aviso; una línea sin código → clave por texto;
+  la garantía de envases (`garantia-envases.xml`) fuera de la base del 2% y su explicación, con
+  las de `IndExe` 4 y 5 y sin las exentas ni las no facturables, que tienen su propia base.
 - **E2E de la API (`compras-dte.e2e-spec.ts`, y el guardado en `compras.e2e-spec.ts`):** proveedor
   por `rut`/`rut_fiscal`, con y sin puntos; desconocido y dos con el mismo RUT → pregunta; receptor
   de otra empresa → bloqueado; nota de crédito → sin tipo; folio en borrador/confirmada → ya
@@ -837,7 +864,8 @@ que vino del XML.
 - **Front, componente:** `CargarDteModal.nuxt.spec.ts` (los cinco bloqueos; el body exacto de
   `POST /compras/dte/lectura` contra lo que declara el DTO, porque el mock de `useApiFetch`
   contesta 200 a cualquier cosa) y `compras-carga.nuxt.spec.ts` (el pre-llenado, las líneas por
-  asociar y apartadas, `armarBody` sin esparcir el documento entero, el guard de salida).
+  asociar y apartadas, `armarBody` sin esparcir el documento entero, el guard de salida, y la
+  explicación de la garantía de envases debajo del descuento).
 - **Navegador (`compras-dte.spec.ts`):** como `encargado.compras`, con un XML de fixture propio
   (`e2e/compras/fixtures/andina-dte.xml`, en ISO-8859-1, con una tilde) y RUT/folio generados por
   corrida — así no depende del seed ni de una corrida anterior. Primera factura: la Coca (con su
@@ -847,7 +875,8 @@ que vino del XML.
   ya apartado, sin tocar nada salvo la ubicación (que el XML nunca precarga). Un 409 de folio
   repetido al guardar no pierde el formulario ni suelta el guard de salida — se corrige el folio y
   guarda igual. Subir otra vez la primera factura → "ya está cargada", con **Abrir**. Salir con el
-  XML leído sin guardar → pide confirmación.
+  XML leído sin guardar → pide confirmación. La factura de cerveza con garantía de envases
+  (`fixtures/garantia-envases-dte.xml`) precarga $1.000 y muestra la explicación.
 
 ---
 
