@@ -23,6 +23,31 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Las alertas de Dependabot quedan activas, sin PRs (cerrada 2026-10-11)
+
+Sale de [`pendientes.md`](pendientes.md) § 4. **Decidido por el owner el 2026-10-11** (AskUserQuestion
+de la orquestadora, recomendada: "activarlas"; pidió que lo hiciera la orquestadora). Hecho con
+`gh api -X PUT repos/matheusscx/appbase/vulnerability-alerts` → 204, y verificado con un `GET` (204 =
+activas). Las *security updates* siguen `disabled` (`security_and_analysis` del repo), así que
+Dependabot avisa por mail y en la pestaña Security y **no abre PRs ni ramas**. Cada excepción ya
+aceptada en `scripts/check-dependencias.mjs` va a aparecer como alerta hasta que se descarte a mano
+en GitHub.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 4
+
+- [ ] **¿Se activan las alertas de Dependabot, sin PRs?** (harness; anotado el 2026-10-11 al
+  cerrar "Escaneo de dependencias en CI", [`resueltos.md`](resueltos.md)). El job `dependencias`
+  solo audita cuando alguien pushea. Si se publica una CVE para algo que ya está en `main` y
+  nadie pushea, nadie se entera. Las *alertas* de Dependabot (Settings → Code security) avisan
+  por mail y en la pestaña Security, y **no abren PRs ni ramas**. Lo que sí las abre son las
+  *security updates* y las *version updates*, y eso choca con el flujo de commitear directo a
+  `main` (`CLAUDE.md`, "Flujo de trabajo"). **La pregunta para el owner:** ¿activar solo las
+  alertas (es un ajuste del repo en GitHub, lo hace el owner), o dejarlo como está hasta el
+  paso a producción? Costo de activarlas: mails, y una alerta por cada excepción ya aceptada
+  en `scripts/check-dependencias.mjs` hasta que se descarte a mano en GitHub.
+
+---
+
 ## Una orden que el retorno dejó `procesando` sin compensar no la sacaba nadie (cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § 2. La anotó la revisión independiente del frente

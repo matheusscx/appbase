@@ -413,17 +413,6 @@ prohíbe.
   sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
   notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
   de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
-- [ ] **¿Se activan las alertas de Dependabot, sin PRs?** (harness; anotado el 2026-10-11 al
-  cerrar "Escaneo de dependencias en CI", [`resueltos.md`](resueltos.md)). El job `dependencias`
-  solo audita cuando alguien pushea. Si se publica una CVE para algo que ya está en `main` y
-  nadie pushea, nadie se entera. Las *alertas* de Dependabot (Settings → Code security) avisan
-  por mail y en la pestaña Security, y **no abren PRs ni ramas**. Lo que sí las abre son las
-  *security updates* y las *version updates*, y eso choca con el flujo de commitear directo a
-  `main` (`CLAUDE.md`, "Flujo de trabajo"). **La pregunta para el owner:** ¿activar solo las
-  alertas (es un ajuste del repo en GitHub, lo hace el owner), o dejarlo como está hasta el
-  paso a producción? Costo de activarlas: mails, y una alerta por cada excepción ya aceptada
-  en `scripts/check-dependencias.mjs` hasta que se descarte a mano en GitHub.
-
 
 ## 5. Carreras de concurrencia
 
