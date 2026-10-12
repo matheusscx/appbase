@@ -74,6 +74,13 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
+- [ ] **El aviso de un recargo global en % dice "Recargo de $2" en vez de "2%"** (frontend,
+  `descuentoDeFactura` en `frontend/app/composables/useDte.ts`, el `avisos.push` de `tipoMov ===
+  'R'`; anotado el 2026-10-12 por el frente de la garantía de envases, `0566e01b`, que lo vio y no
+  lo tocó). Al importar el XML de una factura con un `DscRcgGlobal` de recargo con `TpoValor '%'`,
+  el aviso de "no se carga" interpola `dg.valor` siempre como pesos. Que diga "%" o "$" según
+  `TpoValor`, con su spec.
+
 - [ ] **Un comentario de `backend/test/papelera.e2e-spec.ts` (~línea 1614) dice que `descuentos`,
   `recargos` y `turnos` no tienen índice único de nombre, y sí lo tienen** (anotado el 2026-10-12
   por el frente de migraciones, [ADR-030](../adr/030-esquema-por-migraciones.md); ya era falso
@@ -444,6 +451,12 @@ pendiente de este trabajo, es la nota que ADR-020 deja para no repetir la evalua
 
 No se resuelve programando. Está acá para que tenga quién la reclame.
 
+- [ ] **Una línea de factura con `IndExe` 6 (no facturable negativo) no entra en ninguna base de
+  descuento global y la pantalla no lo explica** — ⏸ **solo si aparece en una factura real**
+  (fiscal, va solo; anotado el 2026-10-12 al cerrar `0566e01b`, ver `docs/features/compras.md`).
+  El formato DTE del SII la resta en `MontoNF` (pág. 32) pero no dice si un descuento con
+  `IndExeDR` 2 (no facturables) la toma. Hoy no pesa en ningún descuento y no lleva la explicación
+  que sí tienen 3, 4 y 5. Si aparece, primero confirmar con el SII y después decidir con el owner.
 - [ ] 🛒 **El smoke de compras, en el navegador del owner** — la pieza 1 salió el 2026-09-19
   con el gate entero en verde, pero **nadie la usó a mano todavía**, y eso sigue pendiente
   aunque desde el 2026-09-20 los cinco pasos corran solos en
