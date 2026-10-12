@@ -5,7 +5,6 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
-import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { errorDeColisionNombre } from '../../common/utils/nombre-sugerido.util';
 import { Impuesto } from './entities/impuesto.entity';
@@ -24,18 +23,6 @@ export class ImpuestosService {
     private readonly impuestoRepo: Repository<Impuesto>,
     private readonly db: Db,
   ) {}
-
-  private validarPorcentaje(porcentaje: string): void {
-    let value: Decimal;
-    try {
-      value = new Decimal(porcentaje);
-    } catch {
-      throw new BadRequestException('El porcentaje debe ser mayor a 0');
-    }
-    if (value.isNaN() || value.lessThanOrEqualTo(0)) {
-      throw new BadRequestException('El porcentaje debe ser mayor a 0');
-    }
-  }
 
   /** País del tenant: tenants.provincia_id → provincia.pais_id. */
   private async paisIdDeTenant(tenantId: string): Promise<string | null> {
@@ -157,7 +144,6 @@ export class ImpuestosService {
   }
 
   async create(tenantId: string, dto: CreateImpuestoDto): Promise<Impuesto> {
-    this.validarPorcentaje(dto.porcentaje);
     await this.validarNombreUnico(tenantId, dto.nombre);
     const impuesto = this.impuestoRepo.create({
       tenantId,
@@ -179,9 +165,6 @@ export class ImpuestosService {
     });
     if (!impuesto) {
       throw new NotFoundException(`Impuesto ${id} no encontrado`);
-    }
-    if (dto.porcentaje !== undefined) {
-      this.validarPorcentaje(dto.porcentaje);
     }
     // `excludeId`: renombrar un impuesto dejándole el mismo nombre no puede
     // chocar contra sí mismo.

@@ -108,7 +108,7 @@ POST   /impuestos/:id/restaurar
 Request (POST/PATCH):
 {
   "nombre": "Impuesto verde",
-  "porcentaje": "0.05",     // decimal: 0.19 = 19%
+  "porcentaje": "0.05",     // decimal: 0.19 = 19%; > 0 y ≤ 1 (100%), si no 400
   "activo": true
 }
 // `tipo` NO es aceptado en este DTO: todo impuesto creado/editado por un
@@ -250,6 +250,31 @@ lector que asuma "acá está todo lo que se le cobra al item" muestra de menos.
 - `CreateImpuestoDto` / `UpdateImpuestoDto` (`dto/`) — no declaran `tipo`; el
   servicio lo fuerza a `'otro'` en `create()` para toda fila creada por un
   tenant, sin importar qué envíe el cliente (enforcement en backend, no en UI).
+
+### El porcentaje va de 0 (excluido) a 1 = 100% (2026-10-12)
+
+`porcentaje` entra con `@IsDecimalPositivo()` y `@IsDecimalHasta('1')`
+(`TOPE_PORCENTAJE_IMPUESTO`, en `create-impuesto.dto.ts`), en los dos DTO. Fuera de
+ese rango es **400** con un mensaje que dice el tope y que va en decimal.
+
+**Por qué el tope en 100%:** decisión del owner (2026-10-12, por AskUserQuestion de la
+orquestadora, con la escena y el costo de cada opción). Descartadas: "solo el tope técnico
+de la columna" y "tope en 300%". Hasta ese día solo se exigía `> 0`, así que el tipeo de
+`19` por `0.19` se guardaba como un impuesto del **1900%**, y uno de `10000` —que no cabe en
+`NUMERIC(7,4)`, techo 10^3— daba **500** en el `INSERT`. **Costo aceptado:** si otro país
+necesita un impuesto mayor al 100%, se sube este tope.
+
+La regla vive **solo en el DTO**: el `> 0` que antes validaba `ImpuestosService` se mudó
+ahí junto con el tope, y el service ya no valida el porcentaje (el controller es su único
+llamador). Las filas del sistema no pasan por el DTO: las siembra `seeder.service.ts`
+(el IVA de Chile, `0.19`), igual que antes.
+
+**Lo que el tope no cubre:** el `> 0` mira el valor tipeado, no el que guarda la columna. Un
+`0.00001` se guarda como `0.0000` y más de 4 decimales se redondean sin aviso: abierto en
+[`pendientes.md`](../agent/pendientes.md) § 4. Y una fila guardada antes del tope con un
+porcentaje mayor a 1 no se puede editar desde la pantalla sin bajarle el porcentaje, porque el
+form manda el `porcentaje` en cada `PATCH`. Pausarla y reactivarla sí: ese `PATCH` manda solo
+`activo`.
 
 ### `ImpuestosService`
 
@@ -403,6 +428,9 @@ clasificación después.
 - Filas de origen `'sistema'`: solo lectura — sin editar, sin eliminar, sin
   toggle de activo (los handlers de editar/eliminar retornan temprano si
   `origen === 'sistema'`).
+- **El porcentaje se tipea en decimal y la pantalla no lo valida ni lo convierte**: el
+  rango (> 0 y ≤ 1) lo decide el backend y su mensaje sale en el toast. No hay una
+  validación de UI que pueda quedar distinta de la del DTO.
 - Form de alta/edición (solo aplica a personalizados): sin campo de tipo — todo
   impuesto creado por el tenant queda `tipo='otro'` (forzado en backend);
   `tipo='iva'` es exclusivo de las filas del sistema.
@@ -525,6 +553,11 @@ cd backend && npm run test:e2e
   orden de pasarela; sin el campo cobran el IVA más el adicional del ítem. El cargo
   sin venta de la tienda lo recorre `tienda-impuestos-del-item.e2e-spec.ts` hasta la
   venta del callback, con el proveedor de Webpay falso.
+- **E2E, el tope del porcentaje** (`impuesto-porcentaje-tope.e2e-spec.ts`): por POST y
+  por PATCH, `1` entra; `1.0001`, `1.5`, `10`, `19` y `10000` son 400 con el mensaje del
+  tope y no escriben nada; `0` y `-0.1`, 400 con el del signo. Mutantes medidos: sin
+  `@IsDecimalHasta` vuelven el 201/200 y el 500 de antes; sin `@IsDecimalPositivo`, el 0 y
+  el negativo entran.
 - **E2E, el camino por default** (el bug de entrada de ADR-018): crear un item
   `afecto` sin tocar impuestos y venderlo — cobra el 19% de IVA y deja la traza en
   `ventas_impuestos`, sin haber asociado nada en `item_impuestos`.

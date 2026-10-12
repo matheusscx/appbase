@@ -1650,7 +1650,7 @@ describe('CalculoPreciosService', () => {
     });
 
     it('la venta sin impuestos no cabe con una tasa negativa, aunque el total sí', async () => {
-      // Hoy no se alcanza por la API —`validarPorcentaje` rechaza tasas ≤ 0—:
+      // Hoy no se alcanza por la API —el DTO del impuesto rechaza tasas ≤ 0—:
       // fija que el guard no depende de esa validación. 60 + 60 (recargo) = 120
       // billones de base; −30% deja 84 billones de total, y la venta sin
       // impuestos —que `ventas.service` guarda como `totalFinal −

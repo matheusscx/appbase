@@ -254,7 +254,7 @@ Cada tenant define sus propias reglas reutilizables:
 
 **Categorías** — agrupan items (`aplica_a`: productos, servicios o ambos)
 
-**Impuestos** — nombre + porcentaje (decimal) + activo + `tipo` (`iva` | `otro`, no expuesto en la API de escritura). Dos orígenes conviven en el mismo catálogo:
+**Impuestos** — nombre + porcentaje (decimal, mayor que 0 y **hasta 1 = 100%**: un impuesto no puede superar el 100%, owner 2026-10-12) + activo + `tipo` (`iva` | `otro`, no expuesto en la API de escritura). Dos orígenes conviven en el mismo catálogo:
 - **Oficiales por país** (`origen: 'sistema'`) — ej. IVA Chile 19%, compartido por todos los tenants de ese país. **No editables por el tenant** (solo lectura en la UI); se administran únicamente vía seeder — agregar un país nuevo es agregar su catálogo al seed, sin CRUD superadmin.
 - **Personalizados por tenant** (`origen: 'personalizado'`) — el tenant puede crear/editar/eliminar los suyos, siempre con `tipo = 'otro'` (forzado en backend; `tipo = 'iva'` es exclusivo de las filas del sistema, para evitar que un tenant recree duplicados de IVA).
 

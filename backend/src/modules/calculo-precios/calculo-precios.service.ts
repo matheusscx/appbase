@@ -494,7 +494,7 @@ export class CalculoPreciosService {
    *
    * `base_ventas_sin_impuestos` se mira con la misma resta que hace
    * `ventas.service` (`totalFinal − totalImpuestos`). Hoy cabe si caben los dos,
-   * porque `ImpuestosService.validarPorcentaje` rechaza toda tasa ≤ 0 y el
+   * porque el DTO del impuesto rechaza toda tasa ≤ 0 y el
    * impuesto no puede restar; se mira igual para no apoyar el guard en una
    * validación de otro módulo.
    */

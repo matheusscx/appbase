@@ -163,19 +163,6 @@ describe('ImpuestosService', () => {
         expect.objectContaining({ tipo: 'otro' }),
       );
     });
-
-    it('rechaza porcentaje igual a 0', async () => {
-      await expect(
-        service.create(TENANT, { nombre: 'IVA', porcentaje: '0' }),
-      ).rejects.toThrow(BadRequestException);
-      expect(repo.save).not.toHaveBeenCalled();
-    });
-
-    it('rechaza porcentaje negativo', async () => {
-      await expect(
-        service.create(TENANT, { nombre: 'IVA', porcentaje: '-0.1' }),
-      ).rejects.toThrow(BadRequestException);
-    });
   });
 
   describe('update', () => {
@@ -185,21 +172,6 @@ describe('ImpuestosService', () => {
       await expect(
         service.update(TENANT, IMP, { nombre: 'Otro' }),
       ).rejects.toThrow(NotFoundException);
-      expect(repo.save).not.toHaveBeenCalled();
-    });
-
-    it('rechaza actualizar a porcentaje <= 0', async () => {
-      repo.findOne.mockResolvedValue({
-        id: IMP,
-        tenantId: TENANT,
-        nombre: 'IVA',
-        porcentaje: '0.19',
-        activo: true,
-      });
-
-      await expect(
-        service.update(TENANT, IMP, { porcentaje: '0' }),
-      ).rejects.toThrow(BadRequestException);
       expect(repo.save).not.toHaveBeenCalled();
     });
 

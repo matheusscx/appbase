@@ -23,6 +23,44 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El porcentaje de un impuesto tiene tope en 100% (cerrada 2026-10-12)
+
+Frente fiscal propio (CLAUDE.md, "Lo fiscal va solo"), lanzado por la orquestadora por pedido
+del owner. **Decisión del owner** (2026-10-12, por AskUserQuestion de la orquestadora, con la
+escena y el costo de cada opción): **"Tope en 100%"** —en decimal, `1`—. Descartadas: "solo el
+tope técnico de la columna" y "tope en 300%". Costo aceptado: si otro país necesita un impuesto
+mayor, se sube el tope.
+
+**Medido antes del arreglo** (e2e contra la API, tenant Paris): por `POST /impuestos`, `1.0001`,
+`1.5`, `10` y `19` daban **201** y quedaban guardados; por `PATCH /impuestos/:id`, **200**. `10000`
+(10^4, no cabe en `NUMERIC(7,4)`) daba **500** por los dos. `1` entraba. `0` y `-0.1` ya eran 400,
+por `ImpuestosService.validarPorcentaje`. Ningún otro camino escribe un porcentaje: el único
+llamador de `create`/`update` es el controller, el IVA del sistema lo siembra el seeder con
+`0.19`, y no hay import ni `INSERT` crudo. Ni el seed ni los tests usaban un porcentaje mayor a 1.
+La pantalla no convierte ni valida: se tipea el decimal y muestra el mensaje del backend.
+
+**Arreglo:** `@IsDecimalPositivo()` + `@IsDecimalHasta('1')` en `CreateImpuestoDto` y
+`UpdateImpuestoDto`, con un mensaje que dice el tope y que va en decimal. El `> 0` del service se
+mudó al DTO, así que la regla vive en un solo lugar; sus tres unit tests pasaron al e2e. **Después:**
+los cuatro de arriba y `10000` son **400** por los dos endpoints y no escriben nada.
+
+**Lo fija** `backend/test/impuesto-porcentaje-tope.e2e-spec.ts` (16 casos). Mutantes medidos: sin
+`@IsDecimalHasta` en los dos DTO, 12 rojos —vuelven el 201/200 y el 500 de antes; dos de los
+rojos son en cascada, porque el PATCH anterior dejó guardado un 19—; sin `@IsDecimalPositivo`, 4
+rojos —el 0 y el negativo entran—.
+
+**Qué quedó afuera:** un porcentaje con más de 4 decimales se redondea al guardarse, y `0.00001`
+queda en 0% (medido: 201, guardado `0.0000`). Ya pasaba antes del tope. Es fiscal y abre su
+propio frente: [`pendientes.md`](pendientes.md) § 4.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2 (dentro de "Decimales por body sin techo")
+
+  **Aparte, fiscal:** el `porcentaje` de impuestos (`impuestos.porcentaje`, `NUMERIC(7,4)`, techo
+  10^3; el service solo exige `> 0`). Va en su propio frente y no se toma de arrastre con los de
+  arriba (CLAUDE.md, "Lo fiscal va solo").
+
+---
+
 ## El descuento global en % de una factura y las líneas con `IndExe` 3, 4 o 5: queda como está, y la pantalla lo explica (cerrada 2026-10-12)
 
 **Decisión del owner** (2026-10-12, por AskUserQuestion de la orquestadora, con la escena "10 cajas

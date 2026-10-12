@@ -179,10 +179,6 @@ destapa una decisión que no es mía).
     techo, la suma puede pasar 10^14. No es una columna, así que hay que ver dónde se guarda o se
     compara.
 
-  **Aparte, fiscal:** el `porcentaje` de impuestos (`impuestos.porcentaje`, `NUMERIC(7,4)`, techo
-  10^3; el service solo exige `> 0`). Va en su propio frente y no se toma de arrastre con los de
-  arriba (CLAUDE.md, "Lo fiscal va solo").
-
 - [ ] **La configuración de la pasarela puede quedar incompleta para su modo, y el cobro da 500** — ⬇️ **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos)
   (backend, `pasarela/dto/create-tenant-pasarela.dto.ts` y `tenant-pasarela.service.ts`
   `crear`/`actualizar`; queda del cierre de "la configuración de la pasarela no se valida",
@@ -427,6 +423,24 @@ prohíbe.
   de cada opción): "Dejarlo hasta que pase".** No se construye nada hasta que ocurra en uso real.
   Descartadas: "descartar la marca con un motivo escrito" (la recomendada) y "ligarla a una nota
   existente". Si aparece, se reabre con esas dos opciones.
+
+- [ ] **Un impuesto con más de 4 decimales se redondea al guardarse, y uno de `0.00001` queda en
+  0%.** **La pregunta para el owner:** un impuesto con más de 4 decimales, ¿se rechaza con un aviso
+  (como la plata que no cabe) o se redondea al guardar, como hoy? Si se rechaza, el `0.00001` cae
+  solo. (Backend, **fiscal: va en su propio frente**; lo nombraron el `domain-reviewer` y el
+  `api-security-reviewer` del cierre de "El porcentaje de un impuesto tiene tope en 100%",
+  2026-10-12, [`resueltos.md`](resueltos.md).) El `> 0` del DTO mira el valor tipeado, y
+  `impuestos.porcentaje` es `NUMERIC(7,4)`. **Medido ese día** por `POST /impuestos`: `0.00001` y
+  `0.00004` dan 201 y quedan guardados como `0.0000`, un impuesto del 0% que es "sin impuesto" con
+  forma de impuesto (invariante 5). `0.12345` da 201 y queda `0.1235`, sin aviso. Ya pasaba antes
+  del tope: el `> 0` del service tenía el mismo hueco. **Arreglo probable, si se rechaza:** marcar
+  `porcentaje` con `@EsCosto` ("un COSTO o una TASA", escala fija en 4). La marca sola no valida:
+  `EscalaMonedaPipe` va por parámetro, no global, así que hace falta `@Body(EscalaMonedaPipe)` en
+  `create` y `update` de `ImpuestosController`, y que `ImpuestosModule` importe `MonedasModule`.
+  Además `monto-persistible-cobertura.spec.ts` exige que todo campo marcado lleve
+  `@IsMontoPersistible` sobre una columna de precisión 18, o que figure en `EXENTOS` con su porqué.
+  `NUMERIC(7,4)` no encaja, así que los dos `porcentaje` irían a `EXENTOS`: el techo lo pone
+  `@IsDecimalHasta('1')`.
 
 ## 5. Carreras de concurrencia
 
