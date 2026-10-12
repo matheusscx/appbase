@@ -716,6 +716,16 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   pasa en verde). Para acotar ese: rollback rápido a la versión anterior (deploy inmutable),
   canary/gradual (soltar al % del tráfico y mirar métricas antes del 100%), y feature flags
   para apagar una feature sin re-desplegar.
+- [ ] **El repo es público: pasarlo a privado antes de producción, y bajar el consumo del CI**
+  (infra; anotado el 2026-10-11). `matheusscx/appbase` es público (verificado con `gh repo view`).
+  El owner lo quiso privado y decidió **dejarlo público por ahora** (2026-10-11, AskUserQuestion de
+  la orquestadora) por el costo: Actions es gratis e ilimitado solo en repos públicos. En privado
+  el plan gratis trae 2.000 min/mes, y el ritmo medido fue ~120 corridas de ~38 min de jobs en 11
+  días (`gate` ~30 min, `e2e-navegador` ~7,5, `dependencias` <1): ~12.000 min/mes, unos 10.000 de
+  más (~US$80/mes a US$0,008/min). Antes de pasarlo: que un push solo de docs no corra las suites
+  (`paths-ignore` o un job que decida), caché de dependencias, y medir de nuevo. La protección de
+  rama (§ CI como portón) en privado pide plan pago. Mientras sea público, la auditoría de secretos
+  de la entrada de abajo es más urgente.
 - [ ] **Secrets fuera del repo + rotación** (infra) — `JWT_SECRET`, `JWT_REFRESH_SECRET`,
   `PASARELA_ENCRYPTION_KEY` hoy salen de `.env`. En prod deben venir de un secret manager
   (no del repo, no de variables de entorno en texto plano en el CI), con rotación. Auditar que
