@@ -416,6 +416,10 @@ prohíbe.
   sigue marcado para siempre. **La pregunta para el owner:** ¿se liga el `REFUND` a una de las
   notas que ya existen (¿cuál, si son dos?), o se descarta la marca con un motivo escrito? Ninguna
   de las dos existe hoy, y las dos tocan el vínculo `correccion_venta_id`, que se escribe una vez.
+  ✅ **Decidido (owner, 2026-10-12, por AskUserQuestion de la orquestadora, con la escena y el costo
+  de cada opción): "Dejarlo hasta que pase".** No se construye nada hasta que ocurra en uso real.
+  Descartadas: "descartar la marca con un motivo escrito" (la recomendada) y "ligarla a una nota
+  existente". Si aparece, se reabre con esas dos opciones.
 
 ## 5. Carreras de concurrencia
 
