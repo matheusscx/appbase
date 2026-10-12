@@ -43,7 +43,7 @@ mockNuxtImport('useUserPreferences', () => {
 // cargar el módulo, antes del `stubGlobal` del `beforeEach`: sin esto, el store
 // llama al `$fetch` de verdad. Así vuelve a leer el global en cada llamada.
 mockNuxtImport('$fetch', () => {
-  return (...args: Parameters<typeof globalThis.$fetch>) => globalThis.$fetch(...args)
+  return (...args: unknown[]) => (globalThis.$fetch as (...a: unknown[]) => unknown)(...args)
 })
 
 type LoginVm ={ state: { email: string, password: string }, onLogin: () => Promise<void> }

@@ -1035,9 +1035,13 @@ El patrón completo está en `app/stores/monedas.spec.ts` y en `MoneyInput.spec.
   4.5, `$fetch` es un auto-import de `#build/fetch.mjs`, que copia `globalThis.$fetch` una vez,
   cuando se carga el módulo: un `stubGlobal` en el `beforeEach` llega tarde, y la página o el
   store llaman al `$fetch` de verdad. Medido al subir a 4.5.2: 12 rojos en 3 specs. Hay que
-  agregar `mockNuxtImport('$fetch', () => (...args) => globalThis.$fetch(...args))`, que hace
+  agregar un `mockNuxtImport('$fetch')` que devuelva
+  `(...args: unknown[]) => (globalThis.$fetch as (...a: unknown[]) => unknown)(...args)`, que hace
   volver a leer el global en cada llamada. Así el `stubGlobal` sigue funcionando y puede
-  cambiar de un test a otro. Está en `pages/confirmacion/[token].nuxt.spec.ts`.
+  cambiar de un test a otro. Está en `pages/confirmacion/[token].nuxt.spec.ts`. ⚠️ Los
+  parámetros **no** se tipan con `Parameters<typeof globalThis.$fetch>`: `$fetch` es el
+  `$Fetch` de nitro, genérico sobre las rutas, y `vue-tsc` corta con TS2321 (*"Excessive stack
+  depth"*). Vitest no tipa, así que solo lo ve `typecheck:ratchet`, y así llegó rojo al CI.
 - Riesgo del propio patrón: un stub con template propio puede volverse tan permisivo que el
   test pase por construcción. La contraprueba es la mutación — si romper el componente bajo
   test no pone nada en rojo, el test está afirmando el stub y no el componente.

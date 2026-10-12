@@ -89,7 +89,12 @@ lockfiles de antes del commit y sin las excepciones, sale 1, con los `::error::`
 **Gate de cierre**, todo con Node 22.23.3:
 - Backend: lint, typecheck, 4061 unitarios y `test:e2e` entero (2384 pasados, 6 saltados por
   condición de los propios specs).
-- Frontend: build, 2228 unitarios (2 corridas limpias), ratchet y `design:check`. Una tercera
+- Frontend: build, 2228 unitarios (2 corridas limpias), ratchet y `design:check`. ⚠️ **El
+  ratchet de este gate era falso**: lo corrí antes de agregar los `mockNuxtImport('$fetch')` y no
+  lo repetí, y el CI de `865005e5` salió rojo con 2 TS2321 en `auth-pantallas.nuxt.spec.ts`
+  (el `Parameters<typeof globalThis.$fetch>` del mock, ver `patterns/frontend.md` §15). No era
+  una diferencia de entorno: se reprodujo igual en local tras `rm -rf .nuxt node_modules &&
+  npm ci`. Lo arregló el commit siguiente, con el ratchet en 0 desde una instalación limpia. Una tercera
   corrida, con el `test:e2e` en paralelo en el host, dio 2228/2228 con un *unhandled rejection* en
   `pos.vue`. No se reprodujo ni solo ni con el host libre, y quedó anotado como intermitente en
   `pendientes.md` § 2.

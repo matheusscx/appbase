@@ -28,7 +28,7 @@ mockNuxtImport('useRoute', () => {
 })
 
 mockNuxtImport('$fetch', () => {
-  return (...args: Parameters<typeof globalThis.$fetch>) => globalThis.$fetch(...args)
+  return (...args: unknown[]) => (globalThis.$fetch as (...a: unknown[]) => unknown)(...args)
 })
 
 mockNuxtImport('useToast', () => {
