@@ -23,6 +23,102 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Auditoría de secretos en el historial: ninguno real, y un chequeo para que siga así (cerrada 2026-10-12)
+
+**Es la parte de auditoría de "Secrets fuera del repo + rotación".** Lo que queda —secret
+manager y rotación para producción— sigue abierto en
+[`pendientes.md`](pendientes.md) § Endurecimiento para producción. Por qué ahora: el repo
+`matheusscx/appbase` es público, así que el historial entero es legible para cualquiera.
+
+### Lo medido
+
+- **Alcance.** `git rev-list --all --objects`: 2.336 commits, 12.840 blobs (~968 MB), de todas
+  las refs del clone al momento del escaneo (ramas locales y `origin/main`); además, los mensajes
+  de los 2.336 commits. GitHub tiene solo `main`
+  (`git ls-remote`: sin otras ramas ni `refs/pull/*`), así que lo publicado es un subconjunto
+  de lo escaneado. Nunca se commiteó un `.env`: el único archivo `.env*` que alguna vez se
+  agregó es `.env.example`. El único `*.env` versionado es
+  `scripts/qa/fixtures/liquidacion-propinas-ids.env`, con IDs fijos de fixtures de QA. No había gitleaks ni trufflehog en el host, y no se instalaron:
+  el escaneo fue un script propio con patrones.
+- **Por patrón** (19: variables sensibles del proyecto asignadas, URLs de Postgres con
+  password, tokens de GitHub/Google/AWS/Slack/Stripe/Anthropic/OpenAI, `RAILWAY_TOKEN`,
+  credenciales SMTP, cabeceras de clave privada PEM, API keys de 64 hex, JWT firmados,
+  y un genérico `secret|password|token = "…"`): 31 pares (patrón, valor) —30 valores, porque la
+  API key de integración de Transbank cae en dos patrones—, todos de prueba o falsos positivos
+  (tabla abajo). Sin una sola cabecera de clave privada en ningún blob.
+- **Por valor exacto, la prueba que decide.** Los valores vigentes de Railway (`backend`,
+  entorno `production`) se buscaron byte a byte en todos los blobs y mensajes, sin
+  imprimirlos: solo nombre, largo y los primeros 10 hex del sha256. El MCP de Railway
+  (`list-variables`) devuelve los valores redactados, así que se leyeron con
+  `railway variables --json` por pipe directo al script. Resultado: **cero coincidencias**
+  para `JWT_SECRET`, `JWT_REFRESH_SECRET`, `PASARELA_ENCRYPTION_KEY`, el password del
+  `DATABASE_URL` y `QZ_PRIVATE_KEY` (esta última, en 94 trozos de 24 caracteres del cuerpo,
+  para cazar también una copia parcial). El servicio `frontend` no tiene variables sensibles:
+  por nombre (`list-variables`) son URLs, `NODE_ENV`, `VITE_*` y las de Railway.
+  Los tres secretos de la app en Railway **no** son los placeholders públicos de
+  `.env.example` ni la clave de prueba del CI (hashes distintos).
+- **Los `.env` locales** (checkout principal y el único worktree que tenía uno), por el mismo
+  método: sus `JWT_*` y su `PASARELA_ENCRYPTION_KEY` son los de `.env.example` (públicos por
+  diseño). La `QZ_PRIVATE_KEY` del checkout principal (el otro no la tiene) **es la misma que la
+  de Railway** (mismo hash) y no aparece en
+  el historial. No es una fuga, pero el demo y el desarrollo local firman con la misma clave:
+  queda anotado en la entrada que sigue abierta.
+
+| Hallazgo (sin valor) | Dónde | Clasificación |
+|---|---|---|
+| `JWT_SECRET`/`JWT_REFRESH_SECRET` `your…` | `.env.example`, un plan de jun-2026, default de `docker-compose.yml` | Placeholder |
+| `JWT_SECRET`/`JWT_REFRESH_SECRET` `ci-o…` | `.github/workflows/ci.yml`, plan de Playwright en CI | De prueba: "ci-only-not-a-real-secret" |
+| `PASARELA_ENCRYPTION_KEY` `MDEy…` | `.env.example`, `ci.yml`, dos planes | De prueba: base64 de un patrón fijo; Railway usa otra |
+| Password de Postgres `dev_…` | `.env.example`, `docker-compose.yml`, `.mcp.json`, `.cursor/mcp.json`, `ARCHITECTURE.md` (antes) | De desarrollo local |
+| Password de Postgres `appp…` | `ci.yml` | Base efímera del job de CI |
+| API key de Transbank `579B…` y códigos `5970555555xx` | seeder, e2e de Oneclick, planes de pasarela | Integración de Transbank, pública por diseño |
+| 64 hex `01ab…` | `pendientes.md`, `resueltos.md` | Token de una transacción del sandbox de Webpay: no autentica nada |
+| 64 hex en `skills-lock.json` | `skills-lock.json` | Hash de integridad de skills vendorizadas |
+| `SMTP_PASSWORD` | `.env.example` | Vacío: el patrón tomó el nombre de la línea siguiente |
+| `QZ_PRIVATE_KEY` | un plan de jul-2026 | Nombre de variable, sin valor |
+| Genéricos (`password: '…'`, `token: '…'`) | e2e de ventas, invitación, alta de usuarios y tienda; specs de auth; scripts de `scripts/qa/`; skills de `.agents/` | Contraseñas de fixtures, `${QA_…}` sin resolver y ejemplos de documentación |
+
+### Prevención: `scripts/check-secretos.mjs`
+
+Chequeo propio, sin dependencias, en el pre-commit (guard 9, sobre las líneas agregadas al
+índice) y en el CI (paso `secretos · archivos versionados`, sobre el árbol entero, que es lo
+que cubre un `--no-verify` o un rebase). Bloquea un `.env` agregado, los formatos de proveedor,
+un JWT firmado, las variables sensibles del proyecto asignadas a un literal (también entre
+comillas con espacios, como default de `${VAR:-…}` y como fallback en código:
+`process.env.X || '…'`, `config.get('X', '…')`), una URL de Postgres con password y una API key
+de Transbank, con o sin comillas. Los valores de
+prueba que el repo trae a propósito van en `PERMITIDOS` como sha256 completo. No usa
+entropía: en este repo grita sobre hashes de commit, UUIDs del seed y tokens del sandbox.
+
+Probado a mano, porque un cambio al pre-commit no se prueba desde un worktree (`CLAUDE.md`):
+`sh .githooks/pre-commit` con 16 mutantes staged (valores aleatorios generados en el momento:
+`JWT_SECRET` literal, URL con password, token con forma de GitHub, cabecera PEM, API key de
+Transbank con y sin comillas, los dos fallbacks en código, un JWT firmado, default de compose
+para `PASARELA_ENCRYPTION_KEY` y para `DB_PASSWORD`, `SMTP_PASSWORD` en un `.env` y entre
+comillas con espacios, una línea agregada que empieza con `++ `, y dos `.env`, uno bajo una
+carpeta no-ASCII) da exit 1 y los nombra los 16; los 10 controles (`process.env.X`,
+`${{ secrets.X }}`, una URL armada con `${…}`, `Joi.string()`, `configService.get('X')`,
+`config.get<string>('X')`, `?? ''`, `export X=$OTRA`, una lista de nombres de variables y un
+placeholder `<…>` con espacios) pasan. Sobre el árbol de HEAD da verde. Lo que salió al calibrar y
+de la revisión independiente, corregido: el `:` de `${DB_PASSWORD:-…}` se leía como asignación;
+el comentario de cabecera del propio script disparaba la regla de URL; acotar `esReferencia`
+dejó de reconocer la llamada con genérico de Nest (`get<string>(`), y el fallback leía como
+valor el nombre siguiente de una lista de variables; y una línea agregada que
+empieza con `++ ` queda en el diff como `+++ ` y se leía como cabecera de archivo, sin revisarla
+(la versión anterior del script da exit 0 sobre ese mutante, la final exit 1). **La integración con git
+(que el commit de verdad corra este guard) queda sin verificar** hasta después del merge a
+`main`, por `core.hooksPath` absoluto.
+
+### La entrada que cierra, como estaba en `pendientes.md` § Endurecimiento para producción
+
+- [ ] **Secrets fuera del repo + rotación** (infra) — `JWT_SECRET`, `JWT_REFRESH_SECRET`,
+  `PASARELA_ENCRYPTION_KEY` hoy salen de `.env`. En prod deben venir de un secret manager
+  (no del repo, no de variables de entorno en texto plano en el CI), con rotación. Auditar que
+  ningún secreto real quedó commiteado. La `PASARELA_ENCRYPTION_KEY` es especialmente sensible:
+  cifra credenciales de pasarela de pago.
+
+---
+
 ## Los ~40 campos `@EsMontoCobrado` no tenían techo, y los `@EsCosto` tampoco (cerrada 2026-10-12)
 
 **Eran 44, no ~40, y la mitad no estaba en la entrada.** El barrido fue por el decorador. Hay 31

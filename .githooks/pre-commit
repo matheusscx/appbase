@@ -8,6 +8,7 @@
 #   · lint:check (eslint sin --fix) sobre los .ts de backend staged
 #   · helpers de e2e que leen el body sin mirar el status de la respuesta
 #   · el entorno de desarrollo volviendo a ser compartido entre worktrees
+#   · algo con forma de secreto real (el repo es público)
 #
 # NO cubre el juicio (N+1, SELECT sin `eliminado_el IS NULL`): eso es la revisión
 # independiente por sub-agente del skill `verify-feature`, que un hook de shell no
@@ -121,6 +122,16 @@ if [ -n "$staged_e2e" ]; then
     red "✗ Helper de e2e que lee el body sin mirar el status (ver arriba)."
     fail=1
   fi
+fi
+
+# ── Guard 9: secretos en lo staged ───────────────────────────────────────────
+# El repo es público: lo que entra al historial queda publicado aunque se borre
+# en el commit siguiente, y el único arreglo es rotarlo. La auditoría del
+# 2026-10-12 no encontró ninguno; este guard es para que siga así. Corre sobre
+# todo lo staged, tests y docs incluidos: ahí un secreto es igual de público.
+if ! node scripts/check-secretos.mjs --staged ; then
+  red "✗ Posible secreto en lo staged (ver arriba)."
+  fail=1
 fi
 
 # ── Gate: revisión independiente sobre este diff exacto ──────────────────────

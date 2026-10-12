@@ -84,6 +84,16 @@ jobs:
       - name: entorno · aislamiento por worktree
         run: node scripts/check-aislamiento.mjs
 
+      # ── Secretos ─────────────────────────────────────────────────────────
+      # El repo es público. El pre-commit mira lo staged, pero se saltea con
+      # --no-verify y no corre en un rebase; esto mira el árbol del push entero.
+      # No ve un secreto que entró y salió dentro del mismo push, ni el de un push
+      # cuyo run canceló el siguiente (`concurrency`): ya está publicado en el
+      # historial, y lo que corresponde es rotarlo. Un `paths-ignore` de docs dejaría
+      # sin escanear justamente los .md.
+      - name: secretos · archivos versionados
+        run: node scripts/check-secretos.mjs
+
       # ── Backend ──────────────────────────────────────────────────────────
       - name: backend · install
         working-directory: backend

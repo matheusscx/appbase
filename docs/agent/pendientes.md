@@ -714,14 +714,26 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   el plan gratis trae 2.000 min/mes, y el ritmo medido fue ~120 corridas de ~38 min de jobs en 11
   días (`gate` ~30 min, `e2e-navegador` ~7,5, `dependencias` <1): ~12.000 min/mes, unos 10.000 de
   más (~US$80/mes a US$0,008/min). Antes de pasarlo: que un push solo de docs no corra las suites
-  (`paths-ignore` o un job que decida), caché de dependencias, y medir de nuevo. La protección de
-  rama (§ CI como portón) en privado pide plan pago. Mientras sea público, la auditoría de secretos
-  de la entrada de abajo es más urgente.
-- [ ] **Secrets fuera del repo + rotación** (infra) — `JWT_SECRET`, `JWT_REFRESH_SECRET`,
-  `PASARELA_ENCRYPTION_KEY` hoy salen de `.env`. En prod deben venir de un secret manager
-  (no del repo, no de variables de entorno en texto plano en el CI), con rotación. Auditar que
-  ningún secreto real quedó commiteado. La `PASARELA_ENCRYPTION_KEY` es especialmente sensible:
-  cifra credenciales de pasarela de pago.
+  (`paths-ignore` o un job que decida; el paso `secretos` de `ci.yml` tiene que seguir corriendo
+  sobre los `.md`), caché de dependencias, y medir de nuevo. La protección de
+  rama (§ CI como portón) en privado pide plan pago. La auditoría de secretos del historial se
+  hizo el 2026-10-12 sin hallazgos reales, y desde entonces la vigila `scripts/check-secretos.mjs`
+  ([`resueltos.md`](resueltos.md)); la entrada de abajo sigue con lo de producción.
+- [ ] **Secret manager + rotación para producción** (infra) — `JWT_SECRET`,
+  `JWT_REFRESH_SECRET`, `PASARELA_ENCRYPTION_KEY` y `QZ_PRIVATE_KEY` hoy son variables de
+  Railway en texto plano (el MCP las redacta, el CLI las devuelve). En prod deben venir de un
+  secret manager, con rotación. La auditoría de que ningún secreto real quedó en el historial
+  se cerró el 2026-10-12 sin hallazgos, y un chequeo en el pre-commit y el CI lo vigila desde
+  entonces ([`resueltos.md`](resueltos.md)). Lo que falta decidir:
+  - **Rotar `PASARELA_ENCRYPTION_KEY` no es cambiar una variable**: cifra credenciales de
+    pasarela guardadas, así que rotarla exige re-cifrar lo existente (o una clave por versión).
+    Es la más sensible y la que más diseño pide.
+  - **Rotar los `JWT_*`** cierra todas las sesiones abiertas; con access + refresh basta con
+    aceptar la anterior durante un plazo, pero el sistema de tokens es invariante
+    (`CLAUDE.md` 4) y eso se decide antes de tocarlo.
+  - **El demo y el desarrollo local firman QZ con la misma `QZ_PRIVATE_KEY`** (mismo hash en
+    Railway y en el `.env` del checkout principal, medido el 2026-10-12; no está en el
+    historial). Para producción, una clave propia que no salga del secret manager.
 - [ ] **Cabeceras de seguridad del frontend (los documentos que sirve Nuxt)** (frontend;
   anotado el 2026-10-11 al cerrar las del backend, [`resueltos.md`](resueltos.md)). El backend ya
   manda las de `helmet`, pero solo en `/api/**`: la página la sirve Nitro, y medido sobre el

@@ -208,8 +208,9 @@ pre-commit (`.githooks/pre-commit`), que bloquea sobre lo staged: casing malo de
 `tenant_id`, `DELETE` físico, errores de `lint:check` (backend), tokens de diseño
 hardcodeados (`.vue`), enlaces internos de docs rotos, tablas GFM partidas por un
 párrafo pegado (`.md`), helpers de `backend/test/` que leen el body de una
-respuesta sin mirar su status, y el entorno de desarrollo volviendo a ser compartido
-entre worktrees o con el host (`check-aislamiento.mjs`). N+1 y el filtro de
+respuesta sin mirar su status, el entorno de desarrollo volviendo a ser compartido
+entre worktrees o con el host (`check-aislamiento.mjs`), y algo con forma de secreto
+real —el repo es público— (`check-secretos.mjs`, también en CI). N+1 y el filtro de
 borrado son juicio y un hook no los puede evaluar, pero **sí exige la revisión que
 los cubre**: si el diff toca services de backend o `.vue` de `pages`/`components`,
 bloquea hasta que exista el recibo de la revisión independiente de `verify-feature`

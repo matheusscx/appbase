@@ -390,6 +390,18 @@ porque el CI siempre parte de una base virgen — hoy eso está tapado por
 respuesta son migraciones, no más semáforos. Para resincronizar la base del demo:
 skill `railway-sync-db`.
 
+### Escaneo de secretos
+
+El repo es público, así que lo que entra al historial queda publicado aunque se borre después:
+el único arreglo es rotar. `scripts/check-secretos.mjs` corre en el pre-commit sobre las líneas
+staged y en `.github/workflows/ci.yml` sobre todos los archivos versionados (lo que cubre un
+`--no-verify` o un rebase). Bloquea un `.env` agregado, formatos de proveedor (GitHub, Google,
+AWS, Slack, Stripe, Anthropic, clave privada PEM) y las variables sensibles del proyecto
+asignadas a un literal; los valores de prueba que el repo trae a propósito van en `PERMITIDOS`
+como sha256. No ve un secreto sin nombre ni formato reconocible: los secretos viven en las
+variables de Railway y de GitHub, nunca en un archivo. La auditoría del historial que le dio
+origen: [`docs/agent/resueltos.md`](agent/resueltos.md).
+
 ### Escaneo de dependencias
 
 El job `dependencias` de `.github/workflows/ci.yml` corre `scripts/check-dependencias.mjs`
