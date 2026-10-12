@@ -20,12 +20,20 @@ Correr en orden y detenerse en el primer fallo:
 cd backend  && npm run lint:check
 cd backend  && npm run typecheck
 cd backend  && npm test
-cd backend  && npm run test:e2e
+cd backend  && npx jest --config ./test/jest-e2e.json <specs relacionados>
 cd frontend && npm run build
+cd frontend && npm test
 cd frontend && npm run typecheck:ratchet
 cd frontend && npm run design:check
-cd frontend && npm run e2e          # solo si el diff cae en el criterio de CLAUDE.md (🎭)
+cd frontend && npx playwright test <specs relacionados>   # solo si el diff cae en el criterio de CLAUDE.md (🎭)
 ```
+
+**`test:e2e` entero y Playwright entero los corre el CI** desde el 2026-10-11 (owner): Railway
+espera al CI antes de desplegar, así que un rojo no llega al demo (`CLAUDE.md`, bloque 🚦). Local
+va lo relacionado: los specs que pegan a los endpoints, services y páginas del diff, más los
+nuevos. Si el diff es transversal (componente compartido, bump de dependencias, cambio de
+arranque) y no se puede acotar con confianza, correr la suite entera. Anotar en el informe qué
+specs corriste y por qué esos. **Después del push, mirar el CI**: si sale rojo, es lo primero.
 
 Registrar el resultado real de cada comando. **No declarar que un paso pasó sin
 haberlo ejecutado.**

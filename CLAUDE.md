@@ -337,39 +337,59 @@ Corta y accionable.
 Ejecutar, no afirmar. Si algo falla, la tarea no está terminada.
 
 ```bash
-cd backend  && npm run lint:check && npm run typecheck && npm test && npm run test:e2e
+cd backend  && npm run lint:check && npm run typecheck && npm test
+cd backend  && npx jest --config ./test/jest-e2e.json <los specs que ejercitan lo tocado>
 cd frontend && npm run build && npm test && npm run typecheck:ratchet && npm run design:check
+cd frontend && npx playwright test <los specs de las pantallas tocadas>   # solo si aplica 🎭
 ```
 
-El **mismo gate corre en CI** (`.github/workflows/ci.yml`, Postgres real) en cada push a
-`main` — backstop que no depende de invocar `verify-feature` localmente. La revisión de
-juicio (N+1, dinero-Decimal, alcance) no corre en CI: vive en el paso 7 del skill.
+🚦 **Las suites pesadas enteras corren en CI, no en local** (owner, 2026-10-11, por
+AskUserQuestion de la orquestadora, con el costo de cada opción). `test:e2e` entero y Playwright
+entero los corre `.github/workflows/ci.yml` en cada push a `main`, y Railway tiene **Wait for CI**
+activo en `backend` y `frontend`: el deploy queda en `WAITING` hasta que el CI termina, y **un CI
+rojo no se despliega** ([docs](https://docs.railway.com/deployments/github-autodeploys#wait-for-ci)).
+Hasta esa fecha Railway desplegaba en paralelo al CI, y por eso cada sesión corría todo en local
+antes de subir: ~25 min por frente más la espera de turno.
 
-Mecánica de cada comando (por qué `isolatedModules` obliga a `typecheck` aparte, cómo
-funciona el ratchet de `vue-tsc`): `verify-feature` paso 1.
+Lo que sigue siendo local y entero: lint, typecheck, `npm test` de los dos lados (rápidos; un
+subset de unitarios dejó pasar 96 rotos) y build. De las suites pesadas, local va **lo
+relacionado**: los specs que ejercitan los módulos y pantallas tocados, más los nuevos. Elegirlos
+es parte del trabajo: grepear qué specs pegan a los endpoints, services o páginas del diff, no
+solo el del nombre parecido. Si no se puede acotar con confianza (un cambio transversal, un
+componente compartido, un bump de dependencias), correr la suite entera.
 
-🎭 **Playwright entero, si el diff toca pantallas o contratos de la API** (owner, 2026-09-29).
-Aplica salvo que **todo** el diff caiga en esta lista: `*.md`, specs unitarios (`*.spec.ts` de
-`backend/src/` y `frontend/app/`, no los de `frontend/e2e/`), `backend/test/`, y de la raíz
-`scripts/`, `.githooks/`, `.claude/`, `.github/` y `startup-pos.sql`. Un archivo fuera de la
-lista, aunque sea uno solo, lo activa, aunque parezca no tocar pantallas ni la API: **la lista gana
-sobre el título**. Cuenta todo `backend/src/`, no solo controllers y DTOs: el 400 que rompió
-cuatro specs de compras salía de una regla del service (`f34eb6bf`).
+**Después del push, el CI es el gate.** Si sale rojo, arreglarlo es lo primero: `main` rojo no se
+despliega y frena a todas las sesiones. La orquestadora no integra nada encima de un CI rojo. Un
+rojo que no tiene que ver con el diff (un intermitente) se re-corre una vez y se anota en
+`pendientes.md`; no se sube el timeout. Ojo: el CI cancela el run anterior cuando entra otro push
+(`concurrency`), y un run cancelado deja su deploy sin hacer; el que despliega es el del último
+push, que trae todo.
+
+La revisión de juicio (N+1, dinero-Decimal, alcance) no corre en CI: vive en el paso 7 de
+`verify-feature`. Mecánica de cada comando (por qué `isolatedModules` obliga a `typecheck` aparte,
+cómo funciona el ratchet de `vue-tsc`): `verify-feature` paso 1.
+
+🎭 **Playwright de lo relacionado, si el diff toca pantallas o contratos de la API** (owner,
+2026-09-29; desde el 2026-10-11 lo entero lo corre CI). Aplica salvo que **todo** el diff caiga en
+esta lista: `*.md`, specs unitarios (`*.spec.ts` de `backend/src/` y `frontend/app/`, no los de
+`frontend/e2e/`), `backend/test/`, y de la raíz `scripts/`, `.githooks/`, `.claude/`, `.github/` y
+`startup-pos.sql`. Un archivo fuera de la lista, aunque sea uno solo, lo activa, aunque parezca no
+tocar pantallas ni la API: **la lista gana sobre el título**. Cuenta todo `backend/src/`, no solo
+controllers y DTOs: el 400 que rompió cuatro specs de compras salía de una regla del service
+(`f34eb6bf`).
 
 ```bash
 ./scripts/entorno.sh borrar   # solo si el worktree está en modo db: stack aborta
 ./scripts/entorno.sh stack
-./scripts/reset-db.sh         # después del test:e2e, que en modo stack escribe en esta base
-cd frontend && npm run e2e
+./scripts/reset-db.sh
+cd frontend && npx playwright test <specs>
 ./scripts/entorno.sh borrar   # apenas leído el RestartCount de después: la VM no da para muchos stacks
 ```
 
-CI ya lo corre (job `e2e-navegador`), pero Railway despliega en paralelo al CI
-([`ARCHITECTURE.md`](docs/ARCHITECTURE.md#demo-en-railway)), así que un rojo de navegador llega al demo antes
-de verse. Es suite pesada: con varias sesiones activas va **por turno de la orquestadora** (la
-sesión que reparte los frentes por encargo del owner). El
-"sin pedir turno" que imprime `entorno.sh stack` se refiere a los puertos, no a la CPU ni a la memoria.
-Cómo leer la corrida: `verify-feature` paso 1.
+El stack sigue yendo **por turno de la orquestadora** (la sesión que reparte los frentes por
+encargo del owner) cuando hay varias sesiones activas: la VM de Docker da para un solo stack
+completo. El "sin pedir turno" que imprime `entorno.sh stack` se refiere a los puertos, no a la
+memoria. Cómo leer la corrida: `verify-feature` paso 1.
 
 Además verificar:
 

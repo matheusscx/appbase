@@ -570,6 +570,11 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   (2) reactivar PRs + `required status checks` sobre `main` (revierte la regla de dev
   "trabajar directo sobre `main`") → el código roto ni toca la rama que despliega. Cierra el
   agujero del post-mortem del 2026-07-23 (push a `main` con e2e rojo).
+  ✅ **La mitad (1) quedó hecha el 2026-10-11, sin workflow de deploy:** el owner activó **Wait
+  for CI** en `backend` y `frontend` en Railway, así que un CI rojo no se despliega (ver
+  `docs/ARCHITECTURE.md` § Demo en Railway y el bloque 🚦 de `CLAUDE.md`). Queda abierta la (2),
+  branch protection con PRs, que choca con la regla de desarrollo de commitear directo a `main`
+  y es decisión del owner para el paso a producción.
 - [ ] **Smoke post-deploy automático en el CI** (harness/infra, anotado 2026-08-11) — hoy
   `./scripts/smoke-produccion.sh` existe y funciona, pero **se corre a mano**, así que la
   única red que corre sola tras un push es el `healthcheckPath`, y ése prueba el arranque,

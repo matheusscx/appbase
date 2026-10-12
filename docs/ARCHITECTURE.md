@@ -340,11 +340,15 @@ rompía el demo desplegado — ver [ADR-022](./adr/022-navegador-un-solo-origen.
 
 ### Demo en Railway
 
-**Un `git push origin main` despliega el demo.** La conexión con el repo está hecha
-desde el dashboard de Railway, no hay workflow en `.github/` — así que el deploy no
-se ve en el código y corre **en paralelo** al CI, no después. Son dos semáforos
-distintos: el CI verifica el código contra una base virgen, Railway lo arranca
-contra la base vivida del demo.
+**Un `git push origin main` despliega el demo, después del CI.** La conexión con el repo está
+hecha desde el dashboard de Railway, no hay workflow de deploy en `.github/` — así que el deploy no
+se ve en el código. Desde el 2026-10-11 (owner) los servicios `backend` y `frontend` tienen
+**Wait for CI** activo en su configuración del dashboard: el deployment queda en `WAITING` hasta
+que terminan los workflows de GitHub Actions del commit, y si alguno falla se salta
+([docs](https://docs.railway.com/deployments/github-autodeploys#wait-for-ci)). Un run cancelado
+por `concurrency` deja su deployment sin hacer; despliega el push siguiente. Antes de esa fecha el
+deploy corría **en paralelo** al CI. Siguen siendo dos semáforos distintos: el CI verifica el
+código contra una base virgen, Railway lo arranca contra la base vivida del demo.
 
 `healthcheckPath` en `backend/railway.json` y `frontend/railway.json` existe para
 que un arranque roto no reemplace a uno que funciona: **según la documentación de
@@ -366,7 +370,7 @@ apuntado a otro Postgres, vacío pero vivo, pasaría un `SELECT 1`.
 promoción del deploy. Una base que se cae dos horas después no la ve nadie. Para
 eso está `./scripts/smoke-produccion.sh`, que verifica el deployment que está
 sirviendo ahora. Correrlo **después** de que el deployment diga `SUCCESS`, no
-justo tras el push: como Railway y el CI corren en paralelo, antes de eso estaría
+justo tras el push: Railway espera al CI y después construye, así que antes de eso estaría
 midiendo el deployment anterior.
 
 ⚠️ Lo que **ningún** semáforo cubre: un cambio de esquema contra datos existentes,
