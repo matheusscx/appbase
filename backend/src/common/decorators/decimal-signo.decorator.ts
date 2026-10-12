@@ -2,7 +2,8 @@ import { registerDecorator, type ValidationOptions } from 'class-validator';
 import Decimal from 'decimal.js';
 import {
   cabeEnColumnaDePlata,
-  TECHO_PERSISTIBLE_FORMATEADO,
+  ESCALA_PERSISTIDA,
+  techoFormateado,
 } from '../utils/monto-persistible.util';
 
 /**
@@ -107,34 +108,44 @@ export function IsDecimalHasta(
 }
 
 /**
- * Valida que un monto suelto quepa en `NUMERIC(18,4)`, la columna de plata del
- * proyecto (`cabeEnColumnaDePlata`). Sin esto, un monto de 10^14 o más pasaba
- * el DTO y daba 500 en el `INSERT` (medido el 2026-10-09: el pago de una venta
- * o de un abono en efectivo, un pago a proveedor, y una salida de caja sin
- * saldo, cuyo rastro desbordaba `caja_intentos_rechazados.monto_solicitado`).
+ * Valida que un monto suelto quepa en la columna `NUMERIC(18, escala)` donde se
+ * guarda (`cabeEnColumnaDePlata`); por default la de plata del proyecto,
+ * `NUMERIC(18,4)`. Sin esto, un monto de 10^14 o más pasaba el DTO y daba 500
+ * en el `INSERT` (medido el 2026-10-09: el pago de una venta o de un abono en
+ * efectivo, un pago a proveedor, y una salida de caja sin saldo, cuyo rastro
+ * desbordaba `caja_intentos_rechazados.monto_solicitado`; el 2026-10-12, los
+ * demás `@EsMontoCobrado` y `@EsCosto` que se guardan).
  *
- * Solo para campos que se guardan **tal cual** en una columna `NUMERIC(18,4)`:
- * una columna de otra escala tiene otro techo. Se combina con
- * `@IsNumberString()`, igual que los de arriba.
+ * Mira el campo **tal como llega**: un campo que solo se compara no tiene
+ * columna que desbordar, y lo que el service deriva de él (un costo pasado a la
+ * unidad base, una suma) se mira en el service, después de derivarlo. La `escala` es la de la columna, no la de la
+ * moneda: `tenants.monto_tolerancia` es `NUMERIC(18,6)` y su techo es 10^12.
+ * Qué escala lleva cada campo lo ata `monto-persistible-cobertura.spec.ts` a la
+ * metadata de la entity. Se combina con `@IsNumberString()`, igual que los de
+ * arriba.
  */
-export function IsMontoPersistible(validationOptions?: ValidationOptions) {
+export function IsMontoPersistible(
+  escala: number = ESCALA_PERSISTIDA,
+  validationOptions?: ValidationOptions,
+) {
   return function (object: object, propertyName: string) {
     registerDecorator({
       name: 'isMontoPersistible',
       target: object.constructor,
       propertyName,
+      constraints: [escala],
       options: validationOptions,
       validator: {
         validate(value: unknown): boolean {
           if (typeof value !== 'string') return false;
           try {
-            return cabeEnColumnaDePlata(value);
+            return cabeEnColumnaDePlata(value, escala);
           } catch {
             return false;
           }
         },
         defaultMessage(): string {
-          return `${propertyName} no puede ser de $${TECHO_PERSISTIBLE_FORMATEADO} o más: el sistema no puede guardar montos así`;
+          return `${propertyName} no puede ser de $${techoFormateado(escala)} o más: el sistema no puede guardar montos así`;
         },
       },
     });

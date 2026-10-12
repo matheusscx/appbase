@@ -17,6 +17,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { ModoRegla, NivelRegla } from '../../../common/enums/reglas.enums';
+import { IsMontoPersistible } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { EsFechaPura } from '../../../common/decorators/fecha-pura.decorator';
 import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
@@ -34,6 +35,7 @@ export class TramoDto {
 
   @IsOptional()
   @IsNumberString()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   minimoMonto?: string | null;
 
@@ -44,6 +46,7 @@ export class TramoDto {
   // como campo propio; el pipe que lo hace efectivo se enchufa aparte.
   @IsOptional()
   @IsNumberString()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   valorMonto?: string | null;
 
@@ -64,6 +67,7 @@ export class CreateDescuentoDto {
   // lo decide el service. Una regla por tramos no manda ninguna de las dos.
   @IsOptional()
   @IsNumberString()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   valorMonto?: string | null;
 

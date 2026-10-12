@@ -17,6 +17,7 @@ import {
 import {
   IsDecimalNoNegativo,
   IsDecimalPositivo,
+  IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
 import {
   EsCosto,
@@ -103,6 +104,7 @@ export class LineaCompraDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsCosto()
   precioUnitario?: string | null;
 
@@ -206,6 +208,7 @@ export class CompraBorradorDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   descuentoTotal?: string | null;
 
@@ -220,6 +223,7 @@ export class CompraBorradorDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   totalDocumento?: string | null;
 

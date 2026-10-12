@@ -10,7 +10,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalNoNegativo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 
 export class AplicarDesfaseItemDto {
@@ -37,6 +40,7 @@ export class AplicarDesfaseItemDto {
   // desfases entera.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsCosto()
   @IsOptional()
   precioBase?: string;

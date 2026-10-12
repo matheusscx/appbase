@@ -5,7 +5,10 @@ import {
   IsNotEmpty,
   IsOptional,
 } from 'class-validator';
-import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalPositivo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 
 // ⛔ Deliberadamente SIN `ubicacionId`, a diferencia de `AjusteStockDto`, que
@@ -22,6 +25,7 @@ export class AjusteCostoDto {
   // o negativo no existe: el ajuste corrige el promedio ponderado, no lo anula.
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsMontoPersistible()
   @EsCosto()
   costoNuevo: string;
 

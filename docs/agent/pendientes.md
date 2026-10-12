@@ -127,29 +127,19 @@ destapa una decisión que no es mía).
   (`aprobada` o `error`), consultar el estado en vez de confirmar. O leer ese 4xx como "sin
   confirmar" y no como rechazo.
 
-- [ ] **Los ~40 campos `@EsMontoCobrado` no tienen techo: un monto que no cabe en su columna llega
-  al `INSERT`** (backend, DTOs con `@EsMontoCobrado()`; anotado el 2026-10-09 por el frente que cerró
-  los seis 500 del monto suelto de caja y pagos; **leído, no medido** salvo esos seis). Ese frente le
-  puso `IsMontoPersistible` (`common/decorators/decimal-signo.decorator.ts`) solo a los DTO que
-  midió: `CrearMovimientoDto`, `PagoVentaDto`, `PagoItemDto`, `CrearPagoProveedorDto` y
-  `PagoAlConfirmarDto`. El resto de los `@EsMontoCobrado` sigue sin techo: recargos, descuentos y
-  promociones (`valorMonto`, `minimoMonto`), compras (`descuentoTotal`, `totalDocumento`,
-  `AplicacionPagoProveedorDto.monto`), propinas (`montoPagado`, `montoSugerido`, ajustes y
-  liquidación), el `propinaMonto` y la `propinaSugerida` del cierre de cuenta, la nota de crédito,
-  `montoContado` del conteo, y la pasarela (que ya tiene su entrada, *"`pasarela_orden.monto` es `NUMERIC(18,6)`"*)
-  y las preferencias financieras. **No es un techo único:** la pasarela y
-  `tenants.monto_tolerancia` son `NUMERIC(18,6)` (techo 10^12), y un campo que no se guarda tal cual
-  (un umbral que solo se compara) puede no tener ninguno. **Medir:** por cada campo, a qué columna
-  llega y qué devuelve con 10^14 (o 10^12). **Arreglo probable:** `IsMontoPersistible` donde la
-  columna es `NUMERIC(18,4)`, y un techo por escala donde no. Si se hace en `EscalaMonedaPipe`, el
-  pipe tiene que saber la columna de cada campo, porque hoy solo mira la escala de la moneda.
-  **El que más pesa, según la revisión de seguridad de ese frente (leído, no corrido):** la
-  propina de `POST /cuentas/:id/cerrar` y de `POST /ventas` (`CerrarCuentaDto.propinaMonto` y
-  `propinaSugerida`, `PropinaCierreMesaDto`, `PropinaDirectaDto`). El service solo rechaza
-  negativos, y el `INSERT` en `venta_propina` corre antes que los pagos, así que 10^14 daría 500
-  ahí. La `propinaSugerida` llega aunque no se cobre propina. `AbrirCajaDto.saldoInicial` no está en
-  la lista porque ya lo frena `CajaService.abrir` con 400 (`caja-esperado-no-cabe.e2e-spec.ts`,
-  "la apertura").
+- [ ] **Un costo que cabe en su unidad desborda al pasarlo a la unidad base: 500** (backend,
+  `inventario.service.ts` `registrarAjusteCosto` e `items.service.ts` `ajustarStock`, al convertir
+  con `convertirCostoUnitario`; queda del cierre de "Los ~40 campos `@EsMontoCobrado` no tienen
+  techo", 2026-10-12, [`resueltos.md`](resueltos.md)). El techo del DTO (`IsMontoPersistible`)
+  mira el campo tal como llega, y el costo se guarda **por unidad base**. **Medido el 2026-10-12**
+  con un ingrediente en `kg`: `POST /inventario/ajustes-costo` con `unidadCodigo: 'g'` y
+  `costoNuevo: '99999999999999'` da **500**, y `PATCH /items/:id/stock` con el mismo costo por
+  gramo, también. El campo cabe; por kilo son ×1000. **Leído, no medido:** la línea de compra con
+  una presentación o una unidad menor que la base (`compra_lineas.costo_unitario_base`).
+  **Arreglo probable:** el mismo patrón que el motor, `cabeEnColumnaDePlata` sobre el costo ya
+  convertido, una vez, antes de escribir, con un 400 que diga el costo por unidad base. ⚠️ Escribe
+  en `movimientos_inventario`: consultar antes de tocarlo (CLAUDE.md, "Detenerse y preguntar"). Un
+  costo de $10^11 por gramo no es un caso real; lo que pesa es que la respuesta sea un 500.
 
 - [ ] **La configuración de la pasarela puede quedar incompleta para su modo, y el cobro da 500** — ⬇️ **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos)
   (backend, `pasarela/dto/create-tenant-pasarela.dto.ts` y `tenant-pasarela.service.ts`

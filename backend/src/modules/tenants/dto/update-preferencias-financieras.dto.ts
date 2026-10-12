@@ -9,7 +9,10 @@ import {
   IsNumberString,
   IsBoolean,
 } from 'class-validator';
-import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalNoNegativo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import type {
   ModoRedondeo,
@@ -52,6 +55,7 @@ export class UpdatePreferenciasFinancierasDto {
    */
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible(6)
   @EsMontoCobrado()
   montoTolerancia: string;
 
@@ -62,6 +66,7 @@ export class UpdatePreferenciasFinancierasDto {
    */
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   umbralDescuadreAviso: string;
 
@@ -72,6 +77,7 @@ export class UpdatePreferenciasFinancierasDto {
    */
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   umbralDescuadreAlto: string;
 

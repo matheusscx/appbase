@@ -11,7 +11,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalNoNegativo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 // `@ValidateIf` y no `@IsOptional()` en `incluido` y `monto`: sus columnas son
@@ -52,6 +55,7 @@ export class UpdateLiquidacionParticipanteDto {
   // de reparto, no plata.
   @ValidateIf((_o, v) => v !== undefined)
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   monto?: string;
 

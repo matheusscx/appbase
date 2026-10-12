@@ -221,8 +221,8 @@ export class UpdatePreferenciasFinancierasDto {
   escalaCalculo: number;        // @IsInt @Min(0) @Max(12)
   modoRedondeo: string;         // @IsIn(['HALF_UP','HALF_EVEN','FLOOR','CEIL'])
   nivelRedondeo: string;        // @IsIn(['linea','documento'])
-  montoTolerancia: string;      // @IsNumberString @IsDecimalNoNegativo @EsMontoCobrado
-  umbralDescuadreAviso: string; // idem
+  montoTolerancia: string;      // @IsNumberString @IsDecimalNoNegativo @EsMontoCobrado @IsMontoPersistible(6)
+  umbralDescuadreAviso: string; // idem, con @IsMontoPersistible() — su columna es NUMERIC(18,4)
   umbralDescuadreAlto: string;  // idem — el service exige además alto >= aviso
   promosAcumulanDescuentos: boolean; // @IsBoolean
 }

@@ -26,7 +26,10 @@ import {
   ComboComponenteInputDto,
   ItemGrupoModificadorInputDto,
 } from './create-item.dto';
-import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalNoNegativo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 import { MAX_INT } from '../../../common/constants/escalas';
@@ -79,6 +82,7 @@ export class UpdateItemDto {
   // aparente y el atajo era crear y después editar.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsCosto()
   @ValidateIf((_o, v) => v !== undefined)
   precioBase?: string;

@@ -16,6 +16,7 @@ import { Type } from 'class-transformer';
 import {
   IsDecimalNoNegativo,
   IsDecimalPositivo,
+  IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
@@ -110,6 +111,7 @@ export class AjusteStockDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsCosto()
   costoUnitario?: string;
 

@@ -253,6 +253,18 @@ que replica el redondeo de Postgres) **una vez, después de calcular y antes de 
 que no cabe es 400. El caso que lo estableció es el motor: [motor-calculo-precios.md](../features/motor-calculo-precios.md)
 § "Un monto que no cabe en su columna".
 
+📌 **La escala no es el techo: un campo marcado que se guarda lleva también
+`@IsMontoPersistible(escala)`**, con la escala de **su columna**. Por default es la de la plata,
+`NUMERIC(18,4)`; `tenants.monto_tolerancia`, por ejemplo, es `NUMERIC(18,6)` y lleva
+`@IsMontoPersistible(6)`. La marca valida los decimales y no los enteros: hasta el
+2026-10-12, 36 campos `@EsMontoCobrado`/`@EsCosto` daban 500 con 10^14. Un campo que solo se
+compara no lleva techo, porque no tiene columna que desbordar. Lo cuida
+`common/utils/monto-persistible-cobertura.spec.ts`: barre todos los DTO por la marca, y una
+marca sin techo rompe ese spec salvo que figure en su lista de exentos con el porqué. Si
+agregás un campo, anotá ahí su columna. El techo del DTO no cubre lo que el service **deriva**
+del campo (una suma, un costo pasado a la unidad base): eso se mira en el service, como en el
+punto anterior.
+
 ✅ **El punto ciego de descuentos y recargos se cerró el 2026-08-23.** Su `valor` no se
 podía marcar —era monto fijo o porcentaje según el campo hermano `modo`, y ni el decorador
 ni el pipe leen campos hermanos—, así que se **partió en dos columnas**: `valor_monto`

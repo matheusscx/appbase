@@ -7,7 +7,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalNoNegativo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class MontoManualDto {
@@ -20,6 +23,7 @@ export class MontoManualDto {
   // `@EsMontoCobrado()`: es plata que una persona **recibe** —el reparto que se
   // le paga al garzón—, así que la escala es la de la moneda del tenant.
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   monto: string;
 }

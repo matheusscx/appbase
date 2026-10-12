@@ -1,5 +1,8 @@
 import { IsNumberString, IsOptional } from 'class-validator';
-import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalNoNegativo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 /**
@@ -14,12 +17,14 @@ export class PropinaDirectaDto {
   // > 0, pero la validación no debe ser más estricta que la semántica real.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   montoPagado: string;
 
   @IsOptional()
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   montoSugerido?: string;
 

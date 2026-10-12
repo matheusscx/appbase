@@ -27,6 +27,7 @@ export class AplicacionPagoProveedorDto {
 
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   monto: string;
 }

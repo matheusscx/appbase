@@ -5,7 +5,10 @@ import {
   ValidateIf,
   type ValidationArguments,
 } from 'class-validator';
-import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalNoNegativo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
@@ -59,6 +62,7 @@ export class LineaCierreDto {
   // 0 es legítimo (ese método no tuvo movimiento); nunca negativo.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   montoContado: string;
 }

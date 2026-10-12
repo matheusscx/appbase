@@ -13,6 +13,7 @@ import {
   PagoVentaDto,
 } from '../../ventas/dto/create-venta.dto';
 import { CredencialGarzonOpcionalDto } from '../../../common/dto/credencial-garzon.dto';
+import { IsMontoPersistible } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class CerrarCuentaDto extends CredencialGarzonOpcionalDto {
@@ -40,12 +41,14 @@ export class CerrarCuentaDto extends CredencialGarzonOpcionalDto {
   /** Monto de propina cobrado (0 = sin propina). Default 0 si se omite. */
   @IsOptional()
   @IsNumberString()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   propinaMonto?: string;
 
   /** Sugerencia mostrada en UI al momento del cobro. */
   @IsOptional()
   @IsNumberString()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   propinaSugerida?: string;
 

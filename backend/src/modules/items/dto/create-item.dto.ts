@@ -22,6 +22,7 @@ import { Type } from 'class-transformer';
 import {
   IsDecimalHasta,
   IsDecimalNoNegativo,
+  IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
@@ -106,6 +107,7 @@ export class RecetaExtraInputDto {
   // del extra y el monto sale de multiplicarlo, no de este campo.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsCosto()
   precioExtra: string;
 }
@@ -147,6 +149,7 @@ export class ItemGrupoOpcionOverrideInputDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsCosto()
   precioExtra?: string;
 }
@@ -206,6 +209,7 @@ export class CreateItemDto {
   // vender un kilo. Mismo criterio que `AplicarDesfaseItemDto.precioBase`.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsCosto()
   precioBase: string;
 
@@ -279,6 +283,7 @@ export class CreateItemDto {
   // de este DTO, que pasaba en verde mientras la API rebotaba.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsCosto()
   @IsOptional()
   costo?: string;

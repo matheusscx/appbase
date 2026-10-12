@@ -23,6 +23,132 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Los ~40 campos `@EsMontoCobrado` no tenían techo, y los `@EsCosto` tampoco (cerrada 2026-10-12)
+
+**Eran 44, no ~40, y la mitad no estaba en la entrada.** El barrido fue por el decorador. Hay 31
+`@EsMontoCobrado`: la pasarela no lleva la marca, así que no estaba entre ellos. Hay además 13
+`@EsCosto` que la entrada no nombraba, y la orquestadora los sumó al frente (*"cerrar en un
+consumidor no es cerrar"*). Cada campo se midió por HTTP (supertest) con 10^14. A
+`monto_tolerancia`, que es `NUMERIC(18,6)`, se le mandó 10^12. Cada base fue nueva, con el
+código de `origin/main` en `c98e5402`.
+
+**Cómo se cerró.** `IsMontoPersistible` (`common/decorators/decimal-signo.decorator.ts`) recibe
+ahora la escala de la columna. El default es 4, la de la plata; `IsMontoPersistible(6)` va en
+`montoTolerancia`. `cabeEnColumnaDePlata` toma la misma escala opcional, y el motor y la caja la
+siguen llamando sin ella: no cambió cómo se calcula ni cómo se redondea. Se agregó a 36 campos.
+Un campo que solo se compara no lleva techo. Nada nuevo en el frontend: lo que la API rechaza
+ahora es solo lo que antes daba 500.
+
+| Campo (módulo/DTO) | Endpoint | Columna (entity) | Con 10^14 antes | Arreglo |
+|---|---|---|---|---|
+| caja/`CrearMovimientoDto.monto` | `POST /caja/:id/movimientos` | `movimientos_caja.monto` (18,4) | 500 (2026-10-09) | ya lo tenía (2026-10-09) |
+| ventas/`PagoVentaDto.monto` | `POST /ventas`, `/cuentas/:id/cerrar` | `pagos.monto` (18,4) | 500 (2026-10-09) | ya lo tenía |
+| pagos/`PagoItemDto.monto` | `POST /pagos` | `pagos.monto` (18,4) | 500 (2026-10-09) | ya lo tenía |
+| compras/`CrearPagoProveedorDto.monto` | `POST /compras/pagos` | `pagos_proveedor.monto` (18,4) | 500 (2026-10-09) | ya lo tenía |
+| compras/`PagoAlConfirmarDto.monto` | `POST /compras/:id/confirmar` | `pagos_proveedor.monto` (18,4) | 500 (2026-10-09) | ya lo tenía |
+| caja/`AbrirCajaDto.saldoInicial` | `POST /caja/abrir` | `cajas.saldo_inicial` (18,4) | 400 de `CajaService.abrir` | exento: ya lo frena el service |
+| caja/`LineaCierreDto.montoContado` | `POST /caja/:id/conteo` | `caja_arqueo_medio.contado`, `cajas.monto_contado` (18,4) | **500** | `IsMontoPersistible()` |
+| descuentos/`CreateDescuentoDto.valorMonto` | `POST`/`PATCH /descuentos` | `descuentos.valor_monto` (18,4) | **500** | `IsMontoPersistible()` |
+| descuentos/`TramoDto.minimoMonto` | `POST`/`PATCH /descuentos` | `descuento_tramos.minimo_monto` (18,4) | **500** | `IsMontoPersistible()` |
+| descuentos/`TramoDto.valorMonto` | `POST`/`PATCH /descuentos` | `descuento_tramos.valor_monto` (18,4) | **500** | `IsMontoPersistible()` |
+| recargos/`CreateRecargoDto.valorMonto` | `POST`/`PATCH /recargos` | `recargos.valor_monto` (18,4) | **500** | `IsMontoPersistible()` |
+| recargos/`TramoDto.minimoMonto` | `POST`/`PATCH /recargos` | `recargo_tramos.minimo_monto` (18,4) | **500** | `IsMontoPersistible()` |
+| recargos/`TramoDto.valorMonto` | `POST`/`PATCH /recargos` | `recargo_tramos.valor_monto` (18,4) | **500** | `IsMontoPersistible()` |
+| promociones/`CreatePromocionDto.valorMonto` | `POST`/`PATCH /promociones` | `promociones.valor_monto` (18,4) | **500** | `IsMontoPersistible()` |
+| compras/`CompraBorradorDto.totalDocumento` | `POST`/`PATCH /compras` | `compras.total_documento` (18,4) | **500** | `IsMontoPersistible()` |
+| compras/`ActualizarDocumentoDto.totalDocumento` | `PATCH /compras/:id/documento` | `compras.total_documento` (18,4) | **500** | `IsMontoPersistible()` |
+| compras/`CompraBorradorDto.descuentoTotal` | `POST`/`PATCH /compras` | `compras.descuento_total` (18,4) | 400 del service: *"supera el total de la compra"* | `IsMontoPersistible()` igual: se guarda en 18,4 |
+| compras/`CorregirDescuentoDto.descuentoTotal` | `PATCH /compras/:id/descuento` | `compras.descuento_total` (18,4) | 400 del service, el mismo | `IsMontoPersistible()` igual |
+| compras/`AplicacionPagoProveedorDto.monto` | `POST /compras/pagos` | `pago_proveedor_aplicaciones.monto` (18,4) | 400 del service: *"supera su deuda conocida"* | `IsMontoPersistible()` igual |
+| propinas/`UpdateLiquidacionParticipanteDto.monto` | `PATCH /propinas/liquidaciones/:id` | `liquidacion_propinas_participante.monto` (18,4) | **500** | `IsMontoPersistible()` |
+| propinas/`MontoManualDto.monto` | `POST /propinas/liquidaciones/liquidar` y `/preview` | `liquidacion_propinas_participante.monto` (18,4) | liquidar: **500** con un participante real. Sin propinas da 400 (*"no tiene propinas fuente"*), y si el garzón no participa, el monto se ignora. El preview da 201 porque no guarda | `IsMontoPersistible()`: el preview también rechaza, porque muestra lo que liquidar haría |
+| ventas/`PropinaDirectaDto.montoPagado` | `POST /ventas` | `venta_propina.monto_pagado` (18,4) | **500** | `IsMontoPersistible()` |
+| ventas/`PropinaDirectaDto.montoSugerido` | `POST /ventas` | `venta_propina.monto_sugerido` (18,4) | **500**, aun con 0 cobrado | `IsMontoPersistible()` |
+| ventas/`PropinaCierreMesaDto.montoPagado` | `POST /ventas` | `venta_propina.monto_pagado` (18,4) | **500** | `IsMontoPersistible()` |
+| ventas/`PropinaCierreMesaDto.montoSugerido` | `POST /ventas` | `venta_propina.monto_sugerido` (18,4) | **500** | `IsMontoPersistible()` |
+| salones/`CerrarCuentaDto.propinaMonto` | `POST /cuentas/:id/cerrar` | `venta_propina.monto_pagado` (18,4) | **500**; la cuenta queda abierta | `IsMontoPersistible()` |
+| salones/`CerrarCuentaDto.propinaSugerida` | `POST /cuentas/:id/cerrar` | `venta_propina.monto_sugerido` (18,4) | **500**, aun con 0 cobrado | `IsMontoPersistible()` |
+| ventas/`CreateNotaCreditoDto.monto` | `POST /ventas/:id/notas-credito` | — (no llega a escribir) | 400 del service: *"excede lo disponible para nota de crédito"* con `pagoId`; con `sinPlata` sobre una venta pagada, *"no tiene saldo pendiente"* | exento: ya lo frena el service, y lo fiscal va en su propio frente |
+| tenants/`UpdatePreferenciasFinancierasDto.montoTolerancia` | `PUT /tenants/preferencias-financieras` | `tenants.monto_tolerancia` (**18,6**) | **500** con 10^12 y con 10^14; `999999999999` da 200 | `IsMontoPersistible(6)` |
+| tenants/`UpdatePreferenciasFinancierasDto.umbralDescuadreAviso` | `PUT /tenants/preferencias-financieras` | `tenants.umbral_descuadre_aviso` (18,4) | **500** | `IsMontoPersistible()` |
+| tenants/`UpdatePreferenciasFinancierasDto.umbralDescuadreAlto` | `PUT /tenants/preferencias-financieras` | `tenants.umbral_descuadre_alto` (18,4) | **500** | `IsMontoPersistible()` |
+| items/`CreateItemDto.precioBase` (`@EsCosto`) | `POST /items` | `items.precio_base` (18,4) | **500** | `IsMontoPersistible()` |
+| items/`CreateItemDto.costo` (`@EsCosto`) | `POST /items` | `item_producto.costo_actual`, `movimientos_inventario.costo_unitario` (18,4) | **500** | `IsMontoPersistible()` |
+| items/`UpdateItemDto.precioBase` (`@EsCosto`) | `PATCH /items/:id` | `items.precio_base` (18,4) | **500** | `IsMontoPersistible()` |
+| items/`RecetaExtraInputDto.precioExtra` (`@EsCosto`) | `POST`/`PATCH /items` | `receta_extras_permitidos.precio_extra` (18,4) | **500** | `IsMontoPersistible()` |
+| items/`ItemGrupoOpcionOverrideInputDto.precioExtra` (`@EsCosto`) | `POST`/`PATCH /items` | `item_grupo_modificador_opciones.precio_extra` (18,4) | **500** | `IsMontoPersistible()` |
+| items/`AplicarDesfaseItemDto.precioBase` (`@EsCosto`) | `POST /desfases/aplicar` | `items.precio_base` (18,4) | **500** | `IsMontoPersistible()` |
+| items/`DescartarDesfaseItemDto.costoPropuestoVisto` (`@EsCosto`) | `POST /desfases/descartar` | — (solo se compara) | 201: lo devuelve como "cambiado" | exento: no se guarda |
+| items/`AjusteStockDto.costoUnitario` (`@EsCosto`) | `PATCH /items/:id/stock` | `movimientos_inventario.costo_unitario` (18,4) | **500** | `IsMontoPersistible()`. Con una `unidadCodigo` menor que la base, el costo convertido todavía da 500: pendiente aparte |
+| inventario/`AjusteCostoDto.costoNuevo` (`@EsCosto`) | `POST /inventario/ajustes-costo` | `item_producto.costo_actual`, `movimientos_inventario.costo_unitario` (18,4) | **500** | `IsMontoPersistible()`. Con una `unidadCodigo` menor que la base, el costo convertido todavía da 500: pendiente aparte |
+| compras/`LineaCompraDto.precioUnitario` (`@EsCosto`) | `POST`/`PATCH /compras` | `compra_lineas.precio_unitario` (18,4) | **500** | `IsMontoPersistible()` |
+| compras/`CorregirLineaDto.precioUnitario` (`@EsCosto`) | `PATCH /compras/:id/lineas/:lineaId` | `compra_lineas.precio_unitario` (18,4) | **500** | `IsMontoPersistible()` |
+| grupos-modificadores/`GrupoOpcionInputDto.precioExtra` (`@EsCosto`) | `POST`/`PATCH /grupos-modificadores` | `grupo_modificador_opciones.precio_extra` (18,4) | **500** | `IsMontoPersistible()` |
+| grupos-modificadores/`AplicarOverridesDto.precioExtra` (`@EsCosto`) | `PATCH /grupos-modificadores/:id/overrides` | `item_grupo_modificador_opciones.precio_extra` (18,4) | **500** | `IsMontoPersistible()` |
+
+**En números:** 5 ya tenían techo. 33 daban 500 y ahora dan 400. 3 ya los frenaba el service con
+otro 400 y llevan el techo igual, porque se guardan en 18,4. 3 no lo necesitan: la apertura de caja
+y la nota de crédito los frena el service, y `costoPropuestoVisto` no se guarda.
+
+**La pasarela no se midió acá.** Sus tres DTO no llevan la marca a propósito, porque validan la
+escala con `MonedasService.validarEscalaDeMoneda`. Su techo sigue en la entrada propia,
+*"`pasarela_orden.monto` es `NUMERIC(18,6)`"*. La escala de cada columna se leyó de la entity y no
+del `.sql`.
+
+**Qué queda afuera:** lo que el service **deriva** del campo. Un costo que cabe por gramo y se
+guarda por kilo da 500 (medido). Es la entrada nueva *"Un costo que cabe en su unidad desborda al
+pasarlo a la unidad base"*, en [`pendientes.md`](pendientes.md) § 2.
+
+### Tests y mutantes
+
+- `test/monto-suelto-no-cabe.e2e-spec.ts`: los 36 campos dan 400 con el techo en el mensaje,
+  más el `PATCH` de descuento, recargo y promoción (sus `Update*Dto` de `PartialType` heredan el
+  techo, y eso se prueba por HTTP).
+  Cinco bloques miden además que no quedó nada escrito: cuentan las reglas, las compras (más la
+  compra confirmada releída), los ítems con sus movimientos, las ventas de la caja con la cuenta
+  todavía abierta, y las liquidaciones. Controles: la propina que cabe se cobra, y las preferencias aceptan el máximo de
+  cada columna, `999999999999` en la tolerancia y `99999999999999` en el umbral, leídos de vuelta
+  de la base.
+- **Mutante que revierte** (`git apply -R` de los DTO, sin tocar el util): 33 pedidos vuelven a
+  dar **500**. Los 3 que frena el service dan su 400 con otro mensaje, y el preview de la
+  liquidación da 201. El spec cae en sus seis tests.
+- `src/common/utils/monto-persistible-cobertura.spec.ts`: barre todos los DTO por la marca. Exige
+  techo en toda marca salvo las 3 exentas, cada una con su porqué, y ata la escala de cada techo
+  a la de su columna en la metadata de TypeORM. Mutantes: sin el techo de `propinaMonto` cae el
+  chequeo de exentos; con `IsMontoPersistible()` en vez de `(6)` en la tolerancia cae la fila de
+  `montoTolerancia` (18,6 contra 4).
+- `decimal-signo.decorator.spec.ts`: `IsMontoPersistible(6)` acepta `999999999999.999999` y
+  rechaza `1000000000000`, `999999999999.9999995` y `99999999999999`, que cabría en una columna
+  de plata.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Los ~40 campos `@EsMontoCobrado` no tienen techo: un monto que no cabe en su columna llega
+  al `INSERT`** (backend, DTOs con `@EsMontoCobrado()`; anotado el 2026-10-09 por el frente que cerró
+  los seis 500 del monto suelto de caja y pagos; **leído, no medido** salvo esos seis). Ese frente le
+  puso `IsMontoPersistible` (`common/decorators/decimal-signo.decorator.ts`) solo a los DTO que
+  midió: `CrearMovimientoDto`, `PagoVentaDto`, `PagoItemDto`, `CrearPagoProveedorDto` y
+  `PagoAlConfirmarDto`. El resto de los `@EsMontoCobrado` sigue sin techo: recargos, descuentos y
+  promociones (`valorMonto`, `minimoMonto`), compras (`descuentoTotal`, `totalDocumento`,
+  `AplicacionPagoProveedorDto.monto`), propinas (`montoPagado`, `montoSugerido`, ajustes y
+  liquidación), el `propinaMonto` y la `propinaSugerida` del cierre de cuenta, la nota de crédito,
+  `montoContado` del conteo, y la pasarela (que ya tiene su entrada, *"`pasarela_orden.monto` es `NUMERIC(18,6)`"*)
+  y las preferencias financieras. **No es un techo único:** la pasarela y
+  `tenants.monto_tolerancia` son `NUMERIC(18,6)` (techo 10^12), y un campo que no se guarda tal cual
+  (un umbral que solo se compara) puede no tener ninguno. **Medir:** por cada campo, a qué columna
+  llega y qué devuelve con 10^14 (o 10^12). **Arreglo probable:** `IsMontoPersistible` donde la
+  columna es `NUMERIC(18,4)`, y un techo por escala donde no. Si se hace en `EscalaMonedaPipe`, el
+  pipe tiene que saber la columna de cada campo, porque hoy solo mira la escala de la moneda.
+  **El que más pesa, según la revisión de seguridad de ese frente (leído, no corrido):** la
+  propina de `POST /cuentas/:id/cerrar` y de `POST /ventas` (`CerrarCuentaDto.propinaMonto` y
+  `propinaSugerida`, `PropinaCierreMesaDto`, `PropinaDirectaDto`). El service solo rechaza
+  negativos, y el `INSERT` en `venta_propina` corre antes que los pagos, así que 10^14 daría 500
+  ahí. La `propinaSugerida` llega aunque no se cobre propina. `AbrirCajaDto.saldoInicial` no está en
+  la lista porque ya lo frena `CajaService.abrir` con 400 (`caja-esperado-no-cabe.e2e-spec.ts`,
+  "la apertura").
+
+---
+
 ## El *unhandled rejection* de `pos.nuxt.spec.ts` en `pos.vue:165` (cerrada 2026-10-12)
 
 **La causa está en el mock, no en la pantalla.** En `pos.nuxt.spec.ts`, `POST

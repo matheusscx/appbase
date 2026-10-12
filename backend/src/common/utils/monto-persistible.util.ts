@@ -16,27 +16,42 @@ import Decimal from 'decimal.js';
 export const PRECISION_PERSISTIDA = 18;
 export const ESCALA_PERSISTIDA = 4;
 
-/** El primer monto que ya no cabe: 14 dígitos enteros, `10^(18−4)`. */
-const TECHO = new Decimal(10).pow(PRECISION_PERSISTIDA - ESCALA_PERSISTIDA);
+/**
+ * El primer monto que ya no cabe en `NUMERIC(18, escala)`: `10^(18−escala)`.
+ * Con la escala de la plata, 14 dígitos enteros; con `NUMERIC(18,6)`
+ * (`tenants.monto_tolerancia`), 12.
+ */
+function techo(escala: number): Decimal {
+  return new Decimal(10).pow(PRECISION_PERSISTIDA - escala);
+}
 
 /**
- * ¿Postgres acepta este monto en una columna `NUMERIC(18,4)`? Replica lo que
- * hace él al escribir: primero redondea a 4 decimales —el empate, hacia afuera
+ * ¿Postgres acepta este monto en una columna `NUMERIC(18, escala)` —por
+ * default la de plata, `NUMERIC(18,4)`—? Replica lo que hace él al escribir:
+ * primero redondea a `escala` decimales —el empate, hacia afuera
  * del cero, que es lo que hace `ROUND_HALF_UP` en Decimal.js— y después exige
- * menos de 14 dígitos enteros. Por eso `99.999.999.999.999,99995` no cabe: llega
+ * menos de `18 − escala` dígitos enteros. Por eso `99.999.999.999.999,99995` no cabe: llega
  * redondeado a `10^14`.
  *
  * Solo mira: no cuantiza ni devuelve nada que alguien vaya a persistir.
  */
-export function cabeEnColumnaDePlata(monto: Decimal.Value): boolean {
+export function cabeEnColumnaDePlata(
+  monto: Decimal.Value,
+  escala: number = ESCALA_PERSISTIDA,
+): boolean {
   return new Decimal(monto)
-    .toDecimalPlaces(ESCALA_PERSISTIDA, Decimal.ROUND_HALF_UP)
+    .toDecimalPlaces(escala, Decimal.ROUND_HALF_UP)
     .abs()
-    .lessThan(TECHO);
+    .lessThan(techo(escala));
 }
 
-/** El techo como lo lee el cajero, para el mensaje del rechazo. */
-export const TECHO_PERSISTIBLE_FORMATEADO = formatearMontoPersistible(TECHO);
+/** El techo de `NUMERIC(18, escala)` como lo lee el cajero, para el mensaje. */
+export function techoFormateado(escala: number): string {
+  return formatearMontoPersistible(techo(escala));
+}
+
+/** El techo de la columna de plata, `NUMERIC(18,4)`. */
+export const TECHO_PERSISTIBLE_FORMATEADO = techoFormateado(ESCALA_PERSISTIDA);
 
 /**
  * `146913578024690.000000` → `146.913.578.024.690`. Sin `number`: un monto que

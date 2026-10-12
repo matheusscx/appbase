@@ -28,6 +28,11 @@ class PersistibleDto {
   monto: string;
 }
 
+class PersistibleEscala6Dto {
+  @IsMontoPersistible(6)
+  tolerancia: string;
+}
+
 describe('IsDecimalPositivo', () => {
   it('acepta un decimal positivo', async () => {
     const dto = plainToInstance(PositivoDto, { monto: '10.50' });
@@ -116,5 +121,29 @@ describe('IsMontoPersistible', () => {
     const dto = plainToInstance(PersistibleDto, { monto: 'mucho' });
     const errores = await validate(dto);
     expect(errores.some((e) => e.property === 'monto')).toBe(true);
+  });
+});
+
+describe('IsMontoPersistible(6): la columna NUMERIC(18,6)', () => {
+  it('acepta el máximo que cabe: 12 enteros y 6 decimales', async () => {
+    for (const tolerancia of ['999999999999.999999', '999999999999', '0']) {
+      const dto = plainToInstance(PersistibleEscala6Dto, { tolerancia });
+      expect(await validate(dto)).toHaveLength(0);
+    }
+  });
+
+  it('rechaza 10^12 y lo que Postgres redondearía a 10^12, con SU techo en el mensaje', async () => {
+    for (const tolerancia of [
+      '1000000000000',
+      '999999999999.9999995',
+      // Cabe en NUMERIC(18,4): el techo no es el de la plata.
+      '99999999999999',
+    ]) {
+      const dto = plainToInstance(PersistibleEscala6Dto, { tolerancia });
+      const errores = await validate(dto);
+      expect(errores[0]?.constraints?.isMontoPersistible).toBe(
+        'tolerancia no puede ser de $1.000.000.000.000 o más: el sistema no puede guardar montos así',
+      );
+    }
   });
 });

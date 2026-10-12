@@ -9,7 +9,10 @@ import {
   IsUUID,
   ValidateIf,
 } from 'class-validator';
-import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalNoNegativo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 
 export class AplicarOverridesDto {
@@ -46,6 +49,7 @@ export class AplicarOverridesDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsCosto()
   precioExtra?: string;
 }

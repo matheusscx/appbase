@@ -19,7 +19,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
-import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalPositivo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsFechaPura } from '../../../common/decorators/fecha-pura.decorator';
 import type { TipoPromocion } from '../entities/promocion.entity';
 import { MAX_SMALLINT } from '../../../common/constants/escalas';
@@ -137,6 +140,7 @@ export class CreatePromocionDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsMontoPersistible()
   @EsMontoCobrado()
   valorMonto?: string | null;
 

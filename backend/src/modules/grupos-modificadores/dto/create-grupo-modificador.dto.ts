@@ -14,7 +14,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { IsDecimalNoNegativo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalNoNegativo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 import { MAX_INT } from '../../../common/constants/escalas';
 
@@ -39,6 +42,7 @@ export class GrupoOpcionInputDto {
   // columna NUMERIC(18,4)—, y como aquél es precio **por unidad** de la opción.
   @IsNumberString()
   @IsDecimalNoNegativo()
+  @IsMontoPersistible()
   @EsCosto()
   precioExtra: string;
 
