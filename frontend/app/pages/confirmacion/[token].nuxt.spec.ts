@@ -8,7 +8,9 @@
 //
 // El token se consulta en `onMounted` con `$fetch` (no `useApiFetch`: la
 // pantalla es pública y no hay sesión que autenticar), así que el mock es un
-// `stubGlobal`.
+// `stubGlobal`. Desde nuxt 4.5 ese `$fetch` es un auto-import que copia el
+// global al cargar el módulo, antes del `beforeEach`: el `mockNuxtImport` de
+// abajo lo hace volver a leer el global en cada llamada.
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Confirmacion from './[token].vue'
@@ -23,6 +25,10 @@ let toasts: { title?: string, color?: string }[] = []
 
 mockNuxtImport('useRoute', () => {
   return () => ({ params: { token: TOKEN }, path: `/confirmacion/${TOKEN}` })
+})
+
+mockNuxtImport('$fetch', () => {
+  return (...args: Parameters<typeof globalThis.$fetch>) => globalThis.$fetch(...args)
 })
 
 mockNuxtImport('useToast', () => {

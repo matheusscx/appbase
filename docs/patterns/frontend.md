@@ -1031,6 +1031,13 @@ El patrón completo está en `app/stores/monedas.spec.ts` y en `MoneyInput.spec.
   template propio: así se cubrió `AppDrawer`, cuyo root es `UDrawer`. El diagnóstico
   inicial —que la causa era el teleport— **era incorrecto**: la falla ocurre en `setup()`,
   antes de cualquier render o teleport.
+- **`vi.stubGlobal('$fetch', …)` solo no alcanza en un spec con entorno `nuxt`.** Desde nuxt
+  4.5, `$fetch` es un auto-import de `#build/fetch.mjs`, que copia `globalThis.$fetch` una vez,
+  cuando se carga el módulo: un `stubGlobal` en el `beforeEach` llega tarde, y la página o el
+  store llaman al `$fetch` de verdad. Medido al subir a 4.5.2: 12 rojos en 3 specs. Hay que
+  agregar `mockNuxtImport('$fetch', () => (...args) => globalThis.$fetch(...args))`, que hace
+  volver a leer el global en cada llamada. Así el `stubGlobal` sigue funcionando y puede
+  cambiar de un test a otro. Está en `pages/confirmacion/[token].nuxt.spec.ts`.
 - Riesgo del propio patrón: un stub con template propio puede volverse tan permisivo que el
   test pase por construcción. La contraprueba es la mutación — si romper el componente bajo
   test no pone nada en rojo, el test está afirmando el stub y no el componente.

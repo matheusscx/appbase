@@ -2,7 +2,7 @@
 # Backend Dockerfile - NestJS Development
 # ========================================
 
-FROM node:22-alpine
+FROM node:22.23-alpine
 
 WORKDIR /app
 

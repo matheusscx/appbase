@@ -23,6 +23,86 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## nodemailer 10 y nuxt 4.5.2, con Node fijado en 22.23 (cerrada 2026-10-12)
+
+Salen de [`pendientes.md`](pendientes.md) § Endurecimiento, entrada *"Vulnerabilidades aceptadas en
+el escaneo de dependencias"*. El owner pidió cerrar las dos con arreglo (2026-10-11). Los dos
+sub-ítems, verbatim:
+
+> - **nodemailer 9 → 10** (backend; mecánico): dos `high` de DoS en el addressparser
+>   (GHSA-v53p-9fqp-m79j, GHSA-prgh-xp8r-p3m5). Están arregladas en la 10, que es un major para
+>   el rango `^9`. El CHANGELOG de la 10.0.0 declara un solo breaking: Node >= 20. Usamos
+>   Node 22, y el uso que hacemos es uno solo (`mail.service.ts`, `createTransport`). Igual
+>   va con el gate entero, porque la 10 también migró a TypeScript con builds ESM y CJS.
+> - **nuxt >= 4.5.1** (frontend; necesita una decisión de entorno, no de producto): cinco
+>   `high` sobre server islands, payload de SSR y `routeRules`. Somos SPA (`ssr: false`,
+>   ADR-017) y no usamos islands ni `routeRules`, así que hoy no aplican. **Por qué no
+>   entró:** desde la 4.5, nuxt pide Node `^22.19.0` (la 4.6.1, `^22.22.3`), y el Node del
+>   host es 22.18.0. Con ese Node, npm deja nuxt en 4.4.8 aunque el rango `^4.4.8` permita
+>   más. Para subirlo, primero hay que actualizar Node en el host y en las sesiones. Además,
+>   la 4.5 agrega `rolldown` como peer: medirlo con Playwright entero.
+
+**nodemailer 10.0.16, no la 10.1.0.** Todos los advisories abiertos se arreglan en la 10.0.9 o
+antes: los dos `high` y además tres `moderate` que el audit marcaba, entre ellos una fuga de
+credenciales SMTP entre transportes. La 10.0.11 restaura la compatibilidad del entry CJS y la forma
+de los tipos de `@types/nodemailer`. La 10.1.0 es un minor de *hardening* publicado el día antes.
+La 10 trae sus propios tipos, así que salió `@types/nodemailer`; `tsc` resuelve `nodemailer` a
+`dist/cjs/nodemailer.d.ts` de la 10.0.16. El `mail.service.spec.ts` no ejerce el envío real (sin
+`SMTP_HOST` loguea), así que se midió aparte: el `MailService` compilado contra un sumidero SMTP
+local mandó `AUTH`, `MAIL FROM`, `RCPT TO` y el cuerpo, con el asunto con tildes codificado. Con el
+sumidero contestando `550` al destinatario, registró el error, como antes.
+
+**nuxt 4.5.2, no la 4.6.x.** La 4.5.1 es la release de seguridad, y la 4.5.2 es el último patch de
+esa línea, con dos meses publicado. Las dos piden el mismo Node (`^22.19.0`). La 4.6.0 trae la CLI
+v4 y el refactor `nuxt/server`; la 4.6.1 tenía dos días y pide `^22.22.3`. El lock solo cambia
+dentro del subárbol de nuxt (`@nuxt/ui`, `@playwright/test` y `happy-dom` quedan iguales) y queda
+**una sola `reka-ui`**. El peer `rolldown ~1.2.1` de la 4.5.2 ya estaba cubierto por la 1.2.13 que
+trae vite 8, así que no entra otra copia. El procedimiento del lock fue el mismo de `4b407178`, con
+dos tropiezos nuevos que quedaron anotados ahí.
+
+Dos cosas que el bump arrastró sin avisar:
+- **unhead pasa de v2 a v3** en nuxt, y `@nuxt/ui` 4.8.2 sigue declarando `@unhead/vue ^2`: quedan
+  las dos versiones en `node_modules`. `@nuxt/ui` solo la importa en `runtime/vue/` (su modo Vue sin
+  Nuxt). Medido en el build: el bundle del cliente define el símbolo `usehead` una sola vez, y el
+  server de `.output/` lleva solo unhead 3.4.2.
+- **`$fetch` pasó a ser un auto-import** de `#build/fetch.mjs`, que copia `globalThis.$fetch` al
+  cargar el módulo. Los specs que lo reemplazaban con `vi.stubGlobal` en un `beforeEach` dejaron de
+  interceptarlo: 12 rojos en `auth-pantallas`, `confirmacion/[token]` y `verificar/[token]`. Cada uno
+  ganó un `mockNuxtImport('$fetch')` que vuelve a leer el global en cada llamada; el patrón quedó en
+  [`patterns/frontend.md`](../patterns/frontend.md) §15. En la app no cambia nada: es el mismo
+  objeto.
+
+**Node fijado en 22.23.** `node:22.23-alpine` en todos los `Dockerfile*` y `node-version: '22.23'`
+en los tres `setup-node` del CI. El rango flotante no garantizaba el piso: la imagen sale de lo que
+haya cacheado quien construye (Railway construye `Dockerfile.prod`), y `setup-node` usa la versión
+del toolcache del runner si cumple el rango. El último CI con `'22'` encontró 22.23.3 en caché,
+pero eso depende de la imagen del runner. `engines` en `package.json` no se usó: sin
+`engine-strict`, npm solo avisa con `EBADENGINE`, que es justo lo que ya hace con el `engines` de
+nuxt. El porqué quedó en [`ARCHITECTURE.md`](../ARCHITECTURE.md) § Stack, junto con el comando que
+lista las líneas a cambiar. De paso se corrigió en § Escaneo de dependencias la frase que decía que
+el job no frena el deploy: con Wait for CI, sí lo frena.
+
+**Escaneo.** Salieron las entradas de nodemailer y nuxt de `EXCEPCIONES` y de `pendientes.md`.
+`scripts/check-dependencias.mjs` sale 0 sin ellas y sin "Excepción vencida". Mutante: con los
+lockfiles de antes del commit y sin las excepciones, sale 1, con los `::error::` de nodemailer y nuxt.
+
+**Gate de cierre**, todo con Node 22.23.3:
+- Backend: lint, typecheck, 4061 unitarios y `test:e2e` entero (2384 pasados, 6 saltados por
+  condición de los propios specs).
+- Frontend: build, 2228 unitarios (2 corridas limpias), ratchet y `design:check`. Una tercera
+  corrida, con el `test:e2e` en paralelo en el host, dio 2228/2228 con un *unhandled rejection* en
+  `pos.vue`. No se reprodujo ni solo ni con el host libre, y quedó anotado como intermitente en
+  `pendientes.md` § 2.
+- Playwright entero: 116/116, con los contenedores del stack en Node 22.23.3, nuxt 4.5.2 y
+  nodemailer 10.0.16, y RestartCount 0 y OOMKilled false antes y después.
+- Imágenes de `Dockerfile.prod` construidas con `--pull` y arrancadas de a una, las dos en Node
+  22.23.3. El backend arrancó una vez en `development` para crear el esquema y sembrar, y otra en
+  `NODE_ENV=production`: `/api/health` → 200 `{"estado":"ok","base":"ok"}`, y el único error del
+  log es el aviso de `SMTP_HOST` vacío. El frontend sirvió `/`, un asset de `/_nuxt` y
+  `/api/health` por su proxy, todo en 200.
+
+---
+
 ## El pre-push con el gate completo se cierra, superado por Wait for CI (cerrada 2026-10-11)
 
 Sale de [`pendientes.md`](pendientes.md) § Endurecimiento. **Decidido por el owner el 2026-10-11**

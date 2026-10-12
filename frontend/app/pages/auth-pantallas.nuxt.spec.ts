@@ -39,6 +39,13 @@ mockNuxtImport('useUserPreferences', () => {
   return () => ({ applyColorModeFromServer: () => {} })
 })
 
+// Desde nuxt 4.5, `$fetch` es un auto-import que copia `globalThis.$fetch` al
+// cargar el módulo, antes del `stubGlobal` del `beforeEach`: sin esto, el store
+// llama al `$fetch` de verdad. Así vuelve a leer el global en cada llamada.
+mockNuxtImport('$fetch', () => {
+  return (...args: Parameters<typeof globalThis.$fetch>) => globalThis.$fetch(...args)
+})
+
 type LoginVm ={ state: { email: string, password: string }, onLogin: () => Promise<void> }
 type RegisterVm = { state: { nombre: string, correo: string, password: string }, onRegister: () => Promise<void> }
 

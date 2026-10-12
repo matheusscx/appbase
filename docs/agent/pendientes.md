@@ -143,6 +143,16 @@ destapa una decisión que no es mía).
   request deja abierta la página del POS (un `networkidle` que nunca llega suele ser un polling o
   un stream). No bloquea la integración.
 
+- [ ] **Intermitente de vitest: `pos.nuxt.spec.ts` deja un *unhandled rejection* en `pos.vue:165`**
+  (frontend unit; visto el 2026-10-11 en el frente de dependencias, que en el POS solo cambia la
+  versión de nuxt). *"Cannot read properties of undefined (reading 'totalFinal')"*: `resultado`
+  existe y no trae `totales`. Los 2228 tests pasan, pero vitest sale con 1 por el error. Apareció
+  una vez, con `test:e2e` corriendo en paralelo en el host. Solo ese spec, 6 de 6 limpias con nuxt
+  4.5.2 y 6 de 6 con la 4.4.8 anterior; `npm test` entero con el host libre, 2 de 2 limpias.
+  **Primera vez anotado.** Si vuelve, mirar qué mock de ese spec contesta un cálculo sin `totales`
+  después de que el test terminó (el último test en curso fue "confirmar crea la línea con las
+  unidades y el cobro manda sus unidadIds").
+
 - [ ] **Los ~40 campos `@EsMontoCobrado` no tienen techo: un monto que no cabe en su columna llega
   al `INSERT`** (backend, DTOs con `@EsMontoCobrado()`; anotado el 2026-10-09 por el frente que cerró
   los seis 500 del monto suelto de caja y pagos; **leído, no medido** salvo esos seis). Ese frente le
@@ -752,18 +762,6 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   es una entrada de `EXCEPCIONES` en `scripts/check-dependencias.mjs`, y se borra de los dos
   lados en el mismo commit que la arregla. Si el arreglo llega solo, el job `dependencias`
   avisa con "Excepción vencida".
-  - **nodemailer 9 → 10** (backend; mecánico): dos `high` de DoS en el addressparser
-    (GHSA-v53p-9fqp-m79j, GHSA-prgh-xp8r-p3m5). Están arregladas en la 10, que es un major para
-    el rango `^9`. El CHANGELOG de la 10.0.0 declara un solo breaking: Node >= 20. Usamos
-    Node 22, y el uso que hacemos es uno solo (`mail.service.ts`, `createTransport`). Igual
-    va con el gate entero, porque la 10 también migró a TypeScript con builds ESM y CJS.
-  - **nuxt >= 4.5.1** (frontend; necesita una decisión de entorno, no de producto): cinco
-    `high` sobre server islands, payload de SSR y `routeRules`. Somos SPA (`ssr: false`,
-    ADR-017) y no usamos islands ni `routeRules`, así que hoy no aplican. **Por qué no
-    entró:** desde la 4.5, nuxt pide Node `^22.19.0` (la 4.6.1, `^22.22.3`), y el Node del
-    host es 22.18.0. Con ese Node, npm deja nuxt en 4.4.8 aunque el rango `^4.4.8` permita
-    más. Para subirlo, primero hay que actualizar Node en el host y en las sesiones. Además,
-    la 4.5 agrega `rolldown` como peer: medirlo con Playwright entero.
   - **simple-git (y su `@simple-git/argv-parser`), node-forge, braces** (frontend; vigilar,
     no hay qué hacer hoy): son críticos
     y altos, pero viven en la cadena de desarrollo y build de nuxt (`@nuxt/devtools`, el
@@ -773,8 +771,10 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
     ninguna versión estable de `@nuxt/devtools` sale de simple-git 3.
   - **El lockfile del frontend no se puede regenerar con npm 10.9**: `npm update` y
     `npm audit fix` revientan con *"Cannot read properties of null (reading 'edgesOut')"* (un
-    bug de arborist con los peers exactos de tiptap). Cómo se hizo el 2026-10-11:
-    `npx npm@11.6.2 install` y después `npm install --package-lock-only` con el npm 10 del
+    bug de arborist con los peers exactos de tiptap), y `npm install <paquete>@<versión>` con
+    *"The "from" argument must be of type string"*. Cómo se hizo el 2026-10-11 (dos veces):
+    `npx npm@11.6.2 install` (con `node_modules` borrado si una corrida de npm 10 lo dejó a
+    medias: si no, npm 11 sale con `ENOTEMPTY`) y después `npm install --package-lock-only` con el npm 10 del
     host, para que el `npm ci` de npm 10 (el del CI y el de los Dockerfile) no falle por
     entradas de `@emnapi` que npm 11 escribe distinto. Comprobación: `npm ci` en limpio con npm 10.
     ⚠️ **Y una sola `reka-ui`.** El lock regenerado le dio a `vaul-vue` (el drawer de

@@ -11,8 +11,19 @@
 - **Frontend**: Nuxt 4 (Vue 3) SPA — `ssr: false`, ver [ADR-017](adr/017-spa-sin-ssr.md) —, puerto 5173
 - **Database**: PostgreSQL 18 con TypeORM, puerto 5432 (interno)
 - **Orchestration**: Docker Compose
+- **Node**: 22.23, con el minor fijo en todos los `Dockerfile*` (`node:22.23-alpine`) y en
+  los `setup-node` de `.github/workflows/ci.yml` (`'22.23'`)
 
 Todo el stack corre en contenedores — no se requiere Node.js ni PostgreSQL local.
+
+**Por qué el minor fijo.** El piso lo pone nuxt: desde la 4.5 pide Node `^22.19.0`, y con un
+Node más viejo npm instala igual (solo avisa `EBADENGINE`). Un `node:22-alpine` o un
+`node-version: '22'` no garantizan ese piso: la imagen puede salir de una caché vieja (Railway
+construye `Dockerfile.prod`) y `setup-node` usa la versión que el runner ya tenga cacheada si
+cumple el rango. `engines` en `package.json` no alcanza por lo mismo: sin `engine-strict`, npm
+solo avisa. Al subir de minor, cambiarlas todas juntas: `git grep -nE "FROM node:|node-version:" -- '*Dockerfile*' .github`. El gate
+local (`npm test`, `test:e2e`, Playwright) corre con el Node del host, que también tiene que
+cumplir el piso.
 
 ## Puertos
 
@@ -387,11 +398,12 @@ dependencias de producción que no estén en `EXCEPCIONES`. Lo `moderate`/`low` 
 desarrollo **se reporta sin fallar**. Si el registry de npm no contesta (error de red, 5xx o
 429), deja un aviso y **no** falla: eso no es un hallazgo, y el push siguiente vuelve a auditar
 el lockfile entero. Cualquier otro error de `npm audit` (sin lockfile, 404) **sí** falla.
-Como el resto del CI, corre después del push y no frena el deploy de Railway.
+Como el resto del CI, corre después del push, y su rojo frena el deploy de Railway (Wait for
+CI, más arriba); el aviso por registry caído no.
 
 Una excepción es una vulnerabilidad aceptada con lo medido al lado. Va en el script y tiene su
 entrada en `docs/agent/pendientes.md`, y se borra de los dos lados en el commit que la
-arregla. En el frontend son la mayoría por una razón estructural: `nuxt` es dependencia de
+arregla. Se concentran en el frontend por una razón estructural: `nuxt` es dependencia de
 producción y arrastra su cadena de build y de servidor de desarrollo, pero lo que se
 despliega es `.output/`, y casi nada de esa cadena entra ahí.
 

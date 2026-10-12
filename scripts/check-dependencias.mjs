@@ -50,29 +50,6 @@ const TOPE_MS = 20_000
 // junto con el arreglo, en el mismo commit.
 const EXCEPCIONES = [
   {
-    dir: 'backend',
-    paquete: 'nodemailer',
-    ids: ['GHSA-v53p-9fqp-m79j', 'GHSA-prgh-xp8r-p3m5'],
-    motivo:
-      'DoS cuadrático del addressparser; el arreglo es nodemailer 10 (major, rango ^9). ' +
-      'Los destinatarios salen de un DTO con @IsEmail o de `usuarios.correo`, que entra por ' +
-      'esos DTOs, por el correo verificado de Google o por el seed: nunca texto libre.',
-  },
-  {
-    dir: 'frontend',
-    paquete: 'nuxt',
-    ids: [
-      'GHSA-hxcr-hm88-mpq6',
-      'GHSA-9pgf-384g-p7mv',
-      'GHSA-9473-5f9j-94wq',
-      'GHSA-wm8w-6qjm-cv43',
-      'GHSA-hxvh-4h3w-prp9',
-    ],
-    motivo:
-      'Server islands, payload de SSR y routeRules: la app es SPA (`ssr: false`, ADR-017) ' +
-      'y no usa islands ni routeRules. El arreglo (nuxt >= 4.5.1) exige Node >= 22.19.',
-  },
-  {
     dir: 'frontend',
     paquete: 'simple-git',
     ids: ['GHSA-x6jw-m9v5-85vh', 'GHSA-g4wm-2vf7-vfgr', 'GHSA-858h-whjf-mvg5'],

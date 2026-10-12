@@ -64,7 +64,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '22.23'
           cache: npm
           cache-dependency-path: |
             backend/package-lock.json
@@ -150,7 +150,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '22.23'
 
       - name: npm audit · backend y frontend
         run: node scripts/check-dependencias.mjs
@@ -201,7 +201,7 @@ jobs:
 
       - uses: actions/setup-node@v5
         with:
-          node-version: '22'
+          node-version: '22.23'
           cache: npm
           cache-dependency-path: |
             backend/package-lock.json

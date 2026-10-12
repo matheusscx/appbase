@@ -30,6 +30,13 @@ mockNuxtImport('useRoute', () => {
   return () => ({ params: { token: TOKEN }, path: `/verificar/${TOKEN}` })
 })
 
+// Desde nuxt 4.5, `$fetch` es un auto-import que copia `globalThis.$fetch` al
+// cargar el módulo, antes del `stubGlobal` del `beforeEach`: sin esto, la
+// página llama al `$fetch` de verdad. Así vuelve a leer el global en cada llamada.
+mockNuxtImport('$fetch', () => {
+  return (...args: Parameters<typeof globalThis.$fetch>) => globalThis.$fetch(...args)
+})
+
 let montado: { unmount: () => void } | null = null
 
 beforeEach(() => {
