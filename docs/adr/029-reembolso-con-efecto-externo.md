@@ -242,10 +242,10 @@ después de cobrar"*.
   pidió el reembolso si se confirma lo que declaró, y de quien hizo clic si lo cambió.
 - **Una `REFUND` aclarada por saldo no tiene código de autorización**: Transbank no lo da en la
   consulta.
-- **Webpay Plus deja consultar 7 días** (según su documentación; la referencia dice "en cualquier
-  momento"): un reembolso que quedó sin confirmar y se reintenta después cae al portal. Es lo
-  único de este ADR que no se midió en el sandbox: hace falta un pago de más de 7 días
-  ([`pendientes.md`](../agent/pendientes.md) § 2).
+- **Webpay Plus deja consultar 7 días** (medido en el sandbox el 2026-10-12: pasado el plazo
+  contesta 422 *"passed max time (7 days)"*, sin `details`): un reembolso que quedó sin confirmar y
+  se reintenta después no se puede aclarar por saldo y cae al 409 y al portal
+  ([`resueltos.md`](../agent/resueltos.md)).
 - **Un sin confirmar gasta el tope por pago de la nota del POS mientras no se aclare**
   (2026-10-04, decisión del owner): pudo haber devuelto la plata y nada lo aclara solo. El detalle
   de la venta ofrece lo que queda y explica lo descontado; "no salió" lo libera. La re-verificación

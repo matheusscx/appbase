@@ -23,6 +23,32 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La ventana de consulta de Webpay Plus son 7 días, medido (cerrada 2026-10-12)
+
+**Medido** el 2026-10-12 15:06 UTC por la orquestadora, con el pago de integración de la medición
+del 2026-10-04 18:23 UTC (anulado entero) y el comando que dejaba la entrada: Transbank contesta
+**422** *"The transactions's date has passed max time (7 days) to recover the status"*, sin
+`details`. La documentación tenía razón y la referencia ("en cualquier momento") no.
+
+**El código ya lo soporta, leído:** `WebpayPlusProvider.consultar` sin `details` devuelve
+`estado: 'desconocido'` con `saldo` y `estadoProveedor` en `null`, y `veredictoPorSaldo`
+(`cobros.service.ts`) cae a `no_se_puede`: el 409 *"Revisalo en el portal de Transbank"* y la marca
+manual del admin, como decía [ADR-029](../adr/029-reembolso-con-efecto-externo.md), que ahora lo
+cita como medido.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
+  cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
+  La documentación de Webpay Plus dice que el estado se consulta hasta 7 días; la referencia, "en
+  cualquier momento". Si vence, el aclarado de un reembolso sin confirmar más viejo cae al 409 y
+  a la marca manual del admin ([ADR-029](../adr/029-reembolso-con-efecto-externo.md)), que no se
+  rompe. **Desde el 2026-10-12**, repetir el `GET` del pago de integración de la medición (creado
+  2026-10-04 18:23 UTC, anulado entero, `balance` 0):
+  `RUN_TRANSBANK_SANDBOX=1 TBK_API_KEY_SECRET=<el de integración del seed> TBK_WEBPAY_MALL=597055555535 node scripts/qa/transbank-saldo-sandbox.mjs --reconsultar 01abe0ccb73419df9944e395fa2396743e230bb3eeb7f1cb003d1285f27209bf`.
+  Si sigue contestando 200 con el detalle, la ventana no aplica a la consulta y el ADR se corrige;
+  si no, el ADR ya lo dice.
+
 ## nodemailer 10 y nuxt 4.5.2, con Node fijado en 22.23 (cerrada 2026-10-12)
 
 Salen de [`pendientes.md`](pendientes.md) § Endurecimiento, entrada *"Vulnerabilidades aceptadas en

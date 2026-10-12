@@ -177,17 +177,6 @@ destapa una decisión que no es mía).
   la lista porque ya lo frena `CajaService.abrir` con 400 (`caja-esperado-no-cabe.e2e-spec.ts`,
   "la apertura").
 
-- [ ] **Medir la ventana de consulta de Webpay Plus con un pago de más de 7 días** (queda del
-  cierre de "Probar en el sandbox de Transbank el saldo…", 2026-10-04, [`resueltos.md`](resueltos.md#el-saldo-con-el-que-se-aclara-un-reembolso-medido-en-el-sandbox-de-transbank-cerrada-2026-10-04)).
-  La documentación de Webpay Plus dice que el estado se consulta hasta 7 días; la referencia, "en
-  cualquier momento". Si vence, el aclarado de un reembolso sin confirmar más viejo cae al 409 y
-  a la marca manual del admin ([ADR-029](../adr/029-reembolso-con-efecto-externo.md)), que no se
-  rompe. **Desde el 2026-10-12**, repetir el `GET` del pago de integración de la medición (creado
-  2026-10-04 18:23 UTC, anulado entero, `balance` 0):
-  `RUN_TRANSBANK_SANDBOX=1 TBK_API_KEY_SECRET=<el de integración del seed> TBK_WEBPAY_MALL=597055555535 node scripts/qa/transbank-saldo-sandbox.mjs --reconsultar 01abe0ccb73419df9944e395fa2396743e230bb3eeb7f1cb003d1285f27209bf`.
-  Si sigue contestando 200 con el detalle, la ventana no aplica a la consulta y el ADR se corrige;
-  si no, el ADR ya lo dice.
-
 - [ ] **La configuración de la pasarela puede quedar incompleta para su modo, y el cobro da 500** — ⬇️ **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos)
   (backend, `pasarela/dto/create-tenant-pasarela.dto.ts` y `tenant-pasarela.service.ts`
   `crear`/`actualizar`; queda del cierre de "la configuración de la pasarela no se valida",
