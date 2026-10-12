@@ -20,11 +20,10 @@ import {
   `("modo" = 'monto_fijo' AND "valor_porcentaje" IS NULL)
    OR ("modo" = 'porcentaje' AND "valor_monto" IS NULL)`,
 )
-// `uq_recargos_tenant_nombre_vivo` es sobre `lower(nombre)`: TypeORM no sabe
-// expresar una función en `@Index`, así que acá solo se registra el NOMBRE
-// con `synchronize: false` para que `synchronize` no lo tire al arrancar
-// (pendientes.md, "synchronize no tira los 17 índices del seeder"). Lo sigue
-// creando `SeederService.seedRecargos()` con SQL cruda.
+// `uq_recargos_tenant_nombre_vivo` es sobre `lower(nombre)`: TypeORM no sabe expresar una
+// función en `@Index`, así que lo crea la migración con SQL cruda y acá solo se
+// registra el NOMBRE con `synchronize: false`, para que `migration:generate`
+// no proponga borrarlo (ADR-030).
 @Index('uq_recargos_tenant_nombre_vivo', { synchronize: false })
 export class Recargo {
   @PrimaryGeneratedColumn('uuid', { name: 'recargo_id' })
@@ -43,8 +42,8 @@ export class Recargo {
    * Dónde se aplica: por línea o sobre el total de la venta. Ver `NivelRegla`.
    *
    * **Con default y NOT NULL a propósito.** El default no es comodidad del DTO:
-   * es lo que deja que `synchronize` agregue la columna sobre las filas que ya
-   * existen —el demo de Railway— sin el `23502` que dejó el backend en CRASHED
+   * es lo que dejó que `synchronize` agregara la columna sobre las filas que ya
+   * existían —el demo de Railway— sin el `23502` que dejó el backend en CRASHED
    * el 2026-08-09 (`e163dbb7`, `docs/ARCHITECTURE.md`). Y `'linea'` es el valor
    * VERDADERO para esas filas: hasta hoy la única forma de usar una regla era
    * asociarla a un ítem.

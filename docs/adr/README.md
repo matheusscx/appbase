@@ -41,6 +41,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [027](./027-graficas-con-unovis.md) | Gráficas con Unovis: `AppGrafica` como único punto de entrada, colores por variable CSS de los tokens, y la gráfica siempre al lado de una tabla que tiene el número | Accepted | 2026-09-21 |
 | [028](./028-emision-registrada-por-venta.md) | La emisión se registra por venta: tabla `venta_documentos`, el emisor sale del medio de pago y de lo que declara el comercio, y el documento nace con la entrega | Accepted | 2026-10-02 |
 | [029](./029-reembolso-con-efecto-externo.md) | Reembolso de pasarela: at-most-once contra el proveedor — el reclamo de la clave y el `REFUND` en `iniciada` se commitean antes de llamar; el reintento sin confirmar se aclara por saldo, nunca vuelve a reembolsar. Desde 2026-10-10 cubre también el alta de suscripción (cobro Oneclick: orden write-ahead, aclarado por consulta) | Accepted | 2026-10-04 |
+| [030](./030-esquema-por-migraciones.md) | El esquema lo arman las migraciones, en todos los entornos (`migrationsRun`, `synchronize` apagado): la línea base reproduce lo que armaban `synchronize` + los índices de expresión del seeder, el CI frena una entity cambiada sin migración y el demo corre las migraciones al arrancar | Accepted | 2026-10-12 |
 
 ## Creating a New ADR
 

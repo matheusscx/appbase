@@ -9,11 +9,10 @@ import {
 } from 'typeorm';
 import { TipoMotivoBaja } from '../tipo-motivo-baja.enum';
 
-// `uq_motivo_baja_tenant_nombre` es sobre `lower(nombre)`: TypeORM no sabe
-// expresar una función en `@Index`, así que acá solo se registra el NOMBRE
-// con `synchronize: false` para que `synchronize` no lo tire al arrancar
-// (pendientes.md, "synchronize no tira los 17 índices del seeder"). Lo sigue
-// creando `SeederService.seedMotivosBaja()` con SQL cruda.
+// `uq_motivo_baja_tenant_nombre` es sobre `lower(nombre)`: TypeORM no sabe expresar una
+// función en `@Index`, así que lo crea la migración con SQL cruda y acá solo se
+// registra el NOMBRE con `synchronize: false`, para que `migration:generate`
+// no proponga borrarlo (ADR-030).
 @Index('uq_motivo_baja_tenant_nombre', { synchronize: false })
 // La causa de la merma que deja una nota de crédito cuando lo devuelto se
 // pierde: una sola viva por tenant. Columna pelada con `where`, sin función:

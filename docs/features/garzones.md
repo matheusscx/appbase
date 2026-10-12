@@ -287,7 +287,7 @@ PIN o admin) vive en Salones — no en este módulo.
 - **Controller**: `src/modules/garzones/garzones.controller.ts`
 - **Service**: `src/modules/garzones/garzones.service.ts`
 - **Entidades**: `Garzon` → tabla `garzones`; `GarzonPinEvento` → tabla `garzon_pin_evento`
-  (las dos registradas también en el array `entities` de `app.module.ts`: no hay
+  (las dos registradas también en `ENTIDADES`, `src/database/typeorm.config.ts`: no hay
   `autoLoadEntities`).
 
 ### Tabla `garzones`

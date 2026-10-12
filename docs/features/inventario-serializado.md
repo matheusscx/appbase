@@ -350,14 +350,13 @@ validación la hacemos con upper o lower case"*. O sea:
   una serie enorme rebota con un error de Postgres sin mapear —un 500— en el mismo chokepoint
   que da 400 para todo lo demás.
 
-⚠️ **El índice lo crea el seeder, no la entity** (`SeederService.seedItemUnidadSerieIndex()`).
+⚠️ **El índice lo crea la migración con SQL cruda, no la entity** (la línea base, ADR-030).
 No es un detalle de estilo: **TypeORM no sabe expresar una función en `@Index`**, así que
-declarado en la entity `synchronize` crea uno sobre la columna pelada —que acepta `ABC123` y
-`abc123` como dos series distintas—, o sea la regla equivocada. Es el mismo molde que los
-índices de `lower(nombre)` (`seedPromocionesIndices()`, `seedGruposModificadores()`), con su
-misma contrapartida: en dev `synchronize` puede dejar la tabla sin el índice hasta que el
-seeder lo recree, así que la red de la base depende de que el seeder corra y no falle.
-Detalle del criterio entity-vs-seeder: [`../patterns/backend.md`](../patterns/backend.md).
+declarado en la entity se crea uno sobre la columna pelada —que acepta `ABC123` y `abc123`
+como dos series distintas—, o sea la regla equivocada. Es el mismo molde que los índices de
+`lower(nombre)`. La migración copia la lista de blancos de `serieNormalizadaSql`, y
+`esquema.e2e-spec.ts` compara el índice de la base contra el helper para que no deriven.
+Detalle del criterio entity-vs-migración: [`../patterns/backend.md`](../patterns/backend.md) § 17.
 
 Los cuatro caminos que crean unidades —alta de producto en modo serie con stock inicial,
 ajuste/entrada manual de stock, confirmación de compra y corrección de cantidad de una

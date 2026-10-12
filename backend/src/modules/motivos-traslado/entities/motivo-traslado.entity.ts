@@ -8,11 +8,10 @@ import {
   DeleteDateColumn,
 } from 'typeorm';
 
-// `uq_motivo_traslado_tenant_nombre` es sobre `lower(nombre)`: TypeORM no
-// sabe expresar una función en `@Index`, así que acá solo se registra el
-// NOMBRE con `synchronize: false` para que `synchronize` no lo tire al
-// arrancar (pendientes.md, "synchronize no tira los 17 índices del seeder").
-// Lo sigue creando `SeederService.seedMotivosTraslado()` con SQL cruda.
+// `uq_motivo_traslado_tenant_nombre` es sobre `lower(nombre)`: TypeORM no sabe expresar una
+// función en `@Index`, así que lo crea la migración con SQL cruda y acá solo se
+// registra el NOMBRE con `synchronize: false`, para que `migration:generate`
+// no proponga borrarlo (ADR-030).
 @Index('uq_motivo_traslado_tenant_nombre', { synchronize: false })
 @Entity('motivo_traslado')
 export class MotivoTraslado {

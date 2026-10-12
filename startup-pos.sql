@@ -1,6 +1,9 @@
 -- =============================================================
 -- ESQUEMA BASE DE DATOS — SaaS POS Multi-tenant
 -- Terminología nueva aplicada (ver CLAUDE.md para el mapeo completo)
+--
+-- Es DOCUMENTACIÓN del esquema: no lo ejecuta nadie. La base la arman las
+-- migraciones de backend/src/database/migrations al arrancar (ADR-030).
 -- =============================================================
 
 -- -------------------------------------------------------------
@@ -591,7 +594,7 @@ CREATE TABLE "recargos" (
 -- (WHERE eliminado_el IS NULL) para que borrar y volver a crear con el mismo
 -- nombre funcione; es justo eso lo que hace que RESTAURAR pueda colisionar, y
 -- por eso `restaurar()` capta el 23505 y ofrece un nombre libre.
--- TypeORM no sabe expresar LOWER() en @Index: lo crea el seeder con SQL cruda.
+-- TypeORM no sabe expresar LOWER() en @Index: lo crea la migración con SQL cruda.
 CREATE UNIQUE INDEX "uq_recargos_tenant_nombre_vivo"
   ON "recargos" ("tenant_id", LOWER("nombre"))
   WHERE "eliminado_el" IS NULL;
@@ -690,7 +693,7 @@ CREATE TABLE "items" (
 );
 
 -- El listado de venta (GET /items) filtra por tenant y tipo sobre filas vivas.
--- Lo crea `synchronize` desde la entity (idx_items_tenant_tipo_vivo); acá, de referencia.
+-- Lo genera la migración desde la entity (idx_items_tenant_tipo_vivo); acá, de referencia.
 CREATE INDEX "idx_items_tenant_tipo_vivo" ON "items" ("tenant_id", "tipo") WHERE "eliminado_el" IS NULL;
 
 -- Extensión 1:1 para tipo 'producto'.
@@ -1202,9 +1205,9 @@ CREATE TABLE "presentaciones_compra" (
 );
 CREATE INDEX "idx_presentaciones_compra_proveedor" ON "presentaciones_compra" ("tenant_id", "proveedor_id");
 -- Sobre lower(nombre): dos "Caja" vivas del mismo par no se distinguen en el
--- selector, pero una retirada no bloquea el nombre. La crea el SEEDER, no la
--- entity (TypeORM no expresa una función en @Index) — ver
--- `docs/patterns/backend.md`, "Entity o seeder".
+-- selector, pero una retirada no bloquea el nombre. La crea la migración con SQL
+-- cruda, no la entity (TypeORM no expresa una función en @Index) — ver
+-- `docs/patterns/backend.md`, "Entity o migración a mano".
 CREATE UNIQUE INDEX "uq_presentaciones_compra_nombre"
   ON "presentaciones_compra" ("tenant_id", "proveedor_id", "item_id", lower("nombre"))
   WHERE "eliminado_el" IS NULL;
@@ -1368,17 +1371,16 @@ CREATE TABLE "item_unidad" (
 -- ⚠️ La LISTA de blancos va explícita (espacio, tab, LF, CR, FF, VT, NBSP): `btrim`
 -- sin lista recorta solo el espacio ASCII, y entonces `\tABC123\t` no colisiona con
 -- `ABC123`. La fuente de verdad de esa lista es `serieNormalizadaSql` en
--- `item-unidad.entity.ts`, que usan el seeder y el guard del chokepoint.
--- ⚠️ Lo crea `SeederService.seedItemUnidadSerieIndex()` con SQL cruda, NO la entity:
--- TypeORM no sabe expresar una función en `@Index`, y declarado ahí `synchronize` creaba
--- uno sobre la columna pelada, que acepta `ABC123` y `abc123` como dos. Este archivo es
--- documentación del esquema, no lo ejecuta nadie.
+-- `item-unidad.entity.ts`, que usa el guard del chokepoint; la migración la copia.
+-- ⚠️ Lo crea la migración con SQL cruda, NO la entity: TypeORM no sabe expresar una
+-- función en `@Index`, y declarado ahí `synchronize` creaba uno sobre la columna pelada,
+-- que acepta `ABC123` y `abc123` como dos.
 -- Historia de este índice, que son TRES formas con el mismo nombre: hasta el 2026-09-19
 -- vivía SOLO acá y con otras columnas (`uq_unidad_tenant_serie` sobre
 -- `(tenant_id, serie)`), así que la base real no lo tenía; del 2026-09-19 al 2026-09-20
 -- fue un `@Index` de columnas peladas, y un espacio de más esquivaba la unicidad; y la
 -- primera versión normalizada llamaba a `btrim` sin lista, que dejaba pasar el tab y el
--- NBSP. Por eso el seeder lo precede de un DROP condicional.
+-- NBSP. Desde ADR-030 las bases nacen de la línea base, que trae la forma de hoy.
 CREATE UNIQUE INDEX "uq_unidad_item_serie"
   ON "item_unidad" ("item_id", lower(btrim("serie", E' \t\n\r\f\x0b\u00a0')))
   WHERE "eliminado_el" IS NULL;

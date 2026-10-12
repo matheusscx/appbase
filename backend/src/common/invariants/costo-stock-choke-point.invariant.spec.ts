@@ -170,8 +170,8 @@ describe('Invariante: costo_actual y stock solo se escriben desde el kardex', ()
             /DELETE\s+FROM\s+lote_ubicacion/i.test(chunk),
         ) ||
         // El SQL crudo no es la única puerta: `StockUbicacion`, `LoteUbicacion`
-        // y `ItemUnidad` están registradas en el array `entities` de
-        // `app.module.ts` (`ItemUnidad` también en `items.module.ts` vía
+        // y `ItemUnidad` están registradas en `ENTIDADES`
+        // (`src/database/typeorm.config.ts`; `ItemUnidad` también en `items.module.ts` vía
         // `forFeature`), así que `manager.getRepository(X).save(...)` —o
         // `@InjectRepository(ItemUnidad)` en cualquier service— escribe
         // `ubicacionId` sin que aparezca ni un template literal. `ItemUnidad`

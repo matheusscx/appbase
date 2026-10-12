@@ -10,9 +10,9 @@ import {
 
 // Único por producto sobre filas vivas: dos lotes del mismo `codigo_lote` para
 // el mismo ítem son el mismo lote. Existía solo en `startup-pos.sql`
-// (documentación); `ItemLote` no lo declaraba y el seeder no lo crea, así que
-// no existía en la base (pendientes.md, "Declarar el índice único de
-// item_lote"). Columnas peladas: no hace falta la SQL cruda del seeder, a
+// (documentación); `ItemLote` no lo declaraba y nadie lo creaba, así que no
+// existía en la base (pendientes.md, "Declarar el índice único de
+// item_lote"). Columnas peladas: no hace falta SQL cruda en la migración, a
 // diferencia de `uq_unidad_item_serie` (`item-unidad.entity.ts`).
 @Entity('item_lote')
 @Index('uq_lote_item_codigo', ['itemId', 'codigoLote'], {

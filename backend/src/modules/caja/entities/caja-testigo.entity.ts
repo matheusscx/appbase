@@ -32,7 +32,7 @@ export type ViaFirma = 'cuenta' | 'pin';
  *
  * `startup-pos.sql` es documentación de referencia — no lo ejecuta nadie (ver
  * docblock de `test/esquema.e2e-spec.ts`). El esquema real de cualquier
- * ambiente (dev, CI) lo genera `synchronize` a partir de ESTA entity, así que
+ * ambiente lo arman las migraciones, generadas a partir de ESTA entity, así que
  * todo índice o constraint que tenga que existir de verdad va acá, no solo en
  * el `.sql`. `idx_caja_testigo_caja` e `idx_caja_testigo_pendiente` estaban
  * solo en el `.sql` y por eso nunca se creaban — los necesita la consulta

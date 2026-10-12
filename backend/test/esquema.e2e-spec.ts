@@ -3,7 +3,6 @@ import { type INestApplication } from '@nestjs/common';
 import { DataSource } from 'typeorm';
 import type { App } from 'supertest/types';
 import { AppModule } from '../src/app.module';
-import { SeederService } from '../src/modules/seeder/seeder.service';
 import { serieNormalizadaSql } from '../src/modules/items/entities/item-unidad.entity';
 
 /**
@@ -24,7 +23,7 @@ import { serieNormalizadaSql } from '../src/modules/items/entities/item-unidad.e
  *
  * Lo que NO agrega, para que nadie lo repita: no cubre tablas ajenas a las
  * entities. `startup-pos.sql` es documentación de referencia y **no lo ejecuta
- * nadie** —ni el compose ni `reset-db.sh`, que reconstruyen vía `synchronize` +
+ * nadie** —la base la arman las migraciones de `src/database/migrations` y el
  * seeder—, así que su única tabla sin entity (`sub_tenants`) no existe en la
  * base. Medido: 87 columnas `eliminado_el` en la BD, las mismas 87 que declaran
  * las entities.
@@ -103,7 +102,7 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
    * manda la regla.
    *
    * El bug que cerró la primera versión de este test (2026-09-19):
-   * `startup-pos.sql` declaraba el índice pero el esquema lo crea `synchronize`
+   * `startup-pos.sql` declaraba el índice pero el esquema lo creaba `synchronize`
    * desde las entities, y `ItemUnidad` no declaraba ninguno — `item_unidad` tenía
    * solo su PK y dos unidades vivas podían compartir serie **en silencio**.
    *
@@ -112,7 +111,7 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
    * entraban las dos. La regla es que son la misma, así que el índice va sobre
    * `lower(btrim(serie))`. Y como **TypeORM no sabe expresar una función en
    * `@Index`**, declararlo en la entity volvía a crear el de la columna pelada:
-   * por eso hoy lo crea `SeederService.seedItemUnidadSerieIndex()`.
+   * por eso lo crea la migración con SQL cruda (ADR-030).
    *
    * Por eso el test mira `pg_indexes` y no el `.sql` ni la entity: la pregunta es
    * qué índice **hay**, no cuál está escrito ni quién lo declara. Afirma sobre la
@@ -147,6 +146,43 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
   });
 
   /**
+   * Y el índice de la base normaliza EXACTAMENTE como `serieNormalizadaSql`, que
+   * es lo que usa el guard de `InventarioService.assertSeriesLibres`.
+   *
+   * Hace falta desde ADR-030: la migración lleva la lista de blancos copiada —una
+   * migración no importa código que puede cambiar después de correrla—, así que
+   * el helper y el índice pueden derivar. Si derivan, el guard deja pasar lo que
+   * el índice rechaza y vuelve como un 500. Se compara contra un índice armado
+   * con el helper sobre una tabla temporal, en el texto que Postgres renderiza:
+   * así no importa cómo esté escrito cada uno.
+   */
+  it('el índice de serie de la base usa la misma expresión que serieNormalizadaSql', async () => {
+    const definicion = (indexdef: string) =>
+      indexdef.slice(indexdef.indexOf('USING btree'));
+    const [{ indexdef: enLaBase }]: { indexdef: string }[] = await ds.query(
+      `SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_unidad_item_serie'`,
+    );
+
+    const qr = ds.createQueryRunner();
+    try {
+      await qr.query(
+        `CREATE TEMP TABLE serie_helper (item_id uuid, serie text, eliminado_el timestamptz)`,
+      );
+      await qr.query(
+        `CREATE UNIQUE INDEX serie_helper_idx ON serie_helper (item_id, ${serieNormalizadaSql('serie')})
+          WHERE eliminado_el IS NULL`,
+      );
+      const [{ indexdef: delHelper }]: { indexdef: string }[] = await qr.query(
+        `SELECT pg_get_indexdef('serie_helper_idx'::regclass) AS indexdef`,
+      );
+      expect(definicion(enLaBase)).toBe(definicion(delHelper));
+    } finally {
+      await qr.query('DROP TABLE IF EXISTS serie_helper');
+      await qr.release();
+    }
+  });
+
+  /**
    * El listado de venta (`GET /items`) filtra por tenant y tipo sobre filas
    * vivas, y `items` no tenía ningún índice por `tenant_id`: cada pedido hacía
    * seq scan de la tabla de todos los tenants. Mira `pg_indexes` y no la entity
@@ -171,12 +207,11 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
    * El `WHERE` es la mitad que importa: un `@Index` con `where` mal escrito se
    * crea sin la condición.
    *
-   * ⚠️ Solo lo ve **sobre una base vacía**, como la de CI o la de
-   * `entorno.sh db` recién creada. `synchronize` compara índices por nombre: si
-   * `idx_lote_ubicacion_con_saldo` ya existe, no lo recrea aunque la entity
-   * cambie el `where`. Medido el 2026-10-11 con el mutante (el `@Index` sin
-   * `where`): sobre una base que ya tenía el índice el test pasó; sobre una
-   * vacía, falló.
+   * ⚠️ Mira la base, que la arman las migraciones: un `where` cambiado en la
+   * entity **no** lo ve, porque TypeORM compara índices por nombre, unicidad y
+   * columnas, no por `where` (`RdbmsSchemaBuilder.shouldDropIndices`), así que
+   * `migration:generate` tampoco lo propone. Cambiar el `where` de un índice es
+   * escribir la migración a mano (ADR-030).
    */
   it('lote_ubicacion tiene el índice parcial de los lotes con saldo', async () => {
     const indices: { indexdef: string }[] = await ds.query(
@@ -231,55 +266,6 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
     // normalización estaría borrando más de lo que la regla dice.
     expect(fila.adentro).toBe(false);
   });
-
-  /**
-   * Y una base creada **con el índice viejo** queda arreglada al arrancar.
-   *
-   * Es el único test que cubre la migración, y hacía falta: entre el 2026-09-19 y
-   * el 2026-09-20 las bases de dev —y la de Railway— quedaron con
-   * `uq_unidad_item_serie` sobre la **columna pelada**, o sea el mismo nombre con
-   * la definición vieja. Un `CREATE UNIQUE INDEX IF NOT EXISTS` no lo reemplaza:
-   * ve el nombre, no hace nada, y la base se queda con la regla anterior sin que
-   * nada avise. Por eso el seeder lo precede de un `DROP` condicional.
-   *
-   * ⚠️ El escenario se monta con SQL directa **a propósito**, y es la excepción
-   * que se explica sola: el estado "índice viejo" ya no lo puede producir ningún
-   * camino de la app —la entity dejó de declararlo—, así que es un estado
-   * HISTÓRICO, no uno inalcanzable por un hueco de cobertura. Lo que se ejercita
-   * después sí es el camino real: `onApplicationBootstrap()`, el mismo que corre
-   * al arrancar.
-   */
-  it.each([
-    ['columna pelada (2026-09-19)', '(item_id, serie)'],
-    [
-      'lower(btrim(serie)) sin lista de blancos',
-      '(item_id, lower(btrim(serie)))',
-    ],
-  ])(
-    'al arrancar, reemplaza el índice viejo —%s— por el normalizado',
-    async (_nombre, definicionVieja) => {
-      await ds.query('DROP INDEX IF EXISTS uq_unidad_item_serie');
-      await ds.query(`
-        CREATE UNIQUE INDEX uq_unidad_item_serie
-        ON item_unidad ${definicionVieja} WHERE eliminado_el IS NULL
-      `);
-      const [viejo]: { indexdef: string }[] = await ds.query(
-        `SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_unidad_item_serie'`,
-      );
-      // El escenario quedó montado: sin esto, el test podría pasar por no haber
-      // cambiado nada. El NBSP es la marca del índice nuevo, así que su AUSENCIA
-      // es la marca de los viejos.
-      expect(viejo.indexdef).not.toContain('\u00a0');
-
-      await app.get(SeederService).onApplicationBootstrap();
-
-      const [ahora]: { indexdef: string }[] = await ds.query(
-        `SELECT indexdef FROM pg_indexes WHERE indexname = 'uq_unidad_item_serie'`,
-      );
-      expect(ahora.indexdef).toContain('\u00a0');
-    },
-    120000,
-  );
 
   /**
    * Toda columna de dinero es NUMERIC(18,4). Una moneda con más decimales
@@ -431,33 +417,25 @@ describe('Esquema (e2e) — invariantes medidas contra Postgres', () => {
   });
 
   /**
-   * `synchronize` no tiene NADA que hacer al arrancar contra una base recién
-   * sembrada.
+   * Las migraciones dejan la base igual a lo que declaran las entities: una
+   * entity cambiada sin su migración da rojo acá (ADR-030).
    *
-   * Antes de este cierre, `createSchemaBuilder().log()` daba 19 `upQueries`
-   * en una base recién sembrada: 17 `DROP INDEX` de los 17 índices únicos que
-   * crea `SeederService` con SQL cruda —ninguna entity los declaraba, y
-   * `RdbmsSchemaBuilder.shouldDropIndices` tira todo índice sin metadata con
-   * su nombre— más 2 `DEFAULT` (pendientes.md, "synchronize no tira los 17
-   * índices del seeder"). Los 14 de expresión (13 `lower(nombre)` +
-   * `uq_unidad_item_serie`) ahora declaran solo su NOMBRE con
-   * `synchronize: false` en su entity; los 3 de columnas
-   * (`uq_recuento_linea_item_vivo`, `uq_garzones_mostrador_tenant`,
-   * `uq_garzones_usuario_tenant`) se declaran enteros y su SQL salió del
-   * seeder; los 2 `DEFAULT` (`porcentaje_sugerido`, `payload`) se ajustaron
-   * hasta que el log diera vacío.
+   * Es la misma comparación que `npm run migration:check` —que también corre en
+   * CI, antes del e2e—, puesta acá para que la vea quien corre el e2e en local.
+   * Corre después de que la app arrancó y el seeder sembró (`beforeAll`), así que
+   * además caza DDL que el seeder dejara y las entities no conozcan.
    *
-   * Esto corre DESPUÉS de que la app ya arrancó —`onApplicationBootstrap` del
-   * seeder ya corrió en `beforeAll`—, así que un `upQueries` acá es DDL que se
-   * repetiría en cada arranque y en cada deploy, no una ventana sin unicidad:
-   * `app.listen()` corre `init()` antes de escuchar, así que ningún pedido ve
-   * el estado intermedio.
+   * Si da rojo: generar la migración (`npm run migration:generate -- <Nombre>`) y
+   * revisarla. Los índices sobre una expresión, que TypeORM no sabe declarar, van
+   * en la migración con SQL cruda y en la entity solo su nombre con
+   * `synchronize: false` (`docs/patterns/backend.md` § 17).
    */
-  it('createSchemaBuilder().log() no trae upQueries contra una base recién sembrada', async () => {
+  it('las migraciones dejan la base igual a las entities (log() sin upQueries)', async () => {
     const { upQueries } = await ds.driver.createSchemaBuilder().log();
     if (upQueries.length > 0) {
       throw new Error(
-        `${upQueries.length} upQueries pendientes:\n` +
+        `${upQueries.length} cambios de esquema sin migración ` +
+          '(npm run migration:generate -- <Nombre>):\n' +
           upQueries.map((q) => q.query).join('\n'),
       );
     }

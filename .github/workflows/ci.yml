@@ -42,7 +42,7 @@ jobs:
           --health-retries 20
 
     env:
-      # synchronize crea el schema porque NODE_ENV != production; el seeder corre al bootstrap.
+      # El esquema lo arman las migraciones (ADR-030); el seeder corre al bootstrap.
       DATABASE_URL: postgres://appuser:apppass@localhost:5432/appdb
       NODE_ENV: test
       API_PREFIX: api
@@ -110,6 +110,15 @@ jobs:
       - name: backend · unit tests
         working-directory: backend
         run: npm test
+
+      # Una entity cambiada sin su migración frena acá, antes del e2e, con la migración
+      # que falta impresa en el log (ADR-030). Va contra la base de este job, recién
+      # creada: `migration:run` la arma desde cero y `migration:check` compara contra
+      # las entities. Después el e2e arranca la app sobre esa misma base, que ya no
+      # tiene migraciones pendientes.
+      - name: backend · migraciones al día con las entities
+        working-directory: backend
+        run: npm run migration:run && npm run migration:check
 
       - name: backend · e2e (Postgres real)
         working-directory: backend

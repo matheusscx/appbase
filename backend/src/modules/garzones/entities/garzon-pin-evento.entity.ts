@@ -40,8 +40,8 @@ export type TipoEventoPin =
  * Por eso es una tabla y no dos columnas en `garzones`: dos columnas guardan
  * solo el último cambio, y el patrón se pierde en cada sobrescritura.
  *
- * `startup-pos.sql` es documentación de referencia — el esquema real lo genera
- * `synchronize` desde ESTA entity, así que el índice y el CHECK van acá.
+ * `startup-pos.sql` es documentación de referencia — el esquema real sale de
+ * las migraciones generadas desde ESTA entity, así que el índice y el CHECK van acá.
  */
 @Entity('garzon_pin_evento')
 // La lectura siempre es "la historia de este garzón, más nueva primero",

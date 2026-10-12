@@ -53,7 +53,6 @@ import { Pasarela } from '../pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
 import { CredencialesService } from '../pasarela/services/credenciales.service';
 import { ItemsService } from '../items/items.service';
-import { serieNormalizadaSql } from '../items/entities/item-unidad.entity';
 import { Salon } from '../salones/entities/salon.entity';
 import { Mesa, FormaMesa, TamanoMesa } from '../salones/entities/mesa.entity';
 import { MOTIVOS_BAJA_FIJOS } from '../motivos-baja/motivos-baja.defaults';
@@ -182,8 +181,6 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedMotivosDiferencia();
     await this.seedMotivosDiferenciaInventario();
     await this.seedMotivosTraslado();
-    await this.seedPromocionesIndices();
-    await this.seedItemUnidadSerieIndex();
     await this.seedCajasVirtuales();
     await this.seedCajones();
     await this.seedPropinaConfiguracion();
@@ -1544,11 +1541,6 @@ export class SeederService implements OnApplicationBootstrap {
     // `grep -o "550e8400-e29b-41d4-a716-4466554[0-9]\{5\}" seeder.service.ts`.
     const BODEGA_SUBSUELO_ID = '550e8400-e29b-41d4-a716-446655440383';
 
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_ubicaciones_tenant_nombre
-      ON ubicaciones (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
-    `);
-
     // Sin id fijo: nadie referencia el local de un tenant por su UUID, solo
     // por `tipo = 'local'` (`UbicacionesService.localDe`).
     for (const tenantId of [PARIS, FALABELLA]) {
@@ -1590,11 +1582,6 @@ export class SeederService implements OnApplicationBootstrap {
     const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
     const uuid = (n: number) =>
       `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
-
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_motivo_baja_tenant_nombre
-      ON motivo_baja (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
-    `);
 
     // Los cinco de siempre (Vencimiento…Otro) conservan su ID: el contador
     // que arranca en 266 recorre solo esos cinco, dos tenants.
@@ -1666,46 +1653,6 @@ export class SeederService implements OnApplicationBootstrap {
     const uuid = (n: number) =>
       `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
 
-    // El nombre correcto es el de `startup-pos.sql`. Este índice se llamaba
-    // `uq_motivo_diferencia_tenant_nombre` solo acá: la definición era idéntica
-    // y la conducta la misma en las dos bases, pero buscarlo por nombre no
-    // encontraba nada. Su gemelo de inventario (`uq_motivo_dif_inv_tenant_nombre`)
-    // sí coincidía en los dos lados; este era el único desalineado.
-    // Se **renombra**, no se recrea. `seedCajones()` hace `DROP` + `CREATE`
-    // porque allá la definición vieja era distinta (case-sensitive, sin
-    // `lower()`) y había que reconstruir el índice. Acá la definición es
-    // idéntica y solo cambia el nombre: `ALTER INDEX … RENAME` es atómico,
-    // mientras que `DROP` + `CREATE` en dos sentencias deja una ventana con la
-    // tabla **sin unicidad** —y si el arranque muere en el medio (cosa que
-    // pasa: el watcher reinicia el backend seguido), la deja sin índice.
-    // Condicional a los dos nombres, así que en una base nueva o ya migrada no
-    // hace nada.
-    await this.dataSource.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (
-          SELECT 1 FROM pg_indexes
-           WHERE schemaname = 'public'
-             AND indexname = 'uq_motivo_diferencia_tenant_nombre'
-        ) THEN
-          IF EXISTS (
-            SELECT 1 FROM pg_indexes
-             WHERE schemaname = 'public'
-               AND indexname = 'uq_motivo_diferencia_caja_tenant_nombre'
-          ) THEN
-            EXECUTE 'DROP INDEX uq_motivo_diferencia_tenant_nombre';
-          ELSE
-            EXECUTE 'ALTER INDEX uq_motivo_diferencia_tenant_nombre'
-                 || ' RENAME TO uq_motivo_diferencia_caja_tenant_nombre';
-          END IF;
-        END IF;
-      END $$;
-    `);
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_motivo_diferencia_caja_tenant_nombre
-      ON motivo_diferencia_caja (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
-    `);
-
     let id = 291;
     for (const tenantId of [PARIS, FALABELLA]) {
       for (const m of MOTIVOS_DIFERENCIA_DEFAULTS) {
@@ -1731,11 +1678,6 @@ export class SeederService implements OnApplicationBootstrap {
     const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
     const uuid = (n: number) =>
       `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
-
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_motivo_dif_inv_tenant_nombre
-      ON motivo_diferencia_inventario (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
-    `);
 
     // Empieza en 316: 291-304 lo ocupa el rango dinámico de
     // seedMotivosDiferencia (2 tenants x 7 nombres, let id = 291) y 305-315
@@ -1771,11 +1713,6 @@ export class SeederService implements OnApplicationBootstrap {
     const uuid = (n: number) =>
       `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
 
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_motivo_traslado_tenant_nombre
-      ON motivo_traslado (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
-    `);
-
     // Empieza en 391: el máximo previo era 390 (`MOV_ID_BODEGA`, del frente de
     // bodegas y traslados). 2 tenants x 5 nombres = 10 ids (391-400).
     const filas: { id: string; tenantId: string; nombre: string }[] = [];
@@ -1799,83 +1736,6 @@ export class SeederService implements OnApplicationBootstrap {
        ON CONFLICT (motivo_traslado_id) DO NOTHING`,
       paramsTraslado,
     );
-  }
-
-  /**
-   * Solo el índice: la unicidad de la **serie** de una unidad serializada.
-   *
-   * La regla (owner, 2026-09-20): única **por producto**, comparada **sin los
-   * espacios de los bordes y sin distinguir mayúsculas** — `ABC123` y `abc123 `
-   * son la misma serie—, y en la base **se guarda tal como la tipeó el
-   * usuario**. De ahí la forma: `(item_id, serieNormalizadaSql('serie'))` con
-   * `eliminado_el IS NULL`.
-   *
-   * Va acá y no en `@Index` de `ItemUnidad` por el mismo motivo que
-   * `seedPromocionesIndices()` y `seedGruposModificadores()`: **TypeORM no sabe
-   * expresar una función**, así que declarado en la entity `synchronize` crearía
-   * uno sobre la columna pelada —que acepta `ABC123` y `abc123` como dos— y la
-   * regla existiría escrita pero no vigente.
-   *
-   * `InventarioService.assertSeriesLibres` compara con esta MISMA normalización
-   * y es lo que da el 400 con la serie repetida; este índice es la red de la
-   * base. Que los dos usen `lower(btrim(...))` **de Postgres** —el guard también
-   * normaliza en SQL, no en JS— es a propósito: dos normalizaciones distintas
-   * (el `toLowerCase()` de JS y el `lower()` de Postgres difieren fuera de
-   * ASCII) devolverían el 500 del índice que el guard existe para evitar.
-   *
-   * El `DROP` condicional limpia las formas VIEJAS de este índice, que comparten
-   * su nombre: la de **columnas peladas** que vivió en la entity entre el
-   * 2026-09-19 y el 2026-09-20, y la primera normalizada, que llamaba a `btrim`
-   * sin lista de blancos. Un `CREATE ... IF NOT EXISTS` no reemplaza ninguna —ve
-   * el nombre y no hace nada—. Cómo decide cuál es cuál: el comentario de adentro.
-   * En una base ya correcta no dispara, así que no hay churn.
-   */
-  private async seedItemUnidadSerieIndex(): Promise<void> {
-    // El `DROP` dispara cuando el índice que existe **no es** el de ahora, y lo
-    // decide por la presencia del NBSP en su definición: Postgres renderiza la
-    // lista de blancos de `serieNormalizadaSql` con los caracteres de verdad, y
-    // el NBSP es el único que no puede aparecer por casualidad. Es más preciso
-    // que preguntar por `lower` o por `btrim`, porque de este índice ya hubo
-    // **tres** formas con el MISMO nombre: `(item_id, serie)` pelado
-    // (2026-09-19), `lower(btrim(serie))` sin lista —que recorta solo el espacio
-    // ASCII— y el de hoy. Las dos primeras hay que reemplazarlas, y un
-    // `CREATE ... IF NOT EXISTS` no lo hace: ve el nombre y no toca nada.
-    await this.dataSource.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (
-          SELECT 1 FROM pg_indexes
-           WHERE schemaname = 'public'
-             AND indexname = 'uq_unidad_item_serie'
-             AND indexdef NOT LIKE '%' || chr(160) || '%'
-        ) THEN
-          EXECUTE 'DROP INDEX uq_unidad_item_serie';
-        END IF;
-      END $$;
-    `);
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_unidad_item_serie
-      ON item_unidad (item_id, ${serieNormalizadaSql('serie')})
-      WHERE eliminado_el IS NULL
-    `);
-  }
-
-  /**
-   * Solo el índice, sin demo rows: el seed de promos vive en una tarea
-   * aparte del plan (no se siembra ninguna al crear tenant — no es parte
-   * del kit mínimo rol/fórmula/caja virtual). Mismo molde que
-   * `seedDescuentos()` — `lower(nombre)` no lo puede expresar `@Index` de
-   * TypeORM, así que va acá con SQL cruda — pero separado porque acá no
-   * hay filas que sembrar todavía.
-   * `PromocionesService.validarNombreUnico` + `traducirColisionDeNombre`
-   * asumen este índice para traducir la carrera de nombre (23505) al mismo
-   * 400 que el pre-chequeo; sin él, esa rama nunca dispara.
-   */
-  private async seedPromocionesIndices(): Promise<void> {
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_promociones_tenant_nombre_vivo
-      ON promociones (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
-    `);
   }
 
   private async seedCajasVirtuales(): Promise<void> {
@@ -1907,31 +1767,6 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedCajones(): Promise<void> {
-    // Ver `seedDescuentos()`: mismo motivo para crearlo acá y no en la entity.
-    //
-    // El `DROP` condicional limpia el índice case-sensitive que quedó en las
-    // bases de dev creadas antes de este cambio —`cajon.entity.ts` lo declaraba
-    // con `@Index` y `synchronize` lo creaba sobre `nombre` pelado—. Solo
-    // dispara si el que existe NO es el de `lower()`, así que en una base ya
-    // correcta no hay churn. Mismo patrón que `seedGruposModificadores()`.
-    await this.dataSource.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (
-          SELECT 1 FROM pg_indexes
-           WHERE schemaname = 'public'
-             AND indexname = 'ux_cajones_tenant_nombre'
-             AND indexdef NOT ILIKE '%lower%'
-        ) THEN
-          EXECUTE 'DROP INDEX ux_cajones_tenant_nombre';
-        END IF;
-      END $$;
-    `);
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS ux_cajones_tenant_nombre
-      ON cajones (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
-    `);
-
     const cajones: Array<{ id: string; tenantId: string; nombre: string }> = [
       {
         id: '550e8400-e29b-41d4-a716-446655440286',
@@ -2341,12 +2176,6 @@ export class SeederService implements OnApplicationBootstrap {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const FALABELLA = '550e8400-e29b-41d4-a716-446655440040';
 
-    // `uq_garzones_mostrador_tenant` y `uq_garzones_usuario_tenant` ya no se
-    // crean acá: son índices parciales sobre columnas peladas (sin expresión),
-    // que `synchronize` SÍ genera — a diferencia de un índice sobre una
-    // expresión como `lower(nombre)` o `serieNormalizadaSql`, que TypeORM no
-    // sabe declarar. Viven en `Garzon` (`garzon.entity.ts`) como `@Index`.
-
     // pinHash = bcrypt(PIN, 10). PINs de dev: Bruno=222222, Carla=333333. Ana
     // NO tiene PIN de dev: está vinculada desde el seed (ver más abajo), así
     // que su `pinHash` es `PIN_INUTILIZABLE` como cualquier garzón con cuenta.
@@ -2429,12 +2258,6 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedTurnos(): Promise<void> {
-    // Ver `seedDescuentos()`: mismo motivo para crearlo acá y no en la entity.
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_turnos_tenant_nombre_vivo
-      ON turnos (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
-    `);
-
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const turnos: Partial<Turno>[] = [
       {
@@ -3415,7 +3238,7 @@ export class SeederService implements OnApplicationBootstrap {
     }
 
     // Backfill idempotente del flag es_efectivo (los métodos ya existentes no se
-    // re-guardan por el if(!exists) de arriba; synchronize los crea con default false).
+    // re-guardan por el if(!exists) de arriba; la columna nace con default false).
     await this.metodoPagoRepo.update(
       { metodoPagoId: '550e8400-e29b-41d4-a716-446655440105' },
       { esEfectivo: true },
@@ -3734,28 +3557,6 @@ export class SeederService implements OnApplicationBootstrap {
     }
 
     await this.remapImpuestosOficialesDuplicados();
-
-    // Ver `seedDescuentos()`: mismo motivo para crearlo acá y no en la entity
-    // (el índice va sobre `lower(nombre)` y TypeORM no puede expresarlo en
-    // `@Index`).
-    //
-    // ⚠️ Va DESPUÉS del remap y no al principio de la función como en las
-    // hermanas, y la diferencia no es cosmética: `remapImpuestosOficialesDuplicados`
-    // soft-deletea los impuestos del tenant que duplican el IVA oficial, y el
-    // índice es parcial (`WHERE eliminado_el IS NULL`). Creándolo antes, una
-    // base con ese duplicado vivo haría fallar el `CREATE UNIQUE INDEX` y el
-    // backend no arrancaría; creándolo después, el remap ya despejó el caso.
-    //
-    // `tenant_id` es NULLABLE acá (en `descuentos`/`recargos` no lo es), y eso
-    // es justamente lo que deja al catálogo del país fuera del índice sin
-    // ninguna cláusula extra: `CHK_impuestos_scope` fuerza `tenant_id` XOR
-    // `pais_id`, las filas del país tienen `tenant_id` nulo, y en Postgres dos
-    // NULL nunca colisionan en un índice único. La unicidad es por tenant y el
-    // IVA del país no entra — no puede, por el CHECK (ADR-018).
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_impuestos_tenant_nombre_vivo
-      ON impuestos (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
-    `);
   }
 
   /**
@@ -3819,14 +3620,6 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedDescuentos(): Promise<void> {
-    // Ver la nota de `seedGruposModificadores()`: el índice va sobre
-    // `lower(nombre)` y TypeORM no puede expresarlo en `@Index`, así que la
-    // entity no lo declara y lo crea acá con SQL cruda.
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_descuentos_tenant_nombre_vivo
-      ON descuentos (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
-    `);
-
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const TIPO_PRONTO_PAGO = '550e8400-e29b-41d4-a716-446655440100';
     const TIPO_POR_MAYOR = '550e8400-e29b-41d4-a716-446655440101';
@@ -4015,12 +3808,6 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   private async seedRecargos(): Promise<void> {
-    // Ver `seedDescuentos()`: mismo motivo para crearlo acá y no en la entity.
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_recargos_tenant_nombre_vivo
-      ON recargos (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL
-    `);
-
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const TIPO_INTERES_SIMPLE = '550e8400-e29b-41d4-a716-446655440103';
     const TIPO_INTERES_COMPUESTO = '550e8400-e29b-41d4-a716-446655440104';
@@ -4224,10 +4011,8 @@ export class SeederService implements OnApplicationBootstrap {
   /**
    * Dos promos demo (frente del motor de promociones,
    * `docs/features/motor-promociones.md`), va DESPUÉS de `seedItems()` porque
-   * el scope de la primera cuelga de ítems reales — no
-   * antes, como `seedPromocionesIndices()` (esa es solo el índice, sin filas;
-   * ver su docblock: al crear tenant no se siembra ninguna promo, esto es
-   * aparte y demo-only).
+   * el scope de la primera cuelga de ítems reales. Al crear tenant no se
+   * siembra ninguna promo: esto es aparte y demo-only.
    *
    * "2x1 de la casa (martes)": `nxm` cadaN=2 (paga 1 de cada 2), franja
    * 18:00–20:00, solo martes (`diasSemana=[2]`, ISO-8601 1=lunes). Nombre
@@ -4568,22 +4353,13 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   /**
-   * Presentaciones de compra (spec compras-unidad-de-compra § 3.1). El índice
-   * va acá y no en la entity: es sobre `lower(nombre)` y TypeORM no sabe
-   * expresar una función en `@Index` (`docs/patterns/backend.md`, "Entity o
-   * seeder"). Se crea siempre, antes del early-return, porque `synchronize`
-   * no lo conoce.
+   * Presentaciones de compra (spec compras-unidad-de-compra § 3.1).
    *
    * IDs 450-451: el máximo literal previo era 449 y `uuid(450)`/`uuid(451)`
    * no aparecían en ningún generador dinámico del archivo (verificado
    * 2026-09-27, `docs/patterns/backend.md` §8).
    */
   private async seedPresentacionesCompra(): Promise<void> {
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_presentaciones_compra_nombre
-      ON presentaciones_compra (tenant_id, proveedor_id, item_id, lower(nombre))
-      WHERE eliminado_el IS NULL
-    `);
     const uuid = (suffix: number): string =>
       `550e8400-e29b-41d4-a716-44665544${String(suffix).padStart(4, '0')}`;
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
@@ -4704,47 +4480,6 @@ export class SeederService implements OnApplicationBootstrap {
    * Idempotente: guarda por la existencia del grupo "Proteína".
    */
   private async seedGruposModificadores(): Promise<void> {
-    // El índice de nombre único vivo va acá y NO en `@Index` de la entity:
-    // `assertNombreLibre` compara con `LOWER(...)` y `startup-pos.sql` declara
-    // el índice sobre `LOWER("nombre")`, pero **TypeORM no sabe expresar una
-    // función en `@Index`**, así que `synchronize` creaba uno sobre `nombre`
-    // pelado — case-sensitive. Resultado: la regla existía una sola vez, pero
-    // dev la reproducía distinto de producción, y el único guard que quedaba
-    // del lado de la base era el equivocado.
-    //
-    // Mismo patrón que `seedMotivosBaja()` (y los dos de motivos-diferencia),
-    // que ya resolvían esto así: la entity no declara el índice y el seeder lo
-    // crea con SQL cruda.
-    //
-    // El `DROP` condicional limpia el índice case-sensitive que quedó en las
-    // bases de dev creadas antes de este cambio. Solo dispara si el que existe
-    // NO es el de `lower()`, así que en una base ya correcta no hay churn.
-    //
-    // ⚠️ Contrapartida de sacar el `@Index`: en dev, `synchronize` puede dejar
-    // la tabla SIN el índice hasta que este seeder lo recree, o sea que la
-    // única red del constraint pasa a ser que el seeder corra y no falle. Es
-    // el mismo perfil de riesgo que ya tienen `motivo_baja` y los dos
-    // `motivos_diferencia` —que nunca declararon su índice en la entity—, no
-    // uno nuevo; queda dicho porque ahora aplica a un caso más.
-    await this.dataSource.query(`
-      DO $$
-      BEGIN
-        IF EXISTS (
-          SELECT 1 FROM pg_indexes
-           WHERE schemaname = 'public'
-             AND indexname = 'uq_grupo_modificador_nombre_vivo'
-             AND indexdef NOT ILIKE '%lower%'
-        ) THEN
-          EXECUTE 'DROP INDEX uq_grupo_modificador_nombre_vivo';
-        END IF;
-      END $$;
-    `);
-    await this.dataSource.query(`
-      CREATE UNIQUE INDEX IF NOT EXISTS uq_grupo_modificador_nombre_vivo
-      ON grupos_modificadores (tenant_id, lower(nombre))
-      WHERE eliminado_el IS NULL
-    `);
-
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const CLP = '550e8400-e29b-41d4-a716-446655440003';
     const uuid = (suffix: number): string =>

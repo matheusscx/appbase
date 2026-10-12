@@ -176,10 +176,10 @@ en el listado las dos filas se distinguen por el badge Sistema/Personalizado que
 —decisión del owner, el tenant es dueño de su catálogo y la heurística de nombre tiene
 falsos positivos—.
 
-El índice lo crea el seeder **después** de `remapImpuestosOficialesDuplicados()`, y el
-orden no es cosmético: ese barrido soft-deletea los duplicados de IVA del tenant, así que
-creándolo antes una base con uno vivo haría fallar el `CREATE UNIQUE INDEX` y el backend
-no arrancaría.
+El índice lo crea la migración con SQL cruda (ADR-030), así que existe desde que la base nace
+y un duplicado vivo no puede llegar a escribirse. Hasta ese ADR lo creaba el seeder **después**
+de `remapImpuestosOficialesDuplicados()`, que soft-deletea los duplicados de IVA de bases
+anteriores al índice; el barrido sigue en el seeder y en una base nueva no encuentra nada.
 
 📌 **Hueco conocido y hoy inalcanzable, anotado para cuando deje de serlo:** por la misma
 razón que el índice no cruza scopes, tampoco impide **dos filas de país con el mismo

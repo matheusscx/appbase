@@ -20,7 +20,7 @@ import { AppModule } from '../src/app.module';
  * pueden repetir número.
  *
  * Los dos bugs que cierra, en orden. (1) El índice único existía solo en
- * `startup-pos.sql`, que es documentación —el esquema lo crea `synchronize` desde
+ * `startup-pos.sql`, que es documentación —el esquema lo creaba `synchronize` desde
  * las entities—, así que dos unidades vivas del mismo producto compartían serie
  * en silencio. (2) Cerrado eso con un `@Index` de columnas peladas, **un espacio
  * de más seguía esquivando la unicidad**: `"X "` entraba junto a `"X"`, y una

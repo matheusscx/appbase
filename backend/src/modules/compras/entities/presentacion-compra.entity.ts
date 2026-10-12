@@ -18,10 +18,9 @@ import {
  *
  * ⚠️ `uq_presentaciones_compra_nombre` NO se declara acá CON SUS COLUMNAS: es
  * sobre `lower(nombre)` y TypeORM no sabe expresar una función en `@Index`.
- * Lo crea `seeder.service.ts` → `seedPresentacionesCompra()` con SQL cruda.
- * Lo que sí se declara es solo el NOMBRE, con `synchronize: false`, para que
- * `synchronize` no lo tire por huérfano en cada arranque (pendientes.md,
- * "synchronize no tira los 17 índices del seeder").
+ * Lo crea la migración con SQL cruda. Lo que sí se declara es solo el NOMBRE,
+ * con `synchronize: false`, para que `migration:generate` no lo proponga borrar
+ * (ADR-030).
  */
 @Entity('presentaciones_compra')
 @Index('idx_presentaciones_compra_proveedor', ['tenantId', 'proveedorId'])

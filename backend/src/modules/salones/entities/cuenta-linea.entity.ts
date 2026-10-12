@@ -38,8 +38,8 @@ import type { ConsumoCongelado } from '../../../common/dto/consumo-congelado.dto
  *
  * Va sin opclass a propósito: `jsonb_path_ops` es más chico y más rápido, pero
  * TypeORM no expresa el opclass (`IndexOptions` tiene `type`, no `ops`), y el
- * `jsonb_ops` por defecto resuelve `@>` igual. El esquema de este proyecto sale
- * de las entidades (`synchronize`), no de migraciones.
+ * `jsonb_ops` por defecto resuelve `@>` igual. Un opclass a mano iría en una
+ * migración, como los índices de expresión (ADR-030); con el default alcanza.
  */
 @Index('idx_cuenta_lineas_personalizacion', ['personalizacion'], {
   type: 'gin',

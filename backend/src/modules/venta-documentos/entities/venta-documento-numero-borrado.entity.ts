@@ -24,7 +24,7 @@ import {
  * nada: el owner pidió el rastro de lo que se borra, no de cada edición.
  *
  * Sin relaciones (`@ManyToOne`) a `venta_documentos` ni a `usuarios`, como
- * `garzon_pin_evento`: el esquema real lo genera `synchronize` desde ESTA entity y
+ * `garzon_pin_evento`: el esquema real sale de las migraciones generadas desde ESTA entity y
  * `startup-pos.sql` es documentación, así que el índice va acá.
  */
 @Entity('venta_documento_numero_borrados')

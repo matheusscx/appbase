@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { MailModule } from './modules/mail/mail.module';
 import { ConfigModule, ConfigService } from '@nestjs/config';
 import { TypeOrmModule } from '@nestjs/typeorm';
+import { opcionesTypeOrm } from './database/typeorm.config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CommonModule } from './common/common.module';
@@ -12,174 +13,47 @@ import { TenantsModule } from './modules/tenants/tenants.module';
 import { RbacModule } from './modules/rbac/rbac.module';
 import { RolesModule } from './modules/roles/roles.module';
 import { MeModule } from './modules/me/me.module';
-import { Usuario } from './modules/users/usuario.entity';
-import { RefreshToken } from './modules/auth/entities/refresh-token.entity';
-import { TokenAcceso } from './modules/auth/entities/token-acceso.entity';
-import { Pais } from './modules/catalog/entities/pais.entity';
-import { Provincia } from './modules/catalog/entities/provincia.entity';
-import { Moneda } from './modules/catalog/entities/moneda.entity';
-import { UnidadMedida } from './modules/catalog/entities/unidad-medida.entity';
-import { ModuloApp } from './modules/catalog/entities/modulo-app.entity';
-import { Permiso } from './modules/catalog/entities/permiso.entity';
-import { ModuloAppPermiso } from './modules/catalog/entities/modulo-app-permiso.entity';
-import { Tenant } from './modules/tenants/entities/tenant.entity';
-import { UsuarioTenant } from './modules/tenants/entities/usuario-tenant.entity';
-import { TenantModulo } from './modules/tenants/entities/tenant-modulo.entity';
-import { TenantFormulaPrecio } from './modules/tenants/entities/tenant-formula-precio.entity';
-import { Caja } from './modules/caja/entities/caja.entity';
-import { CajaTestigo } from './modules/caja/entities/caja-testigo.entity';
-import { MovimientoCaja } from './modules/caja/entities/movimiento-caja.entity';
-import { CajaArqueoMedio } from './modules/caja/entities/caja-arqueo-medio.entity';
-import { CajaIntentoRechazado } from './modules/caja/entities/caja-intento-rechazado.entity';
-import { RazonSocial } from './modules/tenants/entities/razon-social.entity';
-import { Rol } from './modules/roles/entities/rol.entity';
-import { RolUsuario } from './modules/roles/entities/rol-usuario.entity';
-import { ModuloRol } from './modules/roles/entities/modulo-rol.entity';
-import { RolPermisoModulo } from './modules/roles/entities/rol-permiso-modulo.entity';
-import { TenantMoneda } from './modules/monedas/entities/tenant-moneda.entity';
-import { PaisMoneda } from './modules/monedas/entities/pais-moneda.entity';
 import { MonedasModule } from './modules/monedas/monedas.module';
 import { SeederModule } from './modules/seeder/seeder.module';
-import { Categoria } from './modules/categorias/entities/categoria.entity';
 import { CategoriasModule } from './modules/categorias/categorias.module';
-import { Impuesto } from './modules/impuestos/entities/impuesto.entity';
 import { ImpuestosModule } from './modules/impuestos/impuestos.module';
-import { TipoRegla } from './modules/tipos-regla/entities/tipo-regla.entity';
 import { TiposReglaModule } from './modules/tipos-regla/tipos-regla.module';
-import { Descuento } from './modules/descuentos/entities/descuento.entity';
-import { DescuentoTramo } from './modules/descuentos/entities/descuento-tramo.entity';
-import { DescuentoMetodoPago } from './modules/descuentos/entities/descuento-metodo-pago.entity';
 import { DescuentosModule } from './modules/descuentos/descuentos.module';
-import { Recargo } from './modules/recargos/entities/recargo.entity';
-import { RecargoTramo } from './modules/recargos/entities/recargo-tramo.entity';
-import { RecargoMetodoPago } from './modules/recargos/entities/recargo-metodo-pago.entity';
 import { RecargosModule } from './modules/recargos/recargos.module';
-import { MetodoPago } from './modules/metodos-pago/entities/metodo-pago.entity';
-import { MetodoPagoPais } from './modules/metodos-pago/entities/metodo-pago-pais.entity';
-import { TenantMetodoPago } from './modules/metodos-pago/entities/tenant-metodo-pago.entity';
 import { MetodosPagoModule } from './modules/metodos-pago/metodos-pago.module';
-import { Item } from './modules/items/entities/item.entity';
-import { ItemProducto } from './modules/items/entities/item-producto.entity';
-import { ItemServicio } from './modules/items/entities/item-servicio.entity';
-import { ItemSuscripcion } from './modules/items/entities/item-suscripcion.entity';
-import { ItemReceta } from './modules/items/entities/item-receta.entity';
-import { RecetaIngrediente } from './modules/items/entities/receta-ingrediente.entity';
-import { RecetaExtraPermitido } from './modules/items/entities/receta-extra-permitido.entity';
-import { ItemImpuesto } from './modules/items/entities/item-impuesto.entity';
-import { ItemRecargo } from './modules/items/entities/item-recargo.entity';
-import { ItemDescuento } from './modules/items/entities/item-descuento.entity';
-import { ItemLote } from './modules/items/entities/item-lote.entity';
-import { ItemUnidad } from './modules/items/entities/item-unidad.entity';
-import { ItemCombo } from './modules/items/entities/item-combo.entity';
-import { ComboComponente } from './modules/items/entities/combo-componente.entity';
-import { ItemGrupoModificador } from './modules/items/entities/item-grupo-modificador.entity';
-import { ItemGrupoModificadorOpcion } from './modules/items/entities/item-grupo-modificador-opcion.entity';
 import { ItemsModule } from './modules/items/items.module';
-import { MovimientoInventario } from './modules/inventario/entities/movimiento-inventario.entity';
-import { MovimientoInventarioDetalle } from './modules/inventario/entities/movimiento-inventario-detalle.entity';
-import { MotivoBaja } from './modules/motivos-baja/entities/motivo-baja.entity';
-import { MotivoDiferenciaCaja } from './modules/motivos-diferencia/entities/motivo-diferencia-caja.entity';
 import { MotivosDiferenciaModule } from './modules/motivos-diferencia/motivos-diferencia.module';
 import { InventarioModule } from './modules/inventario/inventario.module';
 import { CalculoPreciosModule } from './modules/calculo-precios/calculo-precios.module';
 import { CajaModule } from './modules/caja/caja.module';
 import { CajonesModule } from './modules/cajones/cajones.module';
-import { Cajon } from './modules/cajones/entities/cajon.entity';
-import { CajonUsuario } from './modules/cajones/entities/cajon-usuario.entity';
 import { VentasModule } from './modules/ventas/ventas.module';
-import { Venta } from './modules/ventas/entities/venta.entity';
-import { VentaDetalle } from './modules/ventas/entities/venta-detalle.entity';
-import { VentaDescuento } from './modules/ventas/entities/venta-descuento.entity';
-import { VentaRecargo } from './modules/ventas/entities/venta-recargo.entity';
-import { VentaImpuesto } from './modules/ventas/entities/venta-impuesto.entity';
-import { VentaCustomer } from './modules/ventas/entities/venta-customer.entity';
 import { VentaDocumentosModule } from './modules/venta-documentos/venta-documentos.module';
-import { VentaDocumento } from './modules/venta-documentos/entities/venta-documento.entity';
-import { VentaDocumentoNumeroBorrado } from './modules/venta-documentos/entities/venta-documento-numero-borrado.entity';
-import { Pago } from './modules/pagos/entities/pago.entity';
-import { PagoAplicacion } from './modules/pagos/entities/pago-aplicacion.entity';
 import { PropinasModule } from './modules/propinas/propinas.module';
-import { VentaPropina } from './modules/propinas/entities/venta-propina.entity';
-import { PropinaConfiguracion } from './modules/propinas/entities/propina-configuracion.entity';
-import { PropinaGrupoDistribucion } from './modules/propinas/entities/propina-grupo-distribucion.entity';
-import { PropinaGrupoPesoManual } from './modules/propinas/entities/propina-grupo-peso-manual.entity';
-import { LiquidacionPropinas } from './modules/propinas/entities/liquidacion-propinas.entity';
-import { LiquidacionPropinasGrupo } from './modules/propinas/entities/liquidacion-propinas-grupo.entity';
-import { LiquidacionPropinasParticipante } from './modules/propinas/entities/liquidacion-propinas-participante.entity';
-import { LiquidacionPropinasFuente } from './modules/propinas/entities/liquidacion-propinas-fuente.entity';
-import { LiquidacionPropinasEvento } from './modules/propinas/entities/liquidacion-propinas-evento.entity';
 import { PagosModule } from './modules/pagos/pagos.module';
-import { TipoDocumentoTributario } from './modules/ventas/entities/tipo-documento-tributario.entity';
-import { UmbralIdentidadPagador } from './modules/ventas/entities/umbral-identidad-pagador.entity';
-import { Tercero } from './modules/terceros/entities/tercero.entity';
 import { TercerosModule } from './modules/terceros/terceros.module';
 import { OnlineModule } from './modules/online/online.module';
-import { Suscripcion } from './modules/suscripciones/entities/suscripcion.entity';
 import { SuscripcionesModule } from './modules/suscripciones/suscripciones.module';
 import { PasarelaModule } from './modules/pasarela/pasarela.module';
-import { Pasarela } from './modules/pasarela/entities/pasarela.entity';
-import { TenantPasarela } from './modules/pasarela/entities/tenant-pasarela.entity';
-import { PasarelaApiKey } from './modules/pasarela/entities/pasarela-api-key.entity';
-import { PasarelaInscripcion } from './modules/pasarela/entities/pasarela-inscripcion.entity';
-import { PasarelaMedioPago } from './modules/pasarela/entities/pasarela-medio-pago.entity';
-import { PasarelaOrden } from './modules/pasarela/entities/pasarela-orden.entity';
-import { PasarelaTransaccion } from './modules/pasarela/entities/pasarela-transaccion.entity';
-import { CronEjecucion } from './modules/cron/entities/cron-ejecucion.entity';
 import { ScheduleModule } from '@nestjs/schedule';
 import { CronModule } from './modules/cron/cron.module';
 import { SalonesModule } from './modules/salones/salones.module';
-import { Salon } from './modules/salones/entities/salon.entity';
-import { Mesa } from './modules/salones/entities/mesa.entity';
-import { Cuenta } from './modules/salones/entities/cuenta.entity';
-import { CuentaLinea } from './modules/salones/entities/cuenta-linea.entity';
-import { CuentaLineaAnulacion } from './modules/salones/entities/cuenta-linea-anulacion.entity';
-import { CuentaLineaReparto } from './modules/salones/entities/cuenta-linea-reparto.entity';
-import { CuentaAsignacion } from './modules/salones/entities/cuenta-asignacion.entity';
 import { GarzonesModule } from './modules/garzones/garzones.module';
-import { Garzon } from './modules/garzones/entities/garzon.entity';
-import { GarzonPinEvento } from './modules/garzones/entities/garzon-pin-evento.entity';
 import { TurnosModule } from './modules/turnos/turnos.module';
-import { Turno } from './modules/turnos/entities/turno.entity';
-import { SesionGarzon } from './modules/turnos/entities/sesion-garzon.entity';
 import { ImpresorasModule } from './modules/impresoras/impresoras.module';
 import { MermasModule } from './modules/mermas/mermas.module';
 import { MotivosBajaModule } from './modules/motivos-baja/motivos-baja.module';
-import { MotivoDiferenciaInventario } from './modules/motivos-diferencia-inventario/entities/motivo-diferencia-inventario.entity';
 import { MotivosDiferenciaInventarioModule } from './modules/motivos-diferencia-inventario/motivos-diferencia-inventario.module';
-import { MotivoTraslado } from './modules/motivos-traslado/entities/motivo-traslado.entity';
 import { MotivosTrasladoModule } from './modules/motivos-traslado/motivos-traslado.module';
 import { ResumenNegocioModule } from './modules/resumen-negocio/resumen-negocio.module';
 import { IdempotenciaModule } from './modules/idempotencia/idempotencia.module';
-import { SolicitudIdempotente } from './modules/idempotencia/entities/solicitud-idempotente.entity';
-import { Impresora } from './modules/impresoras/entities/impresora.entity';
-import { GrupoModificador } from './modules/grupos-modificadores/entities/grupo-modificador.entity';
-import { GrupoModificadorOpcion } from './modules/grupos-modificadores/entities/grupo-modificador-opcion.entity';
 import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos-modificadores.module';
-import { RecuentoInventario } from './modules/recuentos/entities/recuento-inventario.entity';
-import { RecuentoInventarioLinea } from './modules/recuentos/entities/recuento-inventario-linea.entity';
 import { RecuentosModule } from './modules/recuentos/recuentos.module';
-import { Promocion } from './modules/promociones/entities/promocion.entity';
-import { PromocionScope } from './modules/promociones/entities/promocion-scope.entity';
-import { PromocionScopeItem } from './modules/promociones/entities/promocion-scope-item.entity';
-import { VentaPromocion } from './modules/ventas/entities/venta-promocion.entity';
 import { PromocionesModule } from './modules/promociones/promociones.module';
-import { Ubicacion } from './modules/ubicaciones/entities/ubicacion.entity';
-import { Traslado } from './modules/traslados/entities/traslado.entity';
 import { TrasladosModule } from './modules/traslados/traslados.module';
-import { StockUbicacion } from './modules/items/entities/stock-ubicacion.entity';
-import { StockMinimo } from './modules/inventario/entities/stock-minimo.entity';
-import { LoteUbicacion } from './modules/items/entities/lote-ubicacion.entity';
 import { UbicacionesModule } from './modules/ubicaciones/ubicaciones.module';
-import { Compra } from './modules/compras/entities/compra.entity';
-import { CompraLinea } from './modules/compras/entities/compra-linea.entity';
-import { CompraLineaCambio } from './modules/compras/entities/compra-linea-cambio.entity';
-import { TipoDocumentoCompra } from './modules/compras/entities/tipo-documento-compra.entity';
-import { PresentacionCompra } from './modules/compras/entities/presentacion-compra.entity';
-import { CodigoProveedor } from './modules/compras/entities/codigo-proveedor.entity';
-import { PagoProveedor } from './modules/compras/entities/pago-proveedor.entity';
-import { PagoProveedorAplicacion } from './modules/compras/entities/pago-proveedor-aplicacion.entity';
 import { ComprasModule } from './modules/compras/compras.module';
-// Reportes de negocio. Sin entidades que sumar al array `entities` de abajo:
+// Reportes de negocio. Sin entidades que sumar a `ENTIDADES` (typeorm.config.ts):
 // los reportes solo LEEN tablas que ya registran sus módulos dueños.
 import { ReportesModule } from './modules/reportes/reportes.module';
 
@@ -190,8 +64,7 @@ import { ReportesModule } from './modules/reportes/reportes.module';
     TypeOrmModule.forRootAsync({
       inject: [ConfigService],
       useFactory: (config: ConfigService) => ({
-        type: 'postgres',
-        url: config.get<string>('DATABASE_URL'),
+        ...opcionesTypeOrm(config.get<string>('DATABASE_URL')),
         // Pool explícito: el default mudo de pg (10) es exactamente lo que el
         // deadlock de conexiones explotaba sin que nadie supiera el número.
         poolSize: Number(config.get<string>('DB_POOL_SIZE') ?? 10),
@@ -200,137 +73,9 @@ import { ReportesModule } from './modules/reportes/reportes.module';
         // un 500 ruidoso con stack trace en vez de una API muerta hasta
         // reiniciar (pendientes.md, entrada del deadlock).
         connectTimeoutMS: 5000,
-        // dev: schema managed by TypeORM synchronize; prod: use migrations
-        entities: [
-          Usuario,
-          RefreshToken,
-          TokenAcceso,
-          Pais,
-          Provincia,
-          Moneda,
-          UnidadMedida,
-          ModuloApp,
-          Permiso,
-          ModuloAppPermiso,
-          Tenant,
-          UsuarioTenant,
-          TenantModulo,
-          TenantFormulaPrecio,
-          Caja,
-          CajaTestigo,
-          Cajon,
-          CajonUsuario,
-          RazonSocial,
-          Rol,
-          RolUsuario,
-          ModuloRol,
-          RolPermisoModulo,
-          TenantMoneda,
-          PaisMoneda,
-          Categoria,
-          Impuesto,
-          TipoRegla,
-          Descuento,
-          DescuentoTramo,
-          DescuentoMetodoPago,
-          Recargo,
-          RecargoTramo,
-          RecargoMetodoPago,
-          MetodoPago,
-          MetodoPagoPais,
-          TenantMetodoPago,
-          Item,
-          ItemProducto,
-          ItemServicio,
-          ItemSuscripcion,
-          ItemReceta,
-          RecetaIngrediente,
-          RecetaExtraPermitido,
-          ItemImpuesto,
-          ItemRecargo,
-          ItemDescuento,
-          ItemLote,
-          ItemUnidad,
-          ItemCombo,
-          ComboComponente,
-          MotivoBaja,
-          MotivoDiferenciaCaja,
-          MotivoDiferenciaInventario,
-          MotivoTraslado,
-          MovimientoInventario,
-          MovimientoInventarioDetalle,
-          MovimientoCaja,
-          CajaArqueoMedio,
-          CajaIntentoRechazado,
-          SolicitudIdempotente,
-          Venta,
-          VentaDetalle,
-          VentaDescuento,
-          VentaRecargo,
-          VentaImpuesto,
-          VentaDocumento,
-          VentaDocumentoNumeroBorrado,
-          VentaCustomer,
-          Pago,
-          PagoAplicacion,
-          VentaPropina,
-          PropinaConfiguracion,
-          PropinaGrupoDistribucion,
-          PropinaGrupoPesoManual,
-          LiquidacionPropinas,
-          LiquidacionPropinasGrupo,
-          LiquidacionPropinasParticipante,
-          LiquidacionPropinasFuente,
-          LiquidacionPropinasEvento,
-          TipoDocumentoTributario,
-          UmbralIdentidadPagador,
-          Tercero,
-          Suscripcion,
-          Pasarela,
-          TenantPasarela,
-          PasarelaApiKey,
-          PasarelaInscripcion,
-          PasarelaMedioPago,
-          PasarelaOrden,
-          PasarelaTransaccion,
-          CronEjecucion,
-          Salon,
-          Mesa,
-          Cuenta,
-          CuentaAsignacion,
-          CuentaLinea,
-          CuentaLineaAnulacion,
-          CuentaLineaReparto,
-          Garzon,
-          GarzonPinEvento,
-          Turno,
-          SesionGarzon,
-          Impresora,
-          GrupoModificador,
-          GrupoModificadorOpcion,
-          ItemGrupoModificador,
-          ItemGrupoModificadorOpcion,
-          RecuentoInventario,
-          RecuentoInventarioLinea,
-          Promocion,
-          PromocionScope,
-          PromocionScopeItem,
-          VentaPromocion,
-          Ubicacion,
-          StockUbicacion,
-          StockMinimo,
-          LoteUbicacion,
-          Traslado,
-          TipoDocumentoCompra,
-          Compra,
-          CompraLinea,
-          CompraLineaCambio,
-          PresentacionCompra,
-          CodigoProveedor,
-          PagoProveedor,
-          PagoProveedorAplicacion,
-        ],
-        synchronize: config.get<string>('NODE_ENV') !== 'production',
+        // Las migraciones pendientes corren al arrancar, en todos los entornos:
+        // así lo que prueba el CI es lo mismo que arranca en Railway (ADR-030).
+        migrationsRun: true,
       }),
     }),
     SeederModule,

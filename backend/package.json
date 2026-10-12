@@ -19,7 +19,12 @@
     "test:watch": "jest --watch",
     "test:cov": "jest --coverage",
     "test:debug": "node --inspect-brk -r tsconfig-paths/register -r ts-node/register node_modules/.bin/jest --runInBand",
-    "test:e2e": "node --max-old-space-size=8192 node_modules/.bin/jest --config ./test/jest-e2e.json"
+    "test:e2e": "node --max-old-space-size=8192 node_modules/.bin/jest --config ./test/jest-e2e.json",
+    "migration:generate": "sh -c 'typeorm-ts-node-commonjs -d src/database/data-source.ts migration:generate \"src/database/migrations/$0\" && eslint --fix src/database/migrations'",
+    "migration:check": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:generate src/database/migrations/SinMigracion --check",
+    "migration:run": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:run",
+    "migration:revert": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:revert",
+    "migration:show": "typeorm-ts-node-commonjs -d src/database/data-source.ts migration:show"
   },
   "dependencies": {
     "@nestjs/common": "^11.0.1",

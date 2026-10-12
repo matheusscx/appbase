@@ -784,7 +784,7 @@ export class GruposModificadoresService {
         // `ignorarMayusculas: true` porque la unicidad de este recurso es
         // case-insensitive de punta a punta: `assertNombreLibre` compara con
         // `LOWER(...)` y el índice `uq_grupo_modificador_nombre_vivo` es sobre
-        // `LOWER("nombre")` (`startup-pos.sql`, y lo crea el seeder).
+        // `LOWER("nombre")` (`startup-pos.sql`, y lo crea la migración).
         //
         // ⚠️ Corrección de lo que decía antes acá: este comentario afirmaba que
         // el índice era case-sensitive y que el código "ganaba". Era medir el

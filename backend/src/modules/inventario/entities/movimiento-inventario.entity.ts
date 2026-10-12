@@ -69,10 +69,10 @@ import {
  *
  * ⚠️ La Tarea 5 había medido "no sirve" con un seed donde cada producto vivía en
  * una sola ubicación: con eso la ubicación no filtra nada. La distribución es
- * parte de la medición. Y ⚠️ para medirlo a mano: `synchronize` **borra al
- * arrancar** todo índice que las entities no declaren, así que uno creado con
- * SQL antes de levantar la app no existe cuando se mide (le pasó a la primera
- * corrida). Detalle en `docs/features/reporte-varianza.md` § Rendimiento.
+ * parte de la medición. Y ⚠️ al medirlo a mano, hasta ADR-030: `synchronize`
+ * **borraba al arrancar** todo índice que las entities no declararan, así que uno
+ * creado con SQL antes de levantar la app no existía cuando se medía (le pasó a la
+ * primera corrida). Detalle en `docs/features/reporte-varianza.md` § Rendimiento.
  */
 @Index('idx_movimientos_inventario_item_ubicacion_secuencia', [
   'itemId',

@@ -293,8 +293,8 @@ export class CalculoPreciosService {
      *
      * ⚠️ **El `DeprecationWarning` que el backlog citaba como evidencia no era
      * de acá** (medido 2026-08-21 con `--trace-deprecation`): sale del
-     * `Promise.all` interno de TypeORM en `DataSource.synchronize`, al arrancar
-     * cada app de test. Node emite cada deprecación **una vez por proceso**, así
+     * `Promise.all` interno del schema builder de TypeORM, que `DataSource.synchronize`
+     * corría al arrancar cada app de test hasta ADR-030. Node emite cada deprecación **una vez por proceso**, así
      * que ese warning tapa cualquier otro y no sirve para observar este caso. El
      * mecanismo sí se verificó, pero por el código: `Db.query` → `managerActivo`.
      *

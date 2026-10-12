@@ -143,6 +143,8 @@ docker-compose down -v       # Detener y borrar el volumen de la BD
 cd backend
 npm run start:dev            # Watch mode
 npm run lint | npm test | npm run test:e2e   # test:e2e = API (Jest + supertest)
+npm run migration:generate -- <Nombre>      # cambié una entity → su migración (ADR-030)
+npm run migration:run | migration:revert | migration:check   # check: exit 1 si falta una
 
 cd frontend
 npm run dev | npm run build
@@ -155,7 +157,10 @@ Config vía `.env` en la raíz (copiar `.env.example`). Backend lee `DATABASE_UR
 al que su servidor reenvía `/api`, que adentro de compose es la red interna y por eso
 **no** se pone en el `.env`—. En un worktree el `.env` lo escribe `entorno.sh` y su
 `DATABASE_URL` es la verdad **del host**: el backend del contenedor no la lee. El navegador **no** tiene URL de backend: habla
-solo con el origen del frontend (ADR-022).
+solo con el origen del frontend (ADR-022). **El esquema lo arman las migraciones** de
+`backend/src/database/migrations/`, que el backend corre al arrancar en todos los entornos;
+`synchronize` está apagado (ADR-030). Una base que armó `synchronize` antes del 2026-10-12 no
+arranca (`relation … already exists`): se recrea una vez con `reset-db.sh` o `entorno.sh db`.
 
 ⚠️ **No toques un `.ts` del backend con el e2e corriendo.** El compose usa
 `start:dev` con el fuente bind-mounteado, así que cualquier cambio recompila,
@@ -279,7 +284,9 @@ Lo mínimo para decidir si hay que leer más. El detalle vive en un solo lugar.
 - **Pagos** — múltiples pagos por venta; `vuelto` solo si `permite_vuelto = true`.
   → Detalle: `docs/features/pagos.md`.
 - **BD** — timestamps `creado_el`/`actualizado_el`, PKs UUID, items como modelo base +
-  extensión (`item_producto`, `item_servicio`, `item_suscripcion`).
+  extensión (`item_producto`, `item_servicio`, `item_suscripcion`). **Cambiar una entity es
+  generar y leer su migración**, en el mismo commit: un cambio de tipo sale como `DROP` +
+  `ADD` y borra la columna. → `docs/patterns/backend.md` § 22 y **ADR-030**.
 
 ---
 
@@ -321,6 +328,7 @@ agente ejecuta marcando checkboxes): `docs/superpowers/README.md`.
 
 | Tipo de cambio | Archivo(s) a actualizar |
 |---|---|
+| Cambio de entity o de esquema | Migración en `backend/src/database/migrations/` (`docs/patterns/backend.md` § 22) + `startup-pos.sql` |
 | Nueva feature implementada | `docs/features/<feature>.md` (desde `TEMPLATE.md`) + link en `docs/README.md` + fila en `docs/ESTADO.md` |
 | Cambia el estado de una funcionalidad | `docs/ESTADO.md` |
 | Cambio arquitectónico / estructural | `docs/ARCHITECTURE.md` |

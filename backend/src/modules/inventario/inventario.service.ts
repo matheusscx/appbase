@@ -1354,7 +1354,7 @@ export class InventarioService {
 
   /**
    * La serie es única **por producto vivo** y **comparada normalizada** —
-   * `uq_unidad_item_serie`, que lo crea `SeederService`, sobre
+   * `uq_unidad_item_serie`, que lo crea la migración (ADR-030), sobre
    * `(item_id, serieNormalizadaSql('serie')) WHERE eliminado_el IS NULL`—: por
    * producto y no por tenant, porque cada proveedor numera como quiere (owner,
    * 2026-09-19), y sin los blancos de los bordes ni mayúsculas, guardando el

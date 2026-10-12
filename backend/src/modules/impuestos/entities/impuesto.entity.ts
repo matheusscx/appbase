@@ -12,11 +12,16 @@ import {
 @Entity('impuestos')
 // Sistema: (tenant_id NULL, pais_id set) · Personalizado: (tenant_id set, pais_id NULL)
 @Check('CHK_impuestos_scope', '("tenant_id" IS NULL) <> ("pais_id" IS NULL)')
-// `uq_impuestos_tenant_nombre_vivo` es sobre `lower(nombre)`: TypeORM no sabe
-// expresar una función en `@Index`, así que acá solo se registra el NOMBRE
-// con `synchronize: false` para que `synchronize` no lo tire al arrancar
-// (pendientes.md, "synchronize no tira los 17 índices del seeder"). Lo sigue
-// creando `SeederService.seedImpuestos()` con SQL cruda.
+// `uq_impuestos_tenant_nombre_vivo` es sobre `lower(nombre)`: TypeORM no sabe expresar una
+// función en `@Index`, así que lo crea la migración con SQL cruda y acá solo se
+// registra el NOMBRE con `synchronize: false`, para que `migration:generate`
+// no proponga borrarlo (ADR-030).
+//
+// `tenant_id` es NULLABLE acá (en `descuentos`/`recargos` no lo es), y eso es
+// lo que deja al catálogo del país fuera del índice sin ninguna cláusula extra:
+// `CHK_impuestos_scope` fuerza `tenant_id` XOR `pais_id`, las filas del país
+// tienen `tenant_id` nulo, y en Postgres dos NULL nunca colisionan en un índice
+// único. La unicidad es por tenant y el IVA del país no entra (ADR-018).
 @Index('uq_impuestos_tenant_nombre_vivo', { synchronize: false })
 export class Impuesto {
   @PrimaryGeneratedColumn('uuid', { name: 'impuesto_id' })

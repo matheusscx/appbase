@@ -17,12 +17,11 @@ import {
 // todo el proyecto (docs/PRODUCTO.md)— y **TypeORM no sabe expresar una
 // función en `@Index`**. Declarado con columnas, `synchronize` creaba en dev
 // un índice sobre `nombre` PELADO y la base enforzaba otra regla que el código.
-// Lo crea `seeder.service.ts` → `seedCajones()` con SQL cruda, mismo patrón que
-// `grupos_modificadores`, `motivo_baja` y los dos `motivos_diferencia`.
+// Lo crea la migración con SQL cruda, mismo patrón que `grupos_modificadores`,
+// `motivo_baja` y los dos `motivos_diferencia`.
 //
 // Lo que sí se declara acá es solo el NOMBRE, con `synchronize: false`: sin
-// columnas, para que `synchronize` no lo tire por huérfano en cada arranque
-// (pendientes.md, "synchronize no tira los 17 índices del seeder").
+// columnas, para que `migration:generate` no lo proponga borrar (ADR-030).
 @Index('ux_cajones_tenant_nombre', { synchronize: false })
 @Entity('cajones')
 export class Cajon {

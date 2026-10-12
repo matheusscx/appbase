@@ -560,8 +560,8 @@ docker compose exec -T postgres psql -U dev_user -d tecnica_db -c \
   "SELECT indexname, indexdef FROM pg_indexes WHERE tablename='movimientos_inventario';"
 ```
 
-La fuente de verdad son los `@Index` de `movimiento-inventario.entity.ts`, que `synchronize`
-aplica al arrancar; `startup-pos.sql` es documentación y puede desfasarse, aunque **en este
+La fuente de verdad son los `@Index` de `movimiento-inventario.entity.ts`, de donde salen las
+migraciones que arman la base (ADR-030); `startup-pos.sql` es documentación y puede desfasarse, aunque **en este
 caso no era el culpable**: declara los mismos cuatro (líneas 1016-1025). El listado falso vivía
 solo en este archivo, que es lo que hace más fácil que sobreviva — nada lo contrasta con nada.
 

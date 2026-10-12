@@ -723,8 +723,9 @@ describe('InventarioService', () => {
       // el guard y el índice discreparían y el caso que se escapa volvería como
       // el 500 del índice.
       // Se compara contra `serieNormalizadaSql`, no contra un string escrito a
-      // mano: es el mismo helper que usa el seeder para el índice, así que este
-      // assert falla si el guard y el índice dejan de ser gemelos.
+      // mano: el índice de la migración se compara contra el mismo helper en
+      // `esquema.e2e-spec.ts`, así que entre los dos asserts, guard e índice
+      // no pueden dejar de ser gemelos sin que algo dé rojo.
       expect(sql).toContain(serieNormalizadaSql('t.cruda'));
       expect(sql).toContain(`${serieNormalizadaSql('u.serie')} = e.norm`);
       expect(sql).toContain('u.item_id = $1');

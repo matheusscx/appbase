@@ -309,10 +309,12 @@ const data = await useApiFetch<ResponseType>(`${apiUrl}/endpoint`)
 
 ## Base de datos
 
-- TypeORM con `synchronize: true` en desarrollo (el esquema se autosinc desde entidades)
+- El esquema lo arman las **migraciones** de `backend/src/database/migrations/`, que la app corre
+  al arrancar en todos los entornos; `synchronize` está apagado ([ADR-030](./adr/030-esquema-por-migraciones.md)).
+  Una entity cambiada lleva su migración (`docs/patterns/backend.md` § 22)
 - Soft delete en todas las tablas: `eliminado_el TIMESTAMPTZ`; toda lectura filtra `eliminado_el IS NULL`
 - PKs UUID en todas las tablas
-- **Esquema completo:** ver `startup-pos.sql` (fuente de verdad del schema)
+- **Esquema completo, para leer:** `startup-pos.sql` (documentación; no lo ejecuta nadie)
 
 ## Variables de entorno
 
@@ -347,7 +349,6 @@ rompía el demo desplegado — ver [ADR-022](./adr/022-navegador-un-solo-origen.
 - Docker Compose: todos los servicios en red `tecnica_network` (bridge)
 - Datos de PostgreSQL: volumen nombrado `postgres_data`
 - Variables de entorno: archivo `.env` en la raíz del repo, compartido entre servicios
-- En producción: reemplazar `synchronize: true` por migraciones TypeORM
 
 ### Demo en Railway
 
@@ -367,8 +368,10 @@ Railway**, hasta que la ruta no responda no promueve el deployment y sigue
 sirviendo el anterior. Eso último **no está medido acá** —haría falta desplegar
 algo roto a propósito—; lo que sí se observó es el healthcheck corriendo
 (`Starting Healthcheck` / `[1/1] Healthcheck succeeded!` en el build de
-`e637c0a6`). El backend apunta a **`/api/health`** con 300 s de plazo, que es lo
-que tarda `synchronize` más el seed sobre una base fría.
+`e637c0a6`). El backend apunta a **`/api/health`** con 300 s de plazo, pensado para
+`synchronize` más el seed sobre una base fría. Con migraciones sobra: la imagen de
+`Dockerfile.prod` contra un Postgres vacío —línea base más seed— da 200 en 2 s
+(medido en local el 2026-10-12).
 
 Esa ruta (`app.controller.ts` → `AppService.verificarSalud`) **consulta la base**
 y contesta 503 si no responde. La distinción no es teórica: medido el 2026-08-10
@@ -384,10 +387,14 @@ sirviendo ahora. Correrlo **después** de que el deployment diga `SUCCESS`, no
 justo tras el push: Railway espera al CI y después construye, así que antes de eso estaría
 midiendo el deployment anterior.
 
-⚠️ Lo que **ningún** semáforo cubre: un cambio de esquema contra datos existentes,
-porque el CI siempre parte de una base virgen — hoy eso está tapado por
-`synchronize` + reset y por no tener datos productivos. El día que los haya, la
-respuesta son migraciones, no más semáforos. Para resincronizar la base del demo:
+⚠️ Lo que **ningún** semáforo cubre: cómo cae un cambio de esquema sobre los datos que ya
+hay, porque el CI siempre parte de una base virgen. Desde [ADR-030](./adr/030-esquema-por-migraciones.md)
+el cambio es una migración que se lee en el diff —un `DROP COLUMN` se ve antes de
+commitear— y el CI frena la entity que no la trae; lo que la migración haga con las filas
+viejas lo decide quien la revisa, no un semáforo. El backend corre las migraciones al
+arrancar: si una falla, va en una transacción y no deja nada a medias, el deployment nuevo
+no pasa el healthcheck y, según la documentación de Railway, sigue sirviendo el anterior. Para
+resincronizar la base del demo:
 skill `railway-sync-db`.
 
 ### Escaneo de secretos

@@ -26,8 +26,9 @@ import { EstadoVenta } from './entities/venta.entity';
  * una sin salida de caja no deja otro rastro de plata devuelta, así que cuenta como
  * "sin plata" —es lo que hacía la fórmula anterior (total − notas − pagado)—.
  *
- * **Un fragmento SQL y no una función de la base**: el esquema sale de las
- * entities (`synchronize`), y una función de SQL no tendría dónde declararse. Va
+ * **Un fragmento SQL y no una función de la base**: cuando se escribió, el esquema
+ * salía de las entities (`synchronize`, hasta ADR-030) y una función de SQL no tenía
+ * dónde declararse. Va
  * dentro de la misma consulta que ya lee las ventas, como subconsultas
  * correlacionadas: no es una consulta por venta.
  *

@@ -208,8 +208,8 @@ ubicación, y así la ubicación no filtra nada. Acá el mismo producto se mueve
 es el caso que el reporte mira. La distribución es parte de la medición.
 
 ⚠️ **Y la primera corrida de esta medición también mintió**, por otra causa: el índice se creó
-con SQL antes de levantar la app, y **`synchronize` lo borró al arrancar** —borra todo índice que
-las entities no declaran—. La columna "con índice" de esa corrida era una segunda medición sin
+con SQL antes de levantar la app, y **`synchronize` lo borró al arrancar** —hasta ADR-030 borraba todo índice
+que las entities no declararan—. La columna "con índice" de esa corrida era una segunda medición sin
 índice. Lo encontró la revisión; las columnas de arriba son de la corrida con el índice creado
 después del arranque y verificado en `pg_indexes` al terminar.
 

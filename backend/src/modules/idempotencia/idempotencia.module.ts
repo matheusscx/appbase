@@ -3,9 +3,9 @@ import { IdempotenciaService } from './idempotencia.service';
 
 /**
  * Sin `RepositoriosModule.forFeature`: el servicio escribe por `Db.query`
- * (que es global), no por repositorio. La entidad igual va en el array
- * `entities` de `app.module.ts`, que es lo que hace que `synchronize` cree la
- * tabla.
+ * (que es global), no por repositorio. La entidad igual va en `ENTIDADES`
+ * (`src/database/typeorm.config.ts`), que es de donde sale su migración y lo que
+ * hace que TypeORM la conozca.
  */
 @Module({
   providers: [IdempotenciaService],

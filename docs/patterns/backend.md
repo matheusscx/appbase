@@ -37,8 +37,9 @@ backend/src/modules/<feature>/
 └── <feature>.module.ts
 ```
 
-Registrar en `app.module.ts`: entities en el array `entities` del
-`TypeOrmModule.forRoot` y `<Feature>Module` en `imports`.
+Registrar las entities en `ENTIDADES` (`src/database/typeorm.config.ts`, la lista que comparten
+la app y la CLI de migraciones) y `<Feature>Module` en los `imports` de `app.module.ts`. Una
+entity nueva o cambiada lleva su migración: § 22.
 
 ---
 
@@ -1731,70 +1732,57 @@ baratas de a una, y `ventas_impuestos` sola son 9,2 ms — **más del triple** q
 `movimientos_inventario`, que sí se indexó en el frente anterior. Lo que engaña no es el tamaño
 de cada una: es mirarlas de a una en un request que las lee a todas.
 
-El índice va **en la entity** (`@Index('idx_<tabla>_<col>', ['prop'])`), que es lo que
-`synchronize` crea; la convención de nombre es la de las entities de propinas. Y va **también**
+El índice va **en la entity** (`@Index('idx_<tabla>_<col>', ['prop'])`), de donde lo saca
+`migration:generate` (§ 22); la convención de nombre es la de las entities de propinas. Y va **también**
 en `startup-pos.sql`, que es el esquema documentado: si solo está en la entity, quien le
 pregunte al `.sql` si esa FK tiene índice recibe la respuesta equivocada.
 
-#### Entity o seeder: lo decide si el índice lleva una función
+#### Entity o migración a mano: lo decide si el índice lleva una función
 
-**Columnas peladas → `@Index` en la entity. Expresión → SQL cruda en el seeder.** No es
-estilo: **TypeORM no sabe expresar una función en `@Index`**, así que un índice que tiene que
-ser sobre `lower(nombre)` o `lower(btrim(serie))`, declarado en la entity, se crea sobre la
-columna pelada — case-sensitive. Queda la regla escrita y **la equivocada vigente**, que es
-peor que no tenerla: nadie vuelve a mirar un índice que existe.
+**Columnas peladas → `@Index` en la entity** (la migración sale sola con `migration:generate`).
+**Expresión → SQL cruda en la migración.** No es estilo: **TypeORM no sabe expresar una función
+en `@Index`**, así que un índice que tiene que ser sobre `lower(nombre)` o `lower(btrim(serie))`,
+declarado en la entity, se crea sobre la columna pelada — case-sensitive. Queda la regla escrita
+y **la equivocada vigente**, que es peor que no tenerla: nadie vuelve a mirar un índice que existe.
 
-Ya pasó dos veces, y las dos se arreglaron mudando el índice al seeder:
-`seedGruposModificadores()` (nombres únicos, 2026-09) y `seedItemUnidadSerieIndex()` (la serie
-de una unidad, 2026-09-20 — venía de un `@Index` de columnas peladas que dejaba entrar
-`ABC123` y `abc123` como dos series distintas).
+Ya pasó dos veces: los nombres únicos de `grupos_modificadores` (2026-09) y la serie de una
+unidad (2026-09-20, un `@Index` de columnas peladas que dejaba entrar `ABC123` y `abc123`
+como dos series distintas). Hasta ADR-030 estos índices los creaba el seeder, que **no corre con
+`NODE_ENV=production`**: en una base de producción no habrían existido. Hoy los 14 viven en la
+línea base (`src/database/migrations/*-LineaBase.ts`, al final de `up`).
 
-El molde es **el mayoritario** entre los índices únicos que crea el seeder, no una excepción;
-para verlos sin confiar en una lista que envejece:
-
-```bash
-grep -A2 "CREATE UNIQUE INDEX IF NOT EXISTS" backend/src/modules/seeder/seeder.service.ts
-```
-
-⚠️ **Y la vuelta NO vale, en el sentido inverso:** que un índice único lleve SQL cruda en el
-seeder no significa que no se pueda declarar nada en la entity. Hasta el 2026-09-30 el seeder
-también creaba tres de **columnas peladas** —`uq_recuento_linea_item_vivo`,
-`uq_garzones_usuario_tenant`, `uq_garzones_mostrador_tenant`— que no tenían ninguna razón para
-estar ahí: no llevan función, así que hoy son un `@Index([...], { unique: true, where })` común
-en la entity (`RecuentoInventarioLinea`, `Garzon`) y su SQL salió del seeder
-(el cierre, del 2026-09-30, está en `docs/agent/resueltos.md`). Antes de sumar
-uno nuevo al seeder por imitación, mirá si el que estás copiando lleva una función de verdad.
-
-⚠️ **La contrapartida del seeder, que se acepta a sabiendas:** en dev `synchronize` puede
-dejar la tabla **sin** el índice hasta que el seeder lo recree, así que la red del lado de la
-base pasa a depender de que el seeder corra y no falle. Y si el índice cambia de definición
-manteniendo el nombre, `CREATE UNIQUE INDEX IF NOT EXISTS` **no lo reemplaza** —ve el nombre y
-no hace nada—: hay que precederlo de un `DROP` condicional que dispare solo cuando el que
-existe no es el nuevo (molde en las dos funciones citadas). Sin eso, las bases creadas antes
-del cambio se quedan con la regla vieja sin que nada avise.
+⚠️ **Y la vuelta NO vale:** que un índice único lleve SQL cruda no significa que no se pueda
+declarar en la entity. Hasta el 2026-09-30 había tres de **columnas peladas** con SQL cruda
+—`uq_recuento_linea_item_vivo`, `uq_garzones_usuario_tenant`, `uq_garzones_mostrador_tenant`—
+sin ninguna razón: no llevan función, así que son un `@Index([...], { unique: true, where })`
+común en la entity (`RecuentoInventarioLinea`, `Garzon`). Antes de escribir uno a mano por
+imitación, mirá si el que estás copiando lleva una función de verdad.
 
 📌 **El índice de expresión SÍ va también en la entity, pero solo por el NOMBRE.** Sin ningún
 `@Index` que mencione `uq_promociones_tenant_nombre_vivo` (por ejemplo), TypeORM no tiene
-metadata con ese nombre — y `RdbmsSchemaBuilder.shouldDropIndices` tira **todo** índice de la
-tabla que no tenga metadata, sin importar quién lo creó. El resultado, medido en una base recién
-sembrada: 17 `DROP INDEX` en cada arranque, uno por cada índice único que crea el seeder — DDL
-real, no solo ruido de log, y candidato (sin medir) a explicar fragilidad bajo carga. La
-declaración que lo evita **no describe la forma del índice** —seguiría siendo la columna pelada,
-que es exactamente lo que no querés— sino que registra el nombre con `synchronize: false`:
+metadata con ese nombre — y `RdbmsSchemaBuilder.shouldDropIndices` da por huérfano **todo**
+índice de la tabla que no tenga metadata, sin importar quién lo creó: `migration:generate`
+propondría un `DROP INDEX` por cada uno (con `synchronize` eran 17 `DROP` reales en cada
+arranque, medido el 2026-09-29). La declaración que lo evita **no describe la forma del índice**
+—seguiría siendo la columna pelada— sino que registra el nombre con `synchronize: false`:
 
 ```ts
 @Index('uq_promociones_tenant_nombre_vivo', { synchronize: false })
 ```
 
 `synchronize: false` hace que `IndexMetadata.build()` corte antes de tocar columnas —por eso
-alcanza con pasar el nombre solo, sin fields—, y `shouldDropIndices` encuentra metadata con ese
-nombre y no lo tira. El SQL que crea el índice de verdad sigue siendo el del seeder, sin
-cambios (el cierre, del 2026-09-30, está en
-`docs/agent/resueltos.md`): para ver todos los que llevan esta marca,
-`grep -rn "synchronize: false" backend/src/modules/*/entities`.
+alcanza con el nombre solo— y `shouldDropIndices` lo deja en paz. Para ver todos los que llevan
+la marca: `grep -rn "synchronize: false" backend/src/modules/*/entities`.
 
-Y **el índice que crea el seeder va igual en `startup-pos.sql`**, con un comentario que diga
-quién lo crea: por la misma razón que arriba, quien le pregunte al `.sql` merece la respuesta
+⚠️ **Cambiar la definición de uno de estos índices es una migración nueva**, a mano
+(`DROP INDEX` + `CREATE UNIQUE INDEX`): la línea base ya corrió en todas las bases y no se
+edita. Y si la expresión vive también en un helper del código —`serieNormalizadaSql`—, la
+migración la **copia** (una migración no importa código que puede cambiar después de correrla),
+así que hace falta un test que compare la base contra el helper: `esquema.e2e-spec.ts` lo hace
+para la serie.
+
+Y **el índice que crea la migración a mano va igual en `startup-pos.sql`**, con un comentario
+que diga quién lo crea: por la misma razón que arriba, quien le pregunte al `.sql` merece la respuesta
 correcta, incluida la de quién es el dueño.
 
 ⚠️ **No es "indexá toda FK".** El índice se paga en cada `INSERT`, y una tabla paga **solo el
@@ -1999,8 +1987,45 @@ await manager.save(VentaPromocion, filasPromocion, { chunk: FILAS_POR_INSERT });
 reglas), no cuando lo acota un DTO muy por debajo. Hoy lo usan las cuatro tablas de trazas de
 `ventas.service.ts`.
 
+## 22. Cambio de esquema: la migración (ADR-030)
+
+El esquema lo arman las migraciones de `backend/src/database/migrations/`, en todos los entornos:
+la app las corre al arrancar (`migrationsRun`) y `synchronize` está apagado. **Cambié una entity →
+genero la migración, la leo y la commiteo con el cambio.**
+
+```bash
+cd backend
+npm run migration:generate -- NombreDelCambio   # entities vs. la base del .env
+npm run migration:run                            # la aplica (el arranque también)
+npm run migration:revert                         # deshace la última
+npm run migration:check                          # exit 1 si falta una migración (lo corre el CI)
+```
+
+- **La base contra la que se genera tiene que estar al día** con las migraciones de `main`: la de
+  `entorno.sh db` después de arrancar la app una vez, o la del compose. Contra una base atrasada,
+  el diff trae cambios ajenos.
+- **Leerla es el trabajo**, porque es lo que `synchronize` hacía sin mostrar. Qué mirar:
+  - Un cambio de tipo o de nombre sale como `DROP COLUMN` + `ADD COLUMN`, y eso **borra los datos
+    de la columna**. Si hay que conservarlos: `ALTER COLUMN … TYPE … USING …` o `RENAME COLUMN`.
+  - `ADD COLUMN … NOT NULL` sin `DEFAULT` falla sobre una tabla con filas: default, o en dos pasos.
+  - Un enum compartido (`enumName` igual en dos entities) sale con dos `CREATE TYPE` y el segundo
+    falla: dejar uno (pasó en la línea base con `modo_regla`, `nivel_regla` y `condicion_tipo`).
+  - Un `DROP INDEX` que nadie pidió es un índice de expresión sin su
+    `@Index('<nombre>', { synchronize: false })` en la entity (§ 17).
+  - Cambiar el `where` de un `@Index` **no genera nada**: TypeORM compara índices por nombre,
+    unicidad y columnas. Va a mano.
+- **`down` deshace `up`**: `migration:revert` es la salida si un deploy rompe.
+- **Una migración que ya está en `main` no se edita**: corrió en el demo y en las bases de todos.
+  Lo que corrige va en una migración nueva.
+- Lo que no es esquema —filas de catálogo, datos demo— va en el seeder (§ 8), no en una migración.
+
+Si falta, lo frenan `migration:check` en el CI y el último test de `esquema.e2e-spec.ts` en el e2e
+local. Una base que armó `synchronize` (antes del 2026-10-12) no arranca —`relation … already
+exists`—: se recrea una vez con `./scripts/reset-db.sh` o `./scripts/entorno.sh db`.
+
 ## 12. Docs vivas a tocar en el mismo commit
 
+- La migración del cambio de esquema (§ 22).
 - `startup-pos.sql` — agregar las tablas nuevas.
 - `docs/features/<feature>.md` (desde `docs/features/TEMPLATE.md`) + link en `docs/README.md`.
 - `docs/ESTADO.md` — marcar ✅ / agregar la fila de la funcionalidad.

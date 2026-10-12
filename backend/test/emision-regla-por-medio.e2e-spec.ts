@@ -252,7 +252,7 @@ describe('Regla de emisión: emisor por medio y facturador del comercio (e2e)', 
 
   describe('el esquema rechaza lo que el DTO no dejaría pasar', () => {
     // La API ya devuelve 400 antes de llegar acá; esto prueba que el CHECK
-    // existe de verdad (la entity lo declara y `synchronize` lo crea), que es
+    // existe de verdad (la entity lo declara y la migración lo crea), que es
     // lo que protege a un escritor que no pase por el DTO.
     it('facturador y emisor fuera de la lista chocan con su CHECK', async () => {
       const ds = app.get(DataSource);

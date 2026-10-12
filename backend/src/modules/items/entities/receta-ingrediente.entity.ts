@@ -37,8 +37,8 @@ export class RecetaIngrediente {
   @Column({ type: 'boolean', default: true })
   bloqueante: boolean;
 
-  // Obligatorios: con synchronize:true TypeORM alinea el schema a la entidad;
-  // sin estas columnas se perderían las del SQL y se rompería el soft delete.
+  // Obligatorios: el esquema sale de la entidad (las migraciones se generan
+  // desde ella); sin estas columnas no existirían y se rompería el soft delete.
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 

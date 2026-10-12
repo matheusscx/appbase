@@ -10,12 +10,11 @@ import { Entity, Index, PrimaryGeneratedColumn, Column } from 'typeorm';
 // del lado del motor era el equivocado (el `restaurar()` de la papelera no
 // pasa por `assertNombreLibre`).
 //
-// Lo crea `seeder.service.ts` → `seedGruposModificadores()` con SQL cruda,
-// mismo patrón que `motivo_baja` y los dos `motivos_diferencia`.
+// Lo crea la migración con SQL cruda, mismo patrón que `motivo_baja` y los dos
+// `motivos_diferencia`.
 //
 // Lo que sí se declara acá es solo el NOMBRE, con `synchronize: false`: sin
-// columnas, para que `synchronize` no lo tire por huérfano en cada arranque
-// (pendientes.md, "synchronize no tira los 17 índices del seeder").
+// columnas, para que `migration:generate` no lo proponga borrar (ADR-030).
 @Index('uq_grupo_modificador_nombre_vivo', { synchronize: false })
 @Entity('grupos_modificadores')
 export class GrupoModificador {
