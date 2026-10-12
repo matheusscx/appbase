@@ -141,6 +141,34 @@ destapa una decisión que no es mía).
   en `movimientos_inventario`: consultar antes de tocarlo (CLAUDE.md, "Detenerse y preguntar"). Un
   costo de $10^11 por gramo no es un caso real; lo que pesa es que la respuesta sea un 500.
 
+- [ ] **Decimales por body sin techo, fuera de las marcas de plata: leído por la revisión, NO
+  medido** (backend; lo nombraron el `domain-reviewer` y el `api-security-reviewer` del cierre de "Los
+  ~40 campos `@EsMontoCobrado` no tienen techo", 2026-10-12, [`resueltos.md`](resueltos.md); la
+  orquestadora pidió anotarlo sin medir). Son campos que llegan por body con `@IsNumberString()` y
+  sin `@EsMontoCobrado`/`@EsCosto`, así que `monto-persistible-cobertura.spec.ts` no los barre.
+  **Primer paso: medir.** Por cada uno, qué devuelve el endpoint con un valor que no cabe en la
+  columna, y si el service ya lo frena antes. Ninguno de estos se corrió. Las columnas se leyeron de
+  la entity:
+  - Tasa de cambio: `UpdateTenantMonedaDto.valorDelDia` va a `tenant_moneda.valor_del_dia`,
+    `NUMERIC(18,6)` (techo 10^12). No vi ninguna validación de rango.
+  - Cantidades y porcentajes:
+    - `CreateMermaDto.cantidad` va a `movimientos_inventario.cantidad`, `NUMERIC(18,4)`.
+    - `cantidadContada` del recuento va a `recuento_inventario_linea.cantidad_contada`, `NUMERIC(18,4)`.
+    - En la distribución de propinas, el `peso` manual va a `NUMERIC(18,4)`, y el `porcentaje` y el
+      `porcentajeSugerido` van a `NUMERIC(10,6)`, con techo 10^4.
+    - El `porcentajeSugerido` de `PropinaDirectaDto`/`PropinaCierreMesaDto` y el
+      `propinaPorcentajeSugerido` del cierre de cuenta van a `venta_propina.porcentaje_sugerido`, que
+      también es `NUMERIC(10,6)`.
+    - `valorPorcentaje` de descuentos, recargos, promociones y sus tramos va a `NUMERIC(7,4)`, con
+      techo 10^3.
+  - `targetCobro = totalFinal + propinaMonto` (`ventas.service.ts`): con los dos dentro de su
+    techo, la suma puede pasar 10^14. No es una columna, así que hay que ver dónde se guarda o se
+    compara.
+
+  **Aparte, fiscal:** el `porcentaje` de impuestos (`impuestos.porcentaje`, `NUMERIC(7,4)`, techo
+  10^3; el service solo exige `> 0`). Va en su propio frente y no se toma de arrastre con los de
+  arriba (CLAUDE.md, "Lo fiscal va solo").
+
 - [ ] **La configuración de la pasarela puede quedar incompleta para su modo, y el cobro da 500** — ⬇️ **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos)
   (backend, `pasarela/dto/create-tenant-pasarela.dto.ts` y `tenant-pasarela.service.ts`
   `crear`/`actualizar`; queda del cierre de "la configuración de la pasarela no se valida",
