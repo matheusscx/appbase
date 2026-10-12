@@ -441,6 +441,11 @@ prohíbe.
   `@IsMontoPersistible` sobre una columna de precisión 18, o que figure en `EXENTOS` con su porqué.
   `NUMERIC(7,4)` no encaja, así que los dos `porcentaje` irían a `EXENTOS`: el techo lo pone
   `@IsDecimalHasta('1')`.
+  ✅ **Decidido (owner, 2026-10-12, por AskUserQuestion de la sesión del tope, con la escena de
+  0,12345 cobrado como 12,35% y del 0,00001 que queda en 0%, y el costo de cada opción):
+  "Rechazar con aviso".** 400 con un mensaje que diga que el porcentaje admite hasta 4 decimales.
+  Descartadas: "redondear, salvo el 0%" y "dejarlo como está". Costo aceptado: un impuesto real con
+  más de 4 decimales no se puede cargar sin agrandar la columna (ninguno de Chile lo necesita).
 
 ## 5. Carreras de concurrencia
 
