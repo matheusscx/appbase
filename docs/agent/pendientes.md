@@ -93,6 +93,11 @@ destapa una decisión que no es mía).
   se tome: ¿se cambia el texto por uno honesto (p. ej. "Revisá el estado más tarde desde el link
   de tu compra" o "el local se comunicará contigo"), o se construye un aviso (correo)? Lo primero
   es chico; lo segundo, un frente.
+  ⏸ **En espera (owner, 2026-10-11):** un frente que cambiaba el texto se canceló antes de commitear,
+  porque "el local se comunicará contigo" tampoco tiene respaldo: la orden no guarda el contacto del
+  comprador. El owner decidió que primero la compra online pida los datos del cliente, como un
+  ecommerce, y el texto se decide con eso: ver
+  [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2, "La compra online pide los datos del cliente".
 
 - [ ] **El commit de Webpay Plus no tiene tope: el retorno puede quedar colgado minutos**
   (backend, `webpay-plus.provider.ts` `confirmarPago`; anotado el 2026-10-11 por el frente que

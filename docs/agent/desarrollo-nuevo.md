@@ -358,6 +358,29 @@ No entran de arrastre dentro de otra tarea. Las que llevan una pregunta para el 
 tienen como primer paso: después queda la spec entera. El contexto de dónde salió cada una
 es parte del enunciado y viaja con ella.
 
+- [ ] **La compra online pide los datos del cliente, como un ecommerce** (producto + backend +
+  frontend; **pedido por el owner el 2026-10-11** en el chat de la orquestadora: *"hay que pedir
+  los datos del cliente en compras online como hacen los ecommerce"*). Hoy la orden de la tienda
+  **no guarda quién compró** de forma que el local lo pueda usar. Lo midió el frente del texto de
+  "Pago pendiente" (cancelado el mismo día):
+  - `pagadorRef` queda `null` en la orden (`pagos-redirect.service.ts`, en `iniciar`).
+  - `usuarioId` y `customerNombre` viajan solo en `metadata` (`online.service.ts`, en `pagar`), y
+    `toPublico` no la expone (`cobros.service.ts`).
+  - Una orden pendiente o pagada sin venta no tiene venta ni `venta_customer`.
+
+  Consecuencia: tres textos prometen un contacto que nadie puede hacer. La vista "Pago pendiente"
+  de `/tienda/retorno` dice "Te avisaremos cuando se acredite"; la de "pagada sin venta" dice "el
+  local se comunicará contigo"; y el drawer de Órdenes le dice al admin "comunicate con el
+  comprador" sin darle el dato.
+
+  **Lo que hay que decidir con el owner** (investigación de mercado recomendable: Shopify, Jumpseller,
+  WooCommerce): qué datos se piden en el checkout (nombre, correo, teléfono, RUT para boleta, dirección
+  si hay despacho), cuáles son obligatorios, si se precargan del usuario logueado, dónde se guardan
+  (la orden, el `venta_customer`, un tercero), quién los ve (permiso) y cuánto se retienen (datos
+  personales). **Con esto se deciden los textos de arriba**: la entrada de `pendientes.md` § 2 sobre
+  "Te avisaremos cuando se acredite" queda en espera de este proyecto, y lo mismo el eventual aviso
+  por correo.
+
 - [ ] **La caja elige descuentos y recargos de nivel venta: pantalla y permiso** (anotado
   2026-10-06 al cerrar "Los ids de reglas que manda el cliente salen del ítem", ver
   [`resueltos.md`](resueltos.md)). Las reglas de nivel venta (*"Promo del total $5.000"*,
