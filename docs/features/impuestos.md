@@ -251,7 +251,7 @@ lector que asuma "acá está todo lo que se le cobra al item" muestra de menos.
   servicio lo fuerza a `'otro'` en `create()` para toda fila creada por un
   tenant, sin importar qué envíe el cliente (enforcement en backend, no en UI).
 
-### El porcentaje va de 0 (excluido) a 1 = 100% (2026-10-12)
+### El porcentaje va de 0 (excluido) a 1 = 100%, con hasta 4 decimales (2026-10-12)
 
 `porcentaje` entra con `@IsDecimalPositivo()` y `@IsDecimalHasta('1')`
 (`TOPE_PORCENTAJE_IMPUESTO`, en `create-impuesto.dto.ts`), en los dos DTO. Fuera de
@@ -269,12 +269,23 @@ ahí junto con el tope, y el service ya no valida el porcentaje (el controller e
 llamador). Las filas del sistema no pasan por el DTO: las siembra `seeder.service.ts`
 (el IVA de Chile, `0.19`), igual que antes.
 
-**Lo que el tope no cubre:** el `> 0` mira el valor tipeado, no el que guarda la columna. Un
-`0.00001` se guarda como `0.0000` y más de 4 decimales se redondean sin aviso: abierto en
-[`pendientes.md`](../agent/pendientes.md) § 4. Y una fila guardada antes del tope con un
-porcentaje mayor a 1 no se puede editar desde la pantalla sin bajarle el porcentaje, porque el
-form manda el `porcentaje` en cada `PATCH`. Pausarla y reactivarla sí: ese `PATCH` manda solo
-`activo`.
+**Hasta 4 decimales, la escala de la columna** (`NUMERIC(7,4)`): `porcentaje` lleva
+`@EsCosto(MENSAJE_DECIMALES_PORCENTAJE_IMPUESTO)`, y `create`/`update` del controller pasan por
+`@Body(EscalaMonedaPipe)`. Con más es **400** *"El porcentaje admite hasta 4 decimales: 0.1234 =
+12,34%"*, y no se escribe nada. La regla mira el valor, no la cadena: `0.12340` entra como
+`0.1234`. **Por qué rechazar y no redondear:** decisión del owner (2026-10-12, por AskUserQuestion
+de la sesión del tope, con la escena y el costo de cada opción): "Rechazar con aviso". Descartadas:
+"redondear, salvo el 0%" y "dejarlo como está". Hasta ese día Postgres redondeaba al guardar, sin
+aviso: `0.12345` quedaba `0.1235`, y `0.00001` quedaba `0.0000`, un impuesto del 0% que es "sin
+impuesto" con forma de impuesto (invariante 5). El `> 0` no lo frenaba porque mira el valor
+tipeado, y ese ya no se redondea. **Costo aceptado:** un impuesto real con más de 4 decimales no se
+puede cargar sin agrandar la columna. Ninguno de Chile lo necesita: IVA `0.19`, ILA `0.205` y
+`0.315`. Si la columna crece, `ESCALA_COSTO` no la sigue sola: el campo necesita su propia escala.
+
+**Lo que esto no cubre:** una fila guardada antes del tope con un porcentaje mayor a 1 no se
+puede editar desde la pantalla sin bajarle el porcentaje, porque el form manda el `porcentaje`
+en cada `PATCH`. Pausarla y reactivarla sí: ese `PATCH` manda solo `activo`. La pantalla no valida
+los decimales: muestra en un toast el mensaje del backend.
 
 ### `ImpuestosService`
 

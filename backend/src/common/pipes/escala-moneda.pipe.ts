@@ -11,6 +11,7 @@ import { RequestContext } from '../context/request-context';
 import { ESCALA_COSTO } from '../constants/escalas';
 import {
   ESCALA_COSTO_KEY,
+  ESCALA_COSTO_MENSAJE_KEY,
   ESCALA_MONEDA_KEY,
 } from '../decorators/escala-moneda.decorator';
 
@@ -107,8 +108,15 @@ export class EscalaMonedaPipe implements PipeTransform {
         this.validarCampo(objeto[campo], escala, campo, 'moneda');
       }
     }
+    const mensajes = mensajesDeCosto(clase);
     for (const campo of camposMarcados(ESCALA_COSTO_KEY, clase)) {
-      this.validarCampo(objeto[campo], ESCALA_COSTO, campo, 'costo');
+      this.validarCampo(
+        objeto[campo],
+        ESCALA_COSTO,
+        campo,
+        'costo',
+        mensajes[campo],
+      );
     }
 
     for (const anidado of Object.values(objeto)) {
@@ -129,6 +137,7 @@ export class EscalaMonedaPipe implements PipeTransform {
     escala: number,
     campo: string,
     tipo: 'moneda' | 'costo',
+    mensaje?: string,
   ): void {
     // El formato ya lo valida `@IsNumberString`; acá solo importa la escala.
     // Se acepta también el número nativo por si un DTO lo dejara pasar: que
@@ -151,9 +160,10 @@ export class EscalaMonedaPipe implements PipeTransform {
     // cero decimales, y el costo cuatro): confundirlos manda a revisar la
     // configuración del tenant por un límite que no depende de ella.
     throw new BadRequestException(
-      tipo === 'moneda'
-        ? `${campo} tiene más decimales de los que admite la moneda (${escala}).`
-        : `${campo} admite como máximo ${escala} decimales (escala fija de costos y tasas).`,
+      mensaje ??
+        (tipo === 'moneda'
+          ? `${campo} tiene más decimales de los que admite la moneda (${escala}).`
+          : `${campo} admite como máximo ${escala} decimales (escala fija de costos y tasas).`),
     );
   }
 
@@ -194,4 +204,14 @@ export class EscalaMonedaPipe implements PipeTransform {
 function camposMarcados(clave: string, clase: unknown): string[] {
   if (typeof clase !== 'function') return [];
   return (Reflect.getMetadata(clave, clase) as string[]) ?? [];
+}
+
+/** Los mensajes propios de `@EsCosto(mensaje)`, por campo. Mismo filtro. */
+function mensajesDeCosto(clase: unknown): Record<string, string> {
+  if (typeof clase !== 'function') return {};
+  return (
+    (Reflect.getMetadata(ESCALA_COSTO_MENSAJE_KEY, clase) as
+      | Record<string, string>
+      | undefined) ?? {}
+  );
 }

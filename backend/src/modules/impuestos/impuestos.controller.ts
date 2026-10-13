@@ -17,6 +17,7 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
 import { QueryIncluirEliminadosDto } from '../../common/dto/query-incluir-eliminados.dto';
 import { RestaurarDto } from '../../common/dto/restaurar.dto';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { ImpuestosService } from './impuestos.service';
 import { CreateImpuestoDto } from './dto/create-impuesto.dto';
@@ -73,7 +74,7 @@ export class ImpuestosController {
 
   @UseGuards(TenantAdminGuard)
   @Post()
-  create(@Req() req: Request, @Body() dto: CreateImpuestoDto) {
+  create(@Req() req: Request, @Body(EscalaMonedaPipe) dto: CreateImpuestoDto) {
     const user = req.user as { tenantId: string };
     return this.impuestosService.create(user.tenantId, dto);
   }
@@ -83,7 +84,7 @@ export class ImpuestosController {
   update(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateImpuestoDto,
+    @Body(EscalaMonedaPipe) dto: UpdateImpuestoDto,
   ) {
     const user = req.user as { tenantId: string };
     return this.impuestosService.update(user.tenantId, id, dto);

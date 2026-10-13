@@ -17,11 +17,17 @@ import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
  * Medido el 2026-10-12 antes del tope, por POST y por PATCH: 1.0001, 1.5 y 10
  * daban 201/200 y quedaban guardados; 10^4 —que no cabe en
  * `impuestos.porcentaje`, `NUMERIC(7,4)`— daba 500. Ahora los cuatro son 400.
+ *
+ * Y admite hasta 4 decimales, la escala de esa columna: lo que traía más se
+ * redondeaba al guardar, sin aviso (los casos de `RECHAZADOS` con
+ * `MENSAJE_DECIMALES`). Ahora es 400 con el mensaje de los decimales.
  */
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN_PARIS = { email: 'admin.paris@paris.cl', pass: 'admin' };
 const MENSAJE_TOPE = 'El porcentaje no puede superar 1 (100%)';
 const MENSAJE_POSITIVO = 'porcentaje debe ser mayor a cero';
+const MENSAJE_DECIMALES =
+  'El porcentaje admite hasta 4 decimales: 0.1234 = 12,34%';
 
 interface TokenResponse {
   access_token: string;
@@ -64,6 +70,13 @@ const RECHAZADOS: [string, string][] = [
   ['10000', MENSAJE_TOPE],
   ['0', MENSAJE_POSITIVO],
   ['-0.1', MENSAJE_POSITIVO],
+  // Más de 4 decimales no cabe en `NUMERIC(7,4)`: Postgres lo redondeaba al
+  // guardar, sin aviso. 0.12345 quedaba 0.1235, y 0.00001 quedaba 0.0000, un
+  // impuesto del 0% —"sin impuesto" con forma de impuesto—. Decisión del owner
+  // (2026-10-12): "Rechazar con aviso".
+  ['0.12345', MENSAJE_DECIMALES],
+  ['0.00001', MENSAJE_DECIMALES],
+  ['0.00004', MENSAJE_DECIMALES],
 ];
 
 describe('El porcentaje de un impuesto tiene tope en 1 = 100% (e2e)', () => {
@@ -127,6 +140,18 @@ describe('El porcentaje de un impuesto tiene tope en 1 = 100% (e2e)', () => {
       expect(await porcentajeGuardado((res.body as ConId).id)).toBe('1.0000');
     });
 
+    it('0.1234 —4 decimales, el borde— entra tal cual', async () => {
+      const res = await crear('0.1234');
+      expect(res.status).toBe(201);
+      expect(await porcentajeGuardado((res.body as ConId).id)).toBe('0.1234');
+    });
+
+    it('0.12340 —el cero a la derecha no es un decimal más— entra', async () => {
+      const res = await crear('0.12340');
+      expect(res.status).toBe(201);
+      expect(await porcentajeGuardado((res.body as ConId).id)).toBe('0.1234');
+    });
+
     it.each(RECHAZADOS)('%s es 400 y no guarda nada', async (pct, esperado) => {
       const antes = await contarTope();
       const res = await crear(pct);
@@ -149,6 +174,14 @@ describe('El porcentaje de un impuesto tiene tope en 1 = 100% (e2e)', () => {
       const res = await editar(id, '1');
       expect(res.status).toBe(200);
       expect(await porcentajeGuardado(id)).toBe('1.0000');
+      const vuelta = await editar(id, '0.05');
+      expect(vuelta.status).toBe(200);
+    });
+
+    it('0.1234 —4 decimales, el borde— entra tal cual', async () => {
+      const res = await editar(id, '0.1234');
+      expect(res.status).toBe(200);
+      expect(await porcentajeGuardado(id)).toBe('0.1234');
       const vuelta = await editar(id, '0.05');
       expect(vuelta.status).toBe(200);
     });

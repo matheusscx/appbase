@@ -14,6 +14,14 @@ class DtoDeCosto {
   costoUnitario: string;
 }
 
+class DtoDeTasa {
+  @EsCosto('El porcentaje admite hasta 4 decimales')
+  porcentaje: string;
+
+  @EsCosto()
+  costoUnitario: string;
+}
+
 class DtoSinMarcas {
   monto: string;
 }
@@ -120,6 +128,23 @@ describe('EscalaMonedaPipe', () => {
     await expect(
       pipe.transform({ costoUnitario: '5.00001' }, meta(DtoDeCosto)),
     ).rejects.toThrow(/costos y tasas/);
+  });
+
+  it('un costo con mensaje propio lo usa, y el de al lado conserva el genérico', async () => {
+    const { pipe } = armar(0);
+
+    await expect(
+      pipe.transform({ porcentaje: '0.12345' }, meta(DtoDeTasa)),
+    ).rejects.toThrow('El porcentaje admite hasta 4 decimales');
+    await expect(
+      pipe.transform(
+        { porcentaje: '0.1234', costoUnitario: '5.00001' },
+        meta(DtoDeTasa),
+      ),
+    ).rejects.toThrow(/costos y tasas/);
+    await expect(
+      pipe.transform({ porcentaje: '0.1234' }, meta(DtoDeTasa)),
+    ).resolves.toEqual({ porcentaje: '0.1234' });
   });
 
   it('vuelve a preguntar los decimales si cambia el tenant', async () => {

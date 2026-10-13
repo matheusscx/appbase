@@ -424,29 +424,6 @@ prohíbe.
   Descartadas: "descartar la marca con un motivo escrito" (la recomendada) y "ligarla a una nota
   existente". Si aparece, se reabre con esas dos opciones.
 
-- [ ] **Un impuesto con más de 4 decimales se redondea al guardarse, y uno de `0.00001` queda en
-  0%.** **La pregunta para el owner:** un impuesto con más de 4 decimales, ¿se rechaza con un aviso
-  (como la plata que no cabe) o se redondea al guardar, como hoy? Si se rechaza, el `0.00001` cae
-  solo. (Backend, **fiscal: va en su propio frente**; lo nombraron el `domain-reviewer` y el
-  `api-security-reviewer` del cierre de "El porcentaje de un impuesto tiene tope en 100%",
-  2026-10-12, [`resueltos.md`](resueltos.md).) El `> 0` del DTO mira el valor tipeado, y
-  `impuestos.porcentaje` es `NUMERIC(7,4)`. **Medido ese día** por `POST /impuestos`: `0.00001` y
-  `0.00004` dan 201 y quedan guardados como `0.0000`, un impuesto del 0% que es "sin impuesto" con
-  forma de impuesto (invariante 5). `0.12345` da 201 y queda `0.1235`, sin aviso. Ya pasaba antes
-  del tope: el `> 0` del service tenía el mismo hueco. **Arreglo probable, si se rechaza:** marcar
-  `porcentaje` con `@EsCosto` ("un COSTO o una TASA", escala fija en 4). La marca sola no valida:
-  `EscalaMonedaPipe` va por parámetro, no global, así que hace falta `@Body(EscalaMonedaPipe)` en
-  `create` y `update` de `ImpuestosController`, y que `ImpuestosModule` importe `MonedasModule`.
-  Además `monto-persistible-cobertura.spec.ts` exige que todo campo marcado lleve
-  `@IsMontoPersistible` sobre una columna de precisión 18, o que figure en `EXENTOS` con su porqué.
-  `NUMERIC(7,4)` no encaja, así que los dos `porcentaje` irían a `EXENTOS`: el techo lo pone
-  `@IsDecimalHasta('1')`.
-  ✅ **Decidido (owner, 2026-10-12, por AskUserQuestion de la sesión del tope, con la escena de
-  0,12345 cobrado como 12,35% y del 0,00001 que queda en 0%, y el costo de cada opción):
-  "Rechazar con aviso".** 400 con un mensaje que diga que el porcentaje admite hasta 4 decimales.
-  Descartadas: "redondear, salvo el 0%" y "dejarlo como está". Costo aceptado: un impuesto real con
-  más de 4 decimales no se puede cargar sin agrandar la columna (ninguno de Chile lo necesita).
-
 ## 5. Carreras de concurrencia
 
 ---

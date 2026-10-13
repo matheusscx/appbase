@@ -9,7 +9,9 @@ import {
   IsDecimalHasta,
   IsDecimalPositivo,
 } from '../../../common/decorators/decimal-signo.decorator';
+import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
 import {
+  MENSAJE_DECIMALES_PORCENTAJE_IMPUESTO,
   MENSAJE_TOPE_PORCENTAJE_IMPUESTO,
   TOPE_PORCENTAJE_IMPUESTO,
 } from './create-impuesto.dto';
@@ -26,6 +28,7 @@ export class UpdateImpuestoDto {
 
   @ValidateIf((_o, v) => v !== undefined)
   @IsNumberString()
+  @EsCosto(MENSAJE_DECIMALES_PORCENTAJE_IMPUESTO)
   @IsDecimalPositivo()
   @IsDecimalHasta(TOPE_PORCENTAJE_IMPUESTO, {
     message: MENSAJE_TOPE_PORCENTAJE_IMPUESTO,

@@ -127,6 +127,10 @@ const COLUMNAS: Record<string, [Entidad, string][]> = {
 const EXENTOS: Record<string, string> = {
   'caja/AbrirCajaDto.saldoInicial':
     'lo frena `CajaService.abrir` con 400 (caja-esperado-no-cabe.e2e-spec.ts, "la apertura")',
+  'impuestos/CreateImpuestoDto.porcentaje':
+    'su columna es `NUMERIC(7,4)`, no de plata: el techo es `@IsDecimalHasta(TOPE_PORCENTAJE_IMPUESTO)` = 1 (100%)',
+  'impuestos/UpdateImpuestoDto.porcentaje':
+    'su columna es `NUMERIC(7,4)`, no de plata: el techo es `@IsDecimalHasta(TOPE_PORCENTAJE_IMPUESTO)` = 1 (100%)',
   'items/DescartarDesfaseItemDto.costoPropuestoVisto':
     'no se guarda: solo se compara con el costo recalculado, y lo que se guarda es ese',
   'ventas/CreateNotaCreditoDto.monto':
