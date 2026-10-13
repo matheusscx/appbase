@@ -395,6 +395,46 @@ prohíbe.
   Descartadas: "descartar la marca con un motivo escrito" (la recomendada) y "ligarla a una nota
   existente". Si aparece, se reabre con esas dos opciones.
 
+- [ ] **Con "no se suman", una tanda de la promo compite contra un descuento de catálogo que otra
+  tanda ya anuló, y el cliente pierde parte de la promo** (backend + producto,
+  `resolverPromociones` en `calculo-precios.engine.ts`; lo vio la revisión del NxM, `30622fcf`,
+  2026-10-13). ⚠️ Toca el arbitraje del motor: va solo y con el sistema quieto (CLAUDE.md,
+  "Detenerse y preguntar").
+  **Escena:** martes de 3x1 en todo el local, con el interruptor en "aplica solo la rebaja mayor".
+  La mesa pide 5 cervezas de $1.000, que tienen un 30 % de descuento de catálogo ($1.500 sobre las
+  cinco), y un agua de $100.
+  **Medido con el motor real** (`calcularVenta` sobre lo que arma el evaluador):
+  - Con el 3x1 cobra **$3.100**. La primera tanda (3 cervezas) regala $2.000, le gana al 30 % y
+    se lo saca a la línea de cervezas. La segunda (2 cervezas y el agua) regala $1.000 + $100 y
+    se compara contra los $1.500 del 30 %, que ya no se está aplicando: pierde y se descarta.
+  - Sin promo, solo con el catálogo, cobra **$3.600**.
+  - El mismo carrito con un 2x1 cobra **$3.500**, y eso pasaba antes del NxM: cada tanda de 2
+    cervezas regala $1.000 y pierde por separado contra los $1.500, aunque juntas regalarían
+    $2.000. Solo gana la tanda que regala el agua.
+  - Con las dos tandas del 3x1 aplicadas cobraría **$2.000** (calculado, no medido).
+  La causa es una sola: cada tanda se compara contra el catálogo de **toda** la línea, aunque otra
+  tanda de la misma promo ya lo haya anulado. El NxM le agrega una forma nueva, porque una tanda
+  puede caer en dos líneas.
+  **La pregunta para el owner:** cuando la promo y el descuento no se suman, ¿cómo se decide quién
+  gana?
+  1. **La promo entera contra el catálogo de lo que toca** (la recomendada: no depende del orden y
+     arregla también el 2x1). Se suma todo lo que la promo regala en
+     la venta y se compara contra el catálogo de esas líneas; si gana, aplican todas sus tandas.
+     Con el 3x1 serían $2.000 y con el 2x1 $3.000 (calculado). Costo: cambia la regla del
+     2026-08-27, "la comparación es por aplicación, no por línea", que hoy rige también para el
+     combo.
+  2. **Cada tanda compite solo contra el catálogo que todavía se está aplicando.** Si una tanda
+     anterior ya le sacó el 30 % a las cervezas, la siguiente compite contra cero en esa línea. Con
+     el 3x1 serían $2.000, y con el 2x1 seguirían siendo $3.500, porque la primera tanda igual
+     pierde (calculado). Costo: el resultado depende del orden en que se miran las tandas.
+  3. **Dejarlo.** El cliente nunca paga más que con solo el catálogo ($3.100 < $3.600). Costo: en
+     estos carritos la promo rinde menos de lo que el local anunció.
+  ✅ **Decidido (owner, 2026-10-13, por AskUserQuestion de la orquestadora, con el carrito de 5
+  cervezas de $1.000 al 30 % más un agua de $100 y los montos de cada opción): "La promo entera
+  contra el catálogo de lo que toca".** Con eso el 3x1 cobra $2.000 y el 2x1 $3.000. Descartadas:
+  "cada grupo contra lo que queda" y "dejarlo". Va como frente aparte, que lanza la orquestadora:
+  cambia la regla del 2026-08-27, "la comparación es por aplicación".
+
 ## 5. Carreras de concurrencia
 
 ---
