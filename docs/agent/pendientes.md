@@ -424,7 +424,7 @@ prohíbe.
   Toca lo que el motor cobra: va solo (CLAUDE.md, "Detenerse y preguntar").
   ✅ **Decidido (owner, 2026-10-13, por AskUserQuestion de la orquestadora, con la tabla de cómo
   quedan 2x1, 3x2, "segunda al 50%" y 3x1): "Hacer el NxM de verdad".** La promo se configura como
-  "lleva N, paga M" y el motor regala las M−N unidades más baratas de cada grupo, de modo que el 3x1
+  "lleva N, paga M" y el motor regala las N−M unidades más baratas de cada grupo, de modo que el 3x1
   y el 4x2 salen bien con precios distintos (hoy el 3x1 solo se arma con el truco de 200%, que
   descuenta dos veces la más barata). El porcentaje queda con tope en 100% por unidad regalada.
   Descartadas: "un tope que dependa del tamaño del grupo, para conservar el truco" y "dejarlo".
