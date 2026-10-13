@@ -20,6 +20,7 @@ import {
   esDeadlock,
 } from '../../common/db/reintento-deadlock';
 import {
+  assertCantidadConvertidaCabe,
   assertCostoConvertidoCabe,
   assertCostoNoColapsaACero,
 } from '../../common/utils/costo-conversion-unidad.util';
@@ -425,6 +426,10 @@ type Conversor = (cantidad: string, desde: string, hacia: string) => string;
  * borrador, confirmar y la corrección de cantidad. Si alguno convirtiera por su
  * cuenta, ese sería el camino que lee "10 cajas" como 10 unidades.
  *
+ * Por lo mismo, acá vive el techo de la cantidad convertida
+ * (`assertCantidadConvertidaCabe`): 10^12 kg caben en la línea y son 10^15 g
+ * en `compra_lineas.cantidad_base`. Lo ve ya el borrador, no recién confirmar.
+ *
  * `conversor` es perezoso: una factura toda en la unidad base, o toda en
  * presentaciones con contenido ya en base, no consulta el catálogo.
  */
@@ -443,10 +448,13 @@ export async function cantidadEnBase(
         `La cantidad (${cantidad} × ${unidad.contenidoBase}) es menor a la precisión de stock (4 decimales)`,
       );
     }
+    assertCantidadConvertidaCabe(base.toString(), unidadBase);
     return base.toString();
   }
   if (unidad.unidadCodigo === unidadBase) return cantidad;
-  return (await conversor())(cantidad, unidad.unidadCodigo, unidadBase);
+  const base = (await conversor())(cantidad, unidad.unidadCodigo, unidadBase);
+  assertCantidadConvertidaCabe(base, unidadBase);
+  return base;
 }
 
 /** Por índice de línea: con qué se convierte a la unidad base. */

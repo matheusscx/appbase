@@ -13,6 +13,11 @@ import {
   assertCostoNoColapsaACero,
   convertirCostoUnitario,
 } from '../../common/utils/costo-conversion-unidad.util';
+import {
+  cabeEnColumnaDePlata,
+  formatearMontoPersistible,
+  TECHO_PERSISTIBLE_FORMATEADO,
+} from '../../common/utils/monto-persistible.util';
 import Decimal from 'decimal.js';
 import type { PaginatedResponse } from '../../common/interfaces/paginated-response.interface';
 import {
@@ -490,10 +495,11 @@ export class InventarioService {
     const productoRows: {
       modo_inventario: string;
       costo_actual: string | null;
+      unidad_medida: string | null;
       item_nombre: string;
       item_eliminado_el: Date | null;
     }[] = await manager.query(
-      `SELECT ip.modo_inventario, ip.costo_actual,
+      `SELECT ip.modo_inventario, ip.costo_actual, ip.unidad_medida,
               i.nombre AS item_nombre, i.eliminado_el AS item_eliminado_el
          FROM item_producto ip
          JOIN items i ON i.item_id = ip.item_id
@@ -725,6 +731,45 @@ export class InventarioService {
       }
     }
 
+    // El stock que deja una entrada, sumando TODAS las ubicaciones: cada saldo
+    // cabe en `NUMERIC(18,4)` y la suma puede no caber. Medido el 2026-10-13:
+    // dos entradas de 9×10^13 en la misma ubicación daban 500 en el upsert de
+    // `stock_ubicacion`, y 9×10^13 en el local y otro tanto en la bodega
+    // dejaban `GET /items` en 500 para el tenant entero (el listado, el detalle
+    // y la disponibilidad castean el total a `numeric(18,4)`). Mirar el total
+    // cubre el saldo de la ubicación, que nunca es mayor, y la cantidad
+    // convertida que ya no cabe sola. Una salida no sube nada. La entrada de un
+    // traslado no se mira: su salida, en la misma transacción, ya bajó el total
+    // en lo mismo que ésta lo sube, así que el total no cambia.
+    //
+    // Se lee con el lock de `item_producto` en la mano, por lo mismo que el
+    // peso del CPP de más abajo, que reusa este número: todo escritor de
+    // `stock_ubicacion` pasa por acá y toma ese lock primero. Decisión del
+    // owner (2026-10-13): "Sí, con aviso"; se rechaza antes de escribir y no
+    // cambia qué se escribe.
+    let stockTotalPrevio: Decimal | null = null;
+    if (
+      params.tipo === 'entrada' &&
+      !esAjusteCosto &&
+      params.motivo !== 'traslado'
+    ) {
+      stockTotalPrevio = new Decimal(
+        (
+          await this.stockTotalPorProducto(manager, params.tenantId, [
+            params.itemId,
+          ])
+        ).get(params.itemId)!,
+      );
+      const total = stockTotalPrevio.plus(cantidad);
+      if (!cabeEnColumnaDePlata(total)) {
+        throw new BadRequestException(
+          `El stock de "${productoRows[0].item_nombre}" sumando todas las ubicaciones quedaría en ` +
+            `${formatearMontoPersistible(total)} ${productoRows[0].unidad_medida ?? 'unidad'}: ` +
+            `el sistema no puede guardar cantidades de ${TECHO_PERSISTIBLE_FORMATEADO} o más`,
+        );
+      }
+    }
+
     // Costo a persistir en item_producto. null = no se toca.
     // Lo recalculan (promedio ponderado móvil) los motivos de
     // MOTIVOS_QUE_RECALCULAN_CPP; las demás entradas pueden congelar un
@@ -751,14 +796,10 @@ export class InventarioService {
       // es el stock previo a este movimiento.
       //
       // La definición del peso vive en `stockTotalPorProducto`, que comparten
-      // compras (la congela en la línea) y "rehacer la cuenta".
-      const stockTotal = (
-        await this.stockTotalPorProducto(manager, params.tenantId, [
-          params.itemId,
-        ])
-      ).get(params.itemId)!;
+      // compras (la congela en la línea) y "rehacer la cuenta". Ya se leyó
+      // arriba, para el techo: toda entrada que promedia pasa por ahí.
       costoActualNuevo = this.calcularCostoPromedio(
-        new Decimal(stockTotal),
+        stockTotalPrevio!,
         costoActualPrevio,
         cantidad,
         params.costoUnitario,
@@ -2007,17 +2048,31 @@ export class InventarioService {
       // Ancla del lock: la fila de item_lote, la misma de siempre. Ya no trae
       // el saldo (vivía acá como `cantidad_disponible`) — ese se lee aparte,
       // más abajo, por `saldoLoteEnUbicacion`.
-      const existentes: { lote_id: string }[] = await manager.query(
-        `SELECT lote_id FROM item_lote
-         WHERE item_id = $1 AND codigo_lote = $2 AND eliminado_el IS NULL
-         FOR UPDATE`,
-        [params.itemId, loteInput.codigoLote],
-      );
+      const existentes: { lote_id: string; cantidad_inicial: string }[] =
+        await manager.query(
+          `SELECT lote_id, cantidad_inicial FROM item_lote
+           WHERE item_id = $1 AND codigo_lote = $2 AND eliminado_el IS NULL
+           FOR UPDATE`,
+          [params.itemId, loteInput.codigoLote],
+        );
 
       let loteId: string;
 
       if (existentes.length) {
         loteId = existentes[0].lote_id;
+        // `cantidad_inicial` suma todo lo que entró al lote y no baja con las
+        // salidas: el saldo cabe y el acumulado puede no caber (entrar 9×10^13,
+        // venderlo y volver a entrarlo daba 500, medido el 2026-10-13). Se lee
+        // en el mismo `FOR UPDATE` de arriba, ninguna lectura nueva.
+        const acumulado = new Decimal(existentes[0].cantidad_inicial).plus(
+          cantidad,
+        );
+        if (!cabeEnColumnaDePlata(acumulado)) {
+          throw new BadRequestException(
+            `Lo que entró al lote ${loteInput.codigoLote} sumaría ${formatearMontoPersistible(acumulado)}: ` +
+              `el sistema no puede guardar cantidades de ${TECHO_PERSISTIBLE_FORMATEADO} o más`,
+          );
+        }
         await manager.query(
           `UPDATE item_lote SET cantidad_inicial = cantidad_inicial + $1
            WHERE lote_id = $2`,

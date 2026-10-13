@@ -15,6 +15,7 @@ import {
 import { Type } from 'class-transformer';
 import {
   IsDecimalNoNegativo,
+  IsDecimalPersistible,
   IsDecimalPositivo,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
@@ -83,6 +84,7 @@ export class AjusteStockDto {
   // es dinero.
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsDecimalPersistible(18, 4)
   cantidad: string;
 
   @IsIn(['entrada', 'salida'])

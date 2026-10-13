@@ -16,6 +16,7 @@ import {
 import { Type } from 'class-transformer';
 import {
   IsDecimalNoNegativo,
+  IsDecimalPersistible,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
@@ -27,6 +28,7 @@ export class GrupoOpcionInputDto {
 
   @IsOptional()
   @IsNumberString()
+  @IsDecimalPersistible(18, 4)
   cantidad?: string;
 
   // Solo opciones de familia ingrediente; el backend lo verifica.

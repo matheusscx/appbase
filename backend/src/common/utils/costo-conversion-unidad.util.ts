@@ -99,3 +99,28 @@ export function assertCostoConvertidoCabe(
     );
   }
 }
+
+/**
+ * El gemelo de `assertCostoConvertidoCabe` para la cantidad: la que llega cabe
+ * en `NUMERIC(18,4)` (`IsDecimalPersistible` del DTO) y, pasada a la unidad del
+ * producto, puede no caber: 10^12 kg son 10^15 g. Medido el 2026-10-13: el
+ * ajuste de stock y la compra en una unidad o una presentación mayor que la
+ * base daban 500.
+ *
+ * Decisión del owner (2026-10-13, por AskUserQuestion de la orquestadora, con
+ * la escena "100 billones de unidades en un ajuste de stock"): "Sí, con
+ * aviso". Se rechaza antes de escribir y el aviso dice la cantidad ya
+ * convertida; no cambia cómo se convierte ni qué se guarda. El saldo que
+ * resulta lo mira `InventarioService.registrarMovimiento`, bajo su lock.
+ */
+export function assertCantidadConvertidaCabe(
+  cantidadConvertida: string,
+  unidadDestino: string,
+): void {
+  if (!cabeEnColumnaDePlata(cantidadConvertida)) {
+    throw new BadRequestException(
+      `La cantidad en ${unidadDestino} sería de ${formatearMontoPersistible(cantidadConvertida)}: ` +
+        `el sistema no puede guardar cantidades de ${TECHO_PERSISTIBLE_FORMATEADO} o más`,
+    );
+  }
+}

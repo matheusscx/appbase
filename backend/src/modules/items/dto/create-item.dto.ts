@@ -22,6 +22,7 @@ import { Type } from 'class-transformer';
 import {
   IsDecimalHasta,
   IsDecimalNoNegativo,
+  IsDecimalPersistible,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
@@ -80,6 +81,7 @@ export class RecetaIngredienteInputDto {
   ingredienteItemId: string;
 
   @IsNumberString()
+  @IsDecimalPersistible(18, 4)
   cantidad: string;
 
   @IsString()
@@ -96,6 +98,7 @@ export class RecetaExtraInputDto {
   ingredienteItemId: string;
 
   @IsNumberString()
+  @IsDecimalPersistible(18, 4)
   cantidad: string;
 
   @IsString()
@@ -135,6 +138,7 @@ export class ItemGrupoOpcionOverrideInputDto {
   @ValidateIf((o: ItemGrupoOpcionOverrideInputDto) => o.cantidad !== '')
   @IsOptional()
   @IsNumberString()
+  @IsDecimalPersistible(18, 4)
   cantidad?: string;
 
   @ValidateIf((o: ItemGrupoOpcionOverrideInputDto) => o.unidadCodigo !== '')
@@ -256,6 +260,7 @@ export class CreateItemDto {
   modoInventario?: string;
 
   @IsNumberString()
+  @IsDecimalPersistible(18, 4)
   @IsOptional()
   stock?: string;
 

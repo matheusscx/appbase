@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import {
   IsDecimalNoNegativo,
+  IsDecimalPersistible,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
 import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
@@ -30,6 +31,7 @@ export class AplicarOverridesDto {
   @ValidateIf((o: AplicarOverridesDto) => o.cantidad !== '')
   @IsOptional()
   @IsNumberString()
+  @IsDecimalPersistible(18, 4)
   cantidad?: string;
 
   @ValidateIf((o: AplicarOverridesDto) => o.unidadCodigo !== '')

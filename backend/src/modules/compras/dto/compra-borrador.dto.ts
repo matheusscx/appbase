@@ -16,6 +16,7 @@ import {
 } from 'class-validator';
 import {
   IsDecimalNoNegativo,
+  IsDecimalPersistible,
   IsDecimalPositivo,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
@@ -84,6 +85,7 @@ export class LineaCompraDto {
   // String + Decimal.js, como toda cantidad de kardex (`AjusteStockDto`).
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsDecimalPersistible(18, 4)
   cantidad: string;
 
   /** En una unidad del catálogo. Exactamente una de `unidadCodigo` o `presentacionId` (lo exige el service). */

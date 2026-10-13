@@ -300,6 +300,13 @@ con un 400 que dice cuánto sería: *"El costo por kg sería de $99.999.999.999.
 llaman los mismos que al colapso, `ComprasService.costearCompra` incluido (una línea con una
 unidad o una presentación menor que la base, al confirmar y al corregir).
 
+**La cantidad que no cabe en la unidad base, igual** (owner, 2026-10-13: "Sí, con aviso").
+10^12 kg caben en el campo y son 10^15 g. Lo corta `assertCantidadConvertidaCabe` (misma
+util) con un 400 que dice la cantidad convertida: *"La cantidad en g sería de
+1.000.000.000.000.000…"*. Lo llaman `ItemsService.ajustarStock` y `cantidadEnBase` de
+compras, que es la única conversión de una línea de compra: el borrador ya lo ve, y una
+presentación grande también (10^8 sacos de 1000 kg).
+
 **Dónde aplica:**
 - `ItemsService.ajustarStock` — siempre que venga `costoUnitario` y haya conversión de cantidad.
 - `ItemsService.update` — al cambiar `unidad_medida`, reconvierte el `costo_actual` vigente

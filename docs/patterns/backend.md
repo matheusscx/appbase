@@ -278,6 +278,15 @@ Como no hay marca que barrer, cada uso se anota con sus columnas en
 2026-10-13 la tasa del día, el conteo de un recuento, el reparto de propinas, el porcentaje
 sugerido de una propina y el `valorPorcentaje` de un `nxm` daban 500.
 
+📌 **Una cantidad de kardex se mira tres veces, no una.** El DTO mira el campo tal como llega.
+La cantidad **convertida** a la unidad del producto la mira `assertCantidadConvertidaCabe`.
+**Lo acumulado** lo mira quien lo lee bajo lock: el stock del producto sumando todas las
+ubicaciones, en `registrarMovimiento`, y lo que entró a un lote, en `moverLote`
+(`cantidad_inicial` no baja con las salidas). Que cada campo quepa no dice nada de la suma:
+hasta el 2026-10-13, dos entradas de 9×10^13 daban 500, y repartidas entre dos ubicaciones
+dejaban en 500 todo listado que castea el total a `numeric(18,4)`. Lo mismo vale para la
+plata: el costo de una receta o un combo es una suma (`assertCostoCompuestoCabe`).
+
 ✅ **El punto ciego de descuentos y recargos se cerró el 2026-08-23.** Su `valor` no se
 podía marcar —era monto fijo o porcentaje según el campo hermano `modo`, y ni el decorador
 ni el pipe leen campos hermanos—, así que se **partió en dos columnas**: `valor_monto`

@@ -11,6 +11,7 @@ import { Caja } from '../../modules/caja/entities/caja.entity';
 import { CajaArqueoMedio } from '../../modules/caja/entities/caja-arqueo-medio.entity';
 import { MovimientoCaja } from '../../modules/caja/entities/movimiento-caja.entity';
 import { Compra } from '../../modules/compras/entities/compra.entity';
+import { PresentacionCompra } from '../../modules/compras/entities/presentacion-compra.entity';
 import { CompraLinea } from '../../modules/compras/entities/compra-linea.entity';
 import { PagoProveedor } from '../../modules/compras/entities/pago-proveedor.entity';
 import { PagoProveedorAplicacion } from '../../modules/compras/entities/pago-proveedor-aplicacion.entity';
@@ -21,6 +22,8 @@ import { MovimientoInventario } from '../../modules/inventario/entities/movimien
 import { Item } from '../../modules/items/entities/item.entity';
 import { ItemGrupoModificadorOpcion } from '../../modules/items/entities/item-grupo-modificador-opcion.entity';
 import { ItemProducto } from '../../modules/items/entities/item-producto.entity';
+import { RecetaIngrediente } from '../../modules/items/entities/receta-ingrediente.entity';
+import { StockUbicacion } from '../../modules/items/entities/stock-ubicacion.entity';
 import { RecetaExtraPermitido } from '../../modules/items/entities/receta-extra-permitido.entity';
 import { Pago } from '../../modules/pagos/entities/pago.entity';
 import { Promocion } from '../../modules/promociones/entities/promocion.entity';
@@ -157,6 +160,40 @@ function dtos(dir: string): string[] {
  * `docs/agent/resueltos.md`, "Decimales por body sin techo").
  */
 const COLUMNAS_NO_PLATA: Record<string, [Entidad, string][]> = {
+  // Cantidades de kardex: el campo tal como llega. La convertida a la unidad
+  // del producto y el saldo resultante los mira el service (`docs/agent/
+  // resueltos.md`, "Una cantidad por body sin techo").
+  'compras/CorregirLineaDto.cantidad': [[CompraLinea, 'cantidad']],
+  'compras/CrearPresentacionCompraDto.contenido': [
+    [PresentacionCompra, 'contenido'],
+  ],
+  'compras/EditarPresentacionCompraDto.contenido': [
+    [PresentacionCompra, 'contenido'],
+  ],
+  'compras/LineaCompraDto.cantidad': [[CompraLinea, 'cantidad']],
+  'grupos-modificadores/AplicarOverridesDto.cantidad': [
+    [ItemGrupoModificadorOpcion, 'cantidad'],
+  ],
+  'grupos-modificadores/GrupoOpcionInputDto.cantidad': [
+    [GrupoModificadorOpcion, 'cantidad'],
+  ],
+  'items/AjusteStockDto.cantidad': [
+    [MovimientoInventario, 'cantidad'],
+    [StockUbicacion, 'stock'],
+  ],
+  'items/CreateItemDto.stock': [
+    [MovimientoInventario, 'cantidad'],
+    [StockUbicacion, 'stock'],
+  ],
+  'items/ItemGrupoOpcionOverrideInputDto.cantidad': [
+    [ItemGrupoModificadorOpcion, 'cantidad'],
+  ],
+  'items/RecetaExtraInputDto.cantidad': [[RecetaExtraPermitido, 'cantidad']],
+  'items/RecetaIngredienteInputDto.cantidad': [[RecetaIngrediente, 'cantidad']],
+  'traslados/LineaTrasladoDto.cantidad': [
+    [MovimientoInventario, 'cantidad'],
+    [StockUbicacion, 'stock'],
+  ],
   'monedas/UpdateTenantMonedaDto.valorDelDia': [[TenantMoneda, 'valorDelDia']],
   'promociones/CreatePromocionDto.valorPorcentaje': [
     [Promocion, 'valorPorcentaje'],

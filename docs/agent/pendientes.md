@@ -127,37 +127,18 @@ destapa una decisión que no es mía).
   (`aprobada` o `error`), consultar el estado en vez de confirmar. O leer ese 4xx como "sin
   confirmar" y no como rechazo.
 
-- [ ] **El costo de una receta no tiene techo** (backend, `items.service.ts`
-  `validarYCostearIngredientes` y `costoPropuesto`; lo vio la revisión del cierre de "Un costo que
-  cabe en su unidad y no por la unidad base", 2026-10-13, [`resueltos.md`](resueltos.md); **leído,
-  no medido**). El costo de la receta suma `costo_actual × cantidad` de cada ingrediente, con la
-  cantidad ya convertida a la unidad del ingrediente, y lo guarda en `item_receta.costo_actual`
-  (`NUMERIC(18,4)`). Cada costo cabe, y el producto o la suma pueden no caber: dos kilos de un
-  ingrediente de $90 billones por kilo ya son $180 billones. Ningún `cabeEnColumnaDePlata` mira ese resultado, y por
-  lectura daría 500. El combo suma los costos de sus componentes de la misma forma. **Medir** con
-  una receta y un combo; **arreglo probable:** el mismo chequeo una vez sobre el costo calculado y
-  antes de escribir. Hay que decidir si es un 400 (no se puede guardar la receta) o si la receta se
-  guarda con el costo en blanco, y eso lo decide el owner.
+- [ ] **Cantidades por body fuera del kardex, sin techo de columna** (backend; queda del cierre
+  de "Una cantidad de stock que no cabe en su columna", 2026-10-13, [`resueltos.md`](resueltos.md);
+  **leído, no medido**). Llegan con `@IsNumberString()` y a lo sumo `@IsDecimalPositivo()`, sin
+  `IsDecimalPersistible`:
+  - la `cantidad` de una nota de crédito (`CreateNotaCreditoDto`);
+  - la de una línea anulada de salón (`AnularLineaDto`);
+  - la de un reembolso de la pasarela (`CreateReembolsoDto`);
+  - el `minimoCantidad` de un descuento y de un recargo.
 
-- [ ] **Una cantidad por body sin techo llega al `INSERT`: 500** (backend; queda del cierre de
-  "Decimales por body sin techo", 2026-10-13, [`resueltos.md`](resueltos.md)). Las cantidades de
-  kardex llegan con `@IsNumberString()` y a lo sumo `@IsDecimalPositivo()`, sin el techo de su
-  columna `NUMERIC(18,4)`. **Medido el 2026-10-13** por HTTP, base nueva:
-  - `PATCH /items/:id/stock`, entrada de `cantidad: 10^14` en la unidad base: **500**.
-  - El mismo, con `cantidad: 10^12` y `unidadCodigo: 'kg'` en un producto por gramo: **500**. El
-    campo cabe; convertido son ×1000.
-  - Dos entradas de 9×10^13 al mismo producto: la primera da 200 y la segunda **500**, porque el
-    saldo acumulado (`stock_ubicacion`) pasa de 10^14. Ningún campo es grande; lo que desborda es
-    la suma.
-  - Una receta con un ingrediente de `cantidad: 10^14` (`POST /items`): **500**.
-
-  **Leído, no medido:** la cantidad de una compra y su `cantidad_base` convertida (con 10^14 la
-  frenó primero el techo de `totalDocumento`), la de un traslado, la de una opción de grupo
-  modificador (con 10^14 la frenó otro 400, el de la unidad de medida) y la de sus overrides.
-  **Arreglo probable:** `@IsDecimalPersistible(18, 4)` en cada DTO, y en el service el chequeo
-  de la cantidad ya convertida y del saldo resultante, una vez y antes de escribir. ⚠️ El chequeo
-  del service escribe en `movimientos_inventario`: consultar antes (CLAUDE.md, "Detenerse y
-  preguntar"), como el del costo convertido.
+  Puede que el service ya los frene, porque la nota de crédito y la anulación no deberían pasar
+  de lo vendido. **Medir** cada uno con 10^14 por HTTP. ⚠️ La nota de crédito es fiscal: va en
+  su propio frente (CLAUDE.md). La pasarela va con prioridad baja (owner, 2026-10-08).
 
 - [ ] **La configuración de la pasarela puede quedar incompleta para su modo, y el cobro da 500** — ⬇️ **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos)
   (backend, `pasarela/dto/create-tenant-pasarela.dto.ts` y `tenant-pasarela.service.ts`

@@ -86,6 +86,14 @@ Response (201): { "id": "<uuid>" }
 
 Costo = Σ (costo_actual del ingrediente × cantidad convertida a su unidad base), Decimal.js, 4 decimales.
 
+**Un costo que no cabe en la columna no se guarda** (owner, 2026-10-13, por AskUserQuestion de la
+orquestadora: "No guardar, con aviso"). Cada costo cabe en `NUMERIC(18,4)` y la suma puede no
+caber: 2 kg de un ingrediente de $90 billones el kilo son $180 billones. Crear o editar la receta
+da `400` antes de escribir, y el aviso nombra el ingrediente que más pesa para que corrijan su
+costo o su cantidad (`assertCostoCompuestoCabe`). Descartada: guardarla con el costo en blanco. Lo mismo al
+aplicar su desfase, y al descartarlo por extensión del frente
+([simulador-impacto-costos.md](./simulador-impacto-costos.md)).
+
 ### PATCH /items/:id
 
 Con `ingredientes` (reemplazo total): soft-delete de filas vivas + insert de la nueva lista + update de `item_receta.costo_actual`. Lista vacía → `400`.

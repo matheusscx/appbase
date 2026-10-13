@@ -8,7 +8,10 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
-import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalPersistible,
+  IsDecimalPositivo,
+} from '../../../common/decorators/decimal-signo.decorator';
 
 const recortar = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -30,6 +33,7 @@ export class CrearPresentacionCompraDto {
   /** Cuánto trae, en `unidadCodigo`. String + Decimal.js, como toda cantidad de kardex. */
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsDecimalPersistible(18, 4)
   contenido: string;
 
   @IsString()
@@ -53,6 +57,7 @@ export class EditarPresentacionCompraDto {
   @ValidateIf((_o, v) => v !== undefined)
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsDecimalPersistible(18, 4)
   contenido?: string;
 
   @ValidateIf((_o, v) => v !== undefined)

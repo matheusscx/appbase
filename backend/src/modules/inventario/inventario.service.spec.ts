@@ -97,6 +97,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'cantidad' }])
         .mockResolvedValueOnce([{ stock: '10' }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '10' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce(undefined)
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
 
@@ -141,6 +142,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'cantidad' }])
         .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '10' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
 
@@ -171,6 +173,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'cantidad' }])
         .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '10' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]);
 
@@ -277,6 +280,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'cantidad' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '10' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-1' }]); // INSERT movimiento
 
@@ -301,10 +305,10 @@ describe('InventarioService', () => {
         costoActualPrevio: null,
         costoActual: null,
       });
-      // La 3ª llamada es el upsert de stock_ubicacion con el nuevo saldo
-      // (1ª el lock, 2ª el saldo)
+      // La 4ª llamada es el upsert de stock_ubicacion con el nuevo saldo
+      // (1ª el lock, 2ª el saldo, 3ª el total del techo)
       expect(managerMock.query).toHaveBeenNthCalledWith(
-        3,
+        4,
         expect.stringContaining('INSERT INTO stock_ubicacion'),
         expect.arrayContaining(['15', ITEM_ID, UBICACION_ID]),
       );
@@ -475,6 +479,7 @@ describe('InventarioService', () => {
         managerMock.query
           .mockResolvedValueOnce(lockRowEliminado())
           .mockResolvedValueOnce(saldoRow()) // SELECT saldo, ya bajo el lock
+          .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '10' }]) // SELECT stock total: el techo
           .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
           .mockResolvedValueOnce([{ movimiento_id: 'mov-repo' }]); // INSERT kardex
 
@@ -601,6 +606,7 @@ describe('InventarioService', () => {
           },
         ])
         .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '10' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-ok' }]);
 
@@ -641,6 +647,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce([]) // SELECT series ya vivas del producto: ninguna
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // INSERT unidad 1
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_2 }]) // INSERT unidad 2
@@ -688,6 +695,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '1' }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '1' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce([
           { cruda: 'IMEI-001', norm: 'imei-001', ya_viva: null },
           { cruda: 'IMEI-002', norm: 'imei-002', ya_viva: null },
@@ -714,7 +722,7 @@ describe('InventarioService', () => {
         },
       );
 
-      const [sql, params] = managerMock.query.mock.calls[2] as [
+      const [sql, params] = managerMock.query.mock.calls[3] as [
         string,
         unknown[],
       ];
@@ -740,6 +748,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '1' }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '1' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         // Lo que devuelve la base para `abc123 `: colisiona con `ABC123`.
         .mockResolvedValueOnce([
           { cruda: 'abc123 ', norm: 'abc123', ya_viva: 'ABC123' },
@@ -767,6 +776,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '1' }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '1' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce([
           { cruda: 'IMEI-001', norm: 'imei-001', ya_viva: 'IMEI-001' },
         ]);
@@ -793,6 +803,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         // `ABC123` y `abc123 ` normalizan al mismo `abc123`: son la misma serie
         // aunque las dos filas todavía no existan, así que ningún índice puede
         // verlas y el rechazo es de acá.
@@ -826,6 +837,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce([{ cruda: '   ', norm: '', ya_viva: null }]);
 
       await expect(
@@ -847,7 +859,8 @@ describe('InventarioService', () => {
     it('entrada serie: lanza BadRequest si cantidad != series.length', async () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
-        .mockResolvedValueOnce([{ stock: '0' }]); // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]); // SELECT stock total del producto: el techo, ya bajo el lock
 
       await expect(
         service.registrarMovimiento(managerMock as unknown as EntityManager, {
@@ -876,6 +889,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce([]) // series ya vivas: ninguna
         .mockResolvedValueOnce([{ lote_id: LOTE }]) // SELECT item_lote
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }])
@@ -903,7 +917,7 @@ describe('InventarioService', () => {
         },
       );
 
-      const [sql, params] = managerMock.query.mock.calls[3] as [
+      const [sql, params] = managerMock.query.mock.calls[4] as [
         string,
         unknown[],
       ];
@@ -919,6 +933,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([]); // SELECT item_lote: ajeno, borrado o de otro ítem
 
@@ -946,6 +961,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce([])
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }])
         .mockResolvedValueOnce([{ cnt: '1' }])
@@ -1374,6 +1390,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce([]) // SELECT series ya vivas del producto: ninguna
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }]) // INSERT unidad
         .mockResolvedValueOnce([{ cnt: '1' }]) // COUNT disponibles
@@ -1452,6 +1469,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'serie' }])
         .mockResolvedValueOnce([{ stock: '0' }])
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce([]) // SELECT series ya vivas del producto: ninguna
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_1 }])
         .mockResolvedValueOnce([{ unidad_id: UNIDAD_2 }])
@@ -1497,6 +1515,7 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'lote' }]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce([]) // SELECT lote existente (no existe)
         .mockResolvedValueOnce([{ lote_id: LOTE_ID }]) // INSERT lote
         .mockResolvedValueOnce([]) // SELECT saldo previo en esta ubicación (ninguno)
@@ -1521,7 +1540,7 @@ describe('InventarioService', () => {
       );
 
       expect(res.stockResultante).toBe('50');
-      const upsertCall = managerMock.query.mock.calls[5] as [string, unknown[]];
+      const upsertCall = managerMock.query.mock.calls[6] as [string, unknown[]];
       expect(upsertCall[0]).toMatch(/INSERT INTO lote_ubicacion/);
       expect(upsertCall[1]).toEqual([LOTE_ID, UBICACION_ID, '50']);
     });
@@ -1536,7 +1555,8 @@ describe('InventarioService', () => {
       managerMock.query
         .mockResolvedValueOnce([{ modo_inventario: 'lote' }])
         .mockResolvedValueOnce([{ stock: '0' }])
-        .mockResolvedValueOnce([{ lote_id: LOTE_ID }]) // lote existente
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]) // SELECT stock total del producto: el techo, ya bajo el lock
+        .mockResolvedValueOnce([{ lote_id: LOTE_ID, cantidad_inicial: '15' }]) // lote existente
         .mockResolvedValueOnce(undefined) // UPDATE cantidad_inicial
         .mockResolvedValueOnce([]) // saldo previo EN ESTA ubicación: nada, aunque el lote tenga 8 en la bodega
         .mockResolvedValueOnce(undefined) // INSERT/UPSERT lote_ubicacion
@@ -1560,13 +1580,13 @@ describe('InventarioService', () => {
       );
 
       expect(res.stockResultante).toBe('10');
-      const saldoPrevioCall = managerMock.query.mock.calls[4] as [
+      const saldoPrevioCall = managerMock.query.mock.calls[5] as [
         string,
         unknown[],
       ];
       expect(saldoPrevioCall[0]).toMatch(/ubicacion_id\s*=\s*\$2/);
       expect(saldoPrevioCall[1]).toEqual([LOTE_ID, UBICACION_ID]);
-      const upsertCall = managerMock.query.mock.calls[5] as [string, unknown[]];
+      const upsertCall = managerMock.query.mock.calls[6] as [string, unknown[]];
       expect(upsertCall[1]).toEqual([LOTE_ID, UBICACION_ID, '10']);
     });
 
@@ -2468,6 +2488,7 @@ describe('InventarioService', () => {
           { modo_inventario: 'cantidad', costo_actual: '4000' },
         ])
         .mockResolvedValueOnce([{ stock: '10' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '10' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-c1b' }]);
 
@@ -2485,9 +2506,9 @@ describe('InventarioService', () => {
         },
       );
 
-      const insertCall = managerMock.query.mock.calls[3];
+      const insertCall = managerMock.query.mock.calls[4];
       expect(insertCall[1]).toContain('4500');
-      expect(managerMock.query).toHaveBeenCalledTimes(4); // sin UPDATE costo_actual
+      expect(managerMock.query).toHaveBeenCalledTimes(5); // con el total del techo, sin UPDATE costo_actual
     });
 
     it.each([['anulacion'], ['devolucion']])(
@@ -2546,6 +2567,7 @@ describe('InventarioService', () => {
           { modo_inventario: 'cantidad', costo_actual: '57.1429' },
         ])
         .mockResolvedValueOnce([{ stock: '4' }]) // SELECT saldo
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '4' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-perdida' }]);
 
@@ -2565,13 +2587,14 @@ describe('InventarioService', () => {
         },
       );
 
-      const insert = managerMock.query.mock.calls[3];
+      const insert = managerMock.query.mock.calls[4];
       expect(insert[0]).toContain('INSERT INTO movimientos_inventario');
       const valores = insert[1] as unknown[];
       expect(valores[11]).toBe('50'); // costo_unitario: el de la salida
       expect(valores[18]).toBe(false); // costo_informado: rehacer no la promedia
-      // Sin lectura del stock total ni UPDATE de costo_actual.
-      expect(managerMock.query).toHaveBeenCalledTimes(4);
+      // El stock total se lee para el techo, no para promediar: sin UPDATE de
+      // costo_actual.
+      expect(managerMock.query).toHaveBeenCalledTimes(5);
     });
 
     it.each([
@@ -2611,6 +2634,7 @@ describe('InventarioService', () => {
           { modo_inventario: 'cantidad', costo_actual: '57.1429' },
         ])
         .mockResolvedValueOnce([{ stock: '14' }]) // SELECT saldo: statement aparte, ya bajo el lock
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '14' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-rev2' }]);
 
@@ -2627,7 +2651,7 @@ describe('InventarioService', () => {
         },
       );
 
-      expect(managerMock.query).toHaveBeenCalledTimes(4); // sin UPDATE costo_actual
+      expect(managerMock.query).toHaveBeenCalledTimes(5); // con el total del techo, sin UPDATE costo_actual
     });
 
     it('rechaza costoUnitario negativo', async () => {
@@ -2765,6 +2789,7 @@ describe('InventarioService', () => {
           { modo_inventario: 'cantidad', costo_actual: null },
         ]) // SELECT FOR UPDATE
         .mockResolvedValueOnce([{ stock: '0' }]) // SELECT saldo
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '0' }]) // SELECT stock total del producto: el techo, ya bajo el lock
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-l1' }]); // INSERT movimiento
 
@@ -2782,7 +2807,7 @@ describe('InventarioService', () => {
         },
       );
 
-      const insert = managerMock.query.mock.calls[3] as [string, unknown[]];
+      const insert = managerMock.query.mock.calls[4] as [string, unknown[]];
       expect(insert[0]).toContain('compra_linea_id');
       expect(insert[1][17]).toBe(LINEA);
     });
@@ -2923,13 +2948,8 @@ describe('InventarioService', () => {
         .mockResolvedValueOnce([
           { modo_inventario: 'cantidad', costo_actual: '1000.0000' },
         ]) // SELECT FOR UPDATE
-        .mockResolvedValueOnce([{ stock: '5' }]); // SELECT saldo
-      if (costo) {
-        managerMock.query.mockResolvedValueOnce([
-          { item_id: ITEM_ID, stock: '5' },
-        ]); // SELECT stock total
-      }
-      managerMock.query
+        .mockResolvedValueOnce([{ stock: '5' }]) // SELECT saldo
+        .mockResolvedValueOnce([{ item_id: ITEM_ID, stock: '5' }]) // SELECT stock total: el techo, y el peso del CPP con costo
         .mockResolvedValueOnce(undefined) // INSERT stock_ubicacion
         .mockResolvedValueOnce([{ movimiento_id: 'mov-ci' }]) // INSERT movimiento
         .mockResolvedValueOnce(undefined); // UPDATE costo_actual

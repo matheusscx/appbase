@@ -64,6 +64,13 @@ desfasada =
   fila rota. Desde el 2026-08-16 un `PATCH` no puede crear ese estado (ver
   [`tipo-ingrediente.md`](./tipo-ingrediente.md) §"La unidad de un ingrediente referenciado
   no se cambia"), pero la tolerancia protege contra las filas que ya existan.
+- **Un propuesto que no cabe se lista, y no se guarda.** Si el costo propuesto de una receta o
+  un combo no cabe en `NUMERIC(18,4)`, la bandeja lo muestra igual, pero `aplicar` y `descartar`
+  dan `400` con el ingrediente o componente que más pesa: los dos escriben ese número
+  (`costo_actual`, `costo_propuesto_omitido`). Aplicar es la decisión del owner, del
+  2026-10-13: "No guardar, con aviso". Descartar es una extensión del frente por coherencia,
+  porque guardar `NULL` ahí significaría "sin omisión"; ver `docs/PRODUCTO.md`. Un ítem cuyo
+  propuesto cambió no se descarta ni se chequea: vuelve en `cambiados`.
 - ⚠️ **La tolerancia es solo de LECTURA.** `POST /desfases/aplicar` y
   `.../descartar` sobre una receta sin costo proponible fallan con `400` nombrando la receta.
   `item_receta.costo_actual` es dinero y la columna es nullable: persistir ahí un costo "no

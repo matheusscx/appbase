@@ -11,7 +11,10 @@ import {
   MaxLength,
   ValidateNested,
 } from 'class-validator';
-import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalPersistible,
+  IsDecimalPositivo,
+} from '../../../common/decorators/decimal-signo.decorator';
 
 export class LineaTrasladoDto {
   @IsUUID()
@@ -24,6 +27,7 @@ export class LineaTrasladoDto {
   // o negativo no es una operación.
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsDecimalPersistible(18, 4)
   cantidad: string;
 
   /**

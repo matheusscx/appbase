@@ -127,6 +127,10 @@ costo de un componente `producto`/`receta` viene de `item_producto.costo_actual`
 / `item_receta.costo_actual`; un componente `servicio` no tiene costo (no
 contribuye a la suma).
 
+Si la suma no cabe en `NUMERIC(18,4)`, el combo no se guarda: `400` antes de escribir, con el
+componente que más pesa (owner, 2026-10-13: "No guardar, con aviso"; mismo criterio que
+[recetas.md](./recetas.md)).
+
 ### PATCH /items/:id
 
 Con `componentes` (reemplazo total): soft-delete de filas vivas + insert de la

@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import {
+  assertCantidadConvertidaCabe,
   assertCostoConvertidoCabe,
   assertCostoNoColapsaACero,
   convertirCostoUnitario,
@@ -89,6 +90,25 @@ describe('assertCostoConvertidoCabe', () => {
     expect(() => assertCostoConvertidoCabe(porKilo, 'kg')).not.toThrow();
     expect(() =>
       assertCostoConvertidoCabe('99999999999999.9999', 'kg'),
+    ).not.toThrow();
+  });
+});
+
+describe('assertCantidadConvertidaCabe', () => {
+  it('rechaza la cantidad que cabe en kg y no en gramos, y la dice en gramos', () => {
+    expect(() => assertCantidadConvertidaCabe('1000000000000000', 'g')).toThrow(
+      new BadRequestException(
+        'La cantidad en g sería de 1.000.000.000.000.000: el sistema no puede guardar cantidades de 100.000.000.000.000 o más',
+      ),
+    );
+  });
+
+  it('rechaza lo que Postgres redondearía a 10^14 y deja pasar el máximo que cabe', () => {
+    expect(() =>
+      assertCantidadConvertidaCabe('99999999999999.99995', 'g'),
+    ).toThrow(BadRequestException);
+    expect(() =>
+      assertCantidadConvertidaCabe('99999999999999.9999', 'g'),
     ).not.toThrow();
   });
 });

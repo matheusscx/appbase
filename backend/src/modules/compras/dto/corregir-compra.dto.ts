@@ -11,6 +11,7 @@ import {
 } from 'class-validator';
 import {
   IsDecimalNoNegativo,
+  IsDecimalPersistible,
   IsDecimalPositivo,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
@@ -43,6 +44,7 @@ export class CorregirLineaDto {
   @ValidateIf((_o, v) => v !== undefined)
   @IsNumberString()
   @IsDecimalPositivo()
+  @IsDecimalPersistible(18, 4)
   cantidad?: string;
 
   /** En serie, si la cantidad sube: las series que entran. */

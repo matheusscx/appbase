@@ -23,6 +23,211 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una cantidad de stock que no cabe en su columna se rechaza con aviso (cerrada 2026-10-13)
+
+**Decisión del owner** (2026-10-13, por AskUserQuestion de la orquestadora, con la escena
+*"100 billones de unidades en un ajuste de stock, un saldo acumulado que se pasa, un ingrediente
+así en una receta"*): **"Sí, con aviso"**. Se rechaza con 400 antes de escribir, y el aviso dice
+la cantidad ya convertida a la unidad del producto. No cambia qué se escribe ni cómo se
+convierte. Descartada: "dejarlo".
+
+**Cómo se cerró.** Una cantidad se mira en tres puntos:
+
+- **El campo tal como llega:** `@IsDecimalPersistible(18, 4)`, el decorador de `e99310a7`, en 12
+  campos de 9 DTO. `monto-persistible-cobertura.spec.ts` los anota con sus columnas.
+- **La cantidad convertida:** `assertCantidadConvertidaCabe`
+  (`common/utils/costo-conversion-unidad.util.ts`), gemelo de `assertCostoConvertidoCabe`. Lo
+  llaman `ItemsService.ajustarStock`, junto al chequeo del costo, y `cantidadEnBase` de compras,
+  que es la única conversión de una línea. Por eso el borrador ya lo ve.
+- **Lo acumulado**, leído bajo el lock que ya se tomaba:
+  - **el stock del producto sumando todas las ubicaciones**, en `registrarMovimiento`, para
+    toda entrada salvo la de un traslado: su salida, en la misma transacción, ya bajó el total en
+    lo mismo, así que no lo cambia. Se lee con `stockTotalPorProducto`, ya con el lock de
+    `item_producto` en la mano. Es la misma lectura que hacía el CPP, que ahora reusa ese
+    número. Para la entrada que no promedia es una lectura nueva, bajo el mismo lock: una por
+    movimiento, como la del saldo, porque cada una va bajo el lock de su producto. Juntarlas en
+    un batch obligaría a leer antes del lock (lo juzgó la revisión: no es un N+1 a sacar). El
+    total nunca es menor que el saldo de una ubicación, así que cubre los dos.
+  - `item_lote.cantidad_inicial`, en `moverLote`. Se agregó la columna al `FOR UPDATE` que ya
+    existía.
+
+**Por qué el total y no el saldo de la ubicación.** La primera versión miraba el saldo de la
+ubicación y un chequeo aparte de `compra_lineas.stock_total_anterior`. El `test:e2e` entero dio
+rojo en suites ajenas. Con 9×10^13 en el local y otro tanto en la bodega (cada saldo cabe), el
+listado, el detalle y la disponibilidad de ítems castean el total a `numeric(18,4)`, y
+`GET /items` daba 500 para el tenant entero. Ese estado ya se armaba antes de este frente: dos
+ajustes de 200. Con el techo sobre el total ya no se arma, y el chequeo de
+`stock_total_anterior` quedó inalcanzable, así que se sacó.
+
+`movimientos_inventario` y `stock_ubicacion` se escriben igual que antes, y el orden de bloqueo
+no cambió.
+
+Medido por HTTP (supertest) sobre la base nueva de `entorno.sh db`, con el código de
+`origin/main` en `8170a3b4`.
+
+| Camino | Endpoint | Columna | Antes | Ahora |
+|---|---|---|---|---|
+| Ajuste de stock, `cantidad: 10^14` | `PATCH /items/:id/stock` | `movimientos_inventario.cantidad`, `stock_ubicacion.stock` (18,4) | **500** | 400 del DTO |
+| Stock inicial de un producto nuevo | `POST /items` con `stock` | las mismas | **500** (no estaba en la entrada) | 400 del DTO |
+| Ingrediente de una receta | `POST /items` | `receta_ingredientes.cantidad` (18,4) | **500** | 400 del DTO |
+| Extra permitido de una receta | `POST /items` | `receta_extras_permitidos.cantidad` (18,4) | **500** (no estaba en la entrada) | 400 del DTO |
+| Override de una opción, al crear la receta | `POST /items` | `item_grupo_modificador_opciones.cantidad` (18,4) | **500** | 400 del DTO |
+| Override aplicado a todos | `PATCH /grupos-modificadores/:id/overrides` | la misma | **500** | 400 del DTO |
+| Opción de un grupo, al crear y al editar | `POST`/`PATCH /grupos-modificadores` | `grupo_modificador_opciones.cantidad` (18,4) | **500** (la entrada lo tenía como "leído": con 10^14 la frenaba la unidad) | 400 del DTO |
+| Línea de compra, al crear y al editar el borrador | `POST`/`PATCH /compras` | `compra_lineas.cantidad` (18,4) | **500** | 400 del DTO |
+| Corrección de cantidad de una compra confirmada | `PATCH /compras/:id/lineas/:lineaId` | la misma | **500** | 400 del DTO |
+| Contenido de una presentación, al crear y al editar | `POST`/`PATCH /compras/presentaciones` | `presentaciones_compra.contenido` (18,4) | **500** (no estaba en la entrada) | 400 del DTO |
+| Línea de un traslado | `POST /traslados` | `movimientos_inventario.cantidad` (18,4) | 400 del service: stock insuficiente en el origen | el techo del DTO, que es del campo |
+| Ajuste en kg de un producto por gramo, `10^12` | `PATCH /items/:id/stock` | `movimientos_inventario.cantidad` (18,4) | **500** | 400: *"La cantidad en g sería de 1.000.000.000.000.000…"* |
+| Compra en kg de un producto por gramo, `10^12` | `POST /compras` y después confirmar | `compra_lineas.cantidad_base` (18,4) | el borrador entraba con 201 y confirmar daba **500** | 400 ya en el borrador |
+| Compra por presentación: 10^8 sacos de 1000 kg | `POST /compras/:id/confirmar` | la misma | **500** | 400 al confirmar; la compra queda en borrador |
+| Total: dos ajustes de 9×10^13 en la misma ubicación | `PATCH /items/:id/stock` | `stock_ubicacion.stock`, `movimientos_inventario.stock_resultante` (18,4) | **500** | 400: *"El stock de "X" sumando todas las ubicaciones quedaría en 180.000.000.000.000 unidad…"* |
+| Total: 9×10^13 en el local y otro tanto a la bodega | `PATCH /items/:id/stock` | ninguna al escribir; el listado castea el total | 200, y después `GET /items` daba **500** para el tenant entero, y confirmar una compra del producto daba **500** en `compra_lineas.stock_total_anterior` (no estaban en la entrada) | 400 |
+| Total: confirmar una compra | `POST /compras/:id/confirmar` | las del primer caso | **500** | 400; la compra queda en borrador |
+| Lote: entrar 9×10^13, venderlo y volver a entrarlo | `PATCH /items/:id/stock` | `item_lote.cantidad_inicial` (18,4) | **500** (no estaba en la entrada: el saldo cabe y el acumulado no baja con las salidas) | 400: *"Lo que entró al lote L1 sumaría 180.000.000.000.000…"* |
+
+**En números:** 18 caminos. 17 daban 500 (uno de ellos, más tarde y en otro lado) y ahora dan
+400. El otro, el traslado, ya daba 400 y ahora lleva también el techo del campo. Un traslado no
+cambia el total: 9×10^13 del local a la bodega entra (control del spec). El traslado a una
+bodega con stock, que daba 500 en el destino, ya no se puede armar: el ajuste que llenaba la
+bodega es el que ahora da 400. Controles: `99999999999999.9999` tipeado en la base entra, y
+`99999999999.9999` kg en un producto por gramo también (queda en `99999999999999.9000` g).
+
+**Lo que no lo necesita**, medido en la misma pasada:
+- Las líneas de venta, de cuenta y de `/calcular` ya tienen tope en `MAX_UNIDADES_POR_VENTA`
+  (99.999), y el componente de un combo, en `MAX_UNIDADES_POR_PLATO`.
+- Una opción de grupo de 10^12 kg se guarda como se tipeó, así que cabe. Al venderse es una
+  salida, y la frena el stock insuficiente.
+- La merma y el recuento quedaron cerrados en `e99310a7`.
+
+**Lo que quedó afuera:** las cantidades fuera del kardex, que no se midieron. Están en
+[`pendientes.md`](pendientes.md) § 2, *"Cantidades por body fuera del kardex"*. El costo de una
+receta o un combo, que es una suma de plata y no de cantidad, se cerró el mismo día (abajo).
+
+### Tests y mutantes
+
+- `test/cantidad-no-cabe.e2e-spec.ts`: los 18 caminos (21 pedidos) dan 400 con el aviso
+  exacto. Mide que no se escribió nada: saldos y movimientos de cada producto, ítems, compras,
+  cantidades de línea, presentaciones, opciones y overrides, el `cantidad_inicial` del lote, y
+  que la compra sigue en borrador. También mide que `GET /items` sigue en 200. Controles: el
+  traslado de 9×10^13 y el máximo que cabe, tipeado y convertido. `rechazados` junta todos los
+  pedidos antes de comparar, así que un rojo dice cuáles fueron.
+- **Mutante que revierte los services** (`git apply -R` de los tres, sin tocar el util): de los 7
+  pedidos que mira el service, 5 vuelven a **500**. El borrador en kg vuelve a entrar con 201
+  (su 500 llegaba al confirmar), y el ajuste a la bodega vuelve a 200, que es el estado que deja
+  el listado en 500. Caen 2 de los 4 tests.
+- **Mutante que revierte los DTO** (`git apply -R` de los 9): 10 de los 14 pedidos vuelven a
+  **500**. Los otros 4 los frena igual el service: el ajuste, el stock inicial y la corrección
+  por el total, y el traslado por el stock insuficiente. El ingrediente de la receta es de costo
+  0 a propósito: con costo, lo frenaría antes el techo del costo de la receta. Cae 1 de los 4
+  tests.
+- `costo-conversion-unidad.util.spec.ts`: el aviso exacto, lo que Postgres redondearía a 10^14
+  y el máximo que cabe.
+- `inventario.service.spec.ts`: los mocks de cada entrada traen la lectura del total, y el del
+  lote existente trae `cantidad_inicial`.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Una cantidad por body sin techo llega al `INSERT`: 500** (backend; queda del cierre de
+  "Decimales por body sin techo", 2026-10-13, [`resueltos.md`](resueltos.md)). Las cantidades de
+  kardex llegan con `@IsNumberString()` y a lo sumo `@IsDecimalPositivo()`, sin el techo de su
+  columna `NUMERIC(18,4)`. **Medido el 2026-10-13** por HTTP, base nueva:
+  - `PATCH /items/:id/stock`, entrada de `cantidad: 10^14` en la unidad base: **500**.
+  - El mismo, con `cantidad: 10^12` y `unidadCodigo: 'kg'` en un producto por gramo: **500**. El
+    campo cabe; convertido son ×1000.
+  - Dos entradas de 9×10^13 al mismo producto: la primera da 200 y la segunda **500**, porque el
+    saldo acumulado (`stock_ubicacion`) pasa de 10^14. Ningún campo es grande; lo que desborda es
+    la suma.
+  - Una receta con un ingrediente de `cantidad: 10^14` (`POST /items`): **500**.
+
+  **Leído, no medido:** la cantidad de una compra y su `cantidad_base` convertida (con 10^14 la
+  frenó primero el techo de `totalDocumento`), la de un traslado, la de una opción de grupo
+  modificador (con 10^14 la frenó otro 400, el de la unidad de medida) y la de sus overrides.
+  **Arreglo probable:** `@IsDecimalPersistible(18, 4)` en cada DTO, y en el service el chequeo
+  de la cantidad ya convertida y del saldo resultante, una vez y antes de escribir. ⚠️ El chequeo
+  del service escribe en `movimientos_inventario`: consultar antes (CLAUDE.md, "Detenerse y
+  preguntar"), como el del costo convertido.
+
+## El costo de una receta o un combo que no cabe no se guarda: se rechaza con aviso (cerrada 2026-10-13)
+
+**Decisión del owner** (2026-10-13, por AskUserQuestion de la orquestadora, con la escena *"2 kg
+de un ingrediente de $90 billones el kilo; igual un combo"*): **"No guardar, con aviso"**. La
+receta o el combo no se guarda (400), y el aviso dice qué ingrediente o componente lo dispara,
+para que corrijan su costo. Descartada: "guardar con el costo en blanco y mostrar 'costo no
+disponible'".
+
+**Cómo se cerró.** `assertCostoCompuestoCabe` (`items.service.ts`) mira la suma con
+`cabeEnColumnaDePlata`, una vez y antes de escribir, y si no cabe nombra el ingrediente o el
+componente que más aporta. Lo llaman los cuatro caminos que escriben el costo: los dos
+`validarYCostear*` (crear y editar), y `aplicarDesfases` y `descartarDesfases` (`costo_actual` y
+`costo_propuesto_omitido`). La bandeja (`GET /desfases`) no lo llama: un propuesto que no cabe
+se lista igual. En los desfases, lo que aporta cada fila sale de la misma cuenta
+(`costoPropuesto*` de a una fila), y el nombre, de agregar `nombre` a los dos SELECT que ya
+hacían JOIN a `items`. No cambia cómo se calcula el costo.
+
+Medido por HTTP (supertest) sobre la base de `entorno.sh db`, con el código de `origin/main` en
+`8170a3b4`.
+
+| Camino | Endpoint | Columna | Antes | Ahora |
+|---|---|---|---|---|
+| Crear una receta: 2 kg de un ingrediente de $90 billones el kilo | `POST /items` | `item_receta.costo_actual` (18,4) | **500** | 400: *"El costo de la receta sería de $180.000.000.000.000: … El ingrediente que más pesa es "X", con $180.000.000.000.000: revisá su costo y su cantidad"* |
+| Crear una receta: 10^12 kg de un ingrediente por gramo de $1 | `POST /items` | la misma | **500** | 400 |
+| Editar la receta | `PATCH /items/:id` | la misma | **500** | 400; el costo queda como estaba |
+| Crear un combo: componentes de $90 y $80 billones | `POST /items` | `item_combo.costo_actual` (18,4) | **500** | 400: *"El componente que más pesa es…"* |
+| Editar el combo | `PATCH /items/:id` | la misma | **500** | 400 |
+| Aplicar el desfase de la receta | `POST /desfases/aplicar` | `item_receta.costo_actual` | **500** (no estaba en la entrada) | 400 |
+| Aplicar el desfase del combo | `POST /desfases/aplicar` | `item_combo.costo_actual` | **500** (no estaba en la entrada) | 400 |
+| Descartar el desfase de la receta | `POST /desfases/descartar` | `item_receta.costo_propuesto_omitido` (18,4) | **500** (no estaba en la entrada) | 400 |
+| Descartar el desfase del combo | `POST /desfases/descartar` | `item_combo.costo_propuesto_omitido` (18,4) | **500** (no estaba en la entrada) | 400 |
+
+**En números:** 9 caminos. Los 9 daban 500 y ahora dan 400. Control: con el ingrediente a
+$49.999.999.999.999,9999 el kilo, el desfase de 2 kg se aplica y queda en
+`99999999999999.9998`. Que el costo de la receta no se mueva solo cuando cambia el de un
+ingrediente es así por diseño: lo propone la bandeja.
+
+**Descartar también se rechaza**, aunque no guarda la receta: escribe el propuesto en
+`costo_propuesto_omitido`, que tampoco lo puede guardar, y guardar `NULL` ahí significa "sin
+omisión". Lo que lo resuelve es lo mismo, corregir el insumo. El chequeo va después del `eq4`:
+un ítem cuyo propuesto cambió no se escribe, y no frena el resto del lote. El aviso dice
+"revisá su costo y su cantidad", porque el aporte es costo × cantidad y el culpable puede ser
+cualquiera de los dos. Aplicar guarda el mismo costo que el owner decidió no guardar. La
+extensión real es el descarte: no estaba en la escena, la tomó el frente por coherencia y la
+confirmó la revisión.
+
+**Riesgo a futuro (lo vio la revisión):** la entrada de un traslado se saltea el techo del
+total porque hoy siempre viene después de su salida de igual cantidad, en la misma transacción
+(`TrasladosService.moverLinea`, el único llamador con `motivo: 'traslado'`). El chokepoint no
+exige ese par: un llamador nuevo que registre una entrada de traslado sin su salida pasaría sin
+techo.
+
+**Riesgo anotado, teórico:** el techo del total corre también en las entradas que reponen
+stock (anulación, devolución, nota de crédito). Una nota de crédito sobre un producto cuyo
+total ronde 10^14 se rechazaría con 400 aunque el saldo de su ubicación cupiera. La alternativa
+era dejar `GET /items` en 500 para el tenant entero.
+
+### Tests y mutantes
+
+- `test/costo-compuesto-no-cabe.e2e-spec.ts`: los 9 pedidos dan 400 con el aviso exacto. Mide
+  que no se escribió nada (ítems del tenant, costo y omitido de la receta y del combo) y tiene el
+  control del máximo que cabe. Al final devuelve los insumos a costo 1, para no dejar desfases
+  gigantes en la bandeja del tenant compartido.
+- **Mutante que revierte** (el assert vuelve sin mirar): los 9 pedidos vuelven a **500**. Caen
+  los 2 tests.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **El costo de una receta no tiene techo** (backend, `items.service.ts`
+  `validarYCostearIngredientes` y `costoPropuesto`; lo vio la revisión del cierre de "Un costo que
+  cabe en su unidad y no por la unidad base", 2026-10-13, [`resueltos.md`](resueltos.md); **leído,
+  no medido**). El costo de la receta suma `costo_actual × cantidad` de cada ingrediente, con la
+  cantidad ya convertida a la unidad del ingrediente, y lo guarda en `item_receta.costo_actual`
+  (`NUMERIC(18,4)`). Cada costo cabe, y el producto o la suma pueden no caber: dos kilos de un
+  ingrediente de $90 billones por kilo ya son $180 billones. Ningún `cabeEnColumnaDePlata` mira ese resultado, y por
+  lectura daría 500. El combo suma los costos de sus componentes de la misma forma. **Medir** con
+  una receta y un combo; **arreglo probable:** el mismo chequeo una vez sobre el costo calculado y
+  antes de escribir. Hay que decidir si es un 400 (no se puede guardar la receta) o si la receta se
+  guarda con el costo en blanco, y eso lo decide el owner.
+
 ## Restaurar un impuesto con el nombre de otro vivo: test de colisión en papelera (cerrada 2026-10-13)
 
 Frente mecánico, solo de test, lanzado por la orquestadora. **Medido en `pg_indexes`** de una base
@@ -86,8 +291,8 @@ es ×1000).
 
 **Lo que quedó afuera:** el costo de una receta, que multiplica el costo de cada ingrediente por
 su cantidad ya convertida y lo guarda en `item_receta.costo_actual`. No es una conversión de
-costo unitario y no pasa por este chequeo. Lo vio la revisión; está en
-[`pendientes.md`](pendientes.md) § 2, *"El costo de una receta no tiene techo"*, leído y no medido.
+costo unitario y no pasa por este chequeo. Lo vio la revisión, y se cerró el mismo día: *"El
+costo de una receta o un combo que no cabe no se guarda"*, arriba.
 
 ### Tests y mutantes
 
@@ -160,8 +365,9 @@ lo frenaba (el `valorPorcentaje` de una promoción de porcentaje), porque el tec
 no se tocó**: se cerró en `9b10cb8d` y `cac160f9`, y es fiscal.
 
 **Lo que quedó afuera**, medido en la misma pasada y anotado en [`pendientes.md`](pendientes.md):
-las cantidades de kardex sin techo (*"Una cantidad por body sin techo"*, § 2) y el `nxm` con
-`valorPorcentaje` mayor a 1, que regala las dos unidades (§ 4).
+el `nxm` con `valorPorcentaje` mayor a 1, que regala las dos unidades (§ 4). Las cantidades de
+kardex sin techo se cerraron el mismo día: *"Una cantidad de stock que no cabe en su columna se
+rechaza con aviso"*, arriba.
 
 ### Tests y mutantes
 

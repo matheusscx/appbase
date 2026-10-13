@@ -446,6 +446,25 @@ producto por kilo son ×1000. El aviso dice cuánto sería el costo por la unida
 cambia cómo se convierte ni qué se guarda. Vale para el ajuste de costo, el ajuste de
 stock, el cambio de unidad de un producto con costo y la compra (al confirmar y al corregir).
 
+**Una cantidad de stock que el sistema no puede guardar se rechaza con aviso** (owner,
+2026-10-13, por AskUserQuestion de la orquestadora, con la escena "100 billones de unidades en
+un ajuste de stock, un saldo acumulado que se pasa, un ingrediente así en una receta": "Sí, con
+aviso"). El techo es el de la columna, 10^14: no es un tope de negocio. Se rechaza antes de
+escribir, y el aviso dice la cantidad **ya convertida** a la unidad del producto (10^12 kg en un
+producto por gramo son 10^15 g). Mira tres cosas: la cantidad tipeada, la convertida y lo que
+se acumula: el stock del producto sumando todas las ubicaciones, y lo que entró a un lote. No
+cambia qué se escribe ni cómo se convierte.
+
+**El costo de una receta o un combo que el sistema no puede guardar tampoco se guarda** (owner,
+2026-10-13, por AskUserQuestion de la orquestadora, con la escena "2 kg de un ingrediente de $90
+billones el kilo; igual un combo": "No guardar, con aviso"). Cada costo cabe y la suma puede no
+caber. Crear o editar la receta o el combo da error, y el aviso nombra el ingrediente o el
+componente que más pesa, para que corrijan su costo o su cantidad. Descartada: guardarlo con el
+costo en blanco. Aplicar su desfase también da error, porque guarda ese mismo costo. Descartarlo,
+también: guarda el costo propuesto para silenciarlo, y tampoco cabe. Ese caso no estaba en la
+escena del owner; lo tomó el frente por coherencia y lo confirmó la revisión independiente
+(`docs/agent/resueltos.md`).
+
 **El costo se carga al comprar o en el producto — nunca al mermar.** Una merma no tiene
 campo de costo: se valoriza sola con el `costo_actual` vigente del ítem al momento de
 mermar. Si el ítem no tiene costo cargado, la merma se registra igual, sin valorizar, y

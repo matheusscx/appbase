@@ -205,6 +205,16 @@ Response (400 — Stock insuficiente):
   lee en un statement **aparte**, emitido ya bajo el `FOR UPDATE` sobre `item_producto`:
   leerlo en el mismo statement que toma el lock lo devuelve viejo y deja pasar dos salidas
   concurrentes (`docs/patterns/backend.md` §15).
+- Si `tipo = 'entrada'`, el stock del producto **sumando todas las ubicaciones** tiene que
+  seguir cabiendo en `NUMERIC(18,4)`, menos de 10^14. Lo lee `registrarMovimiento` bajo el lock
+  de `item_producto`, con `stockTotalPorProducto`, que es el mismo número que pesa el CPP. Vale
+  para toda entrada: ajuste, compra o devolución. La de un traslado no se mira, porque no
+  cambia el total: su salida ya lo bajó en lo mismo. El 400 dice en
+  cuánto quedaría (owner, 2026-10-13: "Sí, con aviso"). Es el total y no el saldo de la
+  ubicación porque el listado, el detalle y la disponibilidad castean el total a
+  `numeric(18,4)`: con 9×10^13 en el local y otro tanto en la bodega, `GET /items` daba 500
+  para el tenant entero. La cantidad tipeada tiene el techo del DTO, y la convertida, el de
+  `assertCantidadConvertidaCabe`.
 
 La respuesta real (`{ stock, costoActual }`) siempre incluye `costoActual`: el
 `costo_actual` vigente después del movimiento (el promedio recién recalculado

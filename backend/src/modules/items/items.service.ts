@@ -10,6 +10,11 @@ import Decimal from 'decimal.js';
 import { randomUUID } from 'crypto';
 import { Db } from '../../common/db/db.service';
 import { ESCALA_COSTO } from '../../common/constants/escalas';
+import {
+  cabeEnColumnaDePlata,
+  formatearMontoPersistible,
+  TECHO_PERSISTIBLE_FORMATEADO,
+} from '../../common/utils/monto-persistible.util';
 import { NivelRegla } from '../../common/enums/reglas.enums';
 import { Item } from './entities/item.entity';
 import { ItemServicio } from './entities/item-servicio.entity';
@@ -38,6 +43,7 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 import {
+  assertCantidadConvertidaCabe,
   assertCostoConvertidoCabe,
   assertCostoNoColapsaACero,
   convertirCostoUnitario,
@@ -3460,6 +3466,7 @@ export class ItemsService {
             dto.unidadCodigo,
             unidadBase,
           );
+          assertCantidadConvertidaCabe(cantidad, unidadBase ?? 'unidad');
           if (costoUnitario != null) {
             const costoTipeado = costoUnitario;
             costoUnitario = convertirCostoUnitario(
@@ -6878,6 +6885,7 @@ export class ItemsService {
     // Catálogo de unidades cargado una vez: la conversión sigue ocurriendo
     // dentro del loop, en el mismo punto, así que ningún error cambia de orden.
     const convertir = await this.catalogService.crearConversor();
+    const aportes: { nombre: string; aporte: Decimal }[] = [];
     for (const ing of ingredientes) {
       let cantidad: Decimal;
       try {
@@ -6909,7 +6917,9 @@ export class ItemsService {
         fila.unidad_medida!,
       );
       const costoUnitario = new Decimal(fila.costo_actual ?? '0');
-      costoTotal = costoTotal.plus(costoUnitario.mul(cantidadBase));
+      const aporte = costoUnitario.mul(cantidadBase);
+      costoTotal = costoTotal.plus(aporte);
+      aportes.push({ nombre: fila.nombre, aporte });
       detalle.push({
         ingredienteItemId: ing.ingredienteItemId,
         ingredienteNombre: fila.nombre,
@@ -6924,6 +6934,7 @@ export class ItemsService {
     // editar). Si cambiás el criterio en una, cambialo en la otra: la bandeja de
     // desfases compara ambos resultados con eq4 y un criterio distinto la hace
     // proponer o esconder desfases fantasma.
+    this.assertCostoCompuestoCabe('receta', costoTotal, aportes);
     return {
       costoActual: costoTotal
         .toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP)
@@ -6961,6 +6972,7 @@ export class ItemsService {
       'Un item no puede aparecer más de una vez como componente del combo',
     );
     let costoTotal = new Decimal(0);
+    const aportes: { nombre: string; aporte: Decimal }[] = [];
     const detalle: {
       componenteItemId: string;
       componenteNombre: string;
@@ -6999,9 +7011,9 @@ export class ItemsService {
           `La cantidad del componente ${nombre} debe ser mayor a 0`,
         );
       }
-      costoTotal = costoTotal.plus(
-        new Decimal(costo_actual ?? '0').mul(c.cantidad),
-      );
+      const aporte = new Decimal(costo_actual ?? '0').mul(c.cantidad);
+      costoTotal = costoTotal.plus(aporte);
+      aportes.push({ nombre, aporte });
       detalle.push({
         componenteItemId: c.componenteItemId,
         componenteNombre: nombre,
@@ -7016,12 +7028,50 @@ export class ItemsService {
     // editar). Si cambiás el criterio en una, cambialo en la otra: la bandeja de
     // desfases compara ambos resultados con eq4 y un criterio distinto la hace
     // proponer o esconder desfases fantasma.
+    this.assertCostoCompuestoCabe('combo', costoTotal, aportes);
     return {
       costoActual: costoTotal
         .toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP)
         .toString(),
       componentes: detalle,
     };
+  }
+
+  /**
+   * El costo de una receta o un combo es Σ costo × cantidad: cada costo cabe en
+   * `NUMERIC(18,4)` y el resultado puede no caber (2 kg de un ingrediente de
+   * $90 billones el kilo son $180 billones). Medido el 2026-10-13: crear y
+   * editar una receta o un combo, y aplicar o descartar su desfase, daban 500
+   * al escribir `costo_actual` o `costo_propuesto_omitido`.
+   *
+   * Decisión del owner (2026-10-13, por AskUserQuestion de la orquestadora, con
+   * la escena "2 kg de un ingrediente de $90 billones el kilo; igual un
+   * combo"): "No guardar, con aviso". Se rechaza antes de escribir y el aviso
+   * nombra el ingrediente o el componente que más pesa, para que corrijan su
+   * costo. Descartada: guardar con el costo en blanco.
+   *
+   * Lo llaman los que escriben el costo, nunca la bandeja que lo lee: un
+   * propuesto que no cabe se lista igual, y lo que no se puede es guardarlo.
+   */
+  private assertCostoCompuestoCabe(
+    tipo: 'receta' | 'combo',
+    costo: Decimal.Value,
+    aportes: { nombre: string; aporte: Decimal.Value }[],
+  ): void {
+    if (cabeEnColumnaDePlata(costo)) return;
+    const mayor = aportes.reduce((a, b) =>
+      new Decimal(b.aporte).greaterThan(a.aporte) ? b : a,
+    );
+    const formato = (v: Decimal.Value) =>
+      formatearMontoPersistible(
+        new Decimal(v).toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP),
+      );
+    const quien = tipo === 'receta' ? 'El ingrediente' : 'El componente';
+    throw new BadRequestException(
+      `El costo ${tipo === 'receta' ? 'de la receta' : 'del combo'} sería de $${formato(costo)}: ` +
+        `el sistema no puede guardar costos de $${TECHO_PERSISTIBLE_FORMATEADO} o más. ` +
+        `${quien} que más pesa es "${mayor.nombre}", con $${formato(mayor.aporte)}: revisá su costo y su cantidad`,
+    );
   }
 
   private async validarExtrasPermitidos(
@@ -7190,6 +7240,7 @@ export class ItemsService {
       string,
       {
         componente_item_id: string;
+        nombre: string;
         cantidad: string;
         costo_actual: string | null;
       }[]
@@ -7199,6 +7250,7 @@ export class ItemsService {
       string,
       {
         componente_item_id: string;
+        nombre: string;
         cantidad: string;
         costo_actual: string | null;
       }[]
@@ -7207,10 +7259,12 @@ export class ItemsService {
     const rows: {
       combo_item_id: string;
       componente_item_id: string;
+      nombre: string;
       cantidad: string;
       costo_actual: string | null;
     }[] = await manager.query(
       `SELECT cc.combo_item_id, cc.componente_item_id, cc.cantidad,
+              comp.nombre,
               COALESCE(ip.costo_actual, ir.costo_actual) AS costo_actual
          FROM combo_componentes cc
          JOIN items comp ON comp.item_id = cc.componente_item_id
@@ -7238,6 +7292,7 @@ export class ItemsService {
     Map<
       string,
       {
+        nombre: string;
         cantidad: string;
         unidad_codigo: string;
         unidad_base: string;
@@ -7248,6 +7303,7 @@ export class ItemsService {
     const out = new Map<
       string,
       {
+        nombre: string;
         cantidad: string;
         unidad_codigo: string;
         unidad_base: string;
@@ -7258,13 +7314,14 @@ export class ItemsService {
 
     const rows: {
       receta_item_id: string;
+      nombre: string;
       cantidad: string;
       unidad_codigo: string;
       unidad_base: string;
       costo_actual: string | null;
     }[] = await manager.query(
       `SELECT ri.receta_item_id, ri.cantidad, ri.unidad_codigo,
-              ip.unidad_medida AS unidad_base, ip.costo_actual
+              ing.nombre, ip.unidad_medida AS unidad_base, ip.costo_actual
          FROM receta_ingredientes ri
          JOIN items ing ON ing.item_id = ri.ingrediente_item_id
           AND ing.eliminado_el IS NULL
@@ -7516,6 +7573,37 @@ export class ItemsService {
     return total
       .toDecimalPlaces(ESCALA_COSTO, Decimal.ROUND_HALF_UP)
       .toFixed(ESCALA_COSTO);
+  }
+
+  /**
+   * Lo que aporta cada ingrediente al costo propuesto, para el aviso de
+   * `assertCostoCompuestoCabe`: la misma cuenta, de a una fila. Solo se llama
+   * con un propuesto que no fue `null`, así que ninguna conversión falla acá.
+   */
+  private aportesReceta(
+    convertir: (cantidad: string, desde: string, hacia: string) => string,
+    ings: {
+      nombre: string;
+      cantidad: string;
+      unidad_codigo: string;
+      unidad_base: string;
+      costo_actual: string | null;
+    }[],
+  ): { nombre: string; aporte: string }[] {
+    return ings.map((ing) => ({
+      nombre: ing.nombre,
+      aporte: this.costoPropuesto(convertir, [ing]) ?? '0',
+    }));
+  }
+
+  /** El gemelo de `aportesReceta` para los componentes de un combo. */
+  private aportesCombo(
+    comps: { nombre: string; cantidad: string; costo_actual: string | null }[],
+  ): { nombre: string; aporte: string }[] {
+    return comps.map((c) => ({
+      nombre: c.nombre,
+      aporte: this.costoPropuestoCombo([c]),
+    }));
   }
 
   /**
@@ -7809,6 +7897,11 @@ export class ItemsService {
               'que la receta declara. Corregí esa unidad antes de aplicar.',
           );
         }
+        this.assertCostoCompuestoCabe(
+          'receta',
+          propuesto,
+          this.aportesReceta(convertir!, ingsPorReceta.get(it.itemId)!),
+        );
         await manager.query(
           `UPDATE item_receta
            SET costo_actual = $1, costo_propuesto_omitido = NULL
@@ -7862,6 +7955,11 @@ export class ItemsService {
         }
 
         const propuesto = this.costoPropuestoCombo(comps);
+        this.assertCostoCompuestoCabe(
+          'combo',
+          propuesto,
+          this.aportesCombo(comps),
+        );
         await manager.query(
           `UPDATE item_combo
              SET costo_actual = $1, costo_propuesto_omitido = NULL
@@ -8052,6 +8150,13 @@ export class ItemsService {
           });
           continue;
         }
+        // Después del `eq4`: lo que cambió no se escribe, y no tiene por qué
+        // frenar el resto del lote.
+        this.assertCostoCompuestoCabe(
+          'receta',
+          propuesto,
+          this.aportesReceta(convertir!, ingsPorReceta.get(itemId)!),
+        );
         await manager.query(
           `UPDATE item_receta SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
           [propuesto, itemId],
@@ -8078,6 +8183,12 @@ export class ItemsService {
           });
           continue;
         }
+        // Después del `eq4`, como el de la receta.
+        this.assertCostoCompuestoCabe(
+          'combo',
+          propuestoCombo,
+          this.aportesCombo(comps),
+        );
         await manager.query(
           `UPDATE item_combo SET costo_propuesto_omitido = $1 WHERE item_id = $2`,
           [propuestoCombo, itemId],
