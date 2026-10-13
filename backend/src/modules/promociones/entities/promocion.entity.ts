@@ -29,9 +29,9 @@ export type TipoPromocion = 'porcentaje' | 'nxm' | 'precio_fijo';
 )
 @Check(
   'chk_promociones_valor_segun_tipo',
-  `("tipo" = 'porcentaje' AND "valor_porcentaje" IS NOT NULL AND "cada_n" IS NULL AND "valor_monto" IS NULL)
-   OR ("tipo" = 'nxm' AND "valor_porcentaje" IS NOT NULL AND "cada_n" IS NOT NULL AND "valor_monto" IS NULL)
-   OR ("tipo" = 'precio_fijo' AND "valor_monto" IS NOT NULL AND "valor_porcentaje" IS NULL AND "cada_n" IS NULL)`,
+  `("tipo" = 'porcentaje' AND "valor_porcentaje" IS NOT NULL AND "cada_n" IS NULL AND "paga_m" IS NULL AND "valor_monto" IS NULL)
+   OR ("tipo" = 'nxm' AND "valor_porcentaje" IS NOT NULL AND "cada_n" IS NOT NULL AND "paga_m" IS NOT NULL AND "paga_m" >= 1 AND "paga_m" < "cada_n" AND "valor_monto" IS NULL)
+   OR ("tipo" = 'precio_fijo' AND "valor_monto" IS NOT NULL AND "valor_porcentaje" IS NULL AND "cada_n" IS NULL AND "paga_m" IS NULL)`,
 )
 /** Todo elemento de `dias_semana` entre 1 y 7 (ISO-8601, 1=lunes…7=domingo). */
 @Check(
@@ -92,7 +92,10 @@ export class Promocion {
   @Column({ type: 'text' })
   tipo: TipoPromocion;
 
-  /** Decimal: 2x1 = '1.0000', "2do al 50%" = '0.5000'. */
+  /**
+   * Decimal. En `nxm` es el descuento de CADA unidad regalada, como máximo
+   * 1: 2x1 = '1.0000', "2do al 50%" = '0.5000'.
+   */
   @Column({
     name: 'valor_porcentaje',
     type: 'decimal',
@@ -102,8 +105,16 @@ export class Promocion {
   })
   valorPorcentaje: string | null;
 
+  /** Solo `nxm`: cuántas unidades lleva el grupo (3x1 → 3). */
   @Column({ name: 'cada_n', type: 'smallint', nullable: true })
   cadaN: number | null;
+
+  /**
+   * Solo `nxm`: cuántas de cada `cadaN` paga (3x1 → 1, 4x2 → 2). Las
+   * `cadaN − pagaM` más baratas del grupo reciben `valorPorcentaje`.
+   */
+  @Column({ name: 'paga_m', type: 'smallint', nullable: true })
+  pagaM: number | null;
 
   /** Precio del conjunto en moneda oficial (precio_fijo). */
   @Column({

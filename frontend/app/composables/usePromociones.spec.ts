@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { estadoPromocion, estadoPromocionBadge } from './usePromociones'
+import { ayudaNxm, estadoPromocion, estadoPromocionBadge, resumenNxm } from './usePromociones'
 
 /** 'YYYY-MM-DD' de HOY con el mismo criterio que el composable (fecha LOCAL,
  *  no `toISOString()` que da UTC) — mismo patrón que
@@ -73,5 +73,48 @@ describe('usePromociones — estadoPromocionBadge', () => {
     expect(
       estadoPromocionBadge({ activo: true, fechaInicio: '2020-01-01', fechaFin: '2020-01-31' }),
     ).toEqual({ label: 'Vencida', color: 'error' })
+  })
+})
+
+// "Lleva N, paga M" (owner, 2026-10-13): lo que el local lee en la tabla y
+// bajo los campos del drawer.
+describe('usePromociones — resumenNxm', () => {
+  it('al 100 % no nombra el porcentaje', () => {
+    expect(resumenNxm({ cadaN: 3, pagaM: 1, valorPorcentaje: '1.0000' })).toBe('Lleva 3, paga 1')
+  })
+
+  it('con una regalada a menos de 100 % lo dice en singular', () => {
+    expect(resumenNxm({ cadaN: 2, pagaM: 1, valorPorcentaje: '0.5000' })).toBe(
+      'Lleva 2, paga 1 · regalada al 50%',
+    )
+  })
+
+  it('con varias regaladas lo dice en plural', () => {
+    expect(resumenNxm({ cadaN: 4, pagaM: 2, valorPorcentaje: '0.25' })).toBe(
+      'Lleva 4, paga 2 · regaladas al 25%',
+    )
+  })
+
+  it('sin N, M o valor no inventa nada', () => {
+    expect(resumenNxm({ cadaN: null, pagaM: 1, valorPorcentaje: '1' })).toBe('—')
+    expect(resumenNxm({ cadaN: 3, pagaM: null, valorPorcentaje: '1' })).toBe('—')
+    expect(resumenNxm({ cadaN: 3, pagaM: 1, valorPorcentaje: null })).toBe('—')
+  })
+})
+
+describe('usePromociones — ayudaNxm', () => {
+  it('3x1: las 2 más baratas', () => {
+    expect(ayudaNxm(3, 1)).toBe('De cada 3 unidades, las 2 más baratas llevan el descuento.')
+  })
+
+  it('2x1: la más barata, en singular', () => {
+    expect(ayudaNxm(2, 1)).toBe('De cada 2 unidades, la más barata lleva el descuento.')
+  })
+
+  it('a medio llenar o con paga ≥ lleva no explica nada', () => {
+    expect(ayudaNxm(null, 1)).toBe('')
+    expect(ayudaNxm(3, null)).toBe('')
+    expect(ayudaNxm(2, 2)).toBe('')
+    expect(ayudaNxm(3, 0)).toBe('')
   })
 })

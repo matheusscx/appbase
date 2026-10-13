@@ -1452,8 +1452,9 @@ CREATE TABLE "promociones" (
   "dias_semana"      SMALLINT[],   -- ISO-8601: 1=lunes…7=domingo. NULL = todos los días.
   "canal"            TEXT,         -- 'fisico' | 'online'; NULL = ambos.
   "tipo"             TEXT          NOT NULL,   -- 'porcentaje' | 'nxm' | 'precio_fijo'
-  "valor_porcentaje" NUMERIC(7,4),   -- decimal: 2x1 = '1.0000', "2do al 50%" = '0.5000'
-  "cada_n"           SMALLINT,
+  "valor_porcentaje" NUMERIC(7,4),   -- decimal; en nxm, el de cada unidad regalada (≤ 1): 2x1 = '1.0000', "2do al 50%" = '0.5000'
+  "cada_n"           SMALLINT,       -- nxm: cuántas lleva el grupo (3x1 → 3)
+  "paga_m"           SMALLINT,       -- nxm: cuántas paga (3x1 → 1); regala las cada_n − paga_m más baratas
   "valor_monto"      NUMERIC(18,4),   -- precio del conjunto en moneda oficial (precio_fijo)
   "creado_el"        TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el"   TIMESTAMPTZ,
@@ -1462,9 +1463,9 @@ CREATE TABLE "promociones" (
     ("hora_inicio" IS NULL) = ("hora_fin" IS NULL)
   ),
   CONSTRAINT "chk_promociones_valor_segun_tipo" CHECK (
-    ("tipo" = 'porcentaje' AND "valor_porcentaje" IS NOT NULL AND "cada_n" IS NULL AND "valor_monto" IS NULL)
-    OR ("tipo" = 'nxm' AND "valor_porcentaje" IS NOT NULL AND "cada_n" IS NOT NULL AND "valor_monto" IS NULL)
-    OR ("tipo" = 'precio_fijo' AND "valor_monto" IS NOT NULL AND "valor_porcentaje" IS NULL AND "cada_n" IS NULL)
+    ("tipo" = 'porcentaje' AND "valor_porcentaje" IS NOT NULL AND "cada_n" IS NULL AND "paga_m" IS NULL AND "valor_monto" IS NULL)
+    OR ("tipo" = 'nxm' AND "valor_porcentaje" IS NOT NULL AND "cada_n" IS NOT NULL AND "paga_m" IS NOT NULL AND "paga_m" >= 1 AND "paga_m" < "cada_n" AND "valor_monto" IS NULL)
+    OR ("tipo" = 'precio_fijo' AND "valor_monto" IS NOT NULL AND "valor_porcentaje" IS NULL AND "cada_n" IS NULL AND "paga_m" IS NULL)
   ),
   CONSTRAINT "chk_promociones_dias_semana" CHECK (
     "dias_semana" IS NULL OR "dias_semana" <@ ARRAY[1,2,3,4,5,6,7]::SMALLINT[]

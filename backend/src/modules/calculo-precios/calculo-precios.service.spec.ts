@@ -1138,6 +1138,7 @@ describe('CalculoPreciosService', () => {
       tipo: 'porcentaje',
       valorPorcentaje: '0.2000',
       cadaN: null,
+      pagaM: null,
       valorMonto: null,
       ventana: {
         fechaInicio: '2026-01-01',

@@ -442,20 +442,26 @@ function promoAlAzar(r: () => number, id: string): PromoElegible {
       tipo,
       valorPorcentaje: null,
       cadaN: null,
+      pagaM: null,
       valorMonto: elegir(r, ['1500', '2000', '999', '0.5', '100000']),
       ventana,
       scopes: Array.from({ length: slots }, (_, s) => scopeAlAzar(r, s)),
     };
   }
+  const valorPorcentaje =
+    tipo === 'nxm'
+      ? elegir(r, ['1', '0.5', '0.25', '0'])
+      : elegir(r, ['0.2', '0.1', '1']);
+  const cadaN = tipo === 'nxm' ? 2 + Math.floor(r() * 3) : null;
   return {
     id,
     nombre: `${tipo} ${id}`,
     tipo,
-    valorPorcentaje:
-      tipo === 'nxm'
-        ? elegir(r, ['1', '0.5', '0.25', '0'])
-        : elegir(r, ['0.2', '0.1', '1']),
-    cadaN: tipo === 'nxm' ? 2 + Math.floor(r() * 3) : null,
+    valorPorcentaje,
+    cadaN,
+    // El oráculo es el evaluador de antes de "lleva N, paga M", que regalaba
+    // una sola: es este mismo con `pagaM = cadaN − 1`.
+    pagaM: cadaN == null ? null : cadaN - 1,
     valorMonto: null,
     ventana,
     scopes: [scopeAlAzar(r, 0)],
@@ -505,6 +511,7 @@ function nxm(cadaN: number, valorPorcentaje = '1'): PromoElegible {
     tipo: 'nxm',
     valorPorcentaje,
     cadaN,
+    pagaM: cadaN - 1,
     valorMonto: null,
     ventana: VENTANA,
     scopes: [
@@ -526,6 +533,7 @@ function combo(valorMonto: string, cantidades: number[]): PromoElegible {
     tipo: 'precio_fijo',
     valorPorcentaje: null,
     cadaN: null,
+    pagaM: null,
     valorMonto,
     ventana: VENTANA,
     scopes: cantidades.map((cantidad, slot) => ({

@@ -80,6 +80,16 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **`selector-items-busqueda.spec.ts:123` cae en local y pasa en CI** (Playwright; medido A/B
+  el 2026-10-13 al cerrar el NxM, a pedido de la orquestadora). Sobre `e4df6dea`, con stack propio
+  y base recién sembrada, cae **3 de 3**; con el diff del NxM, 2 de 3. Siempre en el mismo punto:
+  el `waitForResponse` de `GET /items?ids=…` al reabrir el combo (120 s). En los dos casos el
+  RestartCount quedó 0/0, y el CI de `e4df6dea` lo pasó. La captura muestra la causa: el clic en
+  "Editar" de la fila del combo abre el drawer de otro ítem (*"SelItems … 003"*), así que el pedido
+  `?ids=` del combo nunca sale. Lo probable es una carrera de `lapizDelCombo`: resuelve la fila
+  filtrada por `marca` y, cuando hace clic, el listado se vuelve a dibujar con el filtro y la fila
+  ya es otra. **Leído en la captura, no medido en el código.** Lo que falta: confirmar la carrera
+  (esperar la respuesta de la búsqueda antes de tomar la fila) y ver por qué el CI no la pisa.
 - [ ] **La pantalla de retorno de la tienda muestra "rechazado" para una orden `expirada` que pudo
   cobrarse** (frontend, `useRetornoTienda`; lo vio la revisión del frente `3c9e15de`, 2026-10-11;
   **leído, no medido**). `verificar` acepta `expirada` y la puede pasar a `pagada`, así que una
@@ -384,24 +394,6 @@ prohíbe.
   de cada opción): "Dejarlo hasta que pase".** No se construye nada hasta que ocurra en uso real.
   Descartadas: "descartar la marca con un motivo escrito" (la recomendada) y "ligarla a una nota
   existente". Si aparece, se reabre con esas dos opciones.
-
-- [ ] **Una promoción `nxm` acepta un `valorPorcentaje` mayor a 1, y con 2 regala las dos
-  unidades** (backend + producto, `promociones.service.ts`; visto el 2026-10-13 al medir
-  "Decimales por body sin techo", [`resueltos.md`](resueltos.md)). **Medido:** un 2x1
-  (`cadaN: 2`) con `valorPorcentaje: '2'` entra con 201, y `POST /calculo-precios/calcular` con
-  dos unidades de $1.000 devuelve `totalDescuentos` $2.000 y `totalFinal` $0. La promoción de
-  porcentaje ya exige menos de 1 (`validarTopeDelPorcentaje`) y el `nxm` no tiene tope: `1` es el
-  2x1 y `0.5` el "segundo al 50%". Desde el 2026-10-13 el techo de columna rechaza 1000 o más, no
-  lo que está entre 1 y 1000. **La pregunta para el owner:** ¿un `nxm` puede descontar más del
-  100% de la unidad que regala? Si no, el tope es `≤ 1` en el service, como el de porcentaje. ⚠️
-  Toca lo que el motor cobra: va solo (CLAUDE.md, "Detenerse y preguntar").
-  ✅ **Decidido (owner, 2026-10-13, por AskUserQuestion de la orquestadora, con la tabla de cómo
-  quedan 2x1, 3x2, "segunda al 50%" y 3x1): "Hacer el NxM de verdad".** La promo se configura como
-  "lleva N, paga M" y el motor regala las N−M unidades más baratas de cada grupo, de modo que el 3x1
-  y el 4x2 salen bien con precios distintos (hoy el 3x1 solo se arma con el truco de 200%, que
-  descuenta dos veces la más barata). El porcentaje queda con tope en 100% por unidad regalada.
-  Descartadas: "un tope que dependa del tamaño del grupo, para conservar el truco" y "dejarlo".
-  Costo aceptado: toca el motor y la pantalla de promociones; va solo y con el sistema quieto.
 
 ## 5. Carreras de concurrencia
 

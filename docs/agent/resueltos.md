@@ -23,6 +23,65 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El NxM es "lleva N, paga M", con tope de 100 % por unidad regalada (cerrada 2026-10-13)
+
+Entrada de `pendientes.md` § 4, tal como estaba:
+
+- [ ] **Una promoción `nxm` acepta un `valorPorcentaje` mayor a 1, y con 2 regala las dos
+  unidades** (backend + producto, `promociones.service.ts`; visto el 2026-10-13 al medir
+  "Decimales por body sin techo", [`resueltos.md`](resueltos.md)). **Medido:** un 2x1
+  (`cadaN: 2`) con `valorPorcentaje: '2'` entra con 201, y `POST /calculo-precios/calcular` con
+  dos unidades de $1.000 devuelve `totalDescuentos` $2.000 y `totalFinal` $0. La promoción de
+  porcentaje ya exige menos de 1 (`validarTopeDelPorcentaje`) y el `nxm` no tiene tope: `1` es el
+  2x1 y `0.5` el "segundo al 50%". Desde el 2026-10-13 el techo de columna rechaza 1000 o más, no
+  lo que está entre 1 y 1000. **La pregunta para el owner:** ¿un `nxm` puede descontar más del
+  100% de la unidad que regala? Si no, el tope es `≤ 1` en el service, como el de porcentaje. ⚠️
+  Toca lo que el motor cobra: va solo (CLAUDE.md, "Detenerse y preguntar").
+  ✅ **Decidido (owner, 2026-10-13, por AskUserQuestion de la orquestadora, con la tabla de cómo
+  quedan 2x1, 3x2, "segunda al 50%" y 3x1): "Hacer el NxM de verdad".** La promo se configura como
+  "lleva N, paga M" y el motor regala las N−M unidades más baratas de cada grupo, de modo que el 3x1
+  y el 4x2 salen bien con precios distintos (hoy el 3x1 solo se arma con el truco de 200%, que
+  descuenta dos veces la más barata). El porcentaje queda con tope en 100% por unidad regalada.
+  Descartadas: "un tope que dependa del tamaño del grupo, para conservar el truco" y "dejarlo".
+  Costo aceptado: toca el motor y la pantalla de promociones; va solo y con el sistema quieto.
+
+**Decisiones del owner al diseñar** (2026-10-13, por AskUserQuestion de la orquestadora, con
+escena y costo): las unidades que no completan un grupo **pagan completo** (*"Sí, pagan
+completo"*; descartada *"las sueltas también llevan algo"*), y el % del formulario arranca
+**vacío con el ejemplo gris "1.00 (gratis)"** (*"Vacío, con ejemplo gris"*; descartada *"que
+arranque en 1.00"*), para conservar la protección del cambio de tipo. Lo técnico lo aprobó la
+orquestadora. Spec: `docs/superpowers/specs/2026-10-13-nxm-lleva-n-paga-m-design.md`.
+
+**Cómo se cerró.**
+
+- **Modelo:** columna `promociones.paga_m` junto a `cada_n` (API `pagaM`), y el CHECK de forma
+  por tipo exige en `nxm` `1 ≤ paga_m < cada_n`, y `NULL` en los otros dos tipos. La migración
+  `NxmPagaM` recrea el CHECK a mano porque `migration:generate` no compara su expresión, y antes
+  llena los `nxm` existentes con `cada_n − 1`: es la regla anterior escrita de otra forma, así
+  que el 2x1 cobra igual, y el demo de Railway, que conserva filas, arranca. Probada con filas:
+  `up` lleva 2x1 → 1 y 3x2 → 2, `down` vuelve, y el CHECK rechaza 2/2, 2/0, 3/NULL y un
+  `porcentaje` con `paga_m`.
+- **Validación** (`PromocionesService`): `pagaM` es requerido en `nxm` y prohibido en los otros
+  tipos, `pagaM < cadaN` se mira sobre el estado resultante del PATCH, y `validarTopeDelPorcentaje`
+  ganó la rama `nxm`: más de 1 es 400, en los mismos flujos que el de `porcentaje`.
+- **Motor:** solo `evaluarNxm`. En cada grupo, las últimas `cadaN − pagaM` unidades (las más
+  baratas) reciben el porcentaje, con un monto por línea cuando vienen de líneas distintas. El
+  grupo sigue reservando sus N unidades para el greedy. `calculo-precios.engine.ts` no cambió:
+  ya trataba así al combo.
+- **Pantalla:** "Lleva [N] Paga [M]" con la ayuda *"De cada 3 unidades, las 2 más baratas
+  llevan el descuento"*, y el resumen de la tabla "Lleva 3, paga 1".
+
+**Medido** (e2e, ítems exentos): 3x1 sobre $1.000 ×2 y $800 → `/calcular`, POS, cuenta de salón
+y online cobran $1.000, y la venta congela una fila de `ventas_promociones` por línea regalada
+($1.000 y $800, misma `aplicacion`); 5 × $1.000 en un 3x1 → $3.000; un 3x1 sobre una etiqueta de
+$993 con IVA incluido → $993 exacto.
+
+**Qué lo fija.** El mutante que vuelve a la regla anterior (`regaladas = 1`) mata los 7 tests
+nuevos del evaluador y 6 e2e, y deja verde el oráculo, que compara contra el evaluador anterior
+con `pagaM = cadaN − 1`. Regalar las más caras, reservar solo las regaladas, reusar siempre el
+monto del primer grupo, sacar el tope `nxm` y sacar `pagaM < cadaN` también caen. En el front,
+no mandar `pagaM` lo mata el test del submit.
+
 ## Una cantidad de stock que no cabe en su columna se rechaza con aviso (cerrada 2026-10-13)
 
 **Decisión del owner** (2026-10-13, por AskUserQuestion de la orquestadora, con la escena

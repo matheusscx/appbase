@@ -802,6 +802,20 @@ const ENTEROS: FilaTope[] = [
     cuerpo: (n) => ({ cadaN: n }),
   },
   {
+    campo: 'pagaM',
+    tope: MAX_SMALLINT,
+    metodo: 'post',
+    ruta: 'promociones',
+    cuerpo: (n) => promo({ pagaM: n }),
+  },
+  {
+    campo: 'pagaM',
+    tope: MAX_SMALLINT,
+    metodo: 'patch',
+    ruta: `promociones/${ID}`,
+    cuerpo: (n) => ({ pagaM: n }),
+  },
+  {
     campo: 'scopes.0.cantidad',
     tope: MAX_SMALLINT,
     metodo: 'post',

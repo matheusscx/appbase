@@ -32,7 +32,16 @@ describe('promociones-form-config', () => {
   it('la ayuda del porcentaje no ofrece el 100 % en porcentaje, y sí en nxm', () => {
     expect(PROMOCION_CONFIG.porcentaje.ayudaPorcentaje).toMatch(/menor a 1\.00.*cortesía/)
     expect(PROMOCION_CONFIG.porcentaje.ayudaPorcentaje).not.toMatch(/gratis/)
-    expect(PROMOCION_CONFIG.nxm.ayudaPorcentaje).toMatch(/1\.00 = 100% \(gratis\)/)
+    expect(PROMOCION_CONFIG.nxm.ayudaPorcentaje).toMatch(/1\.00 = gratis/)
+  })
+
+  // En nxm el valor es por unidad regalada, con tope en 1.00 (owner,
+  // 2026-10-13); el campo arranca vacío con el ejemplo en gris.
+  it('nxm nombra el descuento por unidad regalada, su tope y el ejemplo gris', () => {
+    expect(PROMOCION_CONFIG.nxm.labelPorcentaje).toBe('Descuento en cada unidad regalada')
+    expect(PROMOCION_CONFIG.nxm.ayudaPorcentaje).toMatch(/máximo 1\.00/)
+    expect(PROMOCION_CONFIG.nxm.placeholderPorcentaje).toBe('1.00 (gratis)')
+    expect(PROMOCION_CONFIG.porcentaje.placeholderPorcentaje).toBe('0.10 (= 10%)')
   })
 
   it('precio_fijo pide el monto y arma slots (1..N)', () => {

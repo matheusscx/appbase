@@ -38,6 +38,7 @@ export type PromocionConScopes = Promocion & { scopes: ScopeConItems[] };
 interface FormaSegunTipo {
   valorPorcentaje?: string | null;
   cadaN?: number | null;
+  pagaM?: number | null;
   valorMonto?: string | null;
 }
 
@@ -58,6 +59,7 @@ interface FilaPromoVigente {
   tipo: TipoPromocion;
   valor_porcentaje: string | null;
   cada_n: number | null;
+  paga_m: number | null;
   valor_monto: string | null;
   fecha_inicio: string;
   fecha_fin: string;
@@ -147,7 +149,7 @@ export class PromocionesService {
   ): Promise<PromoElegible[]> {
     const filas: FilaPromoVigente[] = await this.db.query(
       `SELECT p.promocion_id, p.nombre, p.tipo,
-              p.valor_porcentaje, p.cada_n, p.valor_monto,
+              p.valor_porcentaje, p.cada_n, p.paga_m, p.valor_monto,
               to_char(p.fecha_inicio, 'YYYY-MM-DD') AS fecha_inicio,
               to_char(p.fecha_fin, 'YYYY-MM-DD') AS fecha_fin,
               to_char(p.hora_inicio, 'HH24:MI') AS hora_inicio,
@@ -183,6 +185,7 @@ export class PromocionesService {
           tipo: f.tipo,
           valorPorcentaje: f.valor_porcentaje,
           cadaN: f.cada_n,
+          pagaM: f.paga_m,
           valorMonto: f.valor_monto,
           ventana: {
             fechaInicio: f.fecha_inicio,
@@ -247,6 +250,7 @@ export class PromocionesService {
         tipo: dto.tipo,
         valorPorcentaje: dto.valorPorcentaje ?? null,
         cadaN: dto.cadaN ?? null,
+        pagaM: dto.pagaM ?? null,
         valorMonto: dto.valorMonto ?? null,
       });
       await manager.save(promo);
@@ -283,6 +287,7 @@ export class PromocionesService {
           ? dto.valorPorcentaje
           : promo.valorPorcentaje,
       cadaN: dto.cadaN !== undefined ? dto.cadaN : promo.cadaN,
+      pagaM: dto.pagaM !== undefined ? dto.pagaM : promo.pagaM,
       valorMonto:
         dto.valorMonto !== undefined ? dto.valorMonto : promo.valorMonto,
     };
@@ -452,21 +457,30 @@ export class PromocionesService {
   /**
    * Una promo de porcentaje no regala: con 100 % o más, el plato saldría en
    * una boleta de $0 sin IVA, y regalarlo es una cortesía, que paga IVA como
-   * retiro (owner, 2026-10-04, "Topar la promo bajo 100 %"). El `nxm` queda
-   * afuera: su 1.0000 es la unidad gratis de un paquete (2x1), que es precio.
-   * Es la misma cota que `validarMonto` (`monto-regla.util.ts`) pone a
-   * descuentos y recargos, pero no se reusa: aquella también rechaza el 0 y su
-   * mensaje habla de la notación, y cambiarla movería esos dos módulos.
-   * El 99,99 % pasa: es un uso deliberado, y es el costo aceptado del tope.
+   * retiro (owner, 2026-10-04, "Topar la promo bajo 100 %"). Es la misma cota
+   * que `validarMonto` (`monto-regla.util.ts`) pone a descuentos y recargos,
+   * pero no se reusa: aquella también rechaza el 0 y su mensaje habla de la
+   * notación, y cambiarla movería esos dos módulos. El 99,99 % pasa: es un uso
+   * deliberado, y es el costo aceptado del tope.
+   *
+   * En `nxm` el valor es el descuento de CADA unidad regalada, y su tope es
+   * 100 % inclusive (owner, 2026-10-13, "Hacer el NxM de verdad"): el 1.0000
+   * es la unidad gratis de un paquete (3x1), que es precio, y el grupo
+   * igual paga sus `pagaM` unidades más caras. Más de 1 era el truco del 3x1
+   * que descontaba dos veces la más barata.
    */
   private validarTopeDelPorcentaje(
     tipo: TipoPromocion,
     valorPorcentaje: string | null | undefined,
   ): void {
-    if (tipo !== 'porcentaje' || valorPorcentaje == null) return;
-    if (new Decimal(valorPorcentaje).gte(1))
+    if (valorPorcentaje == null) return;
+    if (tipo === 'porcentaje' && new Decimal(valorPorcentaje).gte(1))
       throw new BadRequestException(
         'Una promoción de porcentaje tiene que ser menor al 100 %: para regalar un producto, registralo como cortesía.',
+      );
+    if (tipo === 'nxm' && new Decimal(valorPorcentaje).gt(1))
+      throw new BadRequestException(
+        'En una promoción NxM el descuento de cada unidad regalada es como máximo 100 % (1.00).',
       );
   }
 
@@ -489,6 +503,10 @@ export class PromocionesService {
         throw new BadRequestException(
           'cadaN no corresponde a una promoción de tipo porcentaje',
         );
+      if (dto.pagaM != null)
+        throw new BadRequestException(
+          'pagaM no corresponde a una promoción de tipo porcentaje',
+        );
       if (dto.valorMonto != null)
         throw new BadRequestException(
           'El importe va en valorPorcentaje para promociones de tipo porcentaje',
@@ -501,6 +519,14 @@ export class PromocionesService {
       if (dto.cadaN == null)
         throw new BadRequestException(
           'cadaN es requerido para promociones nxm',
+        );
+      if (dto.pagaM == null)
+        throw new BadRequestException(
+          'pagaM es requerido para promociones nxm',
+        );
+      if (dto.pagaM >= dto.cadaN)
+        throw new BadRequestException(
+          'Una promoción NxM tiene que pagar menos unidades de las que lleva (pagaM menor a cadaN)',
         );
       if (dto.valorMonto != null)
         throw new BadRequestException(
@@ -519,6 +545,10 @@ export class PromocionesService {
       if (dto.cadaN != null)
         throw new BadRequestException(
           'cadaN no corresponde a una promoción de precio fijo',
+        );
+      if (dto.pagaM != null)
+        throw new BadRequestException(
+          'pagaM no corresponde a una promoción de precio fijo',
         );
     }
   }

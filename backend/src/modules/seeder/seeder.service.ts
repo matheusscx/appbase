@@ -4014,7 +4014,7 @@ export class SeederService implements OnApplicationBootstrap {
    * el scope de la primera cuelga de ítems reales. Al crear tenant no se
    * siembra ninguna promo: esto es aparte y demo-only.
    *
-   * "2x1 de la casa (martes)": `nxm` cadaN=2 (paga 1 de cada 2), franja
+   * "2x1 de la casa (martes)": `nxm` lleva 2, paga 1 (cadaN=2, pagaM=1), franja
    * 18:00–20:00, solo martes (`diasSemana=[2]`, ISO-8601 1=lunes). Nombre
    * genérico a propósito: el seed no tiene bebidas, así que el scope usa los
    * vendibles reales que sí existen (nada de ingredientes) — un nombre
@@ -4080,6 +4080,7 @@ export class SeederService implements OnApplicationBootstrap {
         tipo: 'nxm',
         valorPorcentaje: '1.0000',
         cadaN: 2,
+        pagaM: 1,
         valorMonto: null,
       },
       {
@@ -4097,6 +4098,7 @@ export class SeederService implements OnApplicationBootstrap {
         tipo: 'porcentaje',
         valorPorcentaje: '0.2000',
         cadaN: null,
+        pagaM: null,
         valorMonto: null,
       },
     ];

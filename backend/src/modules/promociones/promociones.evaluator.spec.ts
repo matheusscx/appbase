@@ -29,6 +29,7 @@ function promo(over: Partial<PromoElegible> = {}): PromoElegible {
     tipo: 'porcentaje',
     valorPorcentaje: '0.20',
     cadaN: null,
+    pagaM: null,
     valorMonto: null,
     ventana: ventanaBase,
     scopes: [
@@ -46,7 +47,13 @@ function promo(over: Partial<PromoElegible> = {}): PromoElegible {
 
 /** Fixture de nxm: mismo `promo()`, con la forma que exige ese tipo. */
 function nxmPromo(over: Partial<PromoElegible> = {}): PromoElegible {
-  return promo({ tipo: 'nxm', cadaN: 2, valorPorcentaje: '1', ...over });
+  return promo({
+    tipo: 'nxm',
+    cadaN: 2,
+    pagaM: 1,
+    valorPorcentaje: '1',
+    ...over,
+  });
 }
 
 /**
@@ -410,6 +417,107 @@ describe('evaluarPromos — nxm', () => {
     expect(res[0].montosPorLinea).toEqual([{ lineaIndex: 0, monto: '5000' }]);
     expect(res[1].montosPorLinea).toEqual([{ lineaIndex: 0, monto: '5000' }]);
     expect(sumaMontos(res).toString()).toBe('10000');
+  });
+});
+
+// "Lleva N, paga M" (owner, 2026-10-13): en cada grupo de N, las N−M más
+// baratas reciben el porcentaje. El grupo incompleto no recibe nada.
+describe('evaluarPromos — nxm lleva N, paga M', () => {
+  const lleva = (cadaN: number, pagaM: number, valorPorcentaje = '1') =>
+    nxmPromo({ cadaN, pagaM, valorPorcentaje });
+
+  it('3x1 con $1.000, $1.000 y $800: regala una de $1.000 y la de $800, cada una en su línea', () => {
+    const res = evaluarPromos({
+      promos: [lleva(3, 1)],
+      lineas: [
+        linea({ index: 0, precioListaUnitario: '1000', cantidad: '2' }),
+        linea({ index: 1, precioListaUnitario: '800' }),
+      ],
+      canal: 'fisico',
+    });
+    expect(montos(res)).toEqual([
+      { lineaIndex: 0, monto: '1000' },
+      { lineaIndex: 1, monto: '800' },
+    ]);
+  });
+
+  it('4x2 con $1.500, $1.200, $1.000 y $700: regala las dos más baratas', () => {
+    const res = evaluarPromos({
+      promos: [lleva(4, 2)],
+      lineas: [
+        linea({ index: 0, precioListaUnitario: '1500' }),
+        linea({ index: 1, precioListaUnitario: '700' }),
+        linea({ index: 2, precioListaUnitario: '1200' }),
+        linea({ index: 3, precioListaUnitario: '1000' }),
+      ],
+      canal: 'fisico',
+    });
+    expect(montos(res)).toEqual([
+      { lineaIndex: 3, monto: '1000' },
+      { lineaIndex: 1, monto: '700' },
+    ]);
+  });
+
+  it('4x2 al 50% con $1.000 ×3 y $600: la mitad de una de $1.000 y de la de $600', () => {
+    const res = evaluarPromos({
+      promos: [lleva(4, 2, '0.5')],
+      lineas: [
+        linea({ index: 0, precioListaUnitario: '1000', cantidad: '3' }),
+        linea({ index: 1, precioListaUnitario: '600' }),
+      ],
+      canal: 'fisico',
+    });
+    expect(montos(res)).toEqual([
+      { lineaIndex: 0, monto: '500' },
+      { lineaIndex: 1, monto: '300' },
+    ]);
+  });
+
+  it('3x1 con 5 unidades mezcladas: el grupo son las 3 más caras y las 2 que sobran pagan completo', () => {
+    const res = evaluarPromos({
+      promos: [lleva(3, 1)],
+      lineas: [
+        linea({ index: 0, precioListaUnitario: '800' }),
+        linea({ index: 1, precioListaUnitario: '1200' }),
+        linea({ index: 2, precioListaUnitario: '500' }),
+        linea({ index: 3, precioListaUnitario: '1000', cantidad: '2' }),
+      ],
+      canal: 'fisico',
+    });
+    expect(montos(res)).toEqual([{ lineaIndex: 3, monto: '2000' }]);
+  });
+
+  it('3x1 con una línea de 5 × $1.000 → una aplicación de $2.000', () => {
+    const res = evaluarPromos({
+      promos: [lleva(3, 1)],
+      lineas: [linea({ precioListaUnitario: '1000', cantidad: '5' })],
+      canal: 'fisico',
+    });
+    expect(montos(res)).toEqual([{ lineaIndex: 0, monto: '2000' }]);
+  });
+
+  it('3x1 con una línea de 6 × $1.000 → dos aplicaciones de $2.000 que no chocan', () => {
+    const res = evaluarPromos({
+      promos: [lleva(3, 1)],
+      lineas: [linea({ precioListaUnitario: '1000', cantidad: '6' })],
+      canal: 'fisico',
+    });
+    expect(res.map((ap) => ap.montosPorLinea)).toEqual([
+      [{ lineaIndex: 0, monto: '2000' }],
+      [{ lineaIndex: 0, monto: '2000' }],
+    ]);
+  });
+
+  // La unidad que paga también ocupa lugar: si el 3x1 reservara solo las
+  // regaladas, la cuarta unidad y la que paga armarían un 2x1 encima.
+  it('el grupo reserva sus N unidades, no solo las regaladas', () => {
+    const res = evaluarPromos({
+      promos: [lleva(3, 1), { ...lleva(2, 1), id: 'promo-2x1' }],
+      lineas: [linea({ precioListaUnitario: '1000', cantidad: '4' })],
+      canal: 'fisico',
+    });
+    expect(res).toHaveLength(1);
+    expect(res[0].montosPorLinea).toEqual([{ lineaIndex: 0, monto: '2000' }]);
   });
 });
 

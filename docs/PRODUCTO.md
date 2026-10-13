@@ -342,6 +342,14 @@ descuento por horario sin medición propia.
 **Una promoción no regala** (owner, 2026-10-04): la de porcentaje es menor al 100 %. Un producto
 regalado es una cortesía, que paga IVA (§ 10).
 
+**El NxM es "lleva N, paga M"** (owner, 2026-10-13, *"Hacer el NxM de verdad"*): en cada grupo de
+N unidades, armado de la más cara a la más barata, las N−M más baratas llevan el descuento. El
+porcentaje es el de **cada** unidad regalada, como máximo 100 %, y el grupo paga siempre por lo
+menos su unidad más cara (M ≥ 1). Un 3x1 sobre $1.000, $1.000 y $800 cobra $1.000; un 4x2 sobre
+$1.500, $1.200, $1.000 y $700 cobra $2.700; la "segunda al 50%" es lleva 2, paga 1, al 50%. Las
+unidades que no completan un grupo **pagan completo**: 5 cervezas de $1.000 en un 3x1 son $3.000
+(owner, 2026-10-13).
+
 **Métodos de pago** — catálogo global habilitado por tenant (`tenant_metodo_pago`)
 
 ---

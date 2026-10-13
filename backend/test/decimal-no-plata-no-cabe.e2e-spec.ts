@@ -534,6 +534,7 @@ describe('Un decimal que no es plata y no cabe en su columna es 400, no 500 (e2e
       nombre: `Promo nxm E2E ${randomUUID().slice(0, 8)}`,
       tipo: 'nxm',
       cadaN: 2,
+      pagaM: 1,
       fechaInicio: '2020-01-01',
       fechaFin: '2020-12-31',
       scopes: [{ tipoScope: 'items', itemIds: [productoId] }],

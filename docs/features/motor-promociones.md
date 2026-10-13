@@ -5,7 +5,7 @@ aislado mientras otra sesión ocupaba Docker, y se integró y verificó al liber
 completo, `reset-db.sh --verificar` y smoke de navegador de punta a punta (el detalle, con los
 números de esa corrida, está en la fila de [`ESTADO.md`](../ESTADO.md)).
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-09-08
+**Last Updated**: 2026-10-13
 
 ---
 
@@ -139,10 +139,15 @@ la apertura da rojo el primero y el cuarto. Detalle en [`../agent/resueltos.md`]
 
 | Tabla | Qué guarda |
 |---|---|
-| `promociones` | La campaña: vigencia (fecha+hora+día+canal), `tipo` (`porcentaje`\|`nxm`\|`precio_fijo`) y las columnas de su beneficio, el resto `NULL` (CHECK de forma por tipo). `fecha_fin` es **obligatoria** — guardarraíl heredado del frente de vigencia, que perdió el suyo al eliminar el tipo `promocional`. |
+| `promociones` | La campaña: vigencia (fecha+hora+día+canal), `tipo` (`porcentaje`\|`nxm`\|`precio_fijo`) y las columnas de su beneficio (`nxm`: `valor_porcentaje`, `cada_n` y `paga_m`), el resto `NULL` (CHECK de forma por tipo). `fecha_fin` es **obligatoria** — guardarraíl heredado del frente de vigencia, que perdió el suyo al eliminar el tipo `promocional`. |
 | `promocion_scopes` | Los "slots" (la Condición): `items`\|`categoria`\|`venta`. `porcentaje`/`nxm` llevan exactamente 1; `precio_fijo` lleva 1..N (cada uno un componente del combo, AND entre sí). |
 | `promocion_scope_items` | Bridge scope↔ítem, solo para `tipoScope='items'`. |
 | `ventas_promociones` | El congelado — molde de `ventas_descuentos`: nombre/tipo/valor efectivo congelados, `aplicacion` agrupa (1-based por promo), un solo camino de escritura (`crearEnTransaccion`). `SUM(monto)` sobre esta tabla es "cuánto descontamos en promos", sin filtrar `ventas_descuentos` por ningún flag — la razón de ser del enfoque, ver ADR-023. |
+
+`paga_m` llegó el 2026-10-13 con la migración `NxmPagaM`, que llena los `nxm` existentes con
+`cada_n − 1` antes de recrear el CHECK: el demo de Railway conserva sus filas y sin eso no
+arrancaba. No es una copia que pueda divergir sino la regla anterior escrita de otra forma ("la
+más barata de cada `cada_n`" = "paga `cada_n − 1`"), así que el 2x1 existente cobra igual.
 
 Detalle de columnas y CHECKs: spec §"Modelo de datos". Entidades:
 `backend/src/modules/promociones/entities/`.
@@ -182,11 +187,26 @@ Por tipo (detalle y ejemplos en el docblock de cada función):
   toque valor, tipo ni `activo: true`. El drawer de edición no sirve para eso, porque reenvía el
   valor y el tipo en cada guardado: ahí hay que bajar el valor a menos de 1 o pausarla. No se
   puede volver a activar mientras siga al 100 % (el motor la sigue aplicando mientras siga
-  activa; no hay datos productivos que migrar). El `nxm` no tiene tope: su `1.0000` es
-  la unidad gratis del 2x1, que es precio. Detalle en
+  activa; no hay datos productivos que migrar). El tope del `nxm` es otro, ver abajo. Detalle en
   [ADR-028](../adr/028-emision-registrada-por-venta.md).
-- **`nxm`**: toma las unidades enteras (`⌊cantidad⌋`) por precio de lista descendente, arma
-  grupos de `cadaN`; en cada grupo la más barata recibe el descuento. Repetible.
+- **`nxm`**: **"lleva `cadaN`, paga `pagaM`"** (owner, 2026-10-13, por AskUserQuestion de la
+  orquestadora con la tabla de 2x1, 3x2, "segunda al 50%" y 3x1: *"Hacer el NxM de verdad"*). Toma
+  las unidades enteras (`⌊cantidad⌋`) por precio de lista descendente y arma grupos de `cadaN`; en
+  cada grupo, las `cadaN − pagaM` **más baratas** reciben cada una `valorPorcentaje × precio`.
+  Repetible. Cuando las regaladas vienen de líneas distintas, la aplicación lleva un monto por
+  línea, igual que el combo.
+  - **El valor es el de cada unidad regalada, como máximo 1** (100 % inclusive: la unidad gratis
+    del paquete es precio). `pagaM ≥ 1` sale de la regla de arriba: el grupo paga por lo menos su
+    unidad más cara. Lo valida `PromocionesService` con 400, en los mismos flujos que el tope de
+    `porcentaje`, y el CHECK exige `1 ≤ paga_m < cada_n`. Una guardada con más de 1 (el truco
+    del 3x1 al 200 %, que descontaba dos veces la más barata) sigue el mismo precedente: aplica
+    mientras esté activa, se pausa, y no se reactiva ni se reescribe sin bajar el valor.
+  - **Las sobrantes pagan completo** (owner, 2026-10-13, *"Sí, pagan completo"*; descartada *"las
+    sueltas también llevan algo"*): 5 cervezas de $1.000 en un 3x1 son un grupo y dos sueltas,
+    $3.000.
+  - Ejemplos, en precio de lista: 3x1 sobre $1.000, $1.000 y $800 regala $1.000 + $800 y cobra
+    $1.000; 4x2 sobre $1.500, $1.200, $1.000 y $700 cobra $2.700; 2x1 al 50 % sobre $1.000 y
+    $800 cobra $1.400.
 - **`precio_fijo`** (combo): arma combos con las unidades **más caras** de cada slot
   (decisión 3 del owner) mientras el descuento resultante sea positivo — una promoción nunca
   encarece —, y reparte el descuento a prorrata del precio aportado entre las líneas del
@@ -279,7 +299,8 @@ el impuesto restando en vez de multiplicar `tasa × base`, adoptado el 2026-08-2
 promociones corren el mismo mecanismo: el ancla de la línea pasa a ser `etiqueta − promo`, y
 sobre esa cifra se aplica el descuento de documento si lo hay. Es la razón por la que un
 combo declarado "$9.990" cierra en exactamente $9.990 (IVA adentro) y no en $9.991, y por la
-que un 2x1 sobre una etiqueta de $993 no le cuesta un peso a la unidad "gratis". Detalle:
+que un 2x1 sobre una etiqueta de $993 no le cuesta un peso a la unidad "gratis" (un 3x1 sobre la
+misma etiqueta cobra $993 exacto, lo fija `promociones.e2e-spec.ts`). Detalle:
 `calculo-precios.engine.ts`, sección "El ancla del cierre".
 
 ---
@@ -341,6 +362,14 @@ cambio (`onTipoChange` lo limpia), así que el submit ya lo frena con un 400 leg
 que se pierda algo guardado de verdad — el toast solo evita la sorpresa de "¿por qué
 desapareció el combo?" a mitad de la edición, no protege ningún dato. No es una
 inconsistencia con `descuentos`: son dos riesgos distintos y cada pantalla responde al suyo.
+
+**El `nxm` se configura como "Lleva [N] Paga [M]"**, con la ayuda *"De cada 3 unidades, las 2 más
+baratas llevan el descuento"* debajo, y después el *Descuento en cada unidad regalada*. Ese campo
+arranca **vacío con el ejemplo gris "1.00 (gratis)"** y no en 1.00 (owner, 2026-10-13, *"Vacío,
+con ejemplo gris"*): así cambiar de tipo sigue dejando vacío el campo requerido, que es lo que
+frena el guardado antes de pisar un combo guardado (ver el párrafo de arriba). La tabla lo resume
+como "Lleva 3, paga 1", y nombra el porcentaje solo cuando no es 100 % ("Lleva 2, paga 1 ·
+regalada al 50%"). Las frases salen de `resumenNxm` y `ayudaNxm` (`usePromociones.ts`).
 
 **El interruptor de tenant** vive en Preferencias financieras, con el texto: *"Cuando una
 promoción y un descuento tocan el mismo producto: ¿se suman, o aplica solo la rebaja

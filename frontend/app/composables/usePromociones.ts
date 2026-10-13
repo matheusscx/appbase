@@ -1,3 +1,4 @@
+import Decimal from 'decimal.js'
 import { useApiFetch } from './useApiFetch'
 
 // ── Tipos (espejo del contrato del backend `promociones`) ───────────────────
@@ -37,10 +38,12 @@ export interface Promocion {
   /** `null` = los dos canales. */
   canal: CanalPromocion | null
   tipo: TipoPromocion
-  /** Decimal: 2x1 = `'1.0000'`, "2do al 50%" = `'0.5000'`. */
+  /** Decimal. En `nxm`, el de cada unidad regalada (≤ 1): 2x1 = `'1.0000'`, "2do al 50%" = `'0.5000'`. */
   valorPorcentaje: string | null
-  /** Solo `nxm`: 2x1→2, 3x2→3. */
+  /** Solo `nxm`: cuántas lleva el grupo (3x1 → 3). */
   cadaN: number | null
+  /** Solo `nxm`: cuántas paga (3x1 → 1). Regala las `cadaN − pagaM` más baratas. */
+  pagaM: number | null
   /** Solo `precio_fijo`: el precio del conjunto en moneda oficial. */
   valorMonto: string | null
   scopes: ScopePromocion[]
@@ -73,6 +76,7 @@ export interface PromocionPayload {
   canal?: CanalPromocion | null
   valorPorcentaje?: string | null
   cadaN?: number | null
+  pagaM?: number | null
   valorMonto?: string | null
   scopes: ScopePromocionPayload[]
 }
@@ -92,6 +96,30 @@ export function usePromociones() {
     useApiFetch(`${apiUrl}/promociones/${id}`, { method: 'DELETE' })
 
   return { listar, crear, actualizar, eliminar }
+}
+
+// ── "Lleva N, paga M" en palabras ──────────────────────────────────────────
+
+/**
+ * La columna Valor de la tabla para un `nxm` (owner, 2026-10-13, "Hacer el
+ * NxM de verdad"): "Lleva 3, paga 1", y el porcentaje solo cuando no es 100 %.
+ */
+export function resumenNxm(p: Pick<Promocion, 'cadaN' | 'pagaM' | 'valorPorcentaje'>): string {
+  if (p.cadaN == null || p.pagaM == null || !p.valorPorcentaje) return '—'
+  const base = `Lleva ${p.cadaN}, paga ${p.pagaM}`
+  const valor = new Decimal(p.valorPorcentaje)
+  if (valor.gte(1)) return base
+  const regaladas = p.cadaN - p.pagaM === 1 ? 'regalada' : 'regaladas'
+  return `${base} · ${regaladas} al ${valor.times(100).toString()}%`
+}
+
+/** La ayuda bajo "Lleva / Paga" en el drawer; vacía mientras no cierre. */
+export function ayudaNxm(cadaN: number | null, pagaM: number | null): string {
+  if (cadaN == null || pagaM == null || pagaM < 1 || pagaM >= cadaN) return ''
+  const regaladas = cadaN - pagaM
+  return regaladas === 1
+    ? `De cada ${cadaN} unidades, la más barata lleva el descuento.`
+    : `De cada ${cadaN} unidades, las ${regaladas} más baratas llevan el descuento.`
 }
 
 // ── Estado derivado para el badge de la lista ───────────────────────────────

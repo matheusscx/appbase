@@ -156,6 +156,7 @@ describe('Cantidad grande con promo (e2e)', () => {
       tipo: 'nxm',
       valorPorcentaje: '1.0000',
       cadaN: 2,
+      pagaM: 1,
       fechaInicio: '2020-01-01',
       fechaFin: '2035-12-31',
       scopes: [{ tipoScope: 'items', itemIds: [itemId] }],

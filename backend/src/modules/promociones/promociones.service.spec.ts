@@ -490,6 +490,7 @@ describe('PromocionesService', () => {
             tipo: 'nxm',
             valorPorcentaje: '1.0000',
             cadaN: 2,
+            pagaM: 1,
             scopes: [{ tipoScope: 'categoria', categoriaId: CATEGORIA_ID }],
           }),
         ),
@@ -507,12 +508,13 @@ describe('PromocionesService', () => {
 
     it('pasar un 2x1 a porcentaje sin reenviar el valor es 400: quedaría en 100 %', async () => {
       promocionRepoMock.findOne.mockResolvedValue(
-        guardada({ tipo: 'nxm', cadaN: 2 }),
+        guardada({ tipo: 'nxm', cadaN: 2, pagaM: 1 }),
       );
       await expect(
         service.update(TENANT, 'promo-vieja', {
           tipo: 'porcentaje',
           cadaN: null,
+          pagaM: null,
         }),
       ).rejects.toThrow(/menor al 100 %/);
     });
@@ -536,6 +538,118 @@ describe('PromocionesService', () => {
       await expect(
         service.update(TENANT, 'promo-vieja', { activo: true }),
       ).rejects.toThrow(/menor al 100 %.*cortesía/);
+    });
+  });
+
+  // NxM de verdad (owner, 2026-10-13): "lleva `cadaN`, paga `pagaM`", y el
+  // valor es el descuento de cada unidad regalada, como máximo 100 %.
+  describe('nxm: lleva N, paga M', () => {
+    const nxm = (over: Partial<CreatePromocionDto> = {}) =>
+      makeCreateDto({
+        tipo: 'nxm',
+        valorPorcentaje: '1.0000',
+        cadaN: 3,
+        pagaM: 1,
+        ...over,
+      });
+    const guardadaNxm = (over: Record<string, unknown> = {}) => ({
+      id: 'promo-nxm',
+      tenantId: TENANT,
+      nombre: '3x1',
+      tipo: 'nxm',
+      fechaInicio: '2026-01-01',
+      fechaFin: '2026-12-31',
+      horaInicio: null,
+      horaFin: null,
+      diasSemana: null,
+      canal: null,
+      valorPorcentaje: '1.0000',
+      cadaN: 3,
+      pagaM: 1,
+      valorMonto: null,
+      activo: true,
+      ...over,
+    });
+
+    it('un 3x1 al 100 % pasa y persiste pagaM', async () => {
+      const res = await service.create(TENANT, nxm());
+      expect(res).toMatchObject({ cadaN: 3, pagaM: 1 });
+    });
+
+    it('sin pagaM es 400', async () => {
+      await expect(
+        service.create(TENANT, nxm({ pagaM: undefined })),
+      ).rejects.toThrow(/pagaM es requerido/);
+    });
+
+    it.each([
+      [2, 2],
+      [3, 4],
+    ])(
+      'lleva %i y paga %i es 400: tiene que pagar menos de lo que lleva',
+      async (cadaN, pagaM) => {
+        await expect(
+          service.create(TENANT, nxm({ cadaN, pagaM })),
+        ).rejects.toThrow(/pagar menos unidades de las que lleva/);
+      },
+    );
+
+    it.each([
+      ['porcentaje', { tipo: 'porcentaje' as const, valorPorcentaje: '0.1' }],
+      [
+        'precio_fijo',
+        {
+          tipo: 'precio_fijo' as const,
+          valorPorcentaje: null,
+          valorMonto: '9990',
+        },
+      ],
+    ])('pagaM en %s es 400', async (_tipo, over) => {
+      await expect(
+        service.create(TENANT, makeCreateDto({ ...over, pagaM: 1 })),
+      ).rejects.toThrow(/pagaM no corresponde/);
+    });
+
+    it.each(['1.0001', '2'])(
+      'un valor de %s es 400: como máximo 100 % por unidad regalada',
+      async (valorPorcentaje) => {
+        await expect(
+          service.create(TENANT, nxm({ valorPorcentaje })),
+        ).rejects.toThrow(/cada unidad regalada es como máximo 100 %/);
+        expect(managerMock.save).not.toHaveBeenCalled();
+      },
+    );
+
+    it('bajar cadaN hasta igualar el pagaM guardado es 400 (estado resultante)', async () => {
+      promocionRepoMock.findOne.mockResolvedValue(guardadaNxm({ pagaM: 2 }));
+      await expect(
+        service.update(TENANT, 'promo-nxm', { cadaN: 2 }),
+      ).rejects.toThrow(/pagar menos unidades de las que lleva/);
+    });
+
+    it('pasar a porcentaje sin limpiar pagaM es 400 (estado resultante)', async () => {
+      promocionRepoMock.findOne.mockResolvedValue(guardadaNxm());
+      await expect(
+        service.update(TENANT, 'promo-nxm', {
+          tipo: 'porcentaje',
+          valorPorcentaje: '0.1',
+          cadaN: null,
+        }),
+      ).rejects.toThrow(/pagaM no corresponde/);
+    });
+
+    // Una guardada al 200 % antes del tope (el truco del 3x1) sigue el
+    // precedente de `porcentaje`: se pausa, pero no se reactiva así.
+    it('a una guardada al 200 % se la puede pausar y no reactivar', async () => {
+      promocionRepoMock.findOne.mockResolvedValue(
+        guardadaNxm({ cadaN: 2, pagaM: 1, valorPorcentaje: '2.0000' }),
+      );
+      await expect(
+        service.update(TENANT, 'promo-nxm', { activo: false }),
+      ).resolves.toBeDefined();
+      await expect(
+        service.update(TENANT, 'promo-nxm', { activo: true }),
+      ).rejects.toThrow(/como máximo 100 %/);
     });
   });
 
@@ -576,6 +690,7 @@ describe('PromocionesService', () => {
       tipo: 'porcentaje',
       valor_porcentaje: '0.2000',
       cada_n: null,
+      paga_m: null,
       valor_monto: null,
       fecha_inicio: '2026-01-01',
       fecha_fin: '2026-12-31',
@@ -608,6 +723,7 @@ describe('PromocionesService', () => {
           tipo: 'porcentaje',
           valorPorcentaje: '0.2000',
           cadaN: null,
+          pagaM: null,
           valorMonto: null,
           ventana: {
             fechaInicio: '2026-01-01',
@@ -628,6 +744,20 @@ describe('PromocionesService', () => {
           ],
         },
       ]);
+    });
+
+    it('un nxm trae cuántas lleva y cuántas paga', async () => {
+      dataSourceMock.query.mockResolvedValue([
+        fila({ tipo: 'nxm', valor_porcentaje: '1.0000', cada_n: 3, paga_m: 1 }),
+      ]);
+
+      const [promo] = await service.cargarVigentes(
+        TENANT,
+        '2026-06-15',
+        '2026-06-15',
+      );
+
+      expect(promo).toMatchObject({ tipo: 'nxm', cadaN: 3, pagaM: 1 });
     });
 
     // El `LEFT JOIN` desnormaliza: un combo de 2 slots con 2 ítems en el

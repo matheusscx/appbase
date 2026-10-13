@@ -40,6 +40,7 @@ interface PromoFake {
   tipo: 'porcentaje' | 'nxm' | 'precio_fijo'
   valorPorcentaje: string | null
   cadaN: number | null
+  pagaM: number | null
   valorMonto: string | null
   scopes: ScopeFake[]
 }
@@ -59,6 +60,7 @@ function promo(over: Partial<PromoFake> = {}): PromoFake {
     tipo: 'porcentaje',
     valorPorcentaje: '0.20',
     cadaN: null,
+    pagaM: null,
     valorMonto: null,
     scopes: [{ id: 'scope-1', slot: 0, tipoScope: 'venta', categoriaId: null, cantidad: 1, itemIds: [] }],
     ...over,
@@ -331,7 +333,7 @@ describe('configuracion/promociones — el formulario cambia campos según el ti
 
     const texto = dialogo()?.textContent ?? ''
     expect(texto).toContain('Porcentaje de descuento')
-    expect(texto).not.toContain('Cada cuántas unidades')
+    expect(texto).not.toContain('Descuento en cada unidad regalada')
     expect(texto).not.toContain('Precio del combo')
     expect(texto).toContain('Aplica a')
     expect(texto).not.toContain('Agregar componente')
@@ -339,14 +341,21 @@ describe('configuracion/promociones — el formulario cambia campos según el ti
     wrapper.unmount()
   })
 
-  it('nxm pide cadaN + el %', async () => {
+  // "Lleva N, paga M" (owner, 2026-10-13). El % arranca vacío con el
+  // ejemplo gris, no en 1.00: así el cambio de tipo deja vacío el campo
+  // requerido y el guardado frena antes de pisar lo guardado.
+  it('nxm pide lleva, paga y el % por unidad regalada, este vacío con el ejemplo gris', async () => {
     const wrapper = await montar()
     await abrirCrear(wrapper)
     await elegirTipo(wrapper, 'nxm')
 
     const texto = dialogo()?.textContent ?? ''
-    expect(texto).toContain('Porcentaje sobre la unidad más barata del grupo')
-    expect(texto).toContain('Cada cuántas unidades')
+    expect(texto).toContain('Lleva')
+    expect(texto).toContain('Paga')
+    expect(texto).toContain('Descuento en cada unidad regalada')
+    const pct = dialogo()?.querySelector<HTMLInputElement>('input[placeholder="1.00 (gratis)"]')
+    expect(pct, 'input del % con el ejemplo gris').toBeTruthy()
+    expect(pct!.value).toBe('')
     expect(texto).not.toContain('Precio del combo')
     expect(texto).not.toContain('Agregar componente')
 
@@ -361,7 +370,7 @@ describe('configuracion/promociones — el formulario cambia campos según el ti
     const texto = dialogo()?.textContent ?? ''
     expect(texto).toContain('Precio del combo')
     expect(texto).not.toContain('Porcentaje de descuento')
-    expect(texto).not.toContain('Cada cuántas unidades')
+    expect(texto).not.toContain('Descuento en cada unidad regalada')
     expect(texto).toContain('Componentes del combo')
     expect(texto).toContain('Agregar componente')
     expect(texto).toContain('Componente 1')
@@ -447,11 +456,69 @@ describe('configuracion/promociones — el submit arma el payload correcto', () 
       canal: null,
       valorPorcentaje: '0.20',
       cadaN: null,
+      pagaM: null,
       valorMonto: null,
     })
     expect(body.scopes).toEqual([
       { tipoScope: 'items', categoriaId: null, itemIds: ['item-1'], cantidad: undefined },
     ])
+
+    wrapper.unmount()
+  })
+})
+
+describe('configuracion/promociones — NxM: lleva N, paga M', () => {
+  beforeEach(() => {
+    reset()
+    promocionesBackend = []
+  })
+
+  async function tipear(placeholder: string, valor: string) {
+    const input = dialogo()?.querySelector<HTMLInputElement>(`input[placeholder="${placeholder}"]`)
+    expect(input, `input ${placeholder}`).toBeTruthy()
+    input!.value = valor
+    input!.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 10))
+  }
+
+  it('un 3x1 manda cadaN 3, pagaM 1 y el %, y la ayuda dice cuántas regala', async () => {
+    postPromocionFalla = true
+    const wrapper = await montar()
+    await abrirCrear(wrapper)
+    await tipear('2x1 martes', '3x1 test')
+    await elegirTipo(wrapper, 'nxm')
+    await tipear('2', '3')
+    await tipear('1', '1')
+    await tipear('1.00 (gratis)', '1')
+
+    expect(dialogo()?.textContent).toContain('De cada 3 unidades, las 2 más baratas llevan el descuento.')
+
+    await elegirItems(wrapper, ['item-1'])
+    await setFecha('promocion-fecha-inicio', '2026-01-01')
+    await setFecha('promocion-fecha-fin', '2026-12-31')
+    await clickBoton('Crear')
+
+    expect(postsPromocion).toHaveLength(1)
+    expect(postsPromocion[0]).toMatchObject({
+      tipo: 'nxm',
+      valorPorcentaje: '1',
+      cadaN: 3,
+      pagaM: 1,
+      valorMonto: null,
+    })
+
+    wrapper.unmount()
+  })
+
+  it('la tabla resume el 3x1 como "Lleva 3, paga 1" y la segunda al 50% con el porcentaje', async () => {
+    promocionesBackend = [
+      promo({ id: 'p-3x1', nombre: '3x1', tipo: 'nxm', valorPorcentaje: '1.0000', cadaN: 3, pagaM: 1 }),
+      promo({ id: 'p-2da', nombre: '2da al 50', tipo: 'nxm', valorPorcentaje: '0.5000', cadaN: 2, pagaM: 1 }),
+    ]
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('Lleva 3, paga 1')
+    expect(wrapper.text()).toContain('Lleva 2, paga 1 · regalada al 50%')
 
     wrapper.unmount()
   })

@@ -9,6 +9,7 @@ import type {
   TipoPromocion,
   TipoScope,
 } from '~/composables/usePromociones'
+import { ayudaNxm, resumenNxm } from '~/composables/usePromociones'
 import {
   CANAL_OPTIONS,
   CANAL_SENTINEL_AMBOS,
@@ -102,6 +103,7 @@ const emptyForm = () => ({
   tipo: 'porcentaje' as TipoPromocion,
   valorPorcentaje: '',
   cadaN: null as number | null,
+  pagaM: null as number | null,
   valorMonto: '',
   fechaInicio: null as string | null,
   fechaFin: null as string | null,
@@ -115,6 +117,7 @@ const emptyForm = () => ({
 const form = ref(emptyForm())
 
 const cfg = computed(() => PROMOCION_CONFIG[form.value.tipo])
+const ayudaLlevaPaga = computed(() => ayudaNxm(form.value.cadaN, form.value.pagaM))
 
 const drawerTitle = computed(() => (editingId.value ? 'Editar promoción' : 'Nueva promoción'))
 const submitLabel = computed(() => (editingId.value ? 'Guardar' : 'Crear'))
@@ -142,6 +145,7 @@ function onTipoChange(value: TipoPromocion) {
   form.value.tipo = value
   form.value.valorPorcentaje = ''
   form.value.cadaN = null
+  form.value.pagaM = null
   form.value.valorMonto = ''
   const nuevaCfg = PROMOCION_CONFIG[value]
   if (!nuevaCfg.scopesMultiples && form.value.scopes.length > 1) {
@@ -235,6 +239,7 @@ async function abrirEditar(p: Promocion) {
     tipo: p.tipo,
     valorPorcentaje: p.valorPorcentaje ?? '',
     cadaN: p.cadaN ?? null,
+    pagaM: p.pagaM ?? null,
     valorMonto: p.valorMonto ?? '',
     fechaInicio: p.fechaInicio,
     fechaFin: p.fechaFin,
@@ -267,6 +272,7 @@ async function guardar() {
           : (form.value.canal as CanalPromocion),
       valorPorcentaje: cfg.value.campoPorcentaje ? form.value.valorPorcentaje : null,
       cadaN: cfg.value.campoCadaN ? form.value.cadaN : null,
+      pagaM: cfg.value.campoCadaN ? form.value.pagaM : null,
       valorMonto: cfg.value.campoMonto ? form.value.valorMonto : null,
       scopes: form.value.scopes.map((s): ScopePromocionPayload => ({
         tipoScope: s.tipoScope,
@@ -325,11 +331,7 @@ function resumenValor(p: Promocion): string {
   if (p.tipo === 'porcentaje') {
     return p.valorPorcentaje ? `${(Number(p.valorPorcentaje) * 100).toFixed(0)}% de descuento` : '—'
   }
-  if (p.tipo === 'nxm') {
-    return p.valorPorcentaje && p.cadaN
-      ? `Cada ${p.cadaN}: ${(Number(p.valorPorcentaje) * 100).toFixed(0)}% en la más barata`
-      : '—'
-  }
+  if (p.tipo === 'nxm') return resumenNxm(p)
   return p.valorMonto ? formatMonto(p.valorMonto) : '—'
 }
 
@@ -446,15 +448,26 @@ const columns: TableColumn<Promocion>[] = [
           </UFormField>
 
           <!-- Valor del beneficio — por tipo (espejo de `chk_promociones_valor_segun_tipo`) -->
+          <!-- "Lleva N, paga M": las N−M más baratas de cada grupo llevan el descuento -->
+          <div v-if="cfg.campoCadaN" class="space-y-1">
+            <div class="flex gap-4">
+              <UFormField label="Lleva" required>
+                <UInput v-model.number="form.cadaN" type="number" :min="2" placeholder="2" />
+              </UFormField>
+              <UFormField label="Paga" required>
+                <UInput v-model.number="form.pagaM" type="number" :min="1" placeholder="1" />
+              </UFormField>
+            </div>
+            <p v-if="ayudaLlevaPaga" class="text-sm text-muted">
+              {{ ayudaLlevaPaga }}
+            </p>
+          </div>
+
           <UFormField v-if="cfg.campoPorcentaje" :label="cfg.labelPorcentaje ?? 'Porcentaje'" required>
-            <UInput v-model="form.valorPorcentaje" inputmode="decimal" placeholder="0.10 (= 10%)" />
+            <UInput v-model="form.valorPorcentaje" inputmode="decimal" :placeholder="cfg.placeholderPorcentaje" />
             <template #hint>
               {{ cfg.ayudaPorcentaje }}
             </template>
-          </UFormField>
-
-          <UFormField v-if="cfg.campoCadaN" label="Cada cuántas unidades" required>
-            <UInput v-model.number="form.cadaN" type="number" :min="2" placeholder="2 (= 2x1)" />
           </UFormField>
 
           <UFormField v-if="cfg.campoMonto" label="Precio del combo" required>

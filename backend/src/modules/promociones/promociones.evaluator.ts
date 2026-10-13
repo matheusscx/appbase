@@ -54,6 +54,7 @@ export interface PromoElegible {
   tipo: 'porcentaje' | 'nxm' | 'precio_fijo';
   valorPorcentaje: string | null;
   cadaN: number | null;
+  pagaM: number | null;
   valorMonto: string | null;
   ventana: VentanaPromo;
   scopes: ScopePromoResuelto[];
@@ -340,11 +341,36 @@ function mismosTramos(a: Tramo[][], b: Tramo[][]): boolean {
 // ── `nxm` ─────────────────────────────────────────────────────────────────
 
 /**
- * NxM (2x1, "2do al 50%", etc.): toma las unidades enteras del scope en el
- * orden de `lotesDelScope` (precio de lista DESCENDENTE) y arma grupos
- * completos de `cadaN` consecutivas. En cada grupo, la unidad más barata —la
- * última del grupo— recibe `valorPorcentaje × precioLista` (2x1 = 100% de la
- * más barata: "paga la más cara"). Un grupo incompleto al final no aplica.
+ * Las últimas `n` unidades de un grupo, en el mismo orden: como el grupo va
+ * por precio DESCENDENTE, son las `n` más baratas. Recorta el primer tramo
+ * que cruza el borde.
+ */
+function ultimasUnidades(tramos: Tramo[], n: number): Tramo[] {
+  const ultimas: Tramo[] = [];
+  let faltan = n;
+  for (let i = tramos.length - 1; i >= 0 && faltan > 0; i--) {
+    const unidades = Math.min(faltan, tramos[i].unidades);
+    ultimas.unshift({ lote: tramos[i].lote, unidades });
+    faltan -= unidades;
+  }
+  return ultimas;
+}
+
+/**
+ * NxM, "lleva `cadaN`, paga `pagaM`" (owner, 2026-10-13, "Hacer el NxM de
+ * verdad"): 2x1, 3x1, 4x2, "2do al 50%". Toma las unidades enteras del scope
+ * en el orden de `lotesDelScope` (precio de lista DESCENDENTE) y arma grupos
+ * completos de `cadaN` consecutivas. En cada grupo, las `cadaN − pagaM`
+ * unidades más baratas —las últimas del grupo— reciben cada una
+ * `valorPorcentaje × precioLista`: el 3x1 sobre $1.000, $1.000 y $800 regala
+ * una de $1.000 y la de $800, y cobra $1.000. Las unidades que sobran del
+ * último grupo incompleto no reciben nada (owner, 2026-10-13: "Sí, pagan
+ * completo").
+ *
+ * Cuando las regaladas vienen de líneas distintas, la aplicación lleva un
+ * monto por línea —las unidades de una misma línea sumadas—, en el orden del
+ * grupo. Es la forma que ya tiene el combo, y el motor la trata igual: el
+ * interruptor compara la aplicación entera contra el catálogo de esas líneas.
  *
  * Cada grupo completo es UNA `AplicacionPromo` propia (no se agregan en una
  * sola, a diferencia de `porcentaje`): 4 cervezas en el 2x1 son 2 aplicaciones,
@@ -356,10 +382,10 @@ function mismosTramos(a: Tramo[][], b: Tramo[][]): boolean {
  * (`MAX_UNIDADES_POR_VENTA`), no este evaluador.
  *
  * Para el greedy, cada candidata pide las unidades de TODO su grupo, no solo
- * de la barata que aparece en `montosPorLinea`: la "cara" del grupo no recibe
- * descuento, pero igual ocupa una unidad física — si no se contara, otra
- * candidata podría creerla libre y pisarla. Cuando el grupo cae entero dentro
- * de la MISMA línea (ej. una línea con `cantidad`='4' y `cadaN`=2), dos
+ * las regaladas que aparecen en `montosPorLinea`: las que pagan no reciben
+ * descuento, pero igual ocupan una unidad física — si no se contaran, otra
+ * candidata podría creerlas libres y pisarlas. Cuando el grupo cae entero
+ * dentro de la MISMA línea (ej. una línea con `cantidad`='4' y `cadaN`=2), dos
  * grupos de esa línea piden 2+2 unidades — el greedy por conteo (no por
  * presencia de línea) los deja convivir sin chocar entre sí.
  */
@@ -369,25 +395,43 @@ function evaluarNxm(
   lineas: LineaPromo[],
 ): CandidataGreedy[] {
   const cadaN = promo.cadaN as number;
+  const regaladas = cadaN - (promo.pagaM as number);
   const valor = new Decimal(promo.valorPorcentaje as string);
 
   const cursor = new CursorDeLotes(lotesDelScope(promo, scope, lineas));
   const gruposCompletos = Math.floor(cursor.disponibles / cadaN);
   const candidatas: CandidataGreedy[] = [];
 
-  // El monto depende solo de la barata del grupo: se calcula una vez por lote.
-  let barataAnterior: LoteUnidades | null = null;
-  let monto = ZERO;
+  // El monto depende solo de las regaladas del grupo: con los mismos tramos
+  // regalados que el grupo anterior, se reusa.
+  let regaladasAnterior: Tramo[] | null = null;
+  let montosPorLinea: { lineaIndex: number; monto: string }[] = [];
+  let total = ZERO;
 
   for (let g = 0; g < gruposCompletos; g++) {
     const tramos = cursor.tomar(cadaN);
-    // Ordenado desc: la última unidad del grupo es la más barata.
-    const barata = tramos[tramos.length - 1].lote;
-    if (barata !== barataAnterior) {
-      barataAnterior = barata;
-      monto = valor.times(barata.precioLista);
+    const tramosRegalados = ultimasUnidades(tramos, regaladas);
+    if (
+      regaladasAnterior === null ||
+      !mismosTramos([regaladasAnterior], [tramosRegalados])
+    ) {
+      regaladasAnterior = tramosRegalados;
+      const porLinea = new Map<number, Decimal>();
+      for (const t of tramosRegalados) {
+        porLinea.set(
+          t.lote.lineaIndex,
+          (porLinea.get(t.lote.lineaIndex) ?? ZERO).plus(
+            valor.times(t.lote.precioLista).times(t.unidades),
+          ),
+        );
+      }
+      montosPorLinea = [...porLinea.entries()].map(([lineaIndex, monto]) => ({
+        lineaIndex,
+        monto: monto.toString(),
+      }));
+      total = [...porLinea.values()].reduce((a, m) => a.plus(m), ZERO);
     }
-    if (!monto.greaterThan(ZERO)) continue;
+    if (!total.greaterThan(ZERO)) continue;
 
     const conteo = new Map<number, number>();
     for (const t of tramos) {
@@ -402,9 +446,8 @@ function evaluarNxm(
         nombre: promo.nombre,
         tipo: promo.tipo,
         valorEfectivo: promo.valorPorcentaje as string,
-        montosPorLinea: [
-          { lineaIndex: barata.lineaIndex, monto: monto.toString() },
-        ],
+        // Una copia por grupo: el reuso es del cálculo, no de los objetos.
+        montosPorLinea: montosPorLinea.map((m) => ({ ...m })),
       },
       unidadesPorLinea: [...conteo.entries()].map(([lineaIndex, unidades]) => ({
         lineaIndex,

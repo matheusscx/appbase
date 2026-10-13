@@ -123,6 +123,7 @@ interface VentaPromocionResponse {
   tipo: string;
   valorEfectivo: string;
   monto: string;
+  aplicacion: number;
 }
 interface VentaDetalleResponse extends VentaCreateResponse {
   totalFinal: string;
@@ -594,6 +595,7 @@ describe('Motor de promociones (e2e)', () => {
         tipo: 'nxm',
         valorPorcentaje: '1.0000',
         cadaN: 2,
+        pagaM: 1,
         scopes: [{ tipoScope: 'items', itemIds: [itemId] }],
       });
 
@@ -616,6 +618,225 @@ describe('Motor de promociones (e2e)', () => {
           (tresUnidades.body as ResultadoVentaResponse).totales.totalDescuentos,
         ),
       ).toBe(1000);
+    });
+  });
+
+  // ─── 4b. NxM: lleva N, paga M ────────────────────────────────────────────
+
+  // Owner, 2026-10-13, "Hacer el NxM de verdad": en cada grupo de N, las N−M
+  // más baratas reciben el porcentaje, y las que sobran pagan completo. El
+  // 3x1 de $1.000, $1.000 y $800 cobra $1.000: con la regla anterior solo se
+  // armaba con el truco del 200 %, que cobraba $800 o $1.200.
+  describe('NxM: lleva N, paga M', () => {
+    const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
+    let itemMil: string;
+    let itemOchocientos: string;
+    let promoNombre: string;
+    let garzon: { id: string; pin: string };
+    let mesaId: string;
+
+    /** A $1.000 ×2 y B $800 ×1: el carrito del ejemplo del owner. */
+    const carrito3x1 = () => [
+      { itemId: itemMil, cantidad: '2' },
+      { itemId: itemOchocientos, cantidad: '1' },
+    ];
+
+    beforeAll(async () => {
+      const marca = Date.now();
+      itemMil = (
+        await crearItem(`Item 3x1 mil E2E ${marca}`, {
+          precioBase: '1000',
+          clasificacionTributaria: 'exento',
+        })
+      ).id;
+      itemOchocientos = (
+        await crearItem(`Item 3x1 ochocientos E2E ${marca}`, {
+          precioBase: '800',
+          clasificacionTributaria: 'exento',
+        })
+      ).id;
+      promoNombre = `Promo 3x1 E2E ${marca}`;
+      await crearPromo(promoNombre, {
+        tipo: 'nxm',
+        valorPorcentaje: '1',
+        cadaN: 3,
+        pagaM: 1,
+        scopes: [{ tipoScope: 'items', itemIds: [itemMil, itemOchocientos] }],
+      });
+
+      // Garzón propio (molde del describe 'Cuenta de salón'): la sesión es
+      // única por garzón y el del seed lo pisan otros specs.
+      garzon = await post<{ id: string; pin: string }>('/api/garzones', {
+        nombre: `Garzón 3x1 E2E ${marca}`,
+      });
+      await post('/api/sesiones-garzon/iniciar', {
+        garzonId: garzon.id,
+        pin: garzon.pin,
+        turnoId: TURNO_MANANA_ID,
+      });
+      const salonId = (
+        await post<IdResponse>('/api/salones', {
+          nombre: `Salón 3x1 E2E ${marca}`,
+        })
+      ).id;
+      mesaId = (
+        await post<IdResponse>(`/api/salones/${salonId}/mesas`, {
+          nombre: 'Mesa 3x1',
+        })
+      ).id;
+    });
+
+    afterAll(async () => {
+      try {
+        await request(app.getHttpServer())
+          .post('/api/sesiones-garzon/cerrar')
+          .set('Authorization', `Bearer ${tokenAdmin}`)
+          .send({ garzonId: garzon.id, pin: garzon.pin });
+      } catch {
+        // best-effort, igual que en 'Cuenta de salón'
+      }
+    });
+
+    it('/calcular: el 3x1 regala una de $1.000 y la de $800, y cobra $1.000', async () => {
+      const res = await calcular({ lineas: carrito3x1() });
+      expect(res.status).toBe(201);
+      const body = res.body as ResultadoVentaResponse;
+      expect(Number(body.totales.totalDescuentos)).toBe(1800);
+      expect(Number(body.totales.totalFinal)).toBe(1000);
+      // Una sola aplicación, repartida entre las dos líneas.
+      const trazas = body.lineas.map((l) =>
+        l.trazas.promociones.map((t) => ({
+          monto: Number(t.monto),
+          aplicacion: t.aplicacion,
+        })),
+      );
+      expect(trazas).toEqual([
+        [{ monto: 1000, aplicacion: 1 }],
+        [{ monto: 800, aplicacion: 1 }],
+      ]);
+    });
+
+    it('POS: la venta cobra $1.000 y congela una fila por línea regalada', async () => {
+      const res = await crearVenta({ lineas: carrito3x1() });
+      expect(res.status).toBe(201);
+      const venta = res.body as VentaCreateResponse;
+      expect(Number(venta.totalFinal)).toBe(1000);
+
+      const detalle = await detalleVenta(venta.id);
+      const detalleDe = (itemId: string) =>
+        detalle.detalles.find((d) => d.itemId === itemId)!.id;
+      const congelado = detalle.promociones
+        .map((p) => ({
+          detalleId: p.detalleId,
+          nombre: p.nombre,
+          monto: Number(p.monto),
+          aplicacion: p.aplicacion,
+        }))
+        .sort((a, b) => b.monto - a.monto);
+      expect(congelado).toEqual([
+        {
+          detalleId: detalleDe(itemMil),
+          nombre: promoNombre,
+          monto: 1000,
+          aplicacion: 1,
+        },
+        {
+          detalleId: detalleDe(itemOchocientos),
+          nombre: promoNombre,
+          monto: 800,
+          aplicacion: 1,
+        },
+      ]);
+    });
+
+    it('cuenta de salón: cerrar la mesa cobra lo mismo que el POS', async () => {
+      const cuenta = await post<IdResponse>(`/api/mesas/${mesaId}/cuentas`, {
+        garzonId: garzon.id,
+        pin: garzon.pin,
+      });
+      for (const l of carrito3x1()) {
+        await post(`/api/cuentas/${cuenta.id}/lineas`, l);
+      }
+      const cierre = await post<{ ventaId: string }>(
+        `/api/cuentas/${cuenta.id}/cerrar`,
+        { garzonId: garzon.id, pin: garzon.pin, pagos: [] },
+      );
+      const detalle = await detalleVenta(cierre.ventaId);
+      expect(Number(detalle.totalDescuentos)).toBe(1800);
+      expect(Number(detalle.totalFinal)).toBe(1000);
+    });
+
+    it('online: la venta pagada completa cobra $1.000', async () => {
+      const res = await crearVenta({
+        canal: 'online',
+        lineas: carrito3x1(),
+        pagos: [{ metodoPagoId: EFECTIVO_ID, monto: '1000' }],
+      });
+      expect(res.status).toBe(201);
+      const venta = res.body as VentaCreateResponse;
+      expect(venta.canal).toBe('online');
+      expect(Number(venta.totalFinal)).toBe(1000);
+    });
+
+    it('5 unidades de $1.000 en un 3x1: un grupo y dos que pagan completo, $3.000', async () => {
+      const res = await calcular({
+        lineas: [{ itemId: itemMil, cantidad: '5' }],
+      });
+      expect(res.status).toBe(201);
+      expect(
+        Number((res.body as ResultadoVentaResponse).totales.totalFinal),
+      ).toBe(3000);
+    });
+
+    // El ancla del cierre a góndola: dos unidades gratis de una etiqueta con
+    // IVA incluido no le cuestan un peso a la que se paga.
+    it('góndola: un 3x1 sobre una etiqueta de $993 con IVA incluido cobra $993 exacto', async () => {
+      const marca = Date.now();
+      const itemId = (
+        await crearItem(`Item 3x1 góndola E2E ${marca}`, {
+          precioBase: '993',
+          precioIncluyeImpuesto: true,
+        })
+      ).id;
+      await crearPromo(`Promo 3x1 góndola E2E ${marca}`, {
+        tipo: 'nxm',
+        valorPorcentaje: '1',
+        cadaN: 3,
+        pagaM: 1,
+        scopes: [{ tipoScope: 'items', itemIds: [itemId] }],
+      });
+
+      const res = await crearVenta({ lineas: [{ itemId, cantidad: '3' }] });
+      expect(res.status).toBe(201);
+      expect(Number((res.body as VentaCreateResponse).totalFinal)).toBe(993);
+    });
+
+    it.each([
+      ['sin pagaM', { pagaM: undefined }, /pagaM es requerido/],
+      ['paga lo mismo que lleva', { pagaM: 3 }, /pagar menos unidades/],
+      ['paga 0', { pagaM: 0 }, /pagaM must not be less than 1/],
+      [
+        'más de 100 % por unidad',
+        { valorPorcentaje: '1.5' },
+        /como máximo 100 %/,
+      ],
+    ])('crear un nxm %s → 400', async (_caso, extra, mensaje) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/promociones')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({
+          nombre: `Promo nxm 400 E2E ${randomUUID()}`,
+          tipo: 'nxm',
+          fechaInicio: FECHA_INICIO_AMPLIA,
+          fechaFin: FECHA_FIN_AMPLIA,
+          valorPorcentaje: '1',
+          cadaN: 3,
+          pagaM: 1,
+          scopes: [{ tipoScope: 'venta' }],
+          ...extra,
+        });
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toMatch(mensaje);
     });
   });
 

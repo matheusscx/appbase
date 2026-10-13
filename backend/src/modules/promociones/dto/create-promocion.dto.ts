@@ -66,7 +66,7 @@ export class ScopePromoDto {
 
 /**
  * El beneficio va inline (Fase 1: una promo tiene exactamente uno). La
- * correspondencia `tipo ↔ valorPorcentaje/cadaN/valorMonto` es regla entre
+ * correspondencia `tipo ↔ valorPorcentaje/cadaN/pagaM/valorMonto` es regla entre
  * hermanos y la valida el service, espejo de `chk_promociones_valor_segun_tipo`.
  */
 export class CreatePromocionDto {
@@ -124,19 +124,33 @@ export class CreatePromocionDto {
   @IsIn(['fisico', 'online'])
   canal?: 'fisico' | 'online' | null;
 
-  /** `porcentaje` y `nxm`. Decimal: 2x1 = '1.0000', "2do al 50%" = '0.5000'. */
+  /**
+   * `porcentaje` y `nxm`, en decimal. En `nxm` es el descuento de CADA unidad
+   * regalada, como máximo 1: 2x1 = '1.0000', "2do al 50%" = '0.5000'.
+   */
   @IsOptional()
   @IsNumberString()
   @IsDecimalPersistible(7, 4)
   valorPorcentaje?: string | null;
 
-  /** Solo `nxm`: 2x1→2, 3x2→3. */
+  /** Solo `nxm`: cuántas lleva el grupo (2x1 → 2, 3x1 → 3, 4x2 → 4). */
   // Columna `smallint` de `promociones`.
   @IsOptional()
   @IsInt()
   @Min(2)
   @Max(MAX_SMALLINT)
   cadaN?: number | null;
+
+  /**
+   * Solo `nxm`: cuántas de cada `cadaN` paga (2x1 → 1, 3x1 → 1, 4x2 → 2).
+   * Que sea menor a `cadaN` es regla entre hermanos: la valida el service.
+   */
+  // Columna `smallint` de `promociones`.
+  @IsOptional()
+  @IsInt()
+  @Min(1)
+  @Max(MAX_SMALLINT)
+  pagaM?: number | null;
 
   /** Solo `precio_fijo`: el precio del conjunto en moneda oficial. */
   @IsOptional()
