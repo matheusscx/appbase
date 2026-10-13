@@ -100,7 +100,10 @@ destapa una decisión que no es mía).
   el 2026-09-30: aquel caía en el paso 5. Lo probable es la SPA en frío (la pantalla tarda más que
   5 s en pintar el aviso), **no medido**. **Si vuelve a pasar:** mirar en la captura si la
   pantalla todavía estaba cargando y, si es así, darle a ese `toBeVisible` un timeout de carga
-  en vez del de 5 s.
+  en vez del de 5 s. **Antecedente:** ya cayó en frío como primer spec el 2026-09-30, y el frente
+  del arranque en frío (2026-10-09, `resueltos.md`, "El arranque en frío del stack") midió que la
+  primera compilación de Vite de `nuxt dev` tarda más que los timeouts con el host cargado. En CI
+  no pasa porque el `webServer` sirve el build.
 - [ ] **La pantalla de retorno de la tienda muestra "rechazado" para una orden `expirada` que pudo
   cobrarse** (frontend, `useRetornoTienda`; lo vio la revisión del frente `3c9e15de`, 2026-10-11;
   **leído, no medido**). `verificar` acepta `expirada` y la puede pasar a `pagada`, así que una
