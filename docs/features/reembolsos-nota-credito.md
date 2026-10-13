@@ -874,6 +874,9 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
 - `create-reembolso.dto.spec.ts`: validación anidada del DTO y el tope de 500 `devoluciones`.
 - `topes-dto.e2e-spec.ts` (2026-10-08): el tope de `devoluciones` de los tres DTOs por HTTP, y
   una venta de 500 ítems distintos cuya nota entera es 201 (con 501, 400 y ninguna nota).
+- `nota-credito-cantidad-no-cabe.e2e-spec.ts` (2026-10-13): una `cantidad` que no cabe en
+  `NUMERIC(18,4)` es 400 por exceder lo disponible, en la nota manual, el reembolso y "Generar
+  nota", sin escribir nada. Por eso el campo no lleva techo de columna: lo pone el tope de la nota.
 - `pasarela-reembolso.e2e-spec.ts` (2026-10-02): por la API real, con el proveedor doblado:
   el REFUND aprobado sin devoluciones deja la nota sobre la boleta y `correccion_venta_id`;
   dos reembolsos parciales, cada uno con su nota; `generarNotaCredito` da 400 por la ruta del

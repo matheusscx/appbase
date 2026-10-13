@@ -23,6 +23,59 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## La cantidad de una nota de crédito que no cabe en su columna ya daba 400 (cerrada 2026-10-13)
+
+Frente fiscal propio (CLAUDE.md, "Lo fiscal va solo"), lanzado por la orquestadora a pedido del
+owner. Es un campo de la entrada "Cantidades por body fuera del kardex, sin techo de columna" de
+`pendientes.md` § 2. Los otros campos de esa entrada los tomó otra sesión, que reescribe la
+entrada.
+
+**Medido** por HTTP (supertest), sobre la base nueva de `entorno.sh db` y con el código de
+`origin/main` en `ec46ddc5`. Una venta de 2 unidades de un producto propio. Hay tres caminos que
+crean una nota con cantidad: la nota manual (`POST /ventas/:id/notas-credito`), el reembolso de la
+pasarela (`POST /pasarela/admin/ordenes/:id/reembolsos`) y "Generar nota"
+(`…/reembolsos/:transaccionId/nota`). El reembolso por la llave de API usa el mismo DTO y el mismo
+`CobrosService.reembolsar` que el del admin.
+
+| Cantidad | Los tres caminos |
+|---|---|
+| `100000000000000` (10^14, no cabe en `NUMERIC(18,4)`) | **400** *"La cantidad a devolver de «X» excede lo disponible (2)"* |
+| `99999999999999.99999` (redondeada a la escala, es el techo) | **400**, el mismo mensaje |
+
+Vale igual para la `cantidad` de `CreateReembolsoDto` (`DevolucionLineaDto`, que también usa
+"Generar nota"), que la entrada listaba aparte. Ninguno escribe: ni nota, ni vuelta al kardex, ni
+saldo. En el reembolso el proveedor no se llama y
+no queda `REFUND`. En "Generar nota", el `REFUND` sigue sin nota. Lo frena el tope de la propia
+nota: `validarDevolucionesReembolso` rechaza una cantidad mayor que la vendida menos la ya
+comprometida, con las dos políticas. Por eso la cantidad nunca llega a una columna. **No se tocó
+código.**
+
+**Por qué el tope basta, medido:** con ese chequeo desactivado, los 6 casos cambian. La nota
+manual y "Generar nota" dan **500**. El reembolso da **201**: el proveedor devuelve la plata y la
+nota falla después del commit, y es el peor de los tres. Si ese tope se fuera, el campo necesitaría
+su techo de columna.
+
+**Lo fija** `backend/test/nota-credito-cantidad-no-cabe.e2e-spec.ts` (6 casos: los dos valores en
+los tres caminos). Con el chequeo desactivado caen los 6.
+
+**Qué quedó afuera:** con más de 4 decimales, la cantidad da 201 y se redondea en silencio, en la
+nota y también en la venta. Una devolución en dos partes deja 2,0001 unidades de vuelta para 2
+vendidas. El owner decidió rechazarlo con aviso (2026-10-13). Va en su propio frente:
+[`pendientes.md`](pendientes.md) § 3, *"Una cantidad con más de 4 decimales se redondea en
+silencio"*.
+
+### Los campos que cierra, como estaban en la entrada de `pendientes.md` § 2
+
+- la `cantidad` de una nota de crédito (`CreateNotaCreditoDto`);
+- la de un reembolso de la pasarela (`CreateReembolsoDto`);
+
+  (El segundo no estaba en el encargo. Se cierra porque el reembolso y "Generar nota" son caminos
+  que crean una nota con esa cantidad, así que quedaron medidos acá con el mismo resultado.)
+
+  (De la entrada: *"Puede que el service ya los frene, porque la nota de crédito y la anulación no
+  deberían pasar de lo vendido. **Medir** cada uno con 10^14 por HTTP. ⚠️ La nota de crédito es
+  fiscal: va en su propio frente (CLAUDE.md)."*)
+
 ## Con "no se suman", las tandas que comparten línea compiten juntas contra su catálogo (cerrada 2026-10-13)
 
 Entrada de `pendientes.md` § 4, tal como estaba:
