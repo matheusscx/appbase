@@ -74,14 +74,6 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
-- [ ] **Restaurar un impuesto con el nombre de otro vivo no tiene test de colisión en papelera**
-  (backend test, `backend/test/papelera.e2e-spec.ts`; anotado el 2026-10-13 al cerrar `839564b9`,
-  [`resueltos.md`](resueltos.md)). `impuestos` tiene el mismo índice parcial
-  `uq_impuestos_tenant_nombre_vivo` que descuentos, recargos y turnos, y su `restaurar()` depende de
-  traducir el 23505 a 400, pero ningún test lo ejercita. Agregar el caso gemelo de los otros tres
-  (crear, borrar, crear otro con el mismo nombre, restaurar el viejo → 400), con el mutante que saca
-  el catch del 23505 (→ 500). Es solo test, no cambia una regla fiscal.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:

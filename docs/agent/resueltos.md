@@ -23,6 +23,37 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Restaurar un impuesto con el nombre de otro vivo: test de colisión en papelera (cerrada 2026-10-13)
+
+Frente mecánico, solo de test, lanzado por la orquestadora. **Medido en `pg_indexes`** de una base
+de `entorno.sh db` armada por las migraciones: `uq_impuestos_tenant_nombre_vivo` existe, único
+sobre `(tenant_id, lower(nombre)) WHERE eliminado_el IS NULL`, igual que en descuentos, recargos y
+turnos. **Leído** `ImpuestosService.restaurar()`: no pre-valida el nombre, revive con un `UPDATE` y
+traduce el 23505 a 400 con `errorDeColisionNombre` (nombre libre sugerido). Hoy da 400, así que no
+había bug que abrir como frente fiscal; el service no se tocó.
+
+**Arreglo:** caso gemelo de los otros tres en `papelera.e2e-spec.ts` (crear, borrar, crear otro con
+el mismo nombre, restaurar el viejo → 400, el otro sigue vivo y el viejo en la papelera; limpieza
+borrando el otro y restaurando). Además del status afirma el mensaje entero (`Ya existe un impuesto
+activo con el nombre "…".`) y `nombreSugerido` (`… 2`): el mensaje distingue el 400 del `catch` de
+`restaurar()` del de `validarNombreUnico`, que dice "un impuesto" a secas. **Mutante**: la
+condición del `catch` cambiada a un código que nunca llega (todo error se re-lanza, como sin el
+`catch`) → el test da **500** en el `expect(400)` del restaurar, y el log nombra
+`uq_impuestos_tenant_nombre_vivo` con code `23505`. Revertido y comparado byte a byte con el
+original. `papelera.e2e-spec.ts` 93/93 sobre base nueva; lint, typecheck y `npm test` del backend
+en verde. Se sacó de la cabecera del bloque de los 8 recursos `softDelete()` la frase "Impuestos no
+tiene test de colisión".
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Restaurar un impuesto con el nombre de otro vivo no tiene test de colisión en papelera**
+  (backend test, `backend/test/papelera.e2e-spec.ts`; anotado el 2026-10-13 al cerrar `839564b9`,
+  [`resueltos.md`](resueltos.md)). `impuestos` tiene el mismo índice parcial
+  `uq_impuestos_tenant_nombre_vivo` que descuentos, recargos y turnos, y su `restaurar()` depende de
+  traducir el 23505 a 400, pero ningún test lo ejercita. Agregar el caso gemelo de los otros tres
+  (crear, borrar, crear otro con el mismo nombre, restaurar el viejo → 400), con el mutante que saca
+  el catch del 23505 (→ 500). Es solo test, no cambia una regla fiscal.
+
 ## Un costo que cabe en su unidad y no por la unidad base se rechaza con aviso (cerrada 2026-10-13)
 
 **Decisión del owner** (2026-10-13, por AskUserQuestion de la orquestadora, con la escena
@@ -225,7 +256,8 @@ sobre esos seis: corre sobre los ocho, y seis tienen índice único parcial, med
 `pg_indexes`) y la de "Los 5 con índice único
 parcial" (decía que descuentos/recargos/turnos calculaban la sugerencia antes de intentar; la
 calculan en el `catch`, igual que los otros). El código de los tests no se tocó (acordado con la
-orquestadora). Queda sin test de colisión `impuestos`, que tiene el mismo índice. `papelera.e2e-spec.ts` 92/92 sobre base nueva.
+orquestadora). Quedaba sin test de colisión `impuestos`, que tiene el mismo índice: cerrado el
+mismo día (entrada de arriba). `papelera.e2e-spec.ts` 92/92 sobre base nueva.
 
 ### La entrada que cierra, como estaba en `pendientes.md` § 1
 

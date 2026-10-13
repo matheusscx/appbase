@@ -1375,7 +1375,7 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
 // de los ocho tienen índice único parcial (medido en `pg_indexes` el
 // 2026-10-13): descuentos, recargos, impuestos y turnos por nombre
 // (`uq_<tabla>_tenant_nombre_vivo`), y cajones y garzones como cuenta la nota
-// de abajo. Impuestos no tiene test de colisión.
+// de abajo.
 //
 // ⚠️ **Corregido**: la primera versión de este bloque decía que
 // NINGUNO de los 8 tenía nombre único con restricción parcial. Era falso — la
@@ -1938,6 +1938,66 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     expect((res.body as { nombreSugerido: string }).nombreSugerido).toBe(
       `${nombre} 3`,
     );
+  });
+
+  // Mismo índice que los otros tres (`uq_impuestos_tenant_nombre_vivo`). El
+  // mensaje se afirma entero porque es lo que prueba que el 400 sale del
+  // `catch` del 23505 de `restaurar()` y no de `validarNombreUnico`, que dice
+  // "un impuesto" a secas. Sin el `catch` da 500 (medido el 2026-10-13).
+  it('impuestos: colisión de nombre con el índice único parcial — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
+    const nombre = `Impuesto papelera E2E colisión ${Date.now()}`;
+    const bodyBase = { nombre, porcentaje: '0.05' };
+    const resOriginal = await request(app.getHttpServer())
+      .post('/api/impuestos')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send(bodyBase);
+    expect(resOriginal.status).toBe(201);
+    const originalId = (resOriginal.body as RecursoConAuditoria).id;
+
+    const resBorrar = await request(app.getHttpServer())
+      .delete(`/api/impuestos/${originalId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resBorrar.status).toBe(200);
+
+    const resOtro = await request(app.getHttpServer())
+      .post('/api/impuestos')
+      .set('Authorization', `Bearer ${tokenAdmin}`)
+      .send(bodyBase);
+    expect(resOtro.status).toBe(201);
+    const otroId = (resOtro.body as RecursoConAuditoria).id;
+
+    const resRestaurar = await request(app.getHttpServer())
+      .post(`/api/impuestos/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurar.status).toBe(400);
+    const cuerpo = resRestaurar.body as {
+      message: string;
+      nombreSugerido: string;
+    };
+    expect(cuerpo.message).toBe(
+      `Ya existe un impuesto activo con el nombre "${nombre}".`,
+    );
+    expect(cuerpo.nombreSugerido).toBe(`${nombre} 2`);
+
+    const listado = await request(app.getHttpServer())
+      .get('/api/impuestos?incluirEliminados=true')
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(listado.status).toBe(200);
+    const impuestos = listado.body as RecursoConAuditoria[];
+    expect(impuestos.find((i) => i.id === otroId)?.eliminadoEl).toBeFalsy();
+    expect(
+      impuestos.find((i) => i.id === originalId)?.eliminadoEl,
+    ).toBeTruthy();
+
+    const resBorrarOtro = await request(app.getHttpServer())
+      .delete(`/api/impuestos/${otroId}`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resBorrarOtro.status).toBe(200);
+
+    const resRestaurarOk = await request(app.getHttpServer())
+      .post(`/api/impuestos/${originalId}/restaurar`)
+      .set('Authorization', `Bearer ${tokenAdmin}`);
+    expect(resRestaurarOk.status).toBe(201);
   });
 
   it('turnos: colisión de nombre con el índice único parcial — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
