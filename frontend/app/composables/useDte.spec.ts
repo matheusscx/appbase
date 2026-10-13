@@ -66,7 +66,7 @@ describe('leerDte — andina-33.xml (la escena de la spec)', () => {
   })
 
   it('descuentoDeFactura: 2% de (91.200 + 8.800 + 5.000) = 2% de 105.000 = 2.100, el flete adentro de la base', () => {
-    expect(descuentoDeFactura(doc, 0)).toEqual({ monto: '2100', avisos: [], fueraDeLaBase: [] })
+    expect(descuentoDeFactura(doc, 0, formatMontoStub)).toEqual({ monto: '2100', avisos: [], fueraDeLaBase: [] })
   })
 })
 
@@ -196,10 +196,30 @@ describe('descuentoDeFactura — descuentos y recargos globales', () => {
     const doc = documentoOk(leerDte(leerFixture('descuentos-globales.xml')))
     // D $1.500 + D 10% de la línea exenta ($20.000, IndExe=1 calza con IndExeDR=1) = $2.000
     // → 1.500 + 2.000 = 3.500. El R $800 no entra al monto.
-    const { monto, avisos } = descuentoDeFactura(doc, 0)
+    const { monto, avisos } = descuentoDeFactura(doc, 0, formatMontoStub)
     expect(monto).toBe('3500')
     expect(avisos).toHaveLength(1)
     expect(avisos[0]).toContain('$800')
+  })
+
+  // El aviso dice el recargo en su unidad (`TpoValor`): un 2% no son $2.
+  it.each([
+    ['%', '2.5', 'Recargo de 2,5% no se carga: la compra no tiene recargos'],
+    ['$', '5000', 'Recargo de $5.000 no se carga: la compra no tiene recargos'],
+  ] as const)('un recargo en %s dice su valor en esa unidad', (tipoValor, valor, aviso) => {
+    const doc: DocumentoDte = {
+      ...documentoOk(leerDte(leerFixture('descuentos-globales.xml'))),
+      descuentosGlobales: [{ tipoMov: 'R', tipoValor, valor, indExeDR: null }],
+    }
+    expect(descuentoDeFactura(doc, 0, formatMontoStub)).toEqual({ monto: null, avisos: [aviso], fueraDeLaBase: [] })
+  })
+
+  it('un recargo con un ValorDR que no es un número avisa que no se pudo leer, sin explotar', () => {
+    const doc: DocumentoDte = {
+      ...documentoOk(leerDte(leerFixture('descuentos-globales.xml'))),
+      descuentosGlobales: [{ tipoMov: 'R', tipoValor: '%', valor: 'x', indExeDR: null }],
+    }
+    expect(descuentoDeFactura(doc, 0, formatMontoStub).avisos).toEqual(['La factura trae un recargo global que no se pudo leer'])
   })
 })
 
@@ -230,7 +250,7 @@ describe('descuentoDeFactura — las líneas que su IndExe deja fuera de toda ba
 
   it('la escena: cerveza $50.000 + garantía de envases $6.000 (IndExe 3), 2% → $1.000 sobre $50.000, y la garantía queda anotada', () => {
     const doc = documentoOk(leerDte(leerFixture('garantia-envases.xml')))
-    expect(descuentoDeFactura(doc, 0)).toEqual({
+    expect(descuentoDeFactura(doc, 0, formatMontoStub)).toEqual({
       monto: '1000',
       avisos: [],
       fueraDeLaBase: [{
@@ -249,7 +269,7 @@ describe('descuentoDeFactura — las líneas que su IndExe deja fuera de toda ba
       linea('MUESTRA SIN COSTO', '4000', '4'),
       linea('REBAJA GUIA 120', '1500', '5'),
     ], [DOS_POR_CIENTO])
-    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0)
+    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0, formatMontoStub)
     expect(monto).toBe('1000')
     expect(fueraDeLaBase).toEqual([{
       valorDR: '2',
@@ -266,7 +286,7 @@ describe('descuentoDeFactura — las líneas que su IndExe deja fuera de toda ba
       [linea('CERVEZA', '50000', null), linea('GARANTIA ENVASES', '6000', '3')],
       [{ tipoMov: 'D', tipoValor: '$', valor: '1000', indExeDR: null }],
     )
-    expect(descuentoDeFactura(doc, 0).fueraDeLaBase).toEqual([])
+    expect(descuentoDeFactura(doc, 0, formatMontoStub).fueraDeLaBase).toEqual([])
   })
 
   it('un recargo en % no se carga (va a avisos): tampoco se explica su base', () => {
@@ -274,7 +294,7 @@ describe('descuentoDeFactura — las líneas que su IndExe deja fuera de toda ba
       [linea('CERVEZA', '50000', null), linea('GARANTIA ENVASES', '6000', '3')],
       [{ tipoMov: 'R', tipoValor: '%', valor: '2', indExeDR: null }],
     )
-    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0)
+    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0, formatMontoStub)
     expect(monto).toBeNull()
     expect(fueraDeLaBase).toEqual([])
   })
@@ -284,7 +304,7 @@ describe('descuentoDeFactura — las líneas que su IndExe deja fuera de toda ba
       [linea('CERVEZA', '50000', null), linea('RARO', '1000', 'toString'), linea('OTRO', '1000', '__proto__')],
       [DOS_POR_CIENTO],
     )
-    expect(descuentoDeFactura(doc, 0).fueraDeLaBase).toEqual([])
+    expect(descuentoDeFactura(doc, 0, formatMontoStub).fueraDeLaBase).toEqual([])
   })
 
   it('un IndExeDR fuera del schema ("3") que SÍ toma la garantía en su base: esa línea no se anota como fuera', () => {
@@ -292,7 +312,7 @@ describe('descuentoDeFactura — las líneas que su IndExe deja fuera de toda ba
       [linea('CERVEZA', '50000', null), linea('GARANTIA ENVASES', '6000', '3')],
       [{ tipoMov: 'D', tipoValor: '%', valor: '2', indExeDR: '3' }],
     )
-    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0)
+    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0, formatMontoStub)
     expect(monto).toBe('120')
     expect(fueraDeLaBase).toEqual([])
   })
@@ -302,7 +322,7 @@ describe('descuentoDeFactura — las líneas que su IndExe deja fuera de toda ba
       [linea('CERVEZA', '50000', null), linea('PAN EXENTO', '20000', '1'), linea('GARANTIA ENVASES', '6000', '3')],
       [DOS_POR_CIENTO, { tipoMov: 'D', tipoValor: '%', valor: '10', indExeDR: '1' }],
     )
-    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0)
+    const { monto, fueraDeLaBase } = descuentoDeFactura(doc, 0, formatMontoStub)
     expect(monto).toBe('3000')
     expect(fueraDeLaBase.map(f => [f.valorDR, f.base, f.lineas.length])).toEqual([['2', '50000', 1], ['10', '20000', 1]])
   })
@@ -424,8 +444,8 @@ describe('valores no numéricos en el XML (fix round 1, F1)', () => {
 
   it('descuentoDeFactura con un ValorDR="x": no explota, lo salta y avisa', () => {
     const doc = documentoOk(leerDte(leerFixture('valores-invalidos.xml')))
-    expect(() => descuentoDeFactura(doc, 0)).not.toThrow()
-    const { monto, avisos } = descuentoDeFactura(doc, 0)
+    expect(() => descuentoDeFactura(doc, 0, formatMontoStub)).not.toThrow()
+    const { monto, avisos } = descuentoDeFactura(doc, 0, formatMontoStub)
     expect(monto).toBeNull()
     expect(avisos).toContain('La factura trae un descuento global que no se pudo leer')
   })
@@ -517,12 +537,12 @@ describe('precargaDescuento', () => {
   const doc = documentoOk(leerDte(leerFixture('andina-33.xml')))
 
   it('sin líneas sin precio y sin precios brutos: carga el descuento de descuentoDeFactura (2.100)', () => {
-    expect(precargaDescuento(doc, 0, false)).toEqual({ monto: '2100', avisos: [], fueraDeLaBase: [] })
+    expect(precargaDescuento(doc, 0, false, formatMontoStub)).toEqual({ monto: '2100', avisos: [], fueraDeLaBase: [] })
   })
 
   it('con precios brutos: no carga nada y avisa que hay que tipear el neto, sin llamar a descuentoDeFactura', () => {
     const bruto = documentoOk(leerDte(leerFixture('precios-brutos.xml')))
-    expect(precargaDescuento(bruto, 0, false)).toEqual({
+    expect(precargaDescuento(bruto, 0, false, formatMontoStub)).toEqual({
       monto: null,
       avisos: ['Esta factura trae los precios con IVA incluido: tipeá el neto'],
       fueraDeLaBase: [],
@@ -530,7 +550,7 @@ describe('precargaDescuento', () => {
   })
 
   it('con alguna línea sin precio (y la factura sí trae un descuento global): no carga nada y avisa', () => {
-    const r = precargaDescuento(doc, 0, true)
+    const r = precargaDescuento(doc, 0, true, formatMontoStub)
     expect(r.monto).toBeNull()
     expect(r.avisos).toHaveLength(1)
     expect(r.avisos[0]).toMatch(/sin precio/)
@@ -539,7 +559,7 @@ describe('precargaDescuento', () => {
 
   it('con alguna línea sin precio y SIN descuento global en la factura: no avisa nada (no hay nada que no se cargó)', () => {
     const sinDescuento: DocumentoDte = { ...doc, descuentosGlobales: [] }
-    expect(precargaDescuento(sinDescuento, 0, true)).toEqual({ monto: null, avisos: [], fueraDeLaBase: [] })
+    expect(precargaDescuento(sinDescuento, 0, true, formatMontoStub)).toEqual({ monto: null, avisos: [], fueraDeLaBase: [] })
   })
 })
 

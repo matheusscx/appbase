@@ -23,6 +23,68 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El aviso de un recargo global en % decía "Recargo de $2" (cerrada 2026-10-13)
+
+Frente mecánico, lanzado por la orquestadora. `descuentoDeFactura` (`useDte.ts`) armaba el aviso
+del recargo con `$${dg.valor}` sin mirar `TpoValor`: un recargo del 2% salía "Recargo de $2", y
+uno de $5.000 salía "Recargo de $5000", sin separador de miles.
+
+**Arreglo:** el aviso usa el formato del mismo archivo — el % como `explicacionDescuentoDte`
+("2,5%", coma decimal) y el monto con `formatMonto` ("$5.000"), que `descuentoDeFactura` y
+`precargaDescuento` ahora reciben como parámetro, igual que `lineaFormDesdeDte` y
+`explicacionDescuentoDte`. Como el valor ahora se parsea (y `new Decimal` tira con un texto), un
+`ValorDR` de recargo que no es un número pasa por la misma guarda que el del descuento: avisa "La
+factura trae un recargo global que no se pudo leer" (antes salía "Recargo de $x").
+
+**Tests y mutante:** `useDte.spec.ts`, un `it.each` con un recargo en % (`2.5` → "Recargo de
+2,5%") y uno en $ (`5000` → "Recargo de $5.000"), más el `ValorDR` ilegible. Mutante que revierte
+(volver a `$${dg.valor}`): caen los dos casos del `it.each`. Playwright
+`compras/compras-dte.spec.ts` (4/4), que pasa por la precarga del descuento de `compras/[id].vue`.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **El aviso de un recargo global en % dice "Recargo de $2" en vez de "2%"** (frontend,
+  `descuentoDeFactura` en `frontend/app/composables/useDte.ts`, el `avisos.push` de `tipoMov ===
+  'R'`; anotado el 2026-10-12 por el frente de la garantía de envases, `0566e01b`, que lo vio y no
+  lo tocó). Al importar el XML de una factura con un `DscRcgGlobal` de recargo con `TpoValor '%'`,
+  el aviso de "no se carga" interpola `dg.valor` siempre como pesos. Que diga "%" o "$" según
+  `TpoValor`, con su spec.
+
+## Un comentario de `papelera.e2e-spec.ts` negaba el índice único de nombre (cerrada 2026-10-13)
+
+Frente mecánico, lanzado por la orquestadora. **Medido en `pg_indexes`** de una base armada por
+las migraciones (`entorno.sh`, una sola migración, la línea base): `descuentos`, `recargos` y
+`turnos` tienen `uq_<tabla>_tenant_nombre_vivo`, único sobre `(tenant_id, lower(nombre)) WHERE
+eliminado_el IS NULL`.
+
+**Lo falso era más que el índice.** El comentario decía que la unicidad la garantizaba solo el
+código y que, si `restaurar()` se saltara la validación, el test daría 201. Pero `restaurar()` de
+los tres **no pre-valida el nombre**: revive con un `UPDATE` y traduce el 23505 del índice a 400
+con un nombre libre sugerido, igual que `cajones`. El 400 del test viene del índice. **Mutante**:
+sacar la traducción del 23505 en los tres `restaurar()` → los tres tests dan **500**, no 201 (el
+log nombra los tres `uq_*_tenant_nombre_vivo`). El test sigue valiendo: lo que fija es esa
+traducción.
+
+**Arreglo:** el comentario del bloque dice eso, los tres títulos pasaron de "garantizada por
+código (sin índice único)" a "con el índice único parcial", y el comentario gemelo dentro del de
+turnos ("traduce esa misma validación") dice que traduce el 23505. La revisión encontró dos
+gemelos en el mismo archivo y también se corrigieron: la cabecera del bloque de los 8 recursos
+`softDelete()` (decía que seis no tenían restricción única y que el spec parametrizado corría
+sobre esos seis: corre sobre los ocho, y seis tienen índice único parcial, medido en
+`pg_indexes`) y la de "Los 5 con índice único
+parcial" (decía que descuentos/recargos/turnos calculaban la sugerencia antes de intentar; la
+calculan en el `catch`, igual que los otros). El código de los tests no se tocó (acordado con la
+orquestadora). Queda sin test de colisión `impuestos`, que tiene el mismo índice. `papelera.e2e-spec.ts` 92/92 sobre base nueva.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 1
+
+- [ ] **Un comentario de `backend/test/papelera.e2e-spec.ts` (~línea 1614) dice que `descuentos`,
+  `recargos` y `turnos` no tienen índice único de nombre, y sí lo tienen** (anotado el 2026-10-12
+  por el frente de migraciones, [ADR-030](../adr/030-esquema-por-migraciones.md); ya era falso
+  antes: los creaba el seeder, hoy la línea base). Los tests siguen valiendo, porque prueban que
+  `restaurar()` valide el nombre; lo falso es el porqué. Corregir el comentario contra
+  `pg_indexes`, no contra `startup-pos.sql`.
+
 ## Un impuesto con más de 4 decimales se rechaza con aviso (cerrada 2026-10-12)
 
 Frente fiscal propio (CLAUDE.md, "Lo fiscal va solo"), lanzado por la orquestadora. **Decisión del

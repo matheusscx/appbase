@@ -279,28 +279,33 @@ export interface DescuentoDeFacturaDte {
  * El descuento de la factura (spec § 3.3): en `$` tal cual, en `%` sobre la
  * suma de `montoItem` de las líneas con el mismo `indExe` que `indExeDR`
  * (ausente calza con ausente), cuantizado a la escala de la moneda. Un
- * recargo no se carga — se avisa con su monto. `fueraDeLaBase` anota, por
+ * recargo no se carga — se avisa con su valor en su unidad (`$` o `%`, según
+ * `TpoValor`). `fueraDeLaBase` anota, por
  * descuento en %, las líneas que ninguna base toma (`FUERA_DE_TODA_BASE`):
  * no cambia el monto, es para que la pantalla explique por qué no pesaron.
  */
 export function descuentoDeFactura(
   doc: DocumentoDte,
   decimalesMoneda: number,
+  formatMonto: (v: string) => string,
 ): DescuentoDeFacturaDte {
   const avisos: string[] = []
   const fueraDeLaBase: DescuentoConLineasFueraDte[] = []
   let monto: Decimal | null = null
 
   for (const dg of doc.descuentosGlobales) {
-    if (dg.tipoMov === 'R') {
-      avisos.push(`Recargo de $${dg.valor} no se carga: la compra no tiene recargos`)
-      continue
-    }
     // Un `ValorDR` que no es un número se salta (con aviso), nunca hace
     // explotar el cálculo del resto de los descuentos (F1, ronda 1).
     const valor = comoDecimal(dg.valor)
     if (!valor) {
-      avisos.push('La factura trae un descuento global que no se pudo leer')
+      avisos.push(`La factura trae un ${dg.tipoMov === 'R' ? 'recargo' : 'descuento'} global que no se pudo leer`)
+      continue
+    }
+    if (dg.tipoMov === 'R') {
+      const recargo = dg.tipoValor === '%'
+        ? `${valor.toFixed().replace('.', ',')}%`
+        : formatMonto(valor.toFixed())
+      avisos.push(`Recargo de ${recargo} no se carga: la compra no tiene recargos`)
       continue
     }
     if (dg.tipoValor === '$') {
@@ -429,6 +434,7 @@ export function precargaDescuento(
   doc: DocumentoDte,
   decimalesMoneda: number,
   faltaAlgunPrecio: boolean,
+  formatMonto: (v: string) => string,
 ): DescuentoDeFacturaDte {
   if (doc.preciosConIva) {
     return { monto: null, avisos: ['Esta factura trae los precios con IVA incluido: tipeá el neto'], fueraDeLaBase: [] }
@@ -438,7 +444,7 @@ export function precargaDescuento(
       ? { monto: null, avisos: ['La factura trae un descuento, pero hay líneas sin precio: revisalas para que se cargue'], fueraDeLaBase: [] }
       : { monto: null, avisos: [], fueraDeLaBase: [] }
   }
-  return descuentoDeFactura(doc, decimalesMoneda)
+  return descuentoDeFactura(doc, decimalesMoneda, formatMonto)
 }
 
 /**

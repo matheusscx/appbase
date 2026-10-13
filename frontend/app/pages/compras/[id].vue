@@ -526,7 +526,7 @@ const descuentoDte = computed(() => {
   const algunaSinPrecio = faltaAlgunPrecio(
     lineas.value.filter(l => l.dte).map(l => ({ precioUnitario: l.precioUnitario || null })),
   )
-  return precargaDescuento(origenDte.value.documento, decimales, algunaSinPrecio)
+  return precargaDescuento(origenDte.value.documento, decimales, algunaSinPrecio, formatMonto)
 })
 
 // Por qué una línea del XML no pesó en el descuento en % (garantía de envases,

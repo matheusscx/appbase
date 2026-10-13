@@ -741,7 +741,8 @@ seguridad.
    precio (el flete, típicamente) puede seguir bloqueándolo hasta que se aparta con "No es
    mercadería", y ahí se destraba solo, sin que nadie toque el campo — se llena **como mucho una
    vez por lectura**, así que si el encargado ya tipeó o borró el descuento a mano no se pisa. Un
-   recargo global no se carga (la compra no tiene recargos): aviso con el monto.
+   recargo global no se carga (la compra no tiene recargos): aviso con su valor en la unidad de
+   `TpoValor` ("Recargo de $800", "Recargo de 2%").
 
    **Una línea con `IndExe` 3, 4 o 5 no entra en la base de ningún descuento en %, y la pantalla
    dice por qué.** Con 10 cajas de cerveza por $50.000, la garantía de envases por $6.000

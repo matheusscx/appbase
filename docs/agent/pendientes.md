@@ -74,20 +74,6 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
-- [ ] **El aviso de un recargo global en % dice "Recargo de $2" en vez de "2%"** (frontend,
-  `descuentoDeFactura` en `frontend/app/composables/useDte.ts`, el `avisos.push` de `tipoMov ===
-  'R'`; anotado el 2026-10-12 por el frente de la garantía de envases, `0566e01b`, que lo vio y no
-  lo tocó). Al importar el XML de una factura con un `DscRcgGlobal` de recargo con `TpoValor '%'`,
-  el aviso de "no se carga" interpola `dg.valor` siempre como pesos. Que diga "%" o "$" según
-  `TpoValor`, con su spec.
-
-- [ ] **Un comentario de `backend/test/papelera.e2e-spec.ts` (~línea 1614) dice que `descuentos`,
-  `recargos` y `turnos` no tienen índice único de nombre, y sí lo tienen** (anotado el 2026-10-12
-  por el frente de migraciones, [ADR-030](../adr/030-esquema-por-migraciones.md); ya era falso
-  antes: los creaba el seeder, hoy la línea base). Los tests siguen valiendo, porque prueban que
-  `restaurar()` valide el nombre; lo falso es el porqué. Corregir el comentario contra
-  `pg_indexes`, no contra `startup-pos.sql`.
-
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:

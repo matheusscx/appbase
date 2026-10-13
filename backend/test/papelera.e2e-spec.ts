@@ -1369,9 +1369,13 @@ describe('Papelera (e2e) — salones y mesas, colateral en cascada acotado por t
 });
 
 // Los 8 recursos de la familia `softDelete()` de TypeORM — descuentos,
-// recargos, impuestos, terceros, cajones, garzones, turnos, impresoras. Seis de
-// los ocho no tienen colateral en cascada ni restricción única que dispare un
-// 400 al restaurar, así que un solo spec parametrizado sobre esos seis basta.
+// recargos, impuestos, terceros, cajones, garzones, turnos, impresoras. Un solo
+// spec parametrizado sobre los ocho cubre borrar y restaurar sin nadie
+// compitiendo por el nombre; la colisión va en tests propios más abajo. Seis
+// de los ocho tienen índice único parcial (medido en `pg_indexes` el
+// 2026-10-13): descuentos, recargos, impuestos y turnos por nombre
+// (`uq_<tabla>_tenant_nombre_vivo`), y cajones y garzones como cuenta la nota
+// de abajo. Impuestos no tiene test de colisión.
 //
 // ⚠️ **Corregido**: la primera versión de este bloque decía que
 // NINGUNO de los 8 tenía nombre único con restricción parcial. Era falso — la
@@ -1610,18 +1614,17 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     expect(resRestaurarOk.status).toBe(201);
   });
 
-  // Revisión final: `descuentos`/`recargos`/`turnos` NO tienen índice único
-  // de nombre en la base (medido: no hay `CREATE UNIQUE INDEX` sobre esas
-  // tablas en startup-pos.sql) — la unicidad la garantizan `create()`/
-  // `update()` SOLO en código (`validarNombreUnico`/`assertNombreUnico`, que
-  // filtran `eliminado_el IS NULL`). `restaurar()` no reusaba esa validación:
-  // se podía crear "Black Friday", borrarlo, crear OTRO "Black Friday", y
-  // restaurar el viejo — quedando dos vivos con el mismo nombre, un estado
-  // que `create()`/`update()` nunca dejan alcanzar. Estos tres tests montan
-  // esa secuencia real contra Postgres, igual que el de `cajones` de arriba
-  // pero SIN índice único de por medio: si `restaurar()` volviera a saltarse
-  // la validación, esto daría 201 en vez de 400 y dejaría el duplicado vivo.
-  it('descuentos: colisión de nombre garantizada por código (sin índice único) — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
+  // `descuentos`/`recargos`/`turnos` tienen índice único parcial de nombre
+  // (`uq_<tabla>_tenant_nombre_vivo`: `(tenant_id, lower(nombre)) WHERE
+  // eliminado_el IS NULL`, de la línea base de migraciones, ADR-030; medido en
+  // `pg_indexes`). Mientras "Black Friday" está borrado no compite, así que se
+  // puede crear OTRO "Black Friday"; al restaurar el viejo vuelve a competir y
+  // el índice tira 23505. `restaurar()` no pre-valida el nombre: revive con un
+  // `UPDATE` y traduce ese 23505 a 400 con un nombre libre sugerido, igual que
+  // `cajones` arriba. Lo que estos tres tests prueban es esa traducción contra
+  // Postgres real: sin el `catch` del 23505 dan 500 (medido el 2026-10-13), y
+  // el duplicado no queda vivo porque lo frena el índice, no el service.
+  it('descuentos: colisión de nombre con el índice único parcial — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
     const nombre = `Descuento papelera E2E colisión ${Date.now()}`;
     const bodyBase = {
       nombre,
@@ -1784,7 +1787,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     );
   });
 
-  it('recargos: colisión de nombre garantizada por código (sin índice único) — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
+  it('recargos: colisión de nombre con el índice único parcial — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
     const nombre = `Recargo papelera E2E colisión ${Date.now()}`;
     const bodyBase = {
       nombre,
@@ -1937,7 +1940,7 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
     );
   });
 
-  it('turnos: colisión de nombre garantizada por código (sin índice único) — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
+  it('turnos: colisión de nombre con el índice único parcial — crear otro con el mismo nombre y restaurar el borrado → 400, nada cambia', async () => {
     const nombre = `Turno papelera E2E colisión ${Date.now()}`;
     const bodyBase = { nombre, horaInicio: '12:00', horaFin: '14:00' };
     const resOriginal = await request(app.getHttpServer())
@@ -1961,8 +1964,8 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
 
     // `assertNombreUnico` de turnos lanza `ConflictException` (409) en
     // `crear()`/`actualizar()` — se mantiene así, sin tocar. `restaurar()`
-    // traduce esa misma validación a 400, el mismo status accionable que dan
-    // los recursos con índice único.
+    // traduce el 23505 del índice a 400, el mismo status accionable que dan
+    // los otros recursos de la papelera.
     const resRestaurar = await request(app.getHttpServer())
       .post(`/api/turnos/${originalId}/restaurar`)
       .set('Authorization', `Bearer ${tokenAdmin}`);
@@ -2048,8 +2051,8 @@ describe('Papelera (e2e) — familia softDelete(): descuentos, recargos, impuest
   });
 
   // ─── Los 5 con índice único parcial ────────────────────────────────────────
-  // Estos NO calculan la sugerencia antes de intentar como descuentos/recargos/
-  // turnos: capturan el 23505 de Postgres y la calculan DENTRO del catch. El
+  // Igual que descuentos/recargos/turnos, capturan el 23505 de Postgres y
+  // calculan la sugerencia DENTRO del catch, no antes de intentar. El
   // unit test no puede probar que eso funcione —el mock no tiene índices ni
   // sabe de `ILIKE`—, así que el e2e contra Postgres real es el único lugar
   // donde estas dos afirmaciones se verifican.
