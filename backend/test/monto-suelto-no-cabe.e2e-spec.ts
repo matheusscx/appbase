@@ -732,9 +732,18 @@ describe('Un monto suelto que no cabe en su columna es 400, no 500 (e2e)', () =>
     // La propina del control de arriba deja un participante real en el
     // reparto de hoy: sin él, el monto manual no llega a ninguna columna y
     // liquidar contesta otro 400 ("no tiene propinas fuente").
-    const hoy = new Date().toISOString().slice(0, 10);
-    const manana = new Date(Date.now() + 86_400_000).toISOString().slice(0, 10);
-    const rango = { fechaDesde: hoy, fechaHasta: manana };
+    //
+    // "Hoy" es el día de negocio del tenant (Paris, Chile, corte 0), que es como
+    // el backend lee `fechaDesde`/`fechaHasta`. La fecha UTC del proceso pedía
+    // mañana entre las 21:00 y las 24:00 de Chile y la propina quedaba afuera
+    // (rojo de main el 2026-10-13 a las 00:02 UTC).
+    const hoy = new Intl.DateTimeFormat('en-CA', {
+      timeZone: 'America/Santiago',
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).format(new Date());
+    const rango = { fechaDesde: hoy, fechaHasta: hoy };
     const preview = await pedir(
       'post',
       'propinas/liquidaciones/preview',
