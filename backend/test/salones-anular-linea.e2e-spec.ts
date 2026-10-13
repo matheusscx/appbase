@@ -982,6 +982,55 @@ describe('Salones — anular un plato ya despachado (e2e)', () => {
   });
 
   /**
+   * `cantidad` no lleva `IsDecimalPersistible` porque el service la frena
+   * antes, con un tope más bajo que el de sus columnas `numeric(18,4)`: lo
+   * despachado, que no pasa de `MAX_UNIDADES_POR_VENTA`, y 4 decimales. Medido
+   * el 2026-10-13: 10^14 y `99999999999999.99995` (que Postgres redondearía a
+   * 10^14) ya daban 400. Si ese tope se fuera, el campo necesitaría el suyo.
+   */
+  it('una cantidad que no cabe en la columna: 400 del tope de lo despachado, sin anulación ni movimiento', async () => {
+    const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '1' }]);
+    await despachar(cuenta.id);
+    const linea = (await detalleCuenta(cuenta.id)).lineas.find(
+      (l) => l.itemId === platoId,
+    )!;
+    const escrito = async () => {
+      const [fila]: { anulaciones: string; movimientos: string }[] =
+        await ds.query(
+          `SELECT
+             (SELECT COUNT(*) FROM cuenta_linea_anulaciones
+               WHERE cuenta_id = $1)::text AS anulaciones,
+             (SELECT COUNT(*) FROM movimientos_inventario
+               WHERE item_id = $2)::text AS movimientos`,
+          [cuenta.id, platoId],
+        );
+      return fila;
+    };
+    const antes = await escrito();
+
+    for (const [cantidad, esperado] of [
+      ['100000000000000', 'Solo se puede anular lo despachado a cocina (1'],
+      ['99999999999999.99995', 'La cantidad admite como máximo 4 decimales.'],
+    ]) {
+      const res = await anular(cuenta.id, linea.id, {
+        cantidad,
+        motivoBajaId: motivoMermaId,
+      });
+      expect({ cantidad, status: res.status }).toEqual({
+        cantidad,
+        status: 400,
+      });
+      expect((res.body as { message: string }).message).toContain(esperado);
+    }
+
+    expect(await escrito()).toEqual(antes);
+    const despues = (await detalleCuenta(cuenta.id)).lineas.find(
+      (l) => l.id === linea.id,
+    )!;
+    expect(Number(despues.cantidadEnviada)).toBe(1);
+  });
+
+  /**
    * Ronda de fixes 2: el nombre anterior de este test ("una línea de OTRO
    * tenant da 404") era engañoso — pasaba por el `cuenta_id` que no
    * calzaba, no por el filtro de tenant: la línea ajena vivía bajo una

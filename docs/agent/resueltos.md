@@ -23,6 +23,78 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El mínimo de un tramo por cantidad que no cabe en su columna es 400; anular una línea ya lo era (cerrada 2026-10-13)
+
+Frente lanzado por la orquestadora, por pedido del owner. Son dos de los cuatro campos de
+*"Cantidades por body fuera del kardex"*. Los otros dos, la cantidad de una nota de crédito y la de
+un reembolso de la pasarela, los cerró el frente fiscal de la nota de crédito (la entrada de
+abajo). Con los cuatro cerrados, la entrada sale de `pendientes.md`.
+
+**Cómo se cerró.** `@IsDecimalPersistible(18, 4)`, el decorador de `e99310a7`, en
+`minimoCantidad` del `TramoDto` de descuentos. El campo se guarda en
+`descuento_tramos.minimo_cantidad`, que es `NUMERIC(18,4)`. El motor lo lee al aplicar el
+descuento, pero no se tocó: solo se valida lo que entra. `monto-persistible-cobertura.spec.ts`
+lo anota con su columna.
+
+**Exentos, con un e2e que los fija.** Ya daban 400 antes de este cambio:
+- **El `minimoCantidad` de un recargo.** Ningún tipo de recargo mide cantidad, así que el
+  service rechaza el campo entero. Con un tipo por monto, el aviso es *"mide monto de venta"*. Con
+  un tipo sin tramos, *"no admite escalones"*. La columna `recargo_tramos.minimo_cantidad` nunca
+  se escribe por HTTP.
+- **La `cantidad` de `AnularLineaDto`.** El service la frena con un tope más bajo que el de sus
+  columnas `NUMERIC(18,4)`: lo despachado, que no pasa de `MAX_UNIDADES_POR_VENTA`, y 4
+  decimales. El techo del DTO no cambiaría qué se escribe, así que no se puso. Tampoco se tocaron
+  la cuenta ni `movimientos_inventario`.
+
+Medido por HTTP (supertest) sobre la base nueva de `entorno.sh db`, con el código de
+`origin/main` en `ec46ddc5`.
+
+| Camino | Endpoint | Columna | Antes | Ahora |
+|---|---|---|---|---|
+| Tramo `por_mayor`, `minimoCantidad: 10^14` | `POST /descuentos` | `descuento_tramos.minimo_cantidad` (18,4) | **500** | 400 del DTO |
+| Tramo `por_mayor`, `99999999999999.99995` (cabe en el campo; Postgres la redondea a 10^14) | `POST /descuentos` | la misma | **500** | 400 del DTO |
+| Los mismos dos valores, al editar | `PATCH /descuentos/:id` | la misma | **500** | 400 del DTO |
+| Tramo por monto (`por_monto_venta`, `metodo_pago`) o tipo sin tramos (`directo`), con `minimoCantidad: 10^14` | `POST /descuentos` | ninguna | 400 del service | 400 del DTO, que corre antes (medido; ningún test lo fija, porque no era un 500) |
+| Recargo por monto, con `minimoCantidad: 10^14` | `POST /recargos` | ninguna | 400: *"mide monto de venta"* | igual (exento) |
+| Recargo sin tramos, con `minimoCantidad: 10^14` | `POST`/`PATCH /recargos` | ninguna | 400: *"no admite escalones"* | igual (exento) |
+| Anular `10^14` de una línea con 1 despachada | `POST /cuentas/:id/lineas/:lineaId/anular` | `cuenta_linea_anulaciones.cantidad`, `cuenta_lineas.cantidad`/`cantidad_enviada` (18,4) | 400: *"Solo se puede anular lo despachado a cocina (1…"* | igual (exento) |
+| Anular `99999999999999.99995` | la misma | las mismas | 400: *"La cantidad admite como máximo 4 decimales."* | igual (exento) |
+
+Controles: `99999999999999.9999` entra en el tramo, al crear y al editar, y se lee igual de vuelta.
+
+**Lo que no cambia:** un `minimoCantidad` con más de 4 decimales que cabe, como `1.23456`, entra
+con 201 y Postgres lo guarda redondeado (`1.2346`). No es un 500, y el campo no lleva marca de
+escala porque sus decimales son legítimos (2,5 kg). Quedó anotado en la entrada de
+[`pendientes.md`](pendientes.md) § 3 sobre las cantidades con más de 4 decimales.
+
+### Tests y mutantes
+
+- `test/decimal-no-plata-no-cabe.e2e-spec.ts`, test nuevo del tramo `por_mayor`: los 4 pedidos
+  dan 400 con el techo en el mensaje. Además, no se escribe ningún tramo, el editado conserva su
+  `10.0000`, y el máximo entra al crear y al editar. El bloque de exentos suma tres casos de
+  recargos: un tipo por monto y uno sin tramos, al crear, y el sin tramos al editar.
+- `test/salones-anular-linea.e2e-spec.ts`, test nuevo: 10^14 y `.99995` dan 400, sin anulación,
+  sin movimiento del ítem y con lo despachado intacto.
+- **Mutante que revierte** (`git apply -R` del DTO): los 4 pedidos del tramo vuelven a **500**. El
+  test nuevo cae y `monto-persistible-cobertura.spec.ts` da 2 rojos.
+- **Mutante del exento** (el tope de lo despachado en `escribirAnulacionDeLinea` apagado): 10^14
+  da **500** (`numeric field overflow`) y el test de anular cae.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Cantidades por body fuera del kardex, sin techo de columna** (backend; queda del cierre
+  de "Una cantidad de stock que no cabe en su columna", 2026-10-13, [`resueltos.md`](resueltos.md);
+  **leído, no medido**). Llegan con `@IsNumberString()` y a lo sumo `@IsDecimalPositivo()`, sin
+  `IsDecimalPersistible`:
+  - la `cantidad` de una nota de crédito (`CreateNotaCreditoDto`);
+  - la de una línea anulada de salón (`AnularLineaDto`);
+  - la de un reembolso de la pasarela (`CreateReembolsoDto`);
+  - el `minimoCantidad` de un descuento y de un recargo.
+
+  Puede que el service ya los frene, porque la nota de crédito y la anulación no deberían pasar
+  de lo vendido. **Medir** cada uno con 10^14 por HTTP. ⚠️ La nota de crédito es fiscal: va en
+  su propio frente (CLAUDE.md). La pasarela va con prioridad baja (owner, 2026-10-08).
+
 ## La cantidad de una nota de crédito que no cabe en su columna ya daba 400 (cerrada 2026-10-13)
 
 Frente fiscal propio (CLAUDE.md, "Lo fiscal va solo"), lanzado por la orquestadora a pedido del
@@ -295,8 +367,9 @@ bodega es el que ahora da 400. Controles: `99999999999999.9999` tipeado en la ba
   salida, y la frena el stock insuficiente.
 - La merma y el recuento quedaron cerrados en `e99310a7`.
 
-**Lo que quedó afuera:** las cantidades fuera del kardex, que no se midieron. Están en
-[`pendientes.md`](pendientes.md) § 2, *"Cantidades por body fuera del kardex"*. El costo de una
+**Lo que quedó afuera:** las cantidades fuera del kardex. Se cerraron el mismo día (arriba): el
+mínimo de un tramo y la anulación de una línea, en un frente, y la cantidad de una nota de crédito
+y la de un reembolso de la pasarela, en el frente fiscal. El costo de una
 receta o un combo, que es una suma de plata y no de cantidad, se cerró el mismo día (abajo).
 
 ### Tests y mutantes

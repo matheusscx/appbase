@@ -151,19 +151,6 @@ destapa una decisión que no es mía).
   (`aprobada` o `error`), consultar el estado en vez de confirmar. O leer ese 4xx como "sin
   confirmar" y no como rechazo.
 
-- [ ] **Cantidades por body fuera del kardex, sin techo de columna** (backend; queda del cierre
-  de "Una cantidad de stock que no cabe en su columna", 2026-10-13, [`resueltos.md`](resueltos.md);
-  **leído, no medido**). Llegan con `@IsNumberString()` y a lo sumo `@IsDecimalPositivo()`, sin
-  `IsDecimalPersistible`:
-  - la `cantidad` de una nota de crédito (`CreateNotaCreditoDto`);
-  - la de una línea anulada de salón (`AnularLineaDto`);
-  - la de un reembolso de la pasarela (`CreateReembolsoDto`);
-  - el `minimoCantidad` de un descuento y de un recargo.
-
-  Puede que el service ya los frene, porque la nota de crédito y la anulación no deberían pasar
-  de lo vendido. **Medir** cada uno con 10^14 por HTTP. ⚠️ La nota de crédito es fiscal: va en
-  su propio frente (CLAUDE.md). La pasarela va con prioridad baja (owner, 2026-10-08).
-
 - [ ] **La configuración de la pasarela puede quedar incompleta para su modo, y el cobro da 500** — ⬇️ **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos)
   (backend, `pasarela/dto/create-tenant-pasarela.dto.ts` y `tenant-pasarela.service.ts`
   `crear`/`actualizar`; queda del cierre de "la configuración de la pasarela no se valida",
@@ -337,6 +324,10 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
   Postgres que dejaba repetirla sin límite. Antes de
   construir: listar todos los campos `cantidad` que llegan por body (venta, NC, reembolso, Generar
   nota y los demás) y medir cada uno.
+  Uno ya medido fuera de la venta y la NC: el `minimoCantidad` de un tramo `por_mayor` con
+  `1.23456` entra con 201 y se guarda `1.2346` (2026-10-13, "El mínimo de un tramo por cantidad
+  que no cabe en su columna", [`resueltos.md`](resueltos.md)). Ese es un umbral, no una cantidad
+  que mueva stock: si le toca la misma regla lo decide ese frente.
 
 ### Los tres que dejó el frente del redondeo por país (2026-09-03)
 

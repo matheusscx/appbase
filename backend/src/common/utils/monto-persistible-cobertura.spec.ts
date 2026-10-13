@@ -194,6 +194,11 @@ const COLUMNAS_NO_PLATA: Record<string, [Entidad, string][]> = {
     [MovimientoInventario, 'cantidad'],
     [StockUbicacion, 'stock'],
   ],
+  // Fuera del kardex: el umbral de un tramo `por_mayor`. El de recargos no lo
+  // lleva porque ningún tipo de recargo mide cantidad y el service rechaza el
+  // campo entero (`docs/agent/resueltos.md`, "El mínimo de un tramo por
+  // cantidad que no cabe en su columna").
+  'descuentos/TramoDto.minimoCantidad': [[DescuentoTramo, 'minimoCantidad']],
   'monedas/UpdateTenantMonedaDto.valorDelDia': [[TenantMoneda, 'valorDelDia']],
   'promociones/CreatePromocionDto.valorPorcentaje': [
     [Promocion, 'valorPorcentaje'],

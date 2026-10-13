@@ -39,6 +39,7 @@ const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
 const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
 const TIPO_DESCUENTO_POR_MONTO = '550e8400-e29b-41d4-a716-446655440119';
+const TIPO_DESCUENTO_POR_MAYOR = '550e8400-e29b-41d4-a716-446655440101';
 const TIPO_RECARGO_GENERAL = '550e8400-e29b-41d4-a716-446655440122';
 const TIPO_RECARGO_POR_MONTO = '550e8400-e29b-41d4-a716-446655440353';
 const MOTIVO_VENCIMIENTO_ID = '550e8400-e29b-41d4-a716-446655440266';
@@ -574,6 +575,71 @@ describe('Un decimal que no es plata y no cabe en su columna es 400, no 500 (e2e
     expect(promo.pct).toBe('1.0000');
   });
 
+  it('el minimoCantidad de un tramo por_mayor, al crear y al editar: NUMERIC(18,4)', async () => {
+    // Inactiva y vencida: no le cambia el precio a nadie mientras corre el resto.
+    const porMayor = (minimoCantidad: string) => ({
+      nombre: `Por mayor E2E ${randomUUID().slice(0, 8)}`,
+      tipoReglaId: TIPO_DESCUENTO_POR_MAYOR,
+      modo: 'porcentaje',
+      activo: false,
+      fechaInicio: '2020-01-01',
+      fechaFin: '2020-12-31',
+      tramos: [{ minimoCantidad, valorPorcentaje: '0.1' }],
+    });
+    const editable = await crear('descuentos', porMayor('10'));
+    // Sin `eliminado_el`: ver el encabezado.
+    const tramos = () =>
+      contar(
+        `SELECT count(*) AS n FROM descuento_tramos t
+           JOIN descuentos d ON d.descuento_id = t.descuento_id
+          WHERE d.tenant_id = $1`,
+        [PARIS_TENANT_ID],
+      );
+    const minimos = async (descuentoId: string) => {
+      const filas: { minimo: string }[] = await ds.query(
+        `SELECT minimo_cantidad::text AS minimo FROM descuento_tramos
+          WHERE descuento_id = $1 AND eliminado_el IS NULL`,
+        [descuentoId],
+      );
+      return filas.map((f) => f.minimo);
+    };
+    const antes = await tramos();
+
+    // `99999999999999.99995` cabe en el campo, que no tiene techo, y Postgres
+    // la redondea a 10^14 al guardar.
+    const pedidos: Pedido[] = [];
+    for (const valor of [NO_CABE_18_4, '99999999999999.99995']) {
+      pedidos.push(
+        [
+          `crear con ${valor}`,
+          () => pedir('post', 'descuentos', porMayor(valor)),
+        ],
+        [
+          `editar con ${valor}`,
+          () =>
+            pedir('patch', `descuentos/${editable.id}`, {
+              tramos: [{ minimoCantidad: valor, valorPorcentaje: '0.1' }],
+            }),
+        ],
+      );
+    }
+    await rechazados(
+      pedidos,
+      'minimoCantidad no puede ser de 100.000.000.000.000 o más',
+    );
+    expect(await tramos()).toBe(antes);
+    expect(await minimos(editable.id)).toEqual(['10.0000']);
+
+    const maximo = '99999999999999.9999';
+    const creado = await crear('descuentos', porMayor(maximo));
+    expect(await minimos(creado.id)).toEqual([maximo]);
+    const editado = await pedir('patch', `descuentos/${editable.id}`, {
+      tramos: [{ minimoCantidad: maximo, valorPorcentaje: '0.1' }],
+    });
+    expect(editado.status).toBe(200);
+    expect(await minimos(editable.id)).toEqual([maximo]);
+  });
+
   it('lo que no lleva techo porque el service ya lo frena antes, con un tope más bajo', async () => {
     const regla = (tipoReglaId: string, extra: object) => ({
       nombre: `Regla decimal E2E ${randomUUID().slice(0, 8)}`,
@@ -611,6 +677,51 @@ describe('Un decimal que no es plata y no cabe en su columna es 400, no 500 (e2e
         ],
       );
     }
+    // Un recargo no tiene tipo que mida cantidad: con o sin tramos, el service
+    // rechaza el campo entero, al crear y al editar. El recargo editable va
+    // inactivo y vencido: no le cambia el precio a nadie.
+    const recargo = await crear(
+      'recargos',
+      regla(TIPO_RECARGO_GENERAL, {
+        valorPorcentaje: '0.1',
+        activo: false,
+        fechaInicio: '2020-01-01',
+        fechaFin: '2020-12-31',
+      }),
+    );
+    const tramoQueNoCabe = {
+      tramos: [{ minimoCantidad: NO_CABE_18_4, valorPorcentaje: '0.1' }],
+    };
+    pedidos.push(
+      [
+        'recargos: minimoCantidad de un tramo por monto',
+        () =>
+          pedir(
+            'post',
+            'recargos',
+            regla(TIPO_RECARGO_POR_MONTO, tramoQueNoCabe),
+          ),
+        'mide monto de venta',
+      ],
+      [
+        'recargos: minimoCantidad en un tipo sin tramos',
+        () =>
+          pedir(
+            'post',
+            'recargos',
+            regla(TIPO_RECARGO_GENERAL, {
+              valorPorcentaje: '0.1',
+              ...tramoQueNoCabe,
+            }),
+          ),
+        'no admite escalones',
+      ],
+      [
+        'recargos: minimoCantidad al editar',
+        () => pedir('patch', `recargos/${recargo.id}`, tramoQueNoCabe),
+        'no admite escalones',
+      ],
+    );
     pedidos.push(
       [
         'el porcentaje sugerido del reparto',

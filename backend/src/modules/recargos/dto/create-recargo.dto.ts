@@ -28,7 +28,11 @@ export class TramoDto {
   // `modo`. Lo valida `validarMinimosDeTramos` en el service.
   // `minimoMonto` es el que el borde de escala PUEDE marcar: un umbral en plata
   // tiene que caber en la moneda del tenant. `minimoCantidad` no lleva marca
-  // porque sus decimales son legítimos (2,5 kg).
+  // porque sus decimales son legítimos (2,5 kg). Tampoco lleva el techo de su
+  // columna, a diferencia del de descuentos: ningún tipo de recargo mide
+  // cantidad, y el service lo rechaza con 400 en todos ("mide monto de venta"
+  // o "no admite escalones"). Un tipo de recargo por cantidad necesitaría
+  // `@IsDecimalPersistible(18, 4)`, como `por_mayor`.
   @IsOptional()
   @IsNumberString()
   minimoCantidad?: string | null;
