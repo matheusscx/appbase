@@ -23,7 +23,10 @@ import {
   type ValidatorConstraintInterface,
 } from 'class-validator';
 import { IsDecimalPositivo } from '../../../common/decorators/decimal-signo.decorator';
-import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
+import {
+  EsCantidad,
+  EsMontoCobrado,
+} from '../../../common/decorators/escala-moneda.decorator';
 import { MAX_LINEAS_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
 
 export class DevolucionNotaCreditoDto {
@@ -31,6 +34,7 @@ export class DevolucionNotaCreditoDto {
   itemId: string;
 
   @IsNumberString()
+  @EsCantidad()
   cantidad: string;
 
   /**

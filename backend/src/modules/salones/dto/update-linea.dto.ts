@@ -8,6 +8,7 @@ import {
 } from 'class-validator';
 import { IsDecimalHasta } from '../../../common/decorators/decimal-signo.decorator';
 import { MAX_UNIDADES_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
+import { EsCantidad } from '../../../common/decorators/escala-moneda.decorator';
 
 /**
  * Se manda `cantidad` **o** `unidadIds`, según el producto: el service exige
@@ -19,10 +20,12 @@ export class UpdateLineaDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalHasta(MAX_UNIDADES_POR_VENTA)
+  @EsCantidad()
   cantidad?: string;
 
   @IsOptional()
   @IsNumberString()
+  @EsCantidad()
   cantidadPresentacion?: string;
 
   @IsOptional()

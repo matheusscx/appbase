@@ -21,6 +21,7 @@ import {
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
 import {
+  EsCantidad,
   EsCosto,
   EsMontoCobrado,
 } from '../../../common/decorators/escala-moneda.decorator';
@@ -86,6 +87,7 @@ export class LineaCompraDto {
   @IsNumberString()
   @IsDecimalPositivo()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad()
   cantidad: string;
 
   /** En una unidad del catálogo. Exactamente una de `unidadCodigo` o `presentacionId` (lo exige el service). */

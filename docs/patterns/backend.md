@@ -212,6 +212,7 @@ recibe cuelga el pipe:
 // dto — la marca dice QUÉ escala le toca
 @EsMontoCobrado() monto: string;   // escala de la moneda oficial del tenant (CLP → 0)
 @EsCosto()       precioBase: string; // ESCALA_COSTO = 4, no depende de la moneda
+@EsCantidad()    cantidad: string;   // ESCALA_CANTIDAD = 4, la de sus columnas NUMERIC(18,4)
 
 // controller — el pipe recorre el árbol del DTO y rechaza con 400
 @Post() crear(@Body(EscalaMonedaPipe) dto: CreatePagoDto) { … }
@@ -221,6 +222,14 @@ recibe cuelga el pipe:
 alguien **paga o recibe**; `@EsCosto` es una **tasa** —un precio unitario, un costo, un
 extra— que después se multiplica y recién ahí cruza a monto cobrado. Marcar un precio de
 lista como monto cobrado hace que la API rechace su propia sugerencia de precio.
+
+`@EsCantidad` no es plata: es **toda cantidad que alguien tipea** (una línea, un ajuste, lo que
+se devuelve, una receta). Con más de 4 decimales es 400 en vez de que Postgres la redondee
+(owner, 2026-10-13). Lleva siempre mensaje, para quien atiende el local; el campo que el local
+llama distinto pasa el suyo (`@EsCantidad('La cantidad contada admite…')`). No entra en el barrido
+de techos de abajo: el techo de una cantidad es `IsDecimalPersistible(18, 4)` (cada uso anotado
+en `COLUMNAS_NO_PLATA`) o un tope más bajo, del DTO (`IsDecimalHasta`) o del service (lo vendido,
+en una nota de crédito).
 
 Tres cosas que muerden y no se deducen del código:
 

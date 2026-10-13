@@ -7,6 +7,7 @@ import { RecuentoInventario } from './entities/recuento-inventario.entity';
 import { RecuentoInventarioLinea } from './entities/recuento-inventario-linea.entity';
 import { RecuentosService } from './recuentos.service';
 import { RecuentosController } from './recuentos.controller';
+import { MonedasModule } from '../monedas/monedas.module';
 
 @Module({
   imports: [
@@ -20,6 +21,9 @@ import { RecuentosController } from './recuentos.controller';
     // del tenant vía `UbicacionesService.localDe` una vez antes del loop de
     // líneas a aplicar.
     UbicacionesModule,
+    // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
+    // ESTE módulo: sin este import el @Body del controller falla en runtime.
+    MonedasModule,
   ],
   controllers: [RecuentosController],
   providers: [RecuentosService],

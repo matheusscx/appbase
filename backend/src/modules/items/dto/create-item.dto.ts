@@ -25,7 +25,10 @@ import {
   IsDecimalPersistible,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
-import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
+import {
+  EsCantidad,
+  EsCosto,
+} from '../../../common/decorators/escala-moneda.decorator';
 import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 import { MAX_INT } from '../../../common/constants/escalas';
 import { MAX_UNIDADES_POR_PLATO } from '../../../common/utils/tope-unidades-venta.util';
@@ -82,6 +85,7 @@ export class RecetaIngredienteInputDto {
 
   @IsNumberString()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad()
   cantidad: string;
 
   @IsString()
@@ -99,6 +103,7 @@ export class RecetaExtraInputDto {
 
   @IsNumberString()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad()
   cantidad: string;
 
   @IsString()
@@ -124,6 +129,7 @@ export class ComboComponenteInputDto {
   // (2026-10-08): `MAX_UNIDADES_POR_PLATO`.
   @IsNumberString()
   @IsDecimalHasta(String(MAX_UNIDADES_POR_PLATO))
+  @EsCantidad()
   cantidad: string;
 
   @IsBoolean()
@@ -139,6 +145,7 @@ export class ItemGrupoOpcionOverrideInputDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad()
   cantidad?: string;
 
   @ValidateIf((o: ItemGrupoOpcionOverrideInputDto) => o.unidadCodigo !== '')
@@ -262,6 +269,7 @@ export class CreateItemDto {
   @IsNumberString()
   @IsDecimalPersistible(18, 4)
   @IsOptional()
+  @EsCantidad('El stock inicial admite como máximo 4 decimales.')
   stock?: string;
 
   @IsString()

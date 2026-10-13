@@ -6,6 +6,7 @@ import { TrasladosController } from './traslados.controller';
 import { InventarioModule } from '../inventario/inventario.module';
 import { ItemsModule } from '../items/items.module';
 import { MotivosTrasladoModule } from '../motivos-traslado/motivos-traslado.module';
+import { MonedasModule } from '../monedas/monedas.module';
 
 @Module({
   imports: [
@@ -18,6 +19,9 @@ import { MotivosTrasladoModule } from '../motivos-traslado/motivos-traslado.modu
     ItemsModule,
     // El motivo se valida contra el catálogo tipado del tenant.
     MotivosTrasladoModule,
+    // `EscalaMonedaPipe` resuelve `MonedasService` desde los injectables de
+    // ESTE módulo: sin este import el @Body del controller falla en runtime.
+    MonedasModule,
   ],
   controllers: [TrasladosController],
   providers: [TrasladosService],

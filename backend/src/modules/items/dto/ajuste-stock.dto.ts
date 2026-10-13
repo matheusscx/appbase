@@ -19,7 +19,10 @@ import {
   IsDecimalPositivo,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
-import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
+import {
+  EsCantidad,
+  EsCosto,
+} from '../../../common/decorators/escala-moneda.decorator';
 import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 
 const MOTIVOS = ['compra', 'devolucion', 'ajuste_manual', 'inventario_inicial'];
@@ -85,6 +88,7 @@ export class AjusteStockDto {
   @IsNumberString()
   @IsDecimalPositivo()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad()
   cantidad: string;
 
   @IsIn(['entrada', 'salida'])

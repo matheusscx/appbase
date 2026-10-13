@@ -472,6 +472,18 @@ producto por gramo son 10^15 g). Mira tres cosas: la cantidad tipeada, la conver
 se acumula: el stock del producto sumando todas las ubicaciones, y lo que entró a un lote. No
 cambia qué se escribe ni cómo se convierte.
 
+**Una cantidad con más de 4 decimales se rechaza con aviso, no se redondea** (owner, 2026-10-13,
+por AskUserQuestion de la orquestadora, con la escena "1,00005 en una venta o una nota de crédito
+se redondea en silencio; la devolución en dos partes devuelve 2,0001 de 2 vendidas": "Rechazar con
+aviso"). Es la gemela de la regla de los impuestos. Vale para toda cantidad que alguien escribe: la
+línea de una venta, de la cuenta de salón o de la tienda; lo que se devuelve en una nota de crédito
+o un reembolso; un ajuste, una merma, un traslado, una compra o un conteo; la receta, el combo y
+las opciones de un grupo; el contenido de una presentación de compra y el mínimo de un descuento
+por mayor. Con más de 4 decimales, el aviso dice *"máximo 4 decimales"* y no se guarda nada.
+Descartada: redondear como hasta entonces. Lo que el sistema **calcula** se sigue redondeando a 4,
+como la cantidad pasada de gramos a kilos o lo que vuelve por un ingrediente: la regla es sobre lo
+que se escribe.
+
 **El costo de una receta o un combo que el sistema no puede guardar tampoco se guarda** (owner,
 2026-10-13, por AskUserQuestion de la orquestadora, con la escena "2 kg de un ingrediente de $90
 billones el kilo; igual un combo": "No guardar, con aviso"). Cada costo cabe y la suma puede no

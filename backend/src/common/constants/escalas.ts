@@ -10,6 +10,18 @@
 export const ESCALA_COSTO = 4;
 
 /**
+ * Escala de las CANTIDADES: 4 decimales, la de toda columna de cantidad
+ * (`NUMERIC(18,4)`: líneas de venta y de cuenta, kardex, compras, recetas…).
+ * Coincide con `ESCALA_COSTO` pero no es la misma regla: una sale de la
+ * columna y la otra de cuánto error tolera un costo por gramo.
+ *
+ * Una cantidad con más decimales es 400, no se redondea (owner, 2026-10-13):
+ * Postgres redondeaba el quinto decimal al guardar, y una devolución en dos
+ * notas devolvía 2,0001 de 2 vendidas. Lo aplica `@EsCantidad()`.
+ */
+export const ESCALA_CANTIDAD = 4;
+
+/**
  * Lo que cabe en una columna entera de Postgres. Un entero de la API que va a
  * una de estas columnas lleva `@Max` con su tope: sin él, uno más grande pasa
  * `@IsInt()` y revienta en el INSERT con un 500 ("out of range for type

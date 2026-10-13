@@ -21,6 +21,7 @@ import { CreateInscripcionDto } from '../dto/create-inscripcion.dto';
 import { CreateCobroDto } from '../dto/create-cobro.dto';
 import { CreateReembolsoDto } from '../dto/create-reembolso.dto';
 import { CreatePagoDto } from '../dto/create-pago.dto';
+import { EscalaMonedaPipe } from '../../../common/pipes/escala-moneda.pipe';
 
 type ApiRequest = Request & { pasarelaAuth: PasarelaAuth };
 
@@ -98,7 +99,7 @@ export class PasarelaApiController {
   reembolsar(
     @Req() req: ApiRequest,
     @Param('ordenId', ParseUUIDPipe) ordenId: string,
-    @Body() dto: CreateReembolsoDto,
+    @Body(EscalaMonedaPipe) dto: CreateReembolsoDto,
     @ClaveIdempotencia() clave: string,
   ) {
     // La llave de API no tiene usuario: la clave es por llave.

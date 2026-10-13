@@ -15,12 +15,14 @@ import {
   DESTINOS_STOCK_DEVOLUCION,
   type DestinoStockDevolucion,
 } from '../services/reembolso-callback.registry';
+import { EsCantidad } from '../../../common/decorators/escala-moneda.decorator';
 
 export class DevolucionLineaDto {
   @IsUUID()
   itemId: string;
 
   @IsNumberString()
+  @EsCantidad()
   cantidad: string;
 
   /**

@@ -19,7 +19,10 @@ import {
   IsDecimalPersistible,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
-import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
+import {
+  EsCantidad,
+  EsCosto,
+} from '../../../common/decorators/escala-moneda.decorator';
 import { MAX_INT } from '../../../common/constants/escalas';
 
 export class GrupoOpcionInputDto {
@@ -29,6 +32,7 @@ export class GrupoOpcionInputDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad()
   cantidad?: string;
 
   // Solo opciones de familia ingrediente; el backend lo verifica.

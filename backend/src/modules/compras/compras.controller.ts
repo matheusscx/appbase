@@ -131,7 +131,7 @@ export class ComprasController {
   @RequiresPermiso('Compras', 'Crear')
   crearPresentacion(
     @Req() req: Request,
-    @Body() dto: CrearPresentacionCompraDto,
+    @Body(EscalaMonedaPipe) dto: CrearPresentacionCompraDto,
   ) {
     const { tenantId } = req.user as { tenantId: string };
     return this.presentacionesService.crear(tenantId, dto);
@@ -142,7 +142,7 @@ export class ComprasController {
   editarPresentacion(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: EditarPresentacionCompraDto,
+    @Body(EscalaMonedaPipe) dto: EditarPresentacionCompraDto,
   ) {
     const { tenantId } = req.user as { tenantId: string };
     return this.presentacionesService.editar(tenantId, id, dto);

@@ -3,6 +3,10 @@ import 'reflect-metadata';
 export const ESCALA_MONEDA_KEY = 'escala:montoCobrado';
 export const ESCALA_COSTO_KEY = 'escala:costo';
 export const ESCALA_COSTO_MENSAJE_KEY = 'escala:costo:mensaje';
+export const ESCALA_CANTIDAD_KEY = 'escala:cantidad';
+export const ESCALA_CANTIDAD_MENSAJE_KEY = 'escala:cantidad:mensaje';
+
+const MENSAJE_CANTIDAD = 'La cantidad admite como máximo 4 decimales.';
 
 /**
  * Acumula `key` en la lista de campos marcados de la clase que declara el
@@ -44,13 +48,41 @@ export const EsCosto =
   (target, key) => {
     marcarCampo(ESCALA_COSTO_KEY, target, key);
     if (mensaje === undefined) return;
-    const mensajes: Record<string, string> =
-      (Reflect.getMetadata(ESCALA_COSTO_MENSAJE_KEY, target.constructor) as
-        | Record<string, string>
-        | undefined) ?? {};
-    Reflect.defineMetadata(
-      ESCALA_COSTO_MENSAJE_KEY,
-      { ...mensajes, [key as string]: mensaje },
-      target.constructor,
-    );
+    guardarMensaje(ESCALA_COSTO_MENSAJE_KEY, target, key, mensaje);
   };
+
+/**
+ * El campo es una CANTIDAD: escala fija en `ESCALA_CANTIDAD` (4), la de sus
+ * columnas `NUMERIC(18,4)`. Con más decimales es 400 y no se guarda (owner,
+ * 2026-10-13): sin esto Postgres redondeaba en silencio, en la venta, la nota
+ * de crédito y el kardex. Lo hace efectivo `EscalaMonedaPipe`, igual que las
+ * otras dos marcas.
+ *
+ * Siempre lleva mensaje, porque lo lee quien atiende el local: el genérico
+ * dice "la cantidad", y un campo que el local llama distinto (el conteo, el
+ * stock inicial) pasa el suyo.
+ */
+export const EsCantidad =
+  (mensaje = MENSAJE_CANTIDAD): PropertyDecorator =>
+  (target, key) => {
+    marcarCampo(ESCALA_CANTIDAD_KEY, target, key);
+    guardarMensaje(ESCALA_CANTIDAD_MENSAJE_KEY, target, key, mensaje);
+  };
+
+/** Acumula el mensaje propio de un campo marcado, por clase, como `marcarCampo`. */
+function guardarMensaje(
+  clave: string,
+  target: object,
+  key: string | symbol,
+  mensaje: string,
+): void {
+  const mensajes: Record<string, string> =
+    (Reflect.getMetadata(clave, target.constructor) as
+      | Record<string, string>
+      | undefined) ?? {};
+  Reflect.defineMetadata(
+    clave,
+    { ...mensajes, [key as string]: mensaje },
+    target.constructor,
+  );
+}

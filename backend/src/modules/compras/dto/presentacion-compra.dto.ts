@@ -12,6 +12,7 @@ import {
   IsDecimalPersistible,
   IsDecimalPositivo,
 } from '../../../common/decorators/decimal-signo.decorator';
+import { EsCantidad } from '../../../common/decorators/escala-moneda.decorator';
 
 const recortar = ({ value }: { value: unknown }) =>
   typeof value === 'string' ? value.trim() : value;
@@ -34,6 +35,7 @@ export class CrearPresentacionCompraDto {
   @IsNumberString()
   @IsDecimalPositivo()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad('El contenido de la presentación admite como máximo 4 decimales.')
   contenido: string;
 
   @IsString()
@@ -58,6 +60,7 @@ export class EditarPresentacionCompraDto {
   @IsNumberString()
   @IsDecimalPositivo()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad('El contenido de la presentación admite como máximo 4 decimales.')
   contenido?: string;
 
   @ValidateIf((_o, v) => v !== undefined)

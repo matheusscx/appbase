@@ -17,6 +17,7 @@ import { RequiresPermiso } from '../../common/decorators/requires-permiso.decora
 import { PaginationQueryDto } from '../../common/dto/pagination-query.dto';
 import { TrasladosService } from './traslados.service';
 import { CreateTrasladoDto } from './dto/create-traslado.dto';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 
 /**
  * Se reusa `Inventario/Crear` en vez de inventar `Inventario/Trasladar`: el
@@ -45,7 +46,7 @@ export class TrasladosController {
 
   @Post()
   @RequiresPermiso('Inventario', 'Crear')
-  create(@Req() req: Request, @Body() dto: CreateTrasladoDto) {
+  create(@Req() req: Request, @Body(EscalaMonedaPipe) dto: CreateTrasladoDto) {
     const { tenantId, id: usuarioId } = req.user as {
       tenantId: string;
       id: string;

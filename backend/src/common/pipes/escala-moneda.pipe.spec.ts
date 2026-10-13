@@ -1,7 +1,11 @@
 import { BadRequestException, type ArgumentMetadata } from '@nestjs/common';
 import { EscalaMonedaPipe } from './escala-moneda.pipe';
 import { RequestContext } from '../context/request-context';
-import { EsCosto, EsMontoCobrado } from '../decorators/escala-moneda.decorator';
+import {
+  EsCantidad,
+  EsCosto,
+  EsMontoCobrado,
+} from '../decorators/escala-moneda.decorator';
 import { type MonedasService } from '../../modules/monedas/monedas.service';
 
 class DtoDeMonto {
@@ -20,6 +24,18 @@ class DtoDeTasa {
 
   @EsCosto()
   costoUnitario: string;
+}
+
+class LineaConCantidad {
+  @EsCantidad()
+  cantidad: string;
+
+  @EsCantidad('La cantidad contada admite como máximo 4 decimales.')
+  cantidadContada: string;
+}
+
+class DtoConCantidades {
+  lineas: LineaConCantidad[];
 }
 
 class DtoSinMarcas {
@@ -145,6 +161,33 @@ describe('EscalaMonedaPipe', () => {
     await expect(
       pipe.transform({ porcentaje: '0.1234' }, meta(DtoDeTasa)),
     ).resolves.toEqual({ porcentaje: '0.1234' });
+  });
+
+  it('una cantidad: escala 4 fija, con su mensaje, también dentro de una lista', async () => {
+    const { pipe, decimalesOficiales } = armar(0); // CLP: 0 decimales
+    const body = (campos: Partial<LineaConCantidad>) =>
+      Object.assign(new DtoConCantidades(), {
+        lineas: [Object.assign(new LineaConCantidad(), campos)],
+      });
+
+    // '1.0001' tiene cuatro decimales reales: con la escala en 3 o menos, el
+    // primero ya daría 400.
+    await expect(
+      pipe.transform(body({ cantidad: '1.0001' }), meta(DtoConCantidades)),
+    ).resolves.toBeDefined();
+    await expect(
+      pipe.transform(body({ cantidad: '1.00005' }), meta(DtoConCantidades)),
+    ).rejects.toThrow(
+      new BadRequestException('La cantidad admite como máximo 4 decimales.'),
+    );
+    await expect(
+      pipe.transform(
+        body({ cantidad: '1', cantidadContada: '1.00005' }),
+        meta(DtoConCantidades),
+      ),
+    ).rejects.toThrow('La cantidad contada admite como máximo 4 decimales.');
+    // La escala de una cantidad no es la de la moneda: ni la pregunta.
+    expect(decimalesOficiales).not.toHaveBeenCalled();
   });
 
   it('vuelve a preguntar los decimales si cambia el tenant', async () => {

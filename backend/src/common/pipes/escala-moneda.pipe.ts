@@ -8,8 +8,10 @@ import {
 import Decimal from 'decimal.js';
 import { MonedasService } from '../../modules/monedas/monedas.service';
 import { RequestContext } from '../context/request-context';
-import { ESCALA_COSTO } from '../constants/escalas';
+import { ESCALA_CANTIDAD, ESCALA_COSTO } from '../constants/escalas';
 import {
+  ESCALA_CANTIDAD_KEY,
+  ESCALA_CANTIDAD_MENSAJE_KEY,
   ESCALA_COSTO_KEY,
   ESCALA_COSTO_MENSAJE_KEY,
   ESCALA_MONEDA_KEY,
@@ -28,7 +30,9 @@ const PROFUNDIDAD_MAX = 20;
  * del tenant puede representar. Sin esto, `1000.55555` entra: el DTO valida
  * signo y formato pero no la escala, y el recorte lo termina haciendo Postgres
  * con su propia regla — el número guardado deja de ser el que se tecleó.
- * Decisión del owner: 400, nunca cuantizar en silencio.
+ * Decisión del owner: 400, nunca cuantizar en silencio. Lo mismo con los
+ * costos y tasas (`@EsCosto`) y, desde el 2026-10-13, con las cantidades
+ * (`@EsCantidad`), cada una con su escala fija.
  *
  * Se aplica por parámetro (`@Body(EscalaMonedaPipe)`), no global.
  *
@@ -108,7 +112,7 @@ export class EscalaMonedaPipe implements PipeTransform {
         this.validarCampo(objeto[campo], escala, campo, 'moneda');
       }
     }
-    const mensajes = mensajesDeCosto(clase);
+    const mensajes = mensajesPropios(ESCALA_COSTO_MENSAJE_KEY, clase);
     for (const campo of camposMarcados(ESCALA_COSTO_KEY, clase)) {
       this.validarCampo(
         objeto[campo],
@@ -116,6 +120,17 @@ export class EscalaMonedaPipe implements PipeTransform {
         campo,
         'costo',
         mensajes[campo],
+      );
+    }
+    // Una cantidad siempre trae su mensaje (`@EsCantidad`).
+    const deCantidad = mensajesPropios(ESCALA_CANTIDAD_MENSAJE_KEY, clase);
+    for (const campo of camposMarcados(ESCALA_CANTIDAD_KEY, clase)) {
+      this.validarCampo(
+        objeto[campo],
+        ESCALA_CANTIDAD,
+        campo,
+        'cantidad',
+        deCantidad[campo],
       );
     }
 
@@ -136,7 +151,7 @@ export class EscalaMonedaPipe implements PipeTransform {
     valor: unknown,
     escala: number,
     campo: string,
-    tipo: 'moneda' | 'costo',
+    tipo: 'moneda' | 'costo' | 'cantidad',
     mensaje?: string,
   ): void {
     // El formato ya lo valida `@IsNumberString`; acá solo importa la escala.
@@ -163,7 +178,9 @@ export class EscalaMonedaPipe implements PipeTransform {
       mensaje ??
         (tipo === 'moneda'
           ? `${campo} tiene más decimales de los que admite la moneda (${escala}).`
-          : `${campo} admite como máximo ${escala} decimales (escala fija de costos y tasas).`),
+          : tipo === 'cantidad'
+            ? `${campo} admite como máximo ${escala} decimales.`
+            : `${campo} admite como máximo ${escala} decimales (escala fija de costos y tasas).`),
     );
   }
 
@@ -206,12 +223,14 @@ function camposMarcados(clave: string, clase: unknown): string[] {
   return (Reflect.getMetadata(clave, clase) as string[]) ?? [];
 }
 
-/** Los mensajes propios de `@EsCosto(mensaje)`, por campo. Mismo filtro. */
-function mensajesDeCosto(clase: unknown): Record<string, string> {
+/** Los mensajes propios de `@EsCosto(mensaje)` y `@EsCantidad`, por campo. Mismo filtro. */
+function mensajesPropios(
+  clave: string,
+  clase: unknown,
+): Record<string, string> {
   if (typeof clase !== 'function') return {};
   return (
-    (Reflect.getMetadata(ESCALA_COSTO_MENSAJE_KEY, clase) as
-      | Record<string, string>
-      | undefined) ?? {}
+    (Reflect.getMetadata(clave, clase) as Record<string, string> | undefined) ??
+    {}
   );
 }

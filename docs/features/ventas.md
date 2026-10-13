@@ -982,6 +982,14 @@ con la regla del medio. Sin número se completa después desde el detalle de la 
 - Cada línea guarda **cantidad canónica** (`cantidad`, unidad base del ítem) para precio/stock y **presentación** (`cantidadPresentacion` + `unidadCodigoPresentacion`) para UI/tickets.
 - Helpers en `app/utils/cantidad-presentacion.ts`; catálogo de unidades vía `useUnidadesMedidaStore().ensureLoaded()`.
 - POST `/ventas` envía ambos campos cuando el operador eligió una unidad distinta a la base (ej. `500 g` → canónica `0.5` kg).
+- **Las dos cantidades admiten hasta 4 decimales** (owner, 2026-10-13): con más, `POST /ventas`,
+  `/calculo-precios/calcular`, `/online/checkout` y `/online/pagar`, y pedir o cambiar una línea
+  de cuenta, dan 400 *"La cantidad admite como máximo 4 decimales."* y no escriben nada. Hasta esa
+  fecha Postgres redondeaba el quinto decimal al guardar (`NUMERIC(18,4)`). La canónica que el
+  servidor **deriva** de una presentación en otra unidad se sigue cuantizando a 4: eso es cálculo,
+  no lo tipeado. El carrito nunca manda más de 4 (`UInputNumber` redondea a 3 y
+  `convertirPresentacion` cuantiza a 4), así que la pantalla no lleva validación propia. Regla en
+  [PRODUCTO.md](../PRODUCTO.md); lo fija `cantidad-cuatro-decimales.e2e-spec.ts`.
 
 ### Composable & Lógica Pura
 

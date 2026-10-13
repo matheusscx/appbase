@@ -23,6 +23,156 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Una cantidad con más de 4 decimales se rechaza con aviso, no se redondea (cerrada 2026-10-13)
+
+Frente fiscal e inventario propio (CLAUDE.md, "Lo fiscal va solo"), lanzado por la orquestadora a
+pedido del owner. **Decisión del owner** (2026-10-13, por AskUserQuestion de la orquestadora):
+"Rechazar con aviso". Una cantidad con más de 4 decimales da 400 y no se guarda. Es la gemela de la
+regla de los impuestos (`cac160f9`).
+
+**Cómo:** con la misma mecánica que el porcentaje de un impuesto, una marca en el DTO que hace
+efectiva `EscalaMonedaPipe`. Es una marca nueva, `@EsCantidad(mensaje?)`, con escala fija
+`ESCALA_CANTIDAD` = 4 y su propia clave de metadata. No reusa `@EsCosto`: esa marca la barre
+`monto-persistible-cobertura.spec.ts` como plata y le exigiría a cada cantidad un techo de plata.
+El mensaje por defecto es el del precedente de salones (*"La cantidad admite como máximo 4
+decimales."*); el conteo, el stock inicial, el contenido de una presentación y el mínimo de un
+tramo dicen el suyo. El pipe se colgó en las rutas que no lo tenían: el cálculo, `checkout` y
+`pagar` de la tienda, pedir y cambiar una línea de cuenta, el traslado, el conteo de un recuento,
+los dos reembolsos y "Generar nota", y crear y editar una presentación de compra.
+`TrasladosModule` y `RecuentosModule` importan `MonedasModule`.
+
+**No cambia** qué se escribe en `movimientos_inventario`, cómo se compone una nota de crédito, su
+serie ni lo que se congela: solo se valida lo que entra.
+
+### Medido
+
+Por HTTP (supertest), sobre la base nueva de `entorno.sh db`, con el código de `origin/main` en
+`cb633035`. Cada camino con `1.00005` y con `1.23456` (para distinguir lo guardado de lo que entró
+con `1.0001`), y lo guardado leído en la base.
+
+| Camino | Campo | Hasta el 2026-10-13, con `1.23456` | Ahora, con `1.00005` |
+|---|---|---|---|
+| `POST /ventas` | `lineas[].cantidad` | 201; línea y salida del kardex `1.2346` | 400 |
+| `POST /ventas` | `lineas[].cantidadPresentacion` | 201; `cantidad_presentacion` y kardex `1.2346` | 400 |
+| `POST /calculo-precios/calcular` (el POS) | `cantidad` y `cantidadPresentacion` | 201 | 400 |
+| `POST /online/checkout` | `lineas[].cantidad` | 201 | 400 |
+| `POST /online/pagar` | `lineas[].cantidad` | sin medir con el proveedor real: abre una orden. Mismo DTO y mismo cálculo que `checkout` | 400, antes del proveedor |
+| `POST /cuentas/:id/lineas` | `cantidad` y `cantidadPresentacion` | 201; `cuenta_lineas` `1.2346` | 400 |
+| `PATCH /cuentas/:id/lineas/:lineaId` | `cantidad` y `cantidadPresentacion` | 200; `1.2346` | 400 |
+| Nota de crédito manual | `devoluciones[].cantidad` | 201; jsonb `1.23456`, línea y kardex `1.2346` | 400 |
+| Reembolso de pasarela, admin y llave de API | `devoluciones[].cantidad` | 201; `metadata` del `REFUND` `1.23456`, nota y kardex `1.2346` | 400, sin llamar al proveedor |
+| "Generar nota" | `devoluciones[].cantidad` | 201; igual que la nota manual | 400 |
+| `PATCH /items/:id/stock` | `cantidad` | 200; movimiento `1.2346` | 400 |
+| `POST /items` | `stock` (inicial) | 201; movimiento y saldo `1.2346` | 400 |
+| `POST /mermas` | `cantidad` | 201; movimiento `1.2346` | 400 |
+| `POST /traslados` | `lineas[].cantidad` | 201; movimientos `1.2346` | 400 |
+| `POST` y `PATCH /compras` (borrador) | `lineas[].cantidad` | 201/200; `compra_lineas` `1.2346` | 400 |
+| `PATCH /compras/:id/lineas/:lineaId` (corregir) | `cantidad` | 200; `1.2346` | 400 |
+| `POST` y `PATCH /compras/presentaciones` | `contenido` | 201/200; `1.2346` | 400 |
+| `PATCH /recuentos/:id/lineas/:lineaId` | `cantidadContada` | 200; `1.2346` | 400 |
+| `POST /items` (receta y combo) | `ingredientes[]`, `extrasPermitidos[]`, `componentes[]` y `gruposModificadores[].opciones[]`, `.cantidad` | 201; `1.2346` | 400 |
+| `POST` y `PATCH /grupos-modificadores` | `opciones[].cantidad` | 201/200; `1.2346` | 400 |
+| `PATCH /grupos-modificadores/:id/overrides` | `cantidad` | 200; `1.2346` | 400 |
+| `POST` y `PATCH /descuentos` (tramo por mayor) | `minimoCantidad` | 201/200; `1.2346` | 400 |
+
+`PATCH /items/:id` reusa las clases de la receta y el combo, con el mismo pipe. El spec lo ejerce con
+el ingrediente de una receta.
+
+**Ya rechazaban, y quedan como estaban:**
+- La anulación de una línea de salón (`AnularLineaDto.cantidad`): la rechaza
+  `SalonesService.escribirAnulacionDeLinea` con el mismo texto. Lo fija
+  `salones-anular-linea.e2e-spec.ts` ("0.00005").
+- El stock mínimo (`SetStockMinimoDto.minimo`): su `@Matches` admite hasta 4 decimales. Lo fija
+  `stock-minimo.e2e-spec.ts` ("con cinco decimales").
+- El `minimoCantidad` de un recargo: el service rechaza el campo entero, porque ningún tipo de
+  recargo mide cantidad (medido por `070a7ce4` con 10^14; no depende del valor).
+- `UpdateItemDto.stock`: es 400 siempre (el stock no se edita desde el ítem).
+
+**El `minimoCantidad` de un descuento** es un umbral, no stock, y lleva la misma regla. No hay una
+razón medida para lo contrario: su columna también es `NUMERIC(18,4)` y redondeaba igual.
+
+**No son cantidades decimales**, y quedan afuera: las `unidades` de la personalización y la
+`cantidad` de una promoción son enteros (`@IsInt`).
+
+### La devolución en dos partes
+
+Con `1.00005` y después `0.99995`, de 2 vendidas, pasaban las dos notas y el kardex recibía
+2,0001: el tope de la serie suma el jsonb y el kardex suma lo redondeado. Ahora las dos son 400.
+`1.0001` y `0.9999` son las 2, y el `0.0001` siguiente da 400 *"excede lo disponible (0)"*. Las
+vueltas al kardex quedan en `1.0001` y `0.9999`.
+
+### El frontend
+
+No lleva validación propia, y es a propósito (memoria del repo: un guard de UX que duplica una regla
+de plata es gemelo exacto del backend o no va). Los campos de texto libre (`UInput` con
+`inputmode="decimal"`) dejan tipear 5 decimales o más:
+- el formulario de devoluciones de los tres modales de la nota;
+- compras (línea, corrección y presentación);
+- mermas y traslados;
+- el conteo de un recuento;
+- el editor de ítems: stock inicial, receta, extras, combo, overrides y ajuste de stock;
+- grupos de modificadores (opción y lote);
+- el mínimo de un tramo;
+- el stock mínimo.
+
+Todos muestran el `message` del 400 en un toast (`apiErrorMsg`).
+
+El carrito del POS, la tienda y salones no puede mandar más de 4: `UInputNumber` redondea a 3
+decimales al emitir, y `convertirPresentacion` cuantiza a 4 la canónica. Su 400 llega por
+`avisoCalculoFallido` o `mostrarRechazoPorStock`, que también muestran el mensaje.
+
+### Tests y mutantes
+
+`cantidad-cuatro-decimales.e2e-spec.ts` (11 casos): cada camino de la tabla con `1.00005` (400, sin
+escribir nada) y con `1.0001` (entra), lo guardado tal cual en la venta, en cada una de las cuatro
+notas, en el ajuste y en el conteo, y la devolución en dos partes. `escala-moneda.pipe.spec.ts`: la escala 4 fija, el mensaje
+propio y la lista anidada. `nota-credito-cantidad-no-cabe.e2e-spec.ts`: su valor de cinco decimales
+ahora es 400 por esta regla.
+
+Mutantes, medidos:
+- El pipe sin la rama de cantidades: 6 rojos. De los 34 pedidos con `1.00005`, 33 vuelven a 2xx (el
+  redondeo). `/online/pagar` da 500 porque el doble del proveedor del spec no abre órdenes.
+- Sin `@EsCantidad` en `LineaVentaDto.cantidad`: cae solo la fila "venta: cantidad".
+- Sin el pipe en `POST /cuentas/:id/lineas`: caen solo las dos filas de pedir en la cuenta.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 3
+
+- [ ] **Una cantidad con más de 4 decimales se redondea en silencio, en la venta y en la nota de
+  crédito** (backend; **medido** el 2026-10-13 por HTTP al cerrar "La cantidad de una nota de
+  crédito que no cabe en su columna", [`resueltos.md`](resueltos.md)). ⚠️ **Va en su propio
+  frente**: toca la nota de crédito, que es fiscal (CLAUDE.md, "Lo fiscal va solo"), y el kardex.
+  **Decisión del owner** (2026-10-13, por AskUserQuestion de la orquestadora, con la escena
+  *"1,00005 en una venta o una NC se redondea en silencio; la devolución en dos partes devuelve
+  2,0001 de 2 vendidas"*): **"Rechazar con aviso"**. Una cantidad con más de 4 decimales da 400
+  (*"máximo 4 decimales"*) y no se guarda, igual que la regla de los impuestos del 2026-10-12. Se
+  descartó "redondear como hoy".
+
+  **Medido**, sobre una venta de 2 unidades de un producto. Todos los caminos dan **201**:
+  - **Venta** (`POST /ventas`, `cantidad: "1.00005"`): la línea y la salida del kardex quedan en
+    `1.0001`.
+  - **Nota de crédito**, en sus tres caminos: manual (`POST /ventas/:id/notas-credito`),
+    reembolso de pasarela (`POST /pasarela/admin/ordenes/:id/reembolsos`, el mismo DTO que la
+    llave de API) y "Generar nota". Con `1.00005`, `ventas.devoluciones` (jsonb) guarda
+    `"1.00005"`, y la línea de la nota y la vuelta al kardex quedan en `1.0001`.
+  - **El tope de la serie suma el jsonb, y el kardex suma lo redondeado.** Con `1.00005` y después
+    `0.99995` de 2 vendidas, pasan las dos notas. El kardex recibe `1.0001` + `1.0000` = **2,0001
+    unidades de vuelta para 2 vendidas**, y el stock queda `0.0001` arriba.
+  - Con `0.00001`, la línea del ítem desaparece de la nota (su bruto cuantiza a 0, y una línea
+    en cero no se escribe). Igual el jsonb declara `0.00001` devuelto y queda un movimiento de
+    kardex con cantidad `0.0000`.
+
+  `IsDecimalPersistible` no lo cubre: redondea a la escala antes de mirar el techo. Lo que pide la
+  decisión es un tope de escala, como el `@EsCosto` del porcentaje de un impuesto. Hay un
+  precedente en el código: la anulación de una línea de salón ya rechaza más de 4 decimales
+  (`SalonesService`, *"La cantidad admite como máximo 4 decimales."*), por el mismo redondeo de
+  Postgres que dejaba repetirla sin límite. Antes de
+  construir: listar todos los campos `cantidad` que llegan por body (venta, NC, reembolso, Generar
+  nota y los demás) y medir cada uno.
+  Uno ya medido fuera de la venta y la NC: el `minimoCantidad` de un tramo `por_mayor` con
+  `1.23456` entra con 201 y se guarda `1.2346` (2026-10-13, "El mínimo de un tramo por cantidad
+  que no cabe en su columna", [`resueltos.md`](resueltos.md)). Ese es un umbral, no una cantidad
+  que mueva stock: si le toca la misma regla lo decide ese frente.
+
 ## El mínimo de un tramo por cantidad que no cabe en su columna es 400; anular una línea ya lo era (cerrada 2026-10-13)
 
 Frente lanzado por la orquestadora, por pedido del owner. Son dos de los cuatro campos de

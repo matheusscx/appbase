@@ -17,6 +17,7 @@ import { RequiresPermiso } from '../../common/decorators/requires-permiso.decora
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { OnlineService } from './online.service';
 import { CheckoutOnlineDto } from './dto/checkout-online.dto';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 
 @ApiTags('online')
 @ApiBearerAuth()
@@ -27,14 +28,20 @@ export class OnlineController {
 
   @Post('checkout')
   @RequiresPermiso('Tienda Online', 'Crear')
-  async checkout(@Req() req: Request, @Body() dto: CheckoutOnlineDto) {
+  async checkout(
+    @Req() req: Request,
+    @Body(EscalaMonedaPipe) dto: CheckoutOnlineDto,
+  ) {
     const u = req.user as JwtUser;
     return this.onlineService.checkout(u.tenantId ?? '', dto);
   }
 
   @Post('pagar')
   @RequiresPermiso('Tienda Online', 'Crear')
-  async pagar(@Req() req: Request, @Body() dto: CheckoutOnlineDto) {
+  async pagar(
+    @Req() req: Request,
+    @Body(EscalaMonedaPipe) dto: CheckoutOnlineDto,
+  ) {
     const u = req.user as JwtUser;
     return this.onlineService.pagar(u.tenantId ?? '', u.id, u.email, dto);
   }

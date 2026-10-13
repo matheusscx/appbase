@@ -15,6 +15,7 @@ import {
   IsDecimalPersistible,
   IsDecimalPositivo,
 } from '../../../common/decorators/decimal-signo.decorator';
+import { EsCantidad } from '../../../common/decorators/escala-moneda.decorator';
 
 export class LineaTrasladoDto {
   @IsUUID()
@@ -28,6 +29,7 @@ export class LineaTrasladoDto {
   @IsNumberString()
   @IsDecimalPositivo()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad()
   cantidad: string;
 
   /**

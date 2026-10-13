@@ -16,6 +16,7 @@ import {
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
 import {
+  EsCantidad,
   EsCosto,
   EsMontoCobrado,
 } from '../../../common/decorators/escala-moneda.decorator';
@@ -45,6 +46,7 @@ export class CorregirLineaDto {
   @IsNumberString()
   @IsDecimalPositivo()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad()
   cantidad?: string;
 
   /** En serie, si la cantidad sube: las series que entran. */

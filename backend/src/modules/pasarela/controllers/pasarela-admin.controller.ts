@@ -29,6 +29,7 @@ import { QueryOrdenesDto } from '../dto/query-ordenes.dto';
 import { CreateReembolsoDto } from '../dto/create-reembolso.dto';
 import { ResolverReembolsoDto } from '../dto/resolver-reembolso.dto';
 import { GenerarNotaReembolsoDto } from '../dto/generar-nota-reembolso.dto';
+import { EscalaMonedaPipe } from '../../../common/pipes/escala-moneda.pipe';
 
 @ApiTags('pasarela')
 @ApiBearerAuth()
@@ -124,7 +125,7 @@ export class PasarelaAdminController {
   reembolsar(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: CreateReembolsoDto,
+    @Body(EscalaMonedaPipe) dto: CreateReembolsoDto,
     @ClaveIdempotencia() clave: string,
   ) {
     return this.cobrosService.reembolsar(
@@ -166,7 +167,7 @@ export class PasarelaAdminController {
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('transaccionId', ParseUUIDPipe) transaccionId: string,
-    @Body() dto: GenerarNotaReembolsoDto,
+    @Body(EscalaMonedaPipe) dto: GenerarNotaReembolsoDto,
     @ClaveIdempotencia() clave: string,
   ) {
     return this.cobrosService.generarNotaDeReembolso(

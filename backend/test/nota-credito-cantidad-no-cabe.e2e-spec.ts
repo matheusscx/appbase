@@ -38,9 +38,14 @@ const TP_PARIS_WEBPAY_ID = '550e8400-e29b-41d4-a716-446655440217';
 
 /** El primer valor que no cabe en `NUMERIC(18,4)`. */
 const NO_CABE = '100000000000000';
-/** Pasa por debajo del techo, pero redondeado a la escala de la columna es el techo. */
+/**
+ * Pasa por debajo del techo, pero redondeado a la escala de la columna es el
+ * techo. Desde el 2026-10-13 lo frena antes la regla de los 4 decimales
+ * (`cantidad-cuatro-decimales.e2e-spec.ts`): el 400 es por la escala.
+ */
 const REDONDEA_AL_TECHO = '99999999999999.99999';
 const VALORES = [NO_CABE, REDONDEA_AL_TECHO];
+const CUATRO_DECIMALES = 'La cantidad admite como máximo 4 decimales.';
 
 interface TokenResponse {
   access_token: string;
@@ -56,6 +61,8 @@ describe('La cantidad de una nota de crédito que no cabe en su columna es 400, 
   const auth = () => ({ Authorization: `Bearer ${token}` });
   const excede = (nombre: string) =>
     `La cantidad a devolver de "${nombre}" excede lo disponible (2)`;
+  const rechazo = (cantidad: string) =>
+    cantidad === REDONDEA_AL_TECHO ? CUATRO_DECIMALES : excede(nombreProducto);
   let nombreProducto: string;
 
   /** 2 unidades del producto propio ($5.000 c/u, IVA incluido) con débito. */
@@ -230,7 +237,7 @@ describe('La cantidad de una nota de crédito que no cabe en su columna es 400, 
         });
 
       expect(res.status).toBe(400);
-      expect(res.body.message).toBe(excede(nombreProducto));
+      expect(res.body.message).toBe(rechazo(cantidad));
       expect(await estado(ventaId)).toEqual(antes);
     },
   );
@@ -249,7 +256,7 @@ describe('La cantidad de una nota de crédito que no cabe en su columna es 400, 
         .send({ monto: '5000', devoluciones: linea(cantidad) });
 
       expect(res.status).toBe(400);
-      expect(res.body.message).toBe(excede(nombreProducto));
+      expect(res.body.message).toBe(rechazo(cantidad));
       expect(reembolsarEnElProveedor).not.toHaveBeenCalled();
       expect(await refundsDe(ordenId)).toEqual([]);
       expect(await estado(ventaId)).toEqual(antes);
@@ -288,7 +295,7 @@ describe('La cantidad de una nota de crédito que no cabe en su columna es 400, 
         .send({ devoluciones: linea(cantidad) });
 
       expect(res.status).toBe(400);
-      expect(res.body.message).toBe(excede(nombreProducto));
+      expect(res.body.message).toBe(rechazo(cantidad));
       expect(await refundsDe(ordenId)).toEqual([refund]);
       expect(await estado(ventaId)).toEqual(antes);
     },

@@ -26,7 +26,10 @@ import {
   IsMontoPersistible,
   IsDecimalHasta,
 } from '../../../common/decorators/decimal-signo.decorator';
-import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
+import {
+  EsCantidad,
+  EsMontoCobrado,
+} from '../../../common/decorators/escala-moneda.decorator';
 import { PropinaCierreMesaDto } from './propina-cierre-mesa.dto';
 import { PropinaDirectaDto } from './propina-directa.dto';
 import {
@@ -42,10 +45,12 @@ export class LineaVentaDto {
 
   @IsNumberString()
   @IsDecimalHasta(MAX_UNIDADES_POR_VENTA)
+  @EsCantidad()
   cantidad: string;
 
   @IsOptional()
   @IsNumberString()
+  @EsCantidad()
   cantidadPresentacion?: string;
 
   @IsOptional()

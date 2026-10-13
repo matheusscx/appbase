@@ -293,42 +293,6 @@ la acumulación de descuentos y compras— y el renombre de `moneda.decimales` s
     ADR-029, `pasarela-pagos.md` y `reembolsos-nota-credito.md` (ningún e2e de navegador los busca
     por texto, grep del 2026-10-11).
 
-- [ ] **Una cantidad con más de 4 decimales se redondea en silencio, en la venta y en la nota de
-  crédito** (backend; **medido** el 2026-10-13 por HTTP al cerrar "La cantidad de una nota de
-  crédito que no cabe en su columna", [`resueltos.md`](resueltos.md)). ⚠️ **Va en su propio
-  frente**: toca la nota de crédito, que es fiscal (CLAUDE.md, "Lo fiscal va solo"), y el kardex.
-  **Decisión del owner** (2026-10-13, por AskUserQuestion de la orquestadora, con la escena
-  *"1,00005 en una venta o una NC se redondea en silencio; la devolución en dos partes devuelve
-  2,0001 de 2 vendidas"*): **"Rechazar con aviso"**. Una cantidad con más de 4 decimales da 400
-  (*"máximo 4 decimales"*) y no se guarda, igual que la regla de los impuestos del 2026-10-12. Se
-  descartó "redondear como hoy".
-
-  **Medido**, sobre una venta de 2 unidades de un producto. Todos los caminos dan **201**:
-  - **Venta** (`POST /ventas`, `cantidad: "1.00005"`): la línea y la salida del kardex quedan en
-    `1.0001`.
-  - **Nota de crédito**, en sus tres caminos: manual (`POST /ventas/:id/notas-credito`),
-    reembolso de pasarela (`POST /pasarela/admin/ordenes/:id/reembolsos`, el mismo DTO que la
-    llave de API) y "Generar nota". Con `1.00005`, `ventas.devoluciones` (jsonb) guarda
-    `"1.00005"`, y la línea de la nota y la vuelta al kardex quedan en `1.0001`.
-  - **El tope de la serie suma el jsonb, y el kardex suma lo redondeado.** Con `1.00005` y después
-    `0.99995` de 2 vendidas, pasan las dos notas. El kardex recibe `1.0001` + `1.0000` = **2,0001
-    unidades de vuelta para 2 vendidas**, y el stock queda `0.0001` arriba.
-  - Con `0.00001`, la línea del ítem desaparece de la nota (su bruto cuantiza a 0, y una línea
-    en cero no se escribe). Igual el jsonb declara `0.00001` devuelto y queda un movimiento de
-    kardex con cantidad `0.0000`.
-
-  `IsDecimalPersistible` no lo cubre: redondea a la escala antes de mirar el techo. Lo que pide la
-  decisión es un tope de escala, como el `@EsCosto` del porcentaje de un impuesto. Hay un
-  precedente en el código: la anulación de una línea de salón ya rechaza más de 4 decimales
-  (`SalonesService`, *"La cantidad admite como máximo 4 decimales."*), por el mismo redondeo de
-  Postgres que dejaba repetirla sin límite. Antes de
-  construir: listar todos los campos `cantidad` que llegan por body (venta, NC, reembolso, Generar
-  nota y los demás) y medir cada uno.
-  Uno ya medido fuera de la venta y la NC: el `minimoCantidad` de un tramo `por_mayor` con
-  `1.23456` entra con 201 y se guarda `1.2346` (2026-10-13, "El mínimo de un tramo por cantidad
-  que no cabe en su columna", [`resueltos.md`](resueltos.md)). Ese es un umbral, no una cantidad
-  que mueva stock: si le toca la misma regla lo decide ese frente.
-
 ### Los tres que dejó el frente del redondeo por país (2026-09-03)
 
 Los tres salen del frente que hizo que el redondeo del tenant tenga su default puesto por su
@@ -431,6 +395,17 @@ prohíbe.
   de cada opción): "Dejarlo hasta que pase".** No se construye nada hasta que ocurra en uso real.
   Descartadas: "descartar la marca con un motivo escrito" (la recomendada) y "ligarla a una nota
   existente". Si aparece, se reabre con esas dos opciones.
+
+- [ ] **El peso de un garzón en el reparto de propinas redondea el quinto decimal, sin aviso**
+  (backend; anotado el 2026-10-13 al cerrar "Una cantidad con más de 4 decimales se rechaza con
+  aviso", [`resueltos.md`](resueltos.md); **leído, no medido**). `PesoManualDto.peso`
+  (`propinas/dto/update-distribucion.dto.ts`) y `pesoManual` (`propinas/dto/update-liquidacion.dto.ts`)
+  llevan solo `@IsDecimalPersistible(18, 4)`, que redondea antes de mirar el techo, y van a
+  columnas `NUMERIC(18,4)`: un peso de `1.23456` se guardaría `1.2346`. Es el mismo mecanismo que
+  la regla de las cantidades, pero un peso no es una cantidad: reparte plata entre garzones, así
+  que el frente de las cantidades no lo tomó. **La pregunta para el owner:** ¿un peso con más de 4
+  decimales se rechaza con aviso, como las cantidades y los impuestos, o se deja redondear? Si es
+  rechazar, es una marca `@EsCantidad` con su mensaje en los dos campos, medido antes por HTTP.
 
 ## 5. Carreras de concurrencia
 

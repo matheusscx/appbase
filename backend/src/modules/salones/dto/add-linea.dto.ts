@@ -13,6 +13,7 @@ import { PersonalizacionRecetaDto } from '../../../common/dto/personalizacion-re
 import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 import { IsDecimalHasta } from '../../../common/decorators/decimal-signo.decorator';
 import { MAX_UNIDADES_POR_VENTA } from '../../../common/utils/tope-unidades-venta.util';
+import { EsCantidad } from '../../../common/decorators/escala-moneda.decorator';
 
 export class AddLineaDto {
   // En minúsculas: la línea de cuenta no pasa por `aliasarCasingDeIds`, y el id
@@ -24,10 +25,12 @@ export class AddLineaDto {
 
   @IsNumberString()
   @IsDecimalHasta(MAX_UNIDADES_POR_VENTA)
+  @EsCantidad()
   cantidad: string;
 
   @IsOptional()
   @IsNumberString()
+  @EsCantidad()
   cantidadPresentacion?: string;
 
   @IsOptional()

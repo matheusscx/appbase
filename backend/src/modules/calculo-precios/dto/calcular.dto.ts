@@ -20,6 +20,7 @@ import {
   MAX_UNIDADES_POR_VENTA,
 } from '../../../common/utils/tope-unidades-venta.util';
 import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
+import { EsCantidad } from '../../../common/decorators/escala-moneda.decorator';
 
 export class LineaDto {
   @IsUUID('4')
@@ -27,10 +28,12 @@ export class LineaDto {
 
   @IsNumberString()
   @IsDecimalHasta(MAX_UNIDADES_POR_VENTA)
+  @EsCantidad()
   cantidad: string;
 
   @IsOptional()
   @IsNumberString()
+  @EsCantidad()
   cantidadPresentacion?: string;
 
   @IsOptional()

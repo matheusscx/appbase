@@ -346,6 +346,16 @@ y en los dos `POST …/reembolsos` de la pasarela (`DevolucionLineaDto`); es el 
 
 `stock: null` es 400 siempre (lo rechaza el DTO); ausente es 400 solo en la línea con stock. El campo de antes, `reponerStock`, ya no existe: el pipe lo rechaza.
 
+**`cantidad` admite hasta 4 decimales** (owner, 2026-10-13: "Rechazar con aviso"), en los cuatro
+caminos: con más, 400 *"La cantidad admite como máximo 4 decimales."* antes de llamar al proveedor,
+sin `REFUND` ni nota. Hasta esa fecha `ventas.devoluciones` (jsonb) guardaba `1.00005` tal cual y la
+línea y la vuelta al kardex quedaban en `1.0001`, así que el tope de la serie (que suma el jsonb) y
+el kardex (que suma lo redondeado) no contaban lo mismo: `1.00005` + `0.99995` de 2 vendidas
+pasaban y volvían 2,0001. Con 4 decimales el jsonb y el kardex dicen lo mismo, y la serie no pasa de
+lo vendido. No cambia cómo se compone la nota ni qué vuelve: solo se valida lo que entra. La nota del
+webhook no recibe cantidades del body: las lee de la `metadata` del `REFUND`, que ya pasó por este
+borde.
+
 **Hasta 500 líneas** en los tres DTOs (`@ArrayMaxSize(MAX_LINEAS_POR_VENTA)`; la 501 es 400 del pipe): se acepta
 una línea por ítem distinto de la venta (repetido es 400), y una venta tiene a lo sumo 500 líneas
 (`CreateVentaDto.lineas`). Con menos, el tope cortaba una nota válida: medido el 2026-10-08, una
@@ -877,6 +887,12 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
 - `nota-credito-cantidad-no-cabe.e2e-spec.ts` (2026-10-13): una `cantidad` que no cabe en
   `NUMERIC(18,4)` es 400 por exceder lo disponible, en la nota manual, el reembolso y "Generar
   nota", sin escribir nada. Por eso el campo no lleva techo de columna: lo pone el tope de la nota.
+  El valor que pasaba por debajo del techo con cinco decimales lo frena desde el mismo día la
+  regla de los 4 decimales.
+- `cantidad-cuatro-decimales.e2e-spec.ts` (2026-10-13): `1.00005` es 400 en la nota manual, los dos
+  reembolsos (admin y llave de API) y "Generar nota", sin `REFUND` ni nota; `1.0001` acredita la
+  línea y vuelve al kardex tal cual; y la devolución en dos partes (`1.0001` + `0.9999`) suma las 2
+  vendidas, con el `0.0001` siguiente en 400.
 - `pasarela-reembolso.e2e-spec.ts` (2026-10-02): por la API real, con el proveedor doblado:
   el REFUND aprobado sin devoluciones deja la nota sobre la boleta y `correccion_venta_id`;
   dos reembolsos parciales, cada uno con su nota; `generarNotaCredito` da 400 por la ruta del

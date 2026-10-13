@@ -20,6 +20,7 @@ import { CreateRecuentoDto } from './dto/create-recuento.dto';
 import { UpdateRecuentoDto } from './dto/update-recuento.dto';
 import { UpdateRecuentoLineaDto } from './dto/update-recuento-linea.dto';
 import { FindRecuentosDto } from './dto/find-recuentos.dto';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
 @Controller('recuentos')
@@ -56,7 +57,7 @@ export class RecuentosController {
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('lineaId', ParseUUIDPipe) lineaId: string,
-    @Body() dto: UpdateRecuentoLineaDto,
+    @Body(EscalaMonedaPipe) dto: UpdateRecuentoLineaDto,
   ) {
     const { tenantId } = req.user as { tenantId: string };
     return this.recuentosService.updateLinea(tenantId, id, lineaId, dto);

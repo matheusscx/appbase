@@ -21,7 +21,10 @@ import {
   IsDecimalPersistible,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
-import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
+import {
+  EsCantidad,
+  EsMontoCobrado,
+} from '../../../common/decorators/escala-moneda.decorator';
 import { EsFechaPura } from '../../../common/decorators/fecha-pura.decorator';
 import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
@@ -30,12 +33,14 @@ export class TramoDto {
   // regla, que un decorador no puede leer — igual que pasa con el importe y su
   // `modo`. Lo valida `validarMinimosDeTramos` en el service.
   // `minimoMonto` es el que el borde de escala PUEDE marcar: un umbral en plata
-  // tiene que caber en la moneda del tenant. `minimoCantidad` no lleva marca
-  // porque sus decimales son legítimos (2,5 kg), pero sí el techo de su
-  // columna: 10^14 daba 500 en el `INSERT` (medido el 2026-10-13).
+  // tiene que caber en la moneda del tenant. `minimoCantidad` no lleva esa
+  // marca porque sus decimales son legítimos (2,5 kg), pero sí el techo de su
+  // columna (10^14 daba 500 en el `INSERT`, medido el 2026-10-13) y la escala
+  // de las cantidades: hasta 4 decimales, los de esa columna (owner, 2026-10-13).
   @IsOptional()
   @IsNumberString()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad('La cantidad mínima admite como máximo 4 decimales.')
   minimoCantidad?: string | null;
 
   @IsOptional()

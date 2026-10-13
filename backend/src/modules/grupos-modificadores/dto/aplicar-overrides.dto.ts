@@ -14,7 +14,10 @@ import {
   IsDecimalPersistible,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
-import { EsCosto } from '../../../common/decorators/escala-moneda.decorator';
+import {
+  EsCantidad,
+  EsCosto,
+} from '../../../common/decorators/escala-moneda.decorator';
 
 export class AplicarOverridesDto {
   @IsArray()
@@ -32,6 +35,7 @@ export class AplicarOverridesDto {
   @IsOptional()
   @IsNumberString()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad()
   cantidad?: string;
 
   @ValidateIf((o: AplicarOverridesDto) => o.unidadCodigo !== '')

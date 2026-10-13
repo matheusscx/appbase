@@ -233,7 +233,7 @@ export class CuentasController {
   agregarLinea(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: AddLineaDto,
+    @Body(EscalaMonedaPipe) dto: AddLineaDto,
   ) {
     const u = req.user as JwtUser;
     return this.salonesService.agregarLinea(u.tenantId ?? '', id, dto);
@@ -259,7 +259,7 @@ export class CuentasController {
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
     @Param('lineaId', ParseUUIDPipe) lineaId: string,
-    @Body() dto: UpdateLineaDto,
+    @Body(EscalaMonedaPipe) dto: UpdateLineaDto,
   ) {
     const u = req.user as JwtUser;
     return this.salonesService.actualizarLinea(

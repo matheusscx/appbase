@@ -1,4 +1,5 @@
 import { IsNumberString, IsOptional, IsString, IsUUID } from 'class-validator';
+import { EsCantidad } from '../../../common/decorators/escala-moneda.decorator';
 
 export class CreateMermaDto {
   @IsUUID()
@@ -16,6 +17,7 @@ export class CreateMermaDto {
   ubicacionId: string;
 
   @IsNumberString()
+  @EsCantidad()
   cantidad: string;
 
   @IsString()
