@@ -422,6 +422,13 @@ prohíbe.
   lo que está entre 1 y 1000. **La pregunta para el owner:** ¿un `nxm` puede descontar más del
   100% de la unidad que regala? Si no, el tope es `≤ 1` en el service, como el de porcentaje. ⚠️
   Toca lo que el motor cobra: va solo (CLAUDE.md, "Detenerse y preguntar").
+  ✅ **Decidido (owner, 2026-10-13, por AskUserQuestion de la orquestadora, con la tabla de cómo
+  quedan 2x1, 3x2, "segunda al 50%" y 3x1): "Hacer el NxM de verdad".** La promo se configura como
+  "lleva N, paga M" y el motor regala las M−N unidades más baratas de cada grupo, de modo que el 3x1
+  y el 4x2 salen bien con precios distintos (hoy el 3x1 solo se arma con el truco de 200%, que
+  descuenta dos veces la más barata). El porcentaje queda con tope en 100% por unidad regalada.
+  Descartadas: "un tope que dependa del tamaño del grupo, para conservar el truco" y "dejarlo".
+  Costo aceptado: toca el motor y la pantalla de promociones; va solo y con el sistema quieto.
 
 ## 5. Carreras de concurrencia
 
