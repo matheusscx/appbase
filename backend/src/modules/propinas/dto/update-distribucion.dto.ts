@@ -16,6 +16,7 @@ import {
   ValidateIf,
   ValidateNested,
 } from 'class-validator';
+import { IsDecimalPersistible } from '../../../common/decorators/decimal-signo.decorator';
 import { TipoGarzon } from '../../garzones/enums/tipo-garzon.enum';
 import { CriterioDistribucion } from '../enums/criterio-distribucion.enum';
 import { BaseVentasGrupo } from '../enums/base-ventas-grupo.enum';
@@ -27,6 +28,7 @@ export class PesoManualDto {
   garzonId: string;
 
   @IsNumberString()
+  @IsDecimalPersistible(18, 4)
   peso: string;
 }
 
@@ -45,6 +47,7 @@ export class GrupoDistribucionDto {
   nombre: string;
 
   @IsNumberString()
+  @IsDecimalPersistible(10, 6)
   porcentaje: string;
 
   @IsIn(Object.values(CriterioDistribucion))

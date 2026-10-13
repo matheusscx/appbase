@@ -264,7 +264,19 @@ compara no lleva techo, porque no tiene columna que desbordar. Lo cuida
 marca sin techo rompe ese spec salvo que figure en su lista de exentos con el porqué. Si
 agregás un campo, anotá ahí su columna. El techo del DTO no cubre lo que el service **deriva**
 del campo (una suma, un costo pasado a la unidad base): eso se mira en el service, como en el
-punto anterior.
+punto anterior. El costo pasado a la unidad base lo mira `assertCostoConvertidoCabe`
+(`common/utils/costo-conversion-unidad.util.ts`), en los mismos llamadores que
+`assertCostoNoColapsaACero`.
+
+📌 **Lo que no es plata lleva `@IsDecimalPersistible(precision, escala)`**: una cantidad, un
+peso de reparto, un porcentaje, una tasa de cambio. Pide la precisión además de la escala,
+porque un porcentaje en `NUMERIC(10,6)` ya no cabe desde 10^4, y su mensaje no lleva `$`.
+Es un techo de **columna**, no de negocio: donde el service ya pone un tope más bajo (un
+porcentaje de descuento menor a 1, una merma que no saca más que el stock) no hace falta.
+Como no hay marca que barrer, cada uso se anota con sus columnas en
+`monto-persistible-cobertura.spec.ts`, que ata la precisión y la escala a la entity. Hasta el
+2026-10-13 la tasa del día, el conteo de un recuento, el reparto de propinas, el porcentaje
+sugerido de una propina y el `valorPorcentaje` de un `nxm` daban 500.
 
 ✅ **El punto ciego de descuentos y recargos se cerró el 2026-08-23.** Su `valor` no se
 podía marcar —era monto fijo o porcentaje según el campo hermano `modo`, y ni el decorador

@@ -1,6 +1,11 @@
 import { BadRequestException } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { ESCALA_COSTO } from '../constants/escalas';
+import {
+  cabeEnColumnaDePlata,
+  formatearMontoPersistible,
+  TECHO_PERSISTIBLE_FORMATEADO,
+} from './monto-persistible.util';
 
 /**
  * Convierte un `costoUnitario` ingresado en una unidad distinta a la base,
@@ -62,6 +67,35 @@ export function assertCostoNoColapsaACero(
     throw new BadRequestException(
       `El costo se pierde al convertirlo a "${unidadDestino}": queda por debajo ` +
         'del cuarto decimal, que es la escala de los costos',
+    );
+  }
+}
+
+/**
+ * Rechaza el costo que, ya convertido a la unidad base, no cabe en su columna
+ * (`item_producto.costo_actual`, `movimientos_inventario.costo_unitario`,
+ * `compra_lineas.costo_unitario_base`: todas `NUMERIC(18,4)`). El techo del DTO
+ * (`IsMontoPersistible`) mira el costo tal como se tipeó, y el costo se guarda
+ * por unidad base: $99 billones por gramo caben, y por kilo son ×1000. Medido el
+ * 2026-10-13: el ajuste de costo, el ajuste de stock, la compra con una unidad o
+ * una presentación menor que la base y la corrección de su precio daban 500.
+ *
+ * Decisión del owner (2026-10-13, por AskUserQuestion de la orquestadora, con la
+ * escena "ingrediente por kilo, ajuste por gramo"): "Sí, con aviso". Se rechaza
+ * antes de escribir y el aviso dice cuánto sería el costo por unidad base; no
+ * cambia cómo se convierte ni qué se guarda.
+ *
+ * Lo llaman los mismos que `assertCostoNoColapsaACero`, con el costo ya
+ * convertido: un camino nuevo que convierta un costo va también por acá.
+ */
+export function assertCostoConvertidoCabe(
+  costoConvertido: string,
+  unidadDestino: string,
+): void {
+  if (!cabeEnColumnaDePlata(costoConvertido)) {
+    throw new BadRequestException(
+      `El costo por ${unidadDestino} sería de $${formatearMontoPersistible(costoConvertido)}: ` +
+        `el sistema no puede guardar costos de $${TECHO_PERSISTIBLE_FORMATEADO} o más`,
     );
   }
 }

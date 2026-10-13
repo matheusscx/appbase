@@ -1,6 +1,7 @@
 import { IsNumberString, IsOptional } from 'class-validator';
 import {
   IsDecimalNoNegativo,
+  IsDecimalPersistible,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
@@ -30,6 +31,7 @@ export class PropinaDirectaDto {
 
   @IsOptional()
   @IsNumberString()
+  @IsDecimalPersistible(10, 6)
   @IsDecimalNoNegativo()
   porcentajeSugerido?: string;
 }

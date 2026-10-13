@@ -1,5 +1,6 @@
 import { BadRequestException } from '@nestjs/common';
 import {
+  assertCostoConvertidoCabe,
   assertCostoNoColapsaACero,
   convertirCostoUnitario,
 } from './costo-conversion-unidad.util';
@@ -67,5 +68,27 @@ describe('assertCostoNoColapsaACero', () => {
     expect(() =>
       assertCostoNoColapsaACero('0.0001', '0.0000', 'gramo'),
     ).toThrow(/"gramo"/);
+  });
+});
+
+describe('assertCostoConvertidoCabe', () => {
+  it('rechaza el costo que cabe por gramo y no por kilo, y dice cuánto sería por la unidad base', () => {
+    // $99.999.999.999.999 por gramo, en un producto por kilo: el factor de
+    // "1 g" a la base es 0,001 kg.
+    const porKilo = convertirCostoUnitario('1', '99999999999999', '0.001');
+    expect(() => assertCostoConvertidoCabe(porKilo, 'kg')).toThrow(
+      new BadRequestException(
+        'El costo por kg sería de $99.999.999.999.999.000: el sistema no puede guardar costos de $100.000.000.000.000 o más',
+      ),
+    );
+  });
+
+  it('deja pasar el máximo que cabe en la columna', () => {
+    const porKilo = convertirCostoUnitario('1', '99999999999.9999', '0.001');
+    expect(porKilo).toBe('99999999999999.9000');
+    expect(() => assertCostoConvertidoCabe(porKilo, 'kg')).not.toThrow();
+    expect(() =>
+      assertCostoConvertidoCabe('99999999999999.9999', 'kg'),
+    ).not.toThrow();
   });
 });

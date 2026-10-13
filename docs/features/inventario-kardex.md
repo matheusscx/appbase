@@ -289,6 +289,8 @@ persistiría idéntico y dejaría en el kardex un ajuste que no cambió nada.
   tienen costo propio en `item_producto`).
 - `400` si `costoNuevo` (ya convertido a unidad base) es igual al `costo_actual`
   vigente (no hay nada que ajustar).
+- `400` si `costoNuevo`, ya convertido a unidad base, no cabe en `NUMERIC(18,4)`: el aviso
+  dice cuánto sería por la unidad base (`assertCostoConvertidoCabe`, owner 2026-10-13).
 - `400` si `unidadCodigo` no existe o su magnitud es incompatible con la unidad base
   del producto — lo lanza `CatalogService.convertirUnidad`, no una validación propia.
 

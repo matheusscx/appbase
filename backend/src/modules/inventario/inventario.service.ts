@@ -9,6 +9,7 @@ import { Repository, EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { ESCALA_COSTO } from '../../common/constants/escalas';
 import {
+  assertCostoConvertidoCabe,
   assertCostoNoColapsaACero,
   convertirCostoUnitario,
 } from '../../common/utils/costo-conversion-unidad.util';
@@ -962,6 +963,7 @@ export class InventarioService {
       // `costoNuevo` es `> 0` por DTO, así que un '0.0000' acá solo puede venir
       // de la conversión de unidad: es el 0 que nadie escribió.
       assertCostoNoColapsaACero(costoNuevo.toString(), costoNuevo4, unidadBase);
+      assertCostoConvertidoCabe(costoNuevo4, unidadBase);
       if (
         costoAnterior != null &&
         costoNuevo4 === new Decimal(costoAnterior).toFixed(ESCALA_COSTO)

@@ -135,43 +135,37 @@ destapa una decisión que no es mía).
   (`aprobada` o `error`), consultar el estado en vez de confirmar. O leer ese 4xx como "sin
   confirmar" y no como rechazo.
 
-- [ ] **Un costo que cabe en su unidad desborda al pasarlo a la unidad base: 500** (backend,
-  `inventario.service.ts` `registrarAjusteCosto` e `items.service.ts` `ajustarStock`, al convertir
-  con `convertirCostoUnitario`; queda del cierre de "Los ~40 campos `@EsMontoCobrado` no tienen
-  techo", 2026-10-12, [`resueltos.md`](resueltos.md)). El techo del DTO (`IsMontoPersistible`)
-  mira el campo tal como llega, y el costo se guarda **por unidad base**. **Medido el 2026-10-12**
-  con un ingrediente en `kg`: `POST /inventario/ajustes-costo` con `unidadCodigo: 'g'` y
-  `costoNuevo: '99999999999999'` da **500**, y `PATCH /items/:id/stock` con el mismo costo por
-  gramo, también. El campo cabe; por kilo son ×1000. **Leído, no medido:** la línea de compra con
-  una presentación o una unidad menor que la base (`compra_lineas.costo_unitario_base`).
-  **Arreglo probable:** el mismo patrón que el motor, `cabeEnColumnaDePlata` sobre el costo ya
-  convertido, una vez, antes de escribir, con un 400 que diga el costo por unidad base. ⚠️ Escribe
-  en `movimientos_inventario`: consultar antes de tocarlo (CLAUDE.md, "Detenerse y preguntar"). Un
-  costo de $10^11 por gramo no es un caso real; lo que pesa es que la respuesta sea un 500.
+- [ ] **El costo de una receta no tiene techo** (backend, `items.service.ts`
+  `validarYCostearIngredientes` y `costoPropuesto`; lo vio la revisión del cierre de "Un costo que
+  cabe en su unidad y no por la unidad base", 2026-10-13, [`resueltos.md`](resueltos.md); **leído,
+  no medido**). El costo de la receta suma `costo_actual × cantidad` de cada ingrediente, con la
+  cantidad ya convertida a la unidad del ingrediente, y lo guarda en `item_receta.costo_actual`
+  (`NUMERIC(18,4)`). Cada costo cabe, y el producto o la suma pueden no caber: dos kilos de un
+  ingrediente de $90 billones por kilo ya son $180 billones. Ningún `cabeEnColumnaDePlata` mira ese resultado, y por
+  lectura daría 500. El combo suma los costos de sus componentes de la misma forma. **Medir** con
+  una receta y un combo; **arreglo probable:** el mismo chequeo una vez sobre el costo calculado y
+  antes de escribir. Hay que decidir si es un 400 (no se puede guardar la receta) o si la receta se
+  guarda con el costo en blanco, y eso lo decide el owner.
 
-- [ ] **Decimales por body sin techo, fuera de las marcas de plata: leído por la revisión, NO
-  medido** (backend; lo nombraron el `domain-reviewer` y el `api-security-reviewer` del cierre de "Los
-  ~40 campos `@EsMontoCobrado` no tienen techo", 2026-10-12, [`resueltos.md`](resueltos.md); la
-  orquestadora pidió anotarlo sin medir). Son campos que llegan por body con `@IsNumberString()` y
-  sin `@EsMontoCobrado`/`@EsCosto`, así que `monto-persistible-cobertura.spec.ts` no los barre.
-  **Primer paso: medir.** Por cada uno, qué devuelve el endpoint con un valor que no cabe en la
-  columna, y si el service ya lo frena antes. Ninguno de estos se corrió. Las columnas se leyeron de
-  la entity:
-  - Tasa de cambio: `UpdateTenantMonedaDto.valorDelDia` va a `tenant_moneda.valor_del_dia`,
-    `NUMERIC(18,6)` (techo 10^12). No vi ninguna validación de rango.
-  - Cantidades y porcentajes:
-    - `CreateMermaDto.cantidad` va a `movimientos_inventario.cantidad`, `NUMERIC(18,4)`.
-    - `cantidadContada` del recuento va a `recuento_inventario_linea.cantidad_contada`, `NUMERIC(18,4)`.
-    - En la distribución de propinas, el `peso` manual va a `NUMERIC(18,4)`, y el `porcentaje` y el
-      `porcentajeSugerido` van a `NUMERIC(10,6)`, con techo 10^4.
-    - El `porcentajeSugerido` de `PropinaDirectaDto`/`PropinaCierreMesaDto` y el
-      `propinaPorcentajeSugerido` del cierre de cuenta van a `venta_propina.porcentaje_sugerido`, que
-      también es `NUMERIC(10,6)`.
-    - `valorPorcentaje` de descuentos, recargos, promociones y sus tramos va a `NUMERIC(7,4)`, con
-      techo 10^3.
-  - `targetCobro = totalFinal + propinaMonto` (`ventas.service.ts`): con los dos dentro de su
-    techo, la suma puede pasar 10^14. No es una columna, así que hay que ver dónde se guarda o se
-    compara.
+- [ ] **Una cantidad por body sin techo llega al `INSERT`: 500** (backend; queda del cierre de
+  "Decimales por body sin techo", 2026-10-13, [`resueltos.md`](resueltos.md)). Las cantidades de
+  kardex llegan con `@IsNumberString()` y a lo sumo `@IsDecimalPositivo()`, sin el techo de su
+  columna `NUMERIC(18,4)`. **Medido el 2026-10-13** por HTTP, base nueva:
+  - `PATCH /items/:id/stock`, entrada de `cantidad: 10^14` en la unidad base: **500**.
+  - El mismo, con `cantidad: 10^12` y `unidadCodigo: 'kg'` en un producto por gramo: **500**. El
+    campo cabe; convertido son ×1000.
+  - Dos entradas de 9×10^13 al mismo producto: la primera da 200 y la segunda **500**, porque el
+    saldo acumulado (`stock_ubicacion`) pasa de 10^14. Ningún campo es grande; lo que desborda es
+    la suma.
+  - Una receta con un ingrediente de `cantidad: 10^14` (`POST /items`): **500**.
+
+  **Leído, no medido:** la cantidad de una compra y su `cantidad_base` convertida (con 10^14 la
+  frenó primero el techo de `totalDocumento`), la de un traslado, la de una opción de grupo
+  modificador (con 10^14 la frenó otro 400, el de la unidad de medida) y la de sus overrides.
+  **Arreglo probable:** `@IsDecimalPersistible(18, 4)` en cada DTO, y en el service el chequeo
+  de la cantidad ya convertida y del saldo resultante, una vez y antes de escribir. ⚠️ El chequeo
+  del service escribe en `movimientos_inventario`: consultar antes (CLAUDE.md, "Detenerse y
+  preguntar"), como el del costo convertido.
 
 - [ ] **La configuración de la pasarela puede quedar incompleta para su modo, y el cobro da 500** — ⬇️ **prioridad baja** (owner, 2026-10-08: la pasarela va después del resto de los arreglos)
   (backend, `pasarela/dto/create-tenant-pasarela.dto.ts` y `tenant-pasarela.service.ts`
@@ -417,6 +411,17 @@ prohíbe.
   de cada opción): "Dejarlo hasta que pase".** No se construye nada hasta que ocurra en uso real.
   Descartadas: "descartar la marca con un motivo escrito" (la recomendada) y "ligarla a una nota
   existente". Si aparece, se reabre con esas dos opciones.
+
+- [ ] **Una promoción `nxm` acepta un `valorPorcentaje` mayor a 1, y con 2 regala las dos
+  unidades** (backend + producto, `promociones.service.ts`; visto el 2026-10-13 al medir
+  "Decimales por body sin techo", [`resueltos.md`](resueltos.md)). **Medido:** un 2x1
+  (`cadaN: 2`) con `valorPorcentaje: '2'` entra con 201, y `POST /calculo-precios/calcular` con
+  dos unidades de $1.000 devuelve `totalDescuentos` $2.000 y `totalFinal` $0. La promoción de
+  porcentaje ya exige menos de 1 (`validarTopeDelPorcentaje`) y el `nxm` no tiene tope: `1` es el
+  2x1 y `0.5` el "segundo al 50%". Desde el 2026-10-13 el techo de columna rechaza 1000 o más, no
+  lo que está entre 1 y 1000. **La pregunta para el owner:** ¿un `nxm` puede descontar más del
+  100% de la unidad que regala? Si no, el tope es `≤ 1` en el service, como el de porcentaje. ⚠️
+  Toca lo que el motor cobra: va solo (CLAUDE.md, "Detenerse y preguntar").
 
 ## 5. Carreras de concurrencia
 

@@ -4,6 +4,7 @@ import {
   IsNumberString,
   ValidateIf,
 } from 'class-validator';
+import { IsDecimalPersistible } from '../../../common/decorators/decimal-signo.decorator';
 
 // `@ValidateIf` y no `@IsOptional()` en los campos de columnas NOT NULL:
 // `IsOptional` trata `null` igual que ausente y saltea el validador de abajo, y
@@ -17,5 +18,6 @@ export class UpdateTenantMonedaDto {
 
   @IsOptional()
   @IsNumberString()
+  @IsDecimalPersistible(18, 6)
   valorDelDia?: string;
 }

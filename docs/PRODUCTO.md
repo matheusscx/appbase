@@ -439,6 +439,13 @@ costo directo — solo existe en la creación del item, como costo de apertura. 
 de gestión (margen, food-cost, valorización de mermas), no la valorización tributaria de
 existencias: esa la produce el contador. Detalle y porqué: [ADR-016](./adr/016-costeo-promedio-ponderado-movil.md).
 
+**Un costo que cabe por la unidad en que se tipea y no por la unidad base se rechaza con
+aviso** (owner, 2026-10-13, por AskUserQuestion de la orquestadora: "Sí, con aviso"). El
+costo se guarda por la unidad base del producto, así que $99 billones por gramo en un
+producto por kilo son ×1000. El aviso dice cuánto sería el costo por la unidad base; no
+cambia cómo se convierte ni qué se guarda. Vale para el ajuste de costo, el ajuste de
+stock, el cambio de unidad de un producto con costo y la compra (al confirmar y al corregir).
+
 **El costo se carga al comprar o en el producto — nunca al mermar.** Una merma no tiene
 campo de costo: se valoriza sola con el `costo_actual` vigente del ítem al momento de
 mermar. Si el ítem no tiene costo cargado, la merma se registra igual, sin valorizar, y

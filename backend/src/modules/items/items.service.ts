@@ -38,6 +38,7 @@ import {
   resolvePagination,
 } from '../../common/utils/pagination.util';
 import {
+  assertCostoConvertidoCabe,
   assertCostoNoColapsaACero,
   convertirCostoUnitario,
 } from '../../common/utils/costo-conversion-unidad.util';
@@ -2680,6 +2681,7 @@ export class ItemsService {
             costoNuevo,
             costoAReconvertir.hacia,
           );
+          assertCostoConvertidoCabe(costoNuevo, costoAReconvertir.hacia);
           await this.inventarioService.registrarMovimiento(manager, {
             tenantId,
             itemId,
@@ -3472,6 +3474,7 @@ export class ItemsService {
               costoUnitario,
               unidadBase ?? 'unidad',
             );
+            assertCostoConvertidoCabe(costoUnitario, unidadBase ?? 'unidad');
           }
         }
       }

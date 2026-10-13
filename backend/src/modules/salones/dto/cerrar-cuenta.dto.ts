@@ -13,7 +13,10 @@ import {
   PagoVentaDto,
 } from '../../ventas/dto/create-venta.dto';
 import { CredencialGarzonOpcionalDto } from '../../../common/dto/credencial-garzon.dto';
-import { IsMontoPersistible } from '../../../common/decorators/decimal-signo.decorator';
+import {
+  IsDecimalPersistible,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 export class CerrarCuentaDto extends CredencialGarzonOpcionalDto {
@@ -55,5 +58,6 @@ export class CerrarCuentaDto extends CredencialGarzonOpcionalDto {
   /** Porcentaje usado para la sugerencia (decimal, ej. 0.10). */
   @IsOptional()
   @IsNumberString()
+  @IsDecimalPersistible(10, 6)
   propinaPorcentajeSugerido?: string;
 }

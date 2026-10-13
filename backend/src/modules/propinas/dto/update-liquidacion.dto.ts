@@ -13,6 +13,7 @@ import {
 import { Type } from 'class-transformer';
 import {
   IsDecimalNoNegativo,
+  IsDecimalPersistible,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
@@ -46,6 +47,7 @@ export class UpdateLiquidacionParticipanteDto {
 
   @IsOptional()
   @IsNumberString()
+  @IsDecimalPersistible(18, 4)
   pesoManual?: string;
 
   // Mismo motivo que en `ajustes-reparto.dto.ts`: sin esto el negativo llegaba

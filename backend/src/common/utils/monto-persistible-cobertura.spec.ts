@@ -24,10 +24,15 @@ import { ItemProducto } from '../../modules/items/entities/item-producto.entity'
 import { RecetaExtraPermitido } from '../../modules/items/entities/receta-extra-permitido.entity';
 import { Pago } from '../../modules/pagos/entities/pago.entity';
 import { Promocion } from '../../modules/promociones/entities/promocion.entity';
+import { LiquidacionPropinasGrupo } from '../../modules/propinas/entities/liquidacion-propinas-grupo.entity';
 import { LiquidacionPropinasParticipante } from '../../modules/propinas/entities/liquidacion-propinas-participante.entity';
+import { PropinaGrupoDistribucion } from '../../modules/propinas/entities/propina-grupo-distribucion.entity';
+import { PropinaGrupoPesoManual } from '../../modules/propinas/entities/propina-grupo-peso-manual.entity';
 import { VentaPropina } from '../../modules/propinas/entities/venta-propina.entity';
 import { Recargo } from '../../modules/recargos/entities/recargo.entity';
+import { RecuentoInventarioLinea } from '../../modules/recuentos/entities/recuento-inventario-linea.entity';
 import { RecargoTramo } from '../../modules/recargos/entities/recargo-tramo.entity';
+import { TenantMoneda } from '../../modules/monedas/entities/tenant-moneda.entity';
 import { Tenant } from '../../modules/tenants/entities/tenant.entity';
 
 /**
@@ -145,30 +150,69 @@ function dtos(dir: string): string[] {
   });
 }
 
-/** `<módulo>/<Clase>.<campo>` → la escala del techo, o `null` si no tiene. */
-function camposMarcados(): Map<string, number | null> {
+/**
+ * Lo que no es plata no lleva marca, así que `IsDecimalPersistible` no se barre
+ * por una: cada uso está anotado acá con sus columnas, y el chequeo es que la
+ * precisión y la escala del techo sean las de cada una (medido el 2026-10-13,
+ * `docs/agent/resueltos.md`, "Decimales por body sin techo").
+ */
+const COLUMNAS_NO_PLATA: Record<string, [Entidad, string][]> = {
+  'monedas/UpdateTenantMonedaDto.valorDelDia': [[TenantMoneda, 'valorDelDia']],
+  'promociones/CreatePromocionDto.valorPorcentaje': [
+    [Promocion, 'valorPorcentaje'],
+  ],
+  'propinas/GrupoDistribucionDto.porcentaje': [
+    [PropinaGrupoDistribucion, 'porcentaje'],
+    [LiquidacionPropinasGrupo, 'porcentaje'],
+  ],
+  'propinas/PesoManualDto.peso': [[PropinaGrupoPesoManual, 'peso']],
+  'propinas/UpdateLiquidacionParticipanteDto.pesoManual': [
+    [LiquidacionPropinasParticipante, 'pesoManual'],
+  ],
+  'recuentos/UpdateRecuentoLineaDto.cantidadContada': [
+    [RecuentoInventarioLinea, 'cantidadContada'],
+  ],
+  'salones/CerrarCuentaDto.propinaPorcentajeSugerido': [
+    [VentaPropina, 'porcentajeSugerido'],
+  ],
+  'ventas/PropinaCierreMesaDto.porcentajeSugerido': [
+    [VentaPropina, 'porcentajeSugerido'],
+  ],
+  'ventas/PropinaDirectaDto.porcentajeSugerido': [
+    [VentaPropina, 'porcentajeSugerido'],
+  ],
+};
+
+/** Cada clase exportada de un DTO, con su `<módulo>`. */
+function clasesDeDto(): [string, Entidad][] {
   const modulos = join(__dirname, '../../modules');
-  const campos = new Map<string, number | null>();
-  for (const archivo of dtos(modulos)) {
+  return dtos(modulos).flatMap((archivo) => {
     const modulo = relative(modulos, archivo).split(sep)[0];
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const exportado = require(archivo) as Record<string, unknown>;
-    for (const clase of Object.values(exportado)) {
-      if (typeof clase !== 'function') continue;
-      const marcados = [ESCALA_MONEDA_KEY, ESCALA_COSTO_KEY].flatMap(
-        (clave) =>
-          (Reflect.getOwnMetadata(clave, clase) as string[] | undefined) ?? [],
+    return Object.values(exportado)
+      .filter((clase): clase is Entidad => typeof clase === 'function')
+      .map((clase): [string, Entidad] => [modulo, clase]);
+  });
+}
+
+/** `<módulo>/<Clase>.<campo>` → la escala del techo, o `null` si no tiene. */
+function camposMarcados(): Map<string, number | null> {
+  const campos = new Map<string, number | null>();
+  for (const [modulo, clase] of clasesDeDto()) {
+    const marcados = [ESCALA_MONEDA_KEY, ESCALA_COSTO_KEY].flatMap(
+      (clave) =>
+        (Reflect.getOwnMetadata(clave, clase) as string[] | undefined) ?? [],
+    );
+    const techos = getMetadataStorage()
+      .getTargetValidationMetadatas(clase, '', true, false)
+      .filter((m) => m.name === 'isMontoPersistible');
+    for (const campo of marcados) {
+      const techo = techos.find((m) => m.propertyName === campo);
+      campos.set(
+        `${modulo}/${clase.name}.${campo}`,
+        techo ? (techo.constraints[0] as number) : null,
       );
-      const techos = getMetadataStorage()
-        .getTargetValidationMetadatas(clase, '', true, false)
-        .filter((m) => m.name === 'isMontoPersistible');
-      for (const campo of marcados) {
-        const techo = techos.find((m) => m.propertyName === campo);
-        campos.set(
-          `${modulo}/${clase.name}.${campo}`,
-          techo ? (techo.constraints[0] as number) : null,
-        );
-      }
     }
   }
   return campos;
@@ -213,6 +257,40 @@ describe('IsMontoPersistible cubre toda marca de plata que se guarda', () => {
           campo,
           precision: 18,
           scale: campos.get(campo),
+        });
+      }
+    },
+  );
+});
+
+describe('IsDecimalPersistible lleva la precisión y la escala de su columna', () => {
+  const techos = new Map<string, unknown[]>();
+  for (const [modulo, clase] of clasesDeDto()) {
+    for (const m of getMetadataStorage()
+      .getTargetValidationMetadatas(clase, '', true, false)
+      .filter((v) => v.name === 'isDecimalPersistible')) {
+      // `getTargetValidationMetadatas` trae también lo heredado: el campo se
+      // anota en la clase que lo declara.
+      if (m.target !== clase) continue;
+      techos.set(`${modulo}/${clase.name}.${m.propertyName}`, m.constraints);
+    }
+  }
+
+  it('cada uso tiene sus columnas anotadas', () => {
+    expect([...techos.keys()].sort()).toEqual(
+      Object.keys(COLUMNAS_NO_PLATA).sort(),
+    );
+  });
+
+  it.each(Object.entries(COLUMNAS_NO_PLATA))(
+    '%s: el techo es el de su columna',
+    (campo, columnas) => {
+      const [precision, scale] = techos.get(campo) ?? [];
+      for (const [entidad, propiedad] of columnas) {
+        expect({ campo, ...columna(entidad, propiedad) }).toEqual({
+          campo,
+          precision,
+          scale,
         });
       }
     },

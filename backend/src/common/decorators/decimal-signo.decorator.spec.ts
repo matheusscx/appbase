@@ -4,6 +4,7 @@ import { validate } from 'class-validator';
 import {
   IsDecimalHasta,
   IsDecimalNoNegativo,
+  IsDecimalPersistible,
   IsDecimalPositivo,
   IsMontoPersistible,
 } from './decimal-signo.decorator';
@@ -31,6 +32,16 @@ class PersistibleDto {
 class PersistibleEscala6Dto {
   @IsMontoPersistible(6)
   tolerancia: string;
+}
+
+class PorcentajeDto {
+  @IsDecimalPersistible(10, 6)
+  porcentaje: string;
+}
+
+class PorcentajeReglaDto {
+  @IsDecimalPersistible(7, 4)
+  porcentaje: string;
 }
 
 describe('IsDecimalPositivo', () => {
@@ -145,5 +156,37 @@ describe('IsMontoPersistible(6): la columna NUMERIC(18,6)', () => {
         'tolerancia no puede ser de $1.000.000.000.000 o más: el sistema no puede guardar montos así',
       );
     }
+  });
+});
+
+describe('IsDecimalPersistible: el techo de una columna que no es de plata', () => {
+  it('NUMERIC(10,6) acepta el máximo que cabe: 4 enteros y 6 decimales', async () => {
+    for (const porcentaje of ['9999.999999', '0.10', '0']) {
+      const dto = plainToInstance(PorcentajeDto, { porcentaje });
+      expect(await validate(dto)).toHaveLength(0);
+    }
+  });
+
+  it('NUMERIC(10,6) rechaza 10^4 y lo que Postgres redondearía a 10^4, sin "$" en el mensaje', async () => {
+    for (const porcentaje of ['10000', '9999.9999995', '-10000']) {
+      const dto = plainToInstance(PorcentajeDto, { porcentaje });
+      const errores = await validate(dto);
+      expect(errores[0]?.constraints?.isDecimalPersistible).toBe(
+        'porcentaje no puede ser de 10.000 o más: el sistema no puede guardar valores así',
+      );
+    }
+  });
+
+  it('NUMERIC(7,4): el techo es 10^3, aunque 10^3 cabría en NUMERIC(10,6)', async () => {
+    const cabe = plainToInstance(PorcentajeReglaDto, {
+      porcentaje: '999.9999',
+    });
+    expect(await validate(cabe)).toHaveLength(0);
+    const errores = await validate(
+      plainToInstance(PorcentajeReglaDto, { porcentaje: '1000' }),
+    );
+    expect(errores[0]?.constraints?.isDecimalPersistible).toBe(
+      'porcentaje no puede ser de 1.000 o más: el sistema no puede guardar valores así',
+    );
   });
 });

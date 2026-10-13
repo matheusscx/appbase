@@ -17,20 +17,22 @@ export const PRECISION_PERSISTIDA = 18;
 export const ESCALA_PERSISTIDA = 4;
 
 /**
- * El primer monto que ya no cabe en `NUMERIC(18, escala)`: `10^(18−escala)`.
- * Con la escala de la plata, 14 dígitos enteros; con `NUMERIC(18,6)`
- * (`tenants.monto_tolerancia`), 12.
+ * El primer valor que ya no cabe en `NUMERIC(precision, escala)`:
+ * `10^(precision−escala)`. Con la escala de la plata, 14 dígitos enteros; con
+ * `NUMERIC(18,6)` (`tenants.monto_tolerancia`), 12. Las columnas que no son de
+ * plata traen su propia precisión: un porcentaje en `NUMERIC(10,6)` tiene el
+ * techo en 10^4, y uno en `NUMERIC(7,4)`, en 10^3.
  */
-function techo(escala: number): Decimal {
-  return new Decimal(10).pow(PRECISION_PERSISTIDA - escala);
+function techo(escala: number, precision: number): Decimal {
+  return new Decimal(10).pow(precision - escala);
 }
 
 /**
- * ¿Postgres acepta este monto en una columna `NUMERIC(18, escala)` —por
+ * ¿Postgres acepta este monto en una columna `NUMERIC(precision, escala)` —por
  * default la de plata, `NUMERIC(18,4)`—? Replica lo que hace él al escribir:
  * primero redondea a `escala` decimales —el empate, hacia afuera
  * del cero, que es lo que hace `ROUND_HALF_UP` en Decimal.js— y después exige
- * menos de `18 − escala` dígitos enteros. Por eso `99.999.999.999.999,99995` no cabe: llega
+ * menos de `precision − escala` dígitos enteros. Por eso `99.999.999.999.999,99995` no cabe: llega
  * redondeado a `10^14`.
  *
  * Solo mira: no cuantiza ni devuelve nada que alguien vaya a persistir.
@@ -38,16 +40,20 @@ function techo(escala: number): Decimal {
 export function cabeEnColumnaDePlata(
   monto: Decimal.Value,
   escala: number = ESCALA_PERSISTIDA,
+  precision: number = PRECISION_PERSISTIDA,
 ): boolean {
   return new Decimal(monto)
     .toDecimalPlaces(escala, Decimal.ROUND_HALF_UP)
     .abs()
-    .lessThan(techo(escala));
+    .lessThan(techo(escala, precision));
 }
 
-/** El techo de `NUMERIC(18, escala)` como lo lee el cajero, para el mensaje. */
-export function techoFormateado(escala: number): string {
-  return formatearMontoPersistible(techo(escala));
+/** El techo de `NUMERIC(precision, escala)` como lo lee el cajero, para el mensaje. */
+export function techoFormateado(
+  escala: number,
+  precision: number = PRECISION_PERSISTIDA,
+): string {
+  return formatearMontoPersistible(techo(escala, precision));
 }
 
 /** El techo de la columna de plata, `NUMERIC(18,4)`. */

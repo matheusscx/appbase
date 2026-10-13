@@ -19,7 +19,10 @@ import {
   MAX_REINTENTOS_DEADLOCK,
   esDeadlock,
 } from '../../common/db/reintento-deadlock';
-import { assertCostoNoColapsaACero } from '../../common/utils/costo-conversion-unidad.util';
+import {
+  assertCostoConvertidoCabe,
+  assertCostoNoColapsaACero,
+} from '../../common/utils/costo-conversion-unidad.util';
 import {
   diaNegocioTenant,
   diaNegocioEnZona,
@@ -3532,6 +3535,9 @@ export class ComprasService {
    * conversión también puede dejar una línea en 0,0000. El único 0 elegido es
    * el de un descuento que se lleva la factura entera, porque con un reparto
    * proporcional es el único que deja en 0 una línea con precio.
+   *
+   * El techo mira el costo con el descuento, que es el que se guarda: un precio
+   * que cabe por la unidad del proveedor puede no caber por la unidad base.
    */
   private async costearCompra(
     tenantId: string,
@@ -3576,6 +3582,7 @@ export class ComprasService {
       if (!facturaEntera) {
         assertCostoNoColapsaACero(l.precioUnitario!, costos[k], l.unidadBase);
       }
+      assertCostoConvertidoCabe(costos[k], l.unidadBase);
       resultado[i] = costos[k];
     });
     return resultado;

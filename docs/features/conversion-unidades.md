@@ -292,6 +292,14 @@ util), llamada desde los tres sitios de abajo: rechaza el `0` que nadie escribi�
 alguien eligió. Sin la conversión de por medio no hay caso — el DTO no deja tipear más de 4
 decimales.
 
+**El costo que no cabe por la unidad base también se rechaza** (owner, 2026-10-13: "Sí, con
+aviso"). El DTO pone el techo de `NUMERIC(18,4)` sobre el costo **tipeado**, y $99 billones
+por gramo caben; en un producto por kilo son ×1000 y el `INSERT` daba 500. Lo corta
+`assertCostoConvertidoCabe` (misma util), sobre el costo ya convertido y antes de escribir,
+con un 400 que dice cuánto sería: *"El costo por kg sería de $99.999.999.999.999.000…"*. Lo
+llaman los mismos que al colapso, `ComprasService.costearCompra` incluido (una línea con una
+unidad o una presentación menor que la base, al confirmar y al corregir).
+
 **Dónde aplica:**
 - `ItemsService.ajustarStock` — siempre que venga `costoUnitario` y haya conversión de cantidad.
 - `ItemsService.update` — al cambiar `unidad_medida`, reconvierte el `costo_actual` vigente

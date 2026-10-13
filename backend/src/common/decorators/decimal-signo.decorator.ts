@@ -151,3 +151,46 @@ export function IsMontoPersistible(
     });
   };
 }
+
+/**
+ * El mismo techo que `IsMontoPersistible`, para lo que no es plata: una
+ * cantidad, un peso de reparto, un porcentaje, una tasa de cambio. Por eso pide
+ * la precisión además de la escala —un porcentaje en `NUMERIC(10,6)` no cabe
+ * desde 10^4— y el mensaje no lleva `$`. Sin esto, un valor que no cabe pasaba
+ * el DTO y daba 500 en el `INSERT` (medido el 2026-10-13: la tasa del día, el
+ * conteo de un recuento, el porcentaje y el peso del reparto de propinas, el
+ * porcentaje sugerido de una propina y el `valorPorcentaje` de un `nxm`).
+ *
+ * Es un techo de COLUMNA, no una regla de negocio: donde el negocio pone un
+ * tope más bajo (un porcentaje de descuento menor a 1), ese tope lo valida
+ * quien lo decide y este no hace falta. Qué precisión y escala lleva cada campo
+ * lo ata `monto-persistible-cobertura.spec.ts` a la metadata de la entity.
+ */
+export function IsDecimalPersistible(
+  precision: number,
+  escala: number,
+  validationOptions?: ValidationOptions,
+) {
+  return function (object: object, propertyName: string) {
+    registerDecorator({
+      name: 'isDecimalPersistible',
+      target: object.constructor,
+      propertyName,
+      constraints: [precision, escala],
+      options: validationOptions,
+      validator: {
+        validate(value: unknown): boolean {
+          if (typeof value !== 'string') return false;
+          try {
+            return cabeEnColumnaDePlata(value, escala, precision);
+          } catch {
+            return false;
+          }
+        },
+        defaultMessage(): string {
+          return `${propertyName} no puede ser de ${techoFormateado(escala, precision)} o más: el sistema no puede guardar valores así`;
+        },
+      },
+    });
+  };
+}

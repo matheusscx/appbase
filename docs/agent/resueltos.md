@@ -23,6 +23,157 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Un costo que cabe en su unidad y no por la unidad base se rechaza con aviso (cerrada 2026-10-13)
+
+**Decisión del owner** (2026-10-13, por AskUserQuestion de la orquestadora, con la escena
+*"ingrediente por kilo, ajuste por gramo, $99 billones por gramo"*): **"Sí, con aviso"**. Se
+rechaza con 400 antes de escribir, y el aviso dice cuánto sería el costo por la unidad base. No
+cambia cómo se calcula ni qué se guarda. Descartada: "dejarlo".
+
+**Cómo se cerró.** `assertCostoConvertidoCabe` (`common/utils/costo-conversion-unidad.util.ts`)
+mira con `cabeEnColumnaDePlata` el costo **ya convertido**, una vez y antes de escribir, y lo
+llaman los mismos que `assertCostoNoColapsaACero`. El 400 dice *"El costo por kg sería de
+$99.999.999.999.999.000: el sistema no puede guardar costos de $100.000.000.000.000 o más"*.
+`movimientos_inventario` se escribe igual que antes: el chequeo solo rechaza antes.
+
+Medido por HTTP sobre una base nueva con el código de `origin/main` en `435e7d52` (el frente se
+integró sobre `839564b9`, que no toca estos caminos). El producto es
+por kilo y el costo se tipea por gramo: $99.999.999.999.999 (cabe en `NUMERIC(18,4)`; por kilo
+es ×1000).
+
+| Camino | Endpoint | Columna | Antes | Ahora |
+|---|---|---|---|---|
+| Ajuste de costo (`registrarAjusteCosto`) | `POST /inventario/ajustes-costo` con `unidadCodigo: 'g'` | `item_producto.costo_actual`, `movimientos_inventario.costo_unitario` (18,4) | **500** | 400 con el aviso |
+| Ajuste de stock (`ajustarStock`) | `PATCH /items/:id/stock` con `unidadCodigo: 'g'` | `movimientos_inventario.costo_unitario` (18,4) | **500** | 400 con el aviso |
+| Cambio de unidad de un producto con costo (`ItemsService.update`) | `PATCH /items/:id` de `g` a `kg`, sin stock | `item_producto.costo_actual` (18,4) | **500** (no estaba en la entrada; lo nombra el docblock del colapso) | 400 con el aviso |
+| Compra con la línea en una unidad menor (`costearCompra`) | `POST /compras/:id/confirmar`, línea en `g` | `compra_lineas.costo_unitario_base`, `movimientos_inventario.costo_unitario` (18,4) | **500** (el borrador entra con 201) | 400 con el aviso; la compra queda en borrador |
+| Compra con una presentación menor (`costearCompra`) | `POST /compras/:id/confirmar`, presentación "Sobre (1 g)" | las mismas | **500** (la entrada lo tenía como "leído, no medido") | 400 con el aviso |
+| Corrección del precio de una línea en una unidad menor (`costearCompra`, vía `recostear`) | `PATCH /compras/:id/lineas/:lineaId` | `compra_lineas.costo_unitario_base` (18,4) | **500** | 400 con el aviso; precio y costo quedan como estaban |
+
+**En números:** 6 caminos, los 6 daban 500 y ahora dan 400. El costo que sí cabe por kilo
+(`99999999999.9999` por gramo, que da `99999999999999.9000` por kilo) entra con 201.
+
+**Lo que quedó afuera:** el costo de una receta, que multiplica el costo de cada ingrediente por
+su cantidad ya convertida y lo guarda en `item_receta.costo_actual`. No es una conversión de
+costo unitario y no pasa por este chequeo. Lo vio la revisión; está en
+[`pendientes.md`](pendientes.md) § 2, *"El costo de una receta no tiene techo"*, leído y no medido.
+
+### Tests y mutantes
+
+- `test/costo-convertido-no-cabe.e2e-spec.ts`: los 6 caminos dan 400 con el aviso exacto. Mide que
+  no se escribió nada: el costo vigente y los movimientos del producto, la unidad del producto que
+  no cambió, las dos compras siguen en borrador, y el precio y el costo de la línea corregida
+  quedan como estaban. Control: el costo máximo que cabe por kilo entra y se lee de vuelta.
+- **Mutante que revierte** (`git apply -R` de los tres services, sin tocar el util): los 6
+  pedidos vuelven a dar **500**. El spec cae en 3 de sus 4 tests; el cuarto es el control.
+- `costo-conversion-unidad.util.spec.ts`: el aviso exacto, y el máximo que cabe pasa.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Un costo que cabe en su unidad desborda al pasarlo a la unidad base: 500** (backend,
+  `inventario.service.ts` `registrarAjusteCosto` e `items.service.ts` `ajustarStock`, al convertir
+  con `convertirCostoUnitario`; queda del cierre de "Los ~40 campos `@EsMontoCobrado` no tienen
+  techo", 2026-10-12, [`resueltos.md`](resueltos.md)). El techo del DTO (`IsMontoPersistible`)
+  mira el campo tal como llega, y el costo se guarda **por unidad base**. **Medido el 2026-10-12**
+  con un ingrediente en `kg`: `POST /inventario/ajustes-costo` con `unidadCodigo: 'g'` y
+  `costoNuevo: '99999999999999'` da **500**, y `PATCH /items/:id/stock` con el mismo costo por
+  gramo, también. El campo cabe; por kilo son ×1000. **Leído, no medido:** la línea de compra con
+  una presentación o una unidad menor que la base (`compra_lineas.costo_unitario_base`).
+  **Arreglo probable:** el mismo patrón que el motor, `cabeEnColumnaDePlata` sobre el costo ya
+  convertido, una vez, antes de escribir, con un 400 que diga el costo por unidad base. ⚠️ Escribe
+  en `movimientos_inventario`: consultar antes de tocarlo (CLAUDE.md, "Detenerse y preguntar"). Un
+  costo de $10^11 por gramo no es un caso real; lo que pesa es que la respuesta sea un 500.
+
+## Decimales por body sin techo, fuera de las marcas de plata: medidos, y 9 daban 500 (cerrada 2026-10-13)
+
+**Cómo se cerró.** `IsDecimalPersistible(precision, escala)`
+(`common/decorators/decimal-signo.decorator.ts`) es el techo de `IsMontoPersistible` para lo que
+no es plata: pide también la precisión, porque un porcentaje en `NUMERIC(10,6)` no cabe desde
+10^4, y su mensaje no lleva `$`. Para eso `cabeEnColumnaDePlata` y `techoFormateado` toman una
+precisión opcional (default 18): el motor y la caja las siguen llamando igual. Es un techo de
+**columna**, no de negocio: no se puso ningún tope nuevo de porcentaje.
+`monto-persistible-cobertura.spec.ts` anota cada uso con sus columnas y ata precisión y escala a
+la entity.
+
+Medido por HTTP (supertest) sobre una base nueva con el código de `origin/main` en `435e7d52`,
+con el primer valor que no cabe en cada columna. El frente se integró sobre `839564b9`, que no toca
+estos caminos.
+
+| Campo (módulo/DTO) | Endpoint | Columna (entity) | Valor | Antes | Arreglo |
+|---|---|---|---|---|---|
+| monedas/`UpdateTenantMonedaDto.valorDelDia` | `PATCH /monedas/:id` | `tenant_moneda.valor_del_dia` (18,6) | 10^12 | **500** (`999999999999.999999` da 200) | `IsDecimalPersistible(18, 6)` |
+| recuentos/`UpdateRecuentoLineaDto.cantidadContada` | `PATCH /recuentos/:id/lineas/:lineaId` | `recuento_inventario_linea.cantidad_contada` (18,4) | 10^14 | **500** | `IsDecimalPersistible(18, 4)` |
+| propinas/`GrupoDistribucionDto.porcentaje` | `PUT /propinas/distribucion` | `propina_grupo_distribucion.porcentaje` (10,6), y se copia a `liquidacion_propinas_grupo.porcentaje` (10,6) | 10^4 | **500** con un grupo apagado, que no entra en la suma del 100% | `IsDecimalPersistible(10, 6)` |
+| propinas/`PesoManualDto.peso` | `PUT /propinas/distribucion` | `propina_grupo_peso_manual.peso` (18,4) | 10^14 | **500** (el service solo exige > 0) | `IsDecimalPersistible(18, 4)` |
+| propinas/`UpdateLiquidacionParticipanteDto.pesoManual` | `PATCH /propinas/liquidaciones/:id` | `liquidacion_propinas_participante.peso_manual` (18,4) | 10^14 | **500** (no estaba en la entrada: es el gemelo de `peso`) | `IsDecimalPersistible(18, 4)` |
+| ventas/`PropinaDirectaDto.porcentajeSugerido` | `POST /ventas` | `venta_propina.porcentaje_sugerido` (10,6) | 10^4 | **500** | `IsDecimalPersistible(10, 6)` |
+| ventas/`PropinaCierreMesaDto.porcentajeSugerido` | `POST /ventas` | `venta_propina.porcentaje_sugerido` (10,6) | 10^4 | **500** | `IsDecimalPersistible(10, 6)` |
+| salones/`CerrarCuentaDto.propinaPorcentajeSugerido` | `POST /cuentas/:id/cerrar` | `venta_propina.porcentaje_sugerido` (10,6) | 10^4 | **500**; la cuenta queda abierta | `IsDecimalPersistible(10, 6)` |
+| promociones/`CreatePromocionDto.valorPorcentaje`, tipo `nxm` | `POST`/`PATCH /promociones` | `promociones.valor_porcentaje` (7,4) | 10^3 | **500** al crear y al editar | `IsDecimalPersistible(7, 4)` |
+| promociones/`CreatePromocionDto.valorPorcentaje`, tipo `porcentaje` | `POST /promociones` | la misma | 10^3 | 400 del service: *"tiene que ser menor al 100 %"* | el mismo techo, que es del campo: con 10^3 o más el 400 ahora es el del techo; de 1 a 999,9999 sigue siendo el del service |
+| descuentos y recargos/`valorPorcentaje`, de la regla y del tramo | `POST /descuentos`, `/recargos` | `descuentos.valor_porcentaje`, `descuento_tramos.valor_porcentaje`, y los de recargos (7,4) | 10^3 | 400 del service: *"ser menor a 1"* | exento: el tope del service (< 1) es más bajo que el de la columna |
+| propinas/`UpdateDistribucionDto.porcentajeSugerido` | `PUT /propinas/distribucion` | `propina_configuracion.porcentaje_sugerido` (10,6) | 10^4 | 400 del service: *"no porcentaje entero"* (≤ 1) | exento: el mismo motivo |
+| mermas/`CreateMermaDto.cantidad` | `POST /mermas` | `movimientos_inventario.cantidad` (18,4) | 10^14, y 10^12 kg sobre un producto en gramos | 400 del service: *"Stock insuficiente para la salida"* | exento: el stock cabe en su columna y una merma no saca más que el stock |
+
+**`targetCobro = totalFinal + propinaMonto` no revienta.** Medido con un producto de
+$90.000.000.000.000 y una propina igual, $180 billones en total: no es una columna, y solo se
+compara con lo pagado (`PagosService.registrar`). Cada pago tiene su techo en el DTO, la caja el
+suyo (`assertEntradasCaben`) y lo aplicado a la venta no pasa del pago. Pagado con efectivo y
+débito, 201. Con dos débitos, 400 de la caja: *"Los cobros con Tarjeta de débito de esta caja
+sumarían $100.000.000.000.000 o más"*. Con un pago de $1, 201 y la venta queda pendiente. No
+toca el motor de cálculo.
+
+**En números:** 9 campos daban 500 y ahora dan 400 (10 pedidos: el `nxm` se midió al crear y al editar). 1 más lleva el techo aunque el service ya
+lo frenaba (el `valorPorcentaje` de una promoción de porcentaje), porque el techo es del campo.
+4 grupos no lo necesitan: el service los frena con un tope más bajo. **El porcentaje de impuestos
+no se tocó**: se cerró en `9b10cb8d` y `cac160f9`, y es fiscal.
+
+**Lo que quedó afuera**, medido en la misma pasada y anotado en [`pendientes.md`](pendientes.md):
+las cantidades de kardex sin techo (*"Una cantidad por body sin techo"*, § 2) y el `nxm` con
+`valorPorcentaje` mayor a 1, que regala las dos unidades (§ 4).
+
+### Tests y mutantes
+
+- `test/decimal-no-plata-no-cabe.e2e-spec.ts`: los 9 campos (10 pedidos) dan 400 con el techo de su columna
+  en el mensaje. Mide que no se escribió nada: la tasa, el conteo, la versión del reparto, el peso
+  del participante, las ventas de la caja con la cuenta todavía abierta, y las promociones.
+  Controles: el máximo de cada columna entra y se lee de vuelta (`999999999999.999999` en la
+  tasa, `99999999999999.9999` en el conteo, `9999.999999` en el porcentaje sugerido). Un último
+  test fija los exentos: si el tope del service se fuera, ese campo necesitaría el suyo.
+- **Mutante que revierte** (`git apply -R` de los 8 DTO, sin tocar el decorador): los 10 pedidos
+  vuelven a dar **500**. El spec cae en 5 de sus 6 tests; el sexto es el de los exentos.
+- `monto-persistible-cobertura.spec.ts`, bloque nuevo: cada `IsDecimalPersistible` tiene sus
+  columnas anotadas y su precisión y escala son las de cada una. Mutantes: `(18, 6)` en vez de
+  `(10, 6)` en el porcentaje del grupo, 1 rojo; sin el techo de `cantidadContada`, 2 rojos.
+- `decimal-signo.decorator.spec.ts`: `(10,6)` acepta `9999.999999` y rechaza `10000`,
+  `9999.9999995` y `-10000` sin `$` en el mensaje; `(7,4)` rechaza `1000`.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 2
+
+- [ ] **Decimales por body sin techo, fuera de las marcas de plata: leído por la revisión, NO
+  medido** (backend; lo nombraron el `domain-reviewer` y el `api-security-reviewer` del cierre de "Los
+  ~40 campos `@EsMontoCobrado` no tienen techo", 2026-10-12, [`resueltos.md`](resueltos.md); la
+  orquestadora pidió anotarlo sin medir). Son campos que llegan por body con `@IsNumberString()` y
+  sin `@EsMontoCobrado`/`@EsCosto`, así que `monto-persistible-cobertura.spec.ts` no los barre.
+  **Primer paso: medir.** Por cada uno, qué devuelve el endpoint con un valor que no cabe en la
+  columna, y si el service ya lo frena antes. Ninguno de estos se corrió. Las columnas se leyeron de
+  la entity:
+  - Tasa de cambio: `UpdateTenantMonedaDto.valorDelDia` va a `tenant_moneda.valor_del_dia`,
+    `NUMERIC(18,6)` (techo 10^12). No vi ninguna validación de rango.
+  - Cantidades y porcentajes:
+    - `CreateMermaDto.cantidad` va a `movimientos_inventario.cantidad`, `NUMERIC(18,4)`.
+    - `cantidadContada` del recuento va a `recuento_inventario_linea.cantidad_contada`, `NUMERIC(18,4)`.
+    - En la distribución de propinas, el `peso` manual va a `NUMERIC(18,4)`, y el `porcentaje` y el
+      `porcentajeSugerido` van a `NUMERIC(10,6)`, con techo 10^4.
+    - El `porcentajeSugerido` de `PropinaDirectaDto`/`PropinaCierreMesaDto` y el
+      `propinaPorcentajeSugerido` del cierre de cuenta van a `venta_propina.porcentaje_sugerido`, que
+      también es `NUMERIC(10,6)`.
+    - `valorPorcentaje` de descuentos, recargos, promociones y sus tramos va a `NUMERIC(7,4)`, con
+      techo 10^3.
+  - `targetCobro = totalFinal + propinaMonto` (`ventas.service.ts`): con los dos dentro de su
+    techo, la suma puede pasar 10^14. No es una columna, así que hay que ver dónde se guarda o se
+    compara.
+
 ## El aviso de un recargo global en % decía "Recargo de $2" (cerrada 2026-10-13)
 
 Frente mecánico, lanzado por la orquestadora. `descuentoDeFactura` (`useDte.ts`) armaba el aviso
@@ -493,8 +644,8 @@ escala con `MonedasService.validarEscalaDeMoneda`. Su techo sigue en la entrada 
 del `.sql`.
 
 **Qué queda afuera:** lo que el service **deriva** del campo. Un costo que cabe por gramo y se
-guarda por kilo da 500 (medido). Es la entrada nueva *"Un costo que cabe en su unidad desborda al
-pasarlo a la unidad base"*, en [`pendientes.md`](pendientes.md) § 2.
+guarda por kilo daba 500 (medido). ✅ Cerrado el 2026-10-13: *"Un costo que cabe en su unidad y
+no por la unidad base se rechaza con aviso"*, en este archivo.
 
 ### Tests y mutantes
 

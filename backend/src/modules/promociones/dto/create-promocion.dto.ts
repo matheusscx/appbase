@@ -20,6 +20,7 @@ import {
 } from 'class-validator';
 import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import {
+  IsDecimalPersistible,
   IsDecimalPositivo,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
@@ -126,6 +127,7 @@ export class CreatePromocionDto {
   /** `porcentaje` y `nxm`. Decimal: 2x1 = '1.0000', "2do al 50%" = '0.5000'. */
   @IsOptional()
   @IsNumberString()
+  @IsDecimalPersistible(7, 4)
   valorPorcentaje?: string | null;
 
   /** Solo `nxm`: 2x1→2, 3x2→3. */
