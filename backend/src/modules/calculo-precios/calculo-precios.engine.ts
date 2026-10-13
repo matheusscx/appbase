@@ -1665,19 +1665,25 @@ function reescalarTrazas(
  * Devuelve, por índice de línea, qué promos restan ahí y si el catálogo queda
  * anulado.
  *
- * **La unidad de comparación es la APLICACIÓN, no la línea.** Un combo que toca
- * dos líneas se compara ENTERO: es un precio por el conjunto, y dejarlo en la
- * línea donde gana y sacarlo de la otra cobraría medio combo — que no es un
- * producto que exista. Consecuencia buscada: una aplicación puede perder aunque
- * en una de sus líneas, sola, hubiera ganado.
+ * **La unidad de comparación es el BLOQUE: las aplicaciones que comparten
+ * alguna línea, sean de la misma promo o de otra, transitivamente** (owner,
+ * 2026-10-13, "Juntas solo si comparten producto"). El catálogo se anula por
+ * línea, así que toda la plata de promo que cae en una línea se decide junta:
+ * comparando cada aplicación sola, la segunda tanda de un 3x1 competía contra
+ * el 30 % que la primera ya le había sacado a las cervezas, y perdía (5
+ * cervezas de $1.000 y un agua cobraban $3.100 en vez de $2.000). Las que no
+ * comparten línea compiten por separado: una tanda que pierde en su línea no
+ * la arrastra otra que gana en una línea ajena. Un combo que toca dos líneas
+ * sigue yendo ENTERO —es una sola aplicación—: dejarlo en la línea donde gana
+ * y sacarlo de la otra cobraría medio combo. Hasta esa fecha la unidad era la
+ * aplicación sola (regla del 2026-08-27); `docs/features/motor-promociones.md`
+ * cuenta por qué cambió y la decisión intermedia que se descartó.
  *
- * **Contra qué se compara:** los descuentos de catálogo que esas líneas
- * aplicarían **en la pasada normal**, calculados una sola vez acá y usados como
- * baseline para TODAS las aplicaciones. Que el baseline no se actualice a
- * medida que las aplicaciones ganan no es un descuido: si se recalculara, dos
- * aplicaciones sobre la misma línea competirían contra un catálogo que la
- * primera ya apagó, y la segunda ganaría por default. El baseline fijo hace
- * que el resultado no dependa del orden de la lista.
+ * **Contra qué se compara:** los descuentos de catálogo que las líneas del
+ * bloque aplicarían **en la pasada normal**, calculados una sola vez acá. Que
+ * no se recalculen a medida que los bloques ganan no es un descuido: dos
+ * bloques no comparten líneas, así que ninguno puede apagarle el catálogo al
+ * otro, y el resultado no depende del orden de la lista.
  *
  * **Los dos lados se miden en NETO y cuantizados** (con el mismo `q` de la
  * línea) porque lo que se compara es plata declarada, no el valor fino
@@ -1733,27 +1739,55 @@ function resolverPromociones(
         ),
     );
 
-    ganadoras = [];
-    for (const ap of venta.promociones) {
-      const rebajaPromo = ap.montosPorLinea.reduce(
-        (a, m) => a.plus(promoEnNetoQ(m)),
-        ZERO,
-      );
-      const lineasTocadas = new Set(ap.montosPorLinea.map((m) => m.lineaIndex));
-      const rebajaCatalogo = [...lineasTocadas].reduce(
+    // Los bloques: componentes conexas de "comparte una línea con", por
+    // unión-búsqueda sobre los índices de las aplicaciones. Una pasada por
+    // los montos: la primera aplicación que toca una línea queda como su
+    // dueña, y cada una que llega después se une a ella. La transitividad
+    // (A–B y B–C ⇒ A, B y C) la da la unión, no un recorrido por pares.
+    const padre = venta.promociones.map((_, i) => i);
+    const raiz = (i: number): number => {
+      while (padre[i] !== i) {
+        padre[i] = padre[padre[i]];
+        i = padre[i];
+      }
+      return i;
+    };
+    const duenaDeLinea = new Map<number, number>();
+    venta.promociones.forEach((ap, i) => {
+      for (const { lineaIndex } of ap.montosPorLinea) {
+        const duena = duenaDeLinea.get(lineaIndex);
+        if (duena === undefined) duenaDeLinea.set(lineaIndex, i);
+        else padre[raiz(i)] = raiz(duena);
+      }
+    });
+
+    const bloques = new Map<number, { promo: Decimal; lineas: Set<number> }>();
+    venta.promociones.forEach((ap, i) => {
+      const r = raiz(i);
+      const bloque = bloques.get(r) ?? { promo: ZERO, lineas: new Set() };
+      for (const m of ap.montosPorLinea) {
+        bloque.promo = bloque.promo.plus(promoEnNetoQ(m));
+        bloque.lineas.add(m.lineaIndex);
+      }
+      bloques.set(r, bloque);
+    });
+
+    const ganaElBloque = new Map<number, boolean>();
+    for (const [r, { promo, lineas }] of bloques) {
+      const catalogo = [...lineas].reduce(
         (a, i) => a.plus(descuentoDeCatalogo[i] ?? ZERO),
         ZERO,
       );
-
-      // Perdió: la aplicación se descarta ENTERA y **sin traza**, igual que la
-      // regla fuera de vigencia. No es un "aplicó 0" —la promo rige y el
-      // cliente califica—: es que en este tenant las dos familias no conviven,
-      // y eso lo explica la pantalla de configuración, no una línea del ticket.
-      if (!rebajaPromo.greaterThan(rebajaCatalogo)) continue;
-
-      ganadoras.push(ap);
-      for (const i of lineasTocadas) catalogoAnuladoEn.add(i);
+      const gana = promo.greaterThan(catalogo);
+      ganaElBloque.set(r, gana);
+      if (gana) for (const i of lineas) catalogoAnuladoEn.add(i);
     }
+
+    // Perdió: el bloque se descarta ENTERO y **sin traza**, igual que la
+    // regla fuera de vigencia. No es un "aplicó 0" —la promo rige y el
+    // cliente califica—: es que en este tenant las dos familias no conviven,
+    // y eso lo explica la pantalla de configuración, no una línea del ticket.
+    ganadoras = venta.promociones.filter((_, i) => ganaElBloque.get(raiz(i)));
   }
 
   /**

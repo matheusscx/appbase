@@ -369,8 +369,9 @@ function ultimasUnidades(tramos: Tramo[], n: number): Tramo[] {
  *
  * Cuando las regaladas vienen de líneas distintas, la aplicación lleva un
  * monto por línea —las unidades de una misma línea sumadas—, en el orden del
- * grupo. Es la forma que ya tiene el combo, y el motor la trata igual: el
- * interruptor compara la aplicación entera contra el catálogo de esas líneas.
+ * grupo. Es la forma que ya tiene el combo, y el motor la trata igual: con
+ * "no se suman", la aplicación compite entera, junto con las que comparten
+ * alguna de esas líneas (ver `resolverPromociones` en el motor).
  *
  * Cada grupo completo es UNA `AplicacionPromo` propia (no se agregan en una
  * sola, a diferencia de `porcentaje`): 4 cervezas en el 2x1 son 2 aplicaciones,

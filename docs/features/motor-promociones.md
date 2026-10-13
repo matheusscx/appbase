@@ -77,17 +77,64 @@ no configuración de catálogo. Obligatorio en ese `PUT` desde el 2026-10-04: om
 (campo **requerido**, no opcional: un default silencioso cambiaría plata sin que nadie lo
 decidiera) y se **congela** en `ventas.config_calculo` como el resto de la config de cálculo.
 
-**La comparación es POR APLICACIÓN, no por línea.** Un combo que toca dos líneas se compara
-entero contra la suma de los descuentos de catálogo de esas líneas: dejarlo ganar en una
-línea y perder en la otra cobraría medio combo, que no es un producto que exista. Empate:
-gana el catálogo (no cambia la plata que el cliente paga, y es la opción que menos
-sorprende). La promo perdedora se descarta **entera y sin traza** — no es "aplicó 0", es que
-en este tenant las dos familias no conviven, y eso lo explica la pantalla de configuración,
-no una línea del ticket. El catálogo perdedor, en cambio, sí deja traza con monto `'0'` (el
-patrón ya existente de "la regla que no aportó").
+**La comparación es POR BLOQUE: las aplicaciones que comparten una línea compiten juntas**
+(owner, 2026-10-13, *"Juntas solo si comparten producto"*; [ADR-031](../adr/031-arbitraje-promo-catalogo-por-bloques.md)).
+Una aplicación es una tanda de un NxM, un combo o la aplicación única de un `porcentaje`. Las
+que comparten alguna línea, de la misma promo o de otra, forman un bloque, y la relación es
+transitiva: si A comparte una línea con B y B otra con C, van las tres juntas. Cada bloque suma lo
+que regala, en neto y cuantizado, y lo compara contra los descuentos de catálogo de sus líneas.
+Si gana, aplican todas sus aplicaciones y el catálogo se anula en esas líneas. Si no gana,
+sale entero. Los bloques que no comparten líneas compiten por separado.
+
+- **Por qué juntas:** el catálogo se anula por línea, así que toda la plata de promo que cae en
+  una línea se decide junta. Comparando cada tanda sola, la segunda tanda de un 3x1 competía
+  contra el 30 % que la primera ya le había sacado a las cervezas, y perdía.
+- **Por qué solo si comparten línea:** una tanda que pierde en su línea no la arrastra otra que
+  gana en una línea ajena. El combo sigue yendo entero: es una sola aplicación, y dejarlo en la
+  línea donde gana y sacarlo de la otra cobraría medio combo.
+- **"Lo que toca" son las líneas donde la promo pone plata.** La unidad que paga en un grupo no
+  cuenta: en un 2x1 de vino + cerveza que regala la cerveza, el vino conserva su catálogo.
+- **Empate: gana el catálogo** (no cambia la plata que el cliente paga, y es la opción que menos
+  sorprende). El bloque perdedor se descarta **entero y sin traza**: no es "aplicó 0", es que en
+  este tenant las dos familias no conviven, y eso lo explica la pantalla de configuración, no una
+  línea del ticket. El catálogo perdedor, en cambio, sí deja traza con monto `'0'` (el patrón ya
+  existente de "la regla que no aportó").
+- **El catálogo contra el que se compara es el de la pasada normal**, calculado una sola vez:
+  dos bloques no comparten líneas, así que ninguno le apaga el catálogo al otro y el resultado
+  no depende del orden.
+
+Con "no se suman" (todo exento, CLP):
+
+| Carrito | Hasta el 2026-10-13 | Hoy | Solo catálogo |
+|---|---|---|---|
+| 5 cervezas de $1.000 al 30 % y un agua de $100, 3x1 | $3.100 | **$2.000** | $3.600 |
+| El mismo, 2x1 | $3.500 | **$3.000** | $3.600 |
+| 5 cervezas al 30 % con un 3x1 y un 2x1 a la vez (3 unidades para el 3x1, 2 para el 2x1) | $3.000 | **$2.000** | $3.500 |
+| 2x1 sobre 2 vinos de $5.000 al 65 % y 2 cervezas de $1.000 | $4.500 | $4.500 | $5.500 |
+| El mismo con el vino al 55 % | $5.500 | $5.500 | $6.500 |
+
+**Cómo se llegó, el mismo día, en dos decisiones.** Hasta el 2026-10-13 regía la regla del
+2026-08-27, *"la comparación es por aplicación, no por línea"*. Cada tanda se comparaba sola
+contra el catálogo de toda su línea, aunque otra tanda ya lo hubiera anulado. Lo vio la
+revisión del NxM (`30622fcf`). La orquestadora le preguntó al owner con el carrito de las
+cervezas, y el owner eligió *"La promo entera contra el catálogo de lo que toca"*: sumar todas
+las tandas de una promo. Las otras opciones eran *"cada grupo contra lo que queda"*, que depende
+del orden, y *"dejarlo"*. Al diseñarla, la sesión del frente midió dos cosas que la pregunta no
+mostraba:
+
+- Aplicada al pie de la letra, cobraba **más que la regla anterior** en los carritos de vinos
+  ($5.500 y $6.000). En el primero, la tanda de los vinos perdía y arrastraba consigo a la de las
+  cervezas. En el segundo, la promo ganaba en total y le sacaba al vino un catálogo que daba más
+  que su tanda.
+- No decía qué pasaba con **dos promos distintas sobre la misma línea**.
+
+La orquestadora reabrió la decisión con esos dos carritos, y el owner eligió *"Juntas solo si
+comparten producto"*. Descartadas en esa segunda pregunta: la regla literal por promo, y la
+literal más "las promos que comparten línea se comparan juntas".
 
 Implementación: `resolverPromociones` en
-`backend/src/modules/calculo-precios/calculo-precios.engine.ts`.
+`backend/src/modules/calculo-precios/calculo-precios.engine.ts` (bloques por unión-búsqueda
+sobre las líneas, en memoria y sin consultas).
 
 ---
 
@@ -475,13 +522,15 @@ npm test -- --testPathPattern=promociones           # composable + form-config +
 ```
 
 Cobertura, además de la unit del evaluador (ver arriba): el motor con el interruptor en las
-dos posiciones (incluida la aplicación cross-línea comparada entera), traza propia, la
+dos posiciones (incluida la aplicación cross-línea comparada entera y los bloques de
+aplicaciones que comparten línea, con la cadena A–B–C), traza propia, la
 familia perdedora dejando "No aplicó"; el service con elegibilidad (fecha/hora/día/canal) e
 instantes por línea; el e2e cubre una promo congelándose en `ventas_promociones`, que
 previsualización y venta coincidan, y — punta a punta, la única forma de probar la decisión 4
 del owner (`docs/superpowers/specs/2026-08-27-motor-promociones-design.md`) — que en una cuenta
 de salón la línea pedida dentro de la franja lleve la promo y la pedida fuera no, aunque se
-cobren juntas.
+cobren juntas. Y el carrito de las cervezas con "no se suman" ($2.000 con el 3x1, $3.000 con el
+2x1) por `/calcular`, POS, cuenta de salón y online.
 
 ---
 

@@ -3847,6 +3847,252 @@ describe('calcularVenta (motor de cálculo de precios)', () => {
     });
 
     /**
+     * **Las aplicaciones que comparten una línea se comparan juntas** (owner,
+     * 2026-10-13, "Juntas solo si comparten producto"). El catálogo se anula
+     * por LÍNEA, así que toda la plata de promo que cae en una misma línea se
+     * decide junta: comparar cada tanda sola la hacía competir contra un
+     * catálogo que otra tanda ya había anulado. Las aplicaciones de este
+     * bloque son las que arma el evaluador para cada carrito, medidas con
+     * `evaluarPromos`.
+     */
+    describe('interruptor: las aplicaciones que comparten línea compiten juntas', () => {
+      const cfg = config({
+        decimalesMoneda: 0,
+        promosAcumulanDescuentos: false,
+      });
+      const alPorcentaje = (valorPorcentaje: string, id = 'd-cat') =>
+        regla({ id, nombre: 'Descuento catálogo', valorPorcentaje });
+
+      /** 5 cervezas de $1.000 al 30 % de catálogo y un agua de $100. */
+      const carritoDeLaEntrada = () => [
+        linea({
+          itemId: 'cerveza',
+          cantidad: '5',
+          precioUnitario: '1000',
+          descuentos: [alPorcentaje('0.30')],
+        }),
+        linea({ itemId: 'agua', precioUnitario: '100' }),
+      ];
+
+      it('el 3x1 del carrito de la entrada cobra $2.000, no $3.100', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: carritoDeLaEntrada(),
+            promociones: [
+              aplicacion({
+                nombre: '3x1',
+                montosPorLinea: [{ lineaIndex: 0, monto: '2000' }],
+              }),
+              aplicacion({
+                nombre: '3x1',
+                montosPorLinea: [
+                  { lineaIndex: 0, monto: '1000' },
+                  { lineaIndex: 1, monto: '100' },
+                ],
+              }),
+            ],
+            config: cfg,
+          }),
+        );
+
+        expect(r.totales.totalFinal).toBe('2000.000000');
+        expect(r.lineas[0].trazas.descuentos[0].monto).toBe('0.000000');
+        expect(
+          r.lineas.flatMap((l) =>
+            l.trazas.promociones.map((t) => [t.monto, t.aplicacion]),
+          ),
+        ).toEqual([
+          ['2000.000000', 1],
+          ['1000.000000', 2],
+          ['100.000000', 2],
+        ]);
+      });
+
+      it('el 2x1 del carrito de la entrada cobra $3.000, no $3.500', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: carritoDeLaEntrada(),
+            promociones: [
+              aplicacion({
+                montosPorLinea: [{ lineaIndex: 0, monto: '1000' }],
+              }),
+              aplicacion({
+                montosPorLinea: [{ lineaIndex: 0, monto: '1000' }],
+              }),
+              aplicacion({ montosPorLinea: [{ lineaIndex: 1, monto: '100' }] }),
+            ],
+            config: cfg,
+          }),
+        );
+
+        expect(r.totales.totalFinal).toBe('3000.000000');
+      });
+
+      // Un 3x1 y un 2x1 sobre las mismas 5 cervezas: el evaluador le da 3 al
+      // primero y 2 al segundo. Solo, el 2x1 regala $1.000 contra los $1.500
+      // del catálogo, que el 3x1 ya anuló: perdía y cobraba $3.000.
+      it('dos promos distintas sobre la misma línea compiten juntas', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [carritoDeLaEntrada()[0]],
+            promociones: [
+              aplicacion({
+                promocionId: 'promo-3x1',
+                montosPorLinea: [{ lineaIndex: 0, monto: '2000' }],
+              }),
+              aplicacion({
+                promocionId: 'promo-2x1',
+                montosPorLinea: [{ lineaIndex: 0, monto: '1000' }],
+              }),
+            ],
+            config: cfg,
+          }),
+        );
+
+        expect(r.totales.totalFinal).toBe('2000.000000');
+        expect(
+          r.lineas[0].trazas.promociones.map((t) => [t.id, t.aplicacion]),
+        ).toEqual([
+          ['promo-3x1', 1],
+          ['promo-2x1', 1],
+        ]);
+      });
+
+      /** 2 vinos de $5.000 al `pct` de catálogo y 2 cervezas sin descuento. */
+      const vinosYCervezas = (pct: string) =>
+        calcularVenta(
+          venta({
+            lineas: [
+              linea({
+                itemId: 'vino',
+                cantidad: '2',
+                precioUnitario: '5000',
+                descuentos: [alPorcentaje(pct)],
+              }),
+              linea({
+                itemId: 'cerveza',
+                cantidad: '2',
+                precioUnitario: '1000',
+              }),
+            ],
+            promociones: [
+              aplicacion({
+                montosPorLinea: [{ lineaIndex: 0, monto: '5000' }],
+              }),
+              aplicacion({
+                montosPorLinea: [{ lineaIndex: 1, monto: '1000' }],
+              }),
+            ],
+            config: cfg,
+          }),
+        );
+
+      // Las dos tandas del 2x1 no comparten línea: cada una compite sola. La
+      // de los vinos pierde contra el 65 % y la de las cervezas gana contra
+      // nada. Comparar la promo entera (6.000 contra 6.500) cobraba $5.500.
+      it('las tandas que no comparten línea compiten por separado', () => {
+        const r = vinosYCervezas('0.65');
+
+        expect(r.totales.totalFinal).toBe('4500.000000');
+        expect(r.lineas[0].trazas.promociones).toEqual([]);
+        expect(r.lineas[0].descuentoAplicado).toBe('6500.000000');
+        expect(r.lineas[1].trazas.promociones[0].aplicacion).toBe(1);
+      });
+
+      // Con el vino al 55 % la promo entera ganaría (6.000 contra 5.500) y le
+      // sacaría al vino un catálogo que daba más que su tanda: $6.000.
+      it('con el vino al 55 % su tanda sigue perdiendo, aunque la promo entera ganaría', () => {
+        const r = vinosYCervezas('0.55');
+
+        expect(r.totales.totalFinal).toBe('5500.000000');
+        expect(r.lineas[0].descuentoAplicado).toBe('5500.000000');
+      });
+
+      /**
+       * **Compartir línea es transitivo.** A comparte la línea 1 con B, y B
+       * la 2 con C: A y C no se tocan, pero van en el mismo bloque. Solo, C
+       * pierde (600 contra los 1.000 de la línea 3); en el bloque gana
+       * (1.500 contra 1.000) y la línea 3 pierde su catálogo.
+       *
+       * | Bloque que arma la regla | Descuento |
+       * |---|---|
+       * | A–B–C juntos (la regla) | 1.500 |
+       * | cada uno solo | 700 + 200 + 1.000 = 1.900 |
+       * | B–C juntos, A solo | 700 + 1.000 = 1.700 |
+       */
+      it('A–B y B–C comparten línea: A, B y C compiten en un solo bloque', () => {
+        const lineaDe = (itemId: string) =>
+          linea({ itemId, precioUnitario: '10000' });
+        const r = calcularVenta(
+          venta({
+            lineas: [
+              lineaDe('l0'),
+              lineaDe('l1'),
+              lineaDe('l2'),
+              linea({
+                itemId: 'l3',
+                precioUnitario: '10000',
+                descuentos: [descuentoFijo('1000')],
+              }),
+            ],
+            promociones: [
+              aplicacion({
+                promocionId: 'promo-a',
+                montosPorLinea: [
+                  { lineaIndex: 0, monto: '600' },
+                  { lineaIndex: 1, monto: '100' },
+                ],
+              }),
+              aplicacion({
+                promocionId: 'promo-c',
+                montosPorLinea: [
+                  { lineaIndex: 2, monto: '100' },
+                  { lineaIndex: 3, monto: '500' },
+                ],
+              }),
+              aplicacion({
+                promocionId: 'promo-b',
+                montosPorLinea: [
+                  { lineaIndex: 1, monto: '100' },
+                  { lineaIndex: 2, monto: '100' },
+                ],
+              }),
+            ],
+            config: cfg,
+          }),
+        );
+
+        expect(r.totales.totalDescuentos).toBe('1500.000000');
+        expect(r.lineas[3].trazas.descuentos[0].monto).toBe('0.000000');
+        expect(r.lineas[3].trazas.promociones[0].monto).toBe('500.000000');
+      });
+
+      // Juntas no ganan por default: si el bloque no supera al catálogo de
+      // sus líneas, salen todas, y el empate sigue siendo del catálogo.
+      it('un bloque que empata con el catálogo se descarta entero', () => {
+        const r = calcularVenta(
+          venta({
+            lineas: [carritoDeLaEntrada()[0]],
+            promociones: [
+              aplicacion({
+                promocionId: 'promo-a',
+                montosPorLinea: [{ lineaIndex: 0, monto: '1000' }],
+              }),
+              aplicacion({
+                promocionId: 'promo-b',
+                montosPorLinea: [{ lineaIndex: 0, monto: '500' }],
+              }),
+            ],
+            config: cfg,
+          }),
+        );
+
+        expect(r.lineas[0].trazas.promociones).toEqual([]);
+        expect(r.totales.totalFinal).toBe('3500.000000');
+      });
+    });
+
+    /**
      * `nivelRedondeo: 'documento'` deja las líneas finas y cuantiza solo el
      * cierre. Estos casos usan una config **alcanzable** por la perilla del
      * tenant, y por eso no reusan `cfgCLP`: `tenants.service.ts` rechaza

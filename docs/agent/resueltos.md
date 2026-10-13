@@ -23,6 +23,89 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Con "no se suman", las tandas que comparten línea compiten juntas contra su catálogo (cerrada 2026-10-13)
+
+Entrada de `pendientes.md` § 4, tal como estaba:
+
+- [ ] **Con "no se suman", una tanda de la promo compite contra un descuento de catálogo que otra
+  tanda ya anuló, y el cliente pierde parte de la promo** (backend + producto,
+  `resolverPromociones` en `calculo-precios.engine.ts`; lo vio la revisión del NxM, `30622fcf`,
+  2026-10-13). ⚠️ Toca el arbitraje del motor: va solo y con el sistema quieto (CLAUDE.md,
+  "Detenerse y preguntar").
+  **Escena:** martes de 3x1 en todo el local, con el interruptor en "aplica solo la rebaja mayor".
+  La mesa pide 5 cervezas de $1.000, que tienen un 30 % de descuento de catálogo ($1.500 sobre las
+  cinco), y un agua de $100.
+  **Medido con el motor real** (`calcularVenta` sobre lo que arma el evaluador):
+  - Con el 3x1 cobra **$3.100**. La primera tanda (3 cervezas) regala $2.000, le gana al 30 % y
+    se lo saca a la línea de cervezas. La segunda (2 cervezas y el agua) regala $1.000 + $100 y
+    se compara contra los $1.500 del 30 %, que ya no se está aplicando: pierde y se descarta.
+  - Sin promo, solo con el catálogo, cobra **$3.600**.
+  - El mismo carrito con un 2x1 cobra **$3.500**, y eso pasaba antes del NxM: cada tanda de 2
+    cervezas regala $1.000 y pierde por separado contra los $1.500, aunque juntas regalarían
+    $2.000. Solo gana la tanda que regala el agua.
+  - Con las dos tandas del 3x1 aplicadas cobraría **$2.000** (calculado, no medido).
+  La causa es una sola: cada tanda se compara contra el catálogo de **toda** la línea, aunque otra
+  tanda de la misma promo ya lo haya anulado. El NxM le agrega una forma nueva, porque una tanda
+  puede caer en dos líneas.
+  **La pregunta para el owner:** cuando la promo y el descuento no se suman, ¿cómo se decide quién
+  gana?
+  1. **La promo entera contra el catálogo de lo que toca** (la recomendada: no depende del orden y
+     arregla también el 2x1). Se suma todo lo que la promo regala en
+     la venta y se compara contra el catálogo de esas líneas; si gana, aplican todas sus tandas.
+     Con el 3x1 serían $2.000 y con el 2x1 $3.000 (calculado). Costo: cambia la regla del
+     2026-08-27, "la comparación es por aplicación, no por línea", que hoy rige también para el
+     combo.
+  2. **Cada tanda compite solo contra el catálogo que todavía se está aplicando.** Si una tanda
+     anterior ya le sacó el 30 % a las cervezas, la siguiente compite contra cero en esa línea. Con
+     el 3x1 serían $2.000, y con el 2x1 seguirían siendo $3.500, porque la primera tanda igual
+     pierde (calculado). Costo: el resultado depende del orden en que se miran las tandas.
+  3. **Dejarlo.** El cliente nunca paga más que con solo el catálogo ($3.100 < $3.600). Costo: en
+     estos carritos la promo rinde menos de lo que el local anunció.
+  ✅ **Decidido (owner, 2026-10-13, por AskUserQuestion de la orquestadora, con el carrito de 5
+  cervezas de $1.000 al 30 % más un agua de $100 y los montos de cada opción): "La promo entera
+  contra el catálogo de lo que toca".** Con eso el 3x1 cobra $2.000 y el 2x1 $3.000. Descartadas:
+  "cada grupo contra lo que queda" y "dejarlo". Va como frente aparte, que lanza la orquestadora:
+  cambia la regla del 2026-08-27, "la comparación es por aplicación".
+
+**La decisión cambió al diseñar** (owner, 2026-10-13, por AskUserQuestion de la orquestadora,
+segunda pregunta del día: *"Juntas solo si comparten producto"*). La sesión del frente midió que
+la regla elegida, aplicada al pie de la letra, cobraba **más que la anterior** en dos carritos
+que la primera pregunta no mostraba. Los dos llevan un 2x1 sobre 2 vinos de $5.000 y 2 cervezas de
+$1.000 sin descuento: con el vino al 65 % cobraba $5.500 contra $4.500, y con el vino al 55 %,
+$6.000 contra $5.500. También midió que la regla no cubría dos promos distintas sobre la misma
+línea: un 3x1 y un 2x1 sobre las mismas 5 cervezas seguían en $3.000. La orquestadora reabrió la
+decisión con el carrito de vinos al 65 % y el de las dos promos. Descartadas: la regla literal por
+promo, y la literal más "las promos que comparten línea se comparan juntas". Lo técnico (empate
+del catálogo, la unidad que paga no cuenta como línea tocada, `porcentaje` sin cambios, baseline
+fijo y transitividad) lo aprobó la orquestadora.
+[ADR-031](../adr/031-arbitraje-promo-catalogo-por-bloques.md).
+
+**Cómo se cerró.** Solo cambió `resolverPromociones` (`calculo-precios.engine.ts`). Las
+aplicaciones que comparten alguna línea, de la misma promo o de otra, forman un bloque por
+unión-búsqueda sobre sus índices: es transitivo, y se arma en una pasada por los montos, en
+memoria. Cada bloque suma lo que regala, en neto cuantizado, y lo compara contra el catálogo de
+sus líneas, calculado una vez. Si gana, aplica entero y anula el catálogo en esas líneas; si no
+gana, o empata, sale entero y sin traza. La numeración sigue asignándose después del filtro.
+
+**Medido** (e2e, ítems exentos, "no se suman"): 5 cervezas de $1.000 al 30 % y un agua de $100
+cobran **$2.000 con el 3x1 y $3.000 con el 2x1** por `/calcular`, POS, cuenta de salón y online.
+El POS congela todas las tandas ($3.100 y $2.100 regalados) y deja el 30 % en `0`. Unit del
+motor, con las aplicaciones que arma `evaluarPromos`: 3x1 + 2x1 sobre las mismas cervezas →
+$2.000; vinos al 65 % → $4.500 y al 55 % → $5.500, igual que antes; la cadena A–B–C → $1.500 de
+descuento; un bloque que empata → sale entero.
+
+**Qué lo fija.**
+
+- El mutante que vuelve a comparar cada aplicación sola (el archivo anterior entero) devuelve
+  $3.100 y $3.500. Mata 4 tests unit y los 8 e2e nuevos. En online el e2e da 400, porque el pago
+  de $2.000 ya no cubre el total.
+- Unir sin buscar la raíz (`padre[i] = duena`, no transitivo) deja la cadena en $1.700 y mata su
+  test.
+- Agrupar por promo en vez de por línea (la regla literal descartada) mata 5: las dos promos
+  ($3.000), los dos carritos de vinos ($5.500 y $6.000), la cadena ($1.900), y "la numeración no
+  deja huecos", que con esa regla empata y sale entera.
+- Los e2e del interruptor que ya existían dan lo mismo: usan una sola aplicación.
+
 ## El NxM es "lleva N, paga M", con tope de 100 % por unidad regalada (cerrada 2026-10-13)
 
 Entrada de `pendientes.md` § 4, tal como estaba:

@@ -350,6 +350,15 @@ $1.500, $1.200, $1.000 y $700 cobra $2.700; la "segunda al 50%" es lleva 2, paga
 unidades que no completan un grupo **pagan completo**: 5 cervezas de $1.000 en un 3x1 son $3.000
 (owner, 2026-10-13).
 
+**Con "no se suman", las promos que comparten un producto compiten juntas contra su descuento**
+(owner, 2026-10-13, *"Juntas solo si comparten producto"*). Cuando el local elige que la promo y
+el descuento de catálogo no se sumen, la plata de promo que cae sobre una misma línea se suma,
+venga de varias tandas o de varias promos, y se compara contra el descuento de catálogo de esas
+líneas. Si gana, aplica todo y el descuento no corre. Las tandas que caen en productos distintos
+compiten cada una por su lado. Ejemplo: 5 cervezas de $1.000 con 30 % de descuento y un agua de
+$100 cobran $2.000 con el 3x1 y $3.000 con el 2x1. Hasta esa fecha cada tanda competía sola y
+cobraban $3.100 y $3.500. Detalle y decisión intermedia: [ADR-031](./adr/031-arbitraje-promo-catalogo-por-bloques.md).
+
 **Métodos de pago** — catálogo global habilitado por tenant (`tenant_metodo_pago`)
 
 ---

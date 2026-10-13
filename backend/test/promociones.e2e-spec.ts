@@ -31,6 +31,8 @@ const TIPO_DESCUENTO_DIRECTO = '550e8400-e29b-41d4-a716-446655440337';
 const BOLETA_ID = '550e8400-e29b-41d4-a716-446655440145';
 // "Efectivo" — método de pago sembrado, mismo id que usa caja.e2e-spec.ts.
 const EFECTIVO_ID = '550e8400-e29b-41d4-a716-446655440105';
+// "Mañana" — turno sembrado en el que abren su sesión los garzones de esta suite.
+const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
 
 // Rango de fechas ancho a propósito: no depende de en qué fecha corra la
 // suite (la corrida queda diferida, potencialmente lejos de hoy).
@@ -254,6 +256,41 @@ describe('Motor de promociones (e2e)', () => {
       .set('Authorization', `Bearer ${tokenAdmin}`);
     expect(res.status).toBe(200);
     return res.body as VentaDetalleResponse;
+  };
+
+  type Garzon = { id: string; pin: string };
+
+  /**
+   * ⚠️ Garzón PROPIO con su sesión abierta, no el del seed: la sesión es única
+   * por garzón y el estado se filtra de un spec al siguiente (`jest-e2e.json`
+   * corre con `maxWorkers: 1`) — molde `salones-comanda.e2e-spec.ts` /
+   * `vigencia-cuenta.e2e-spec.ts`.
+   */
+  const garzonConSesion = async (nombre: string): Promise<Garzon> => {
+    const garzon = await post<Garzon>('/api/garzones', { nombre });
+    await post('/api/sesiones-garzon/iniciar', {
+      garzonId: garzon.id,
+      pin: garzon.pin,
+      turnoId: TURNO_MANANA_ID,
+    });
+    return garzon;
+  };
+
+  /**
+   * El garzón es propio: dejar la sesión abierta no cambia el escenario de
+   * nadie, pero se cierra igual para no ensuciar el historial de turnos de la
+   * base de dev (higiene, no aserción).
+   */
+  const cerrarSesionGarzon = async (garzon: Garzon | undefined) => {
+    if (garzon === undefined) return;
+    try {
+      await request(app.getHttpServer())
+        .post('/api/sesiones-garzon/cerrar')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ garzonId: garzon.id, pin: garzon.pin });
+    } catch {
+      // best-effort
+    }
   };
 
   beforeAll(async () => {
@@ -628,11 +665,10 @@ describe('Motor de promociones (e2e)', () => {
   // 3x1 de $1.000, $1.000 y $800 cobra $1.000: con la regla anterior solo se
   // armaba con el truco del 200 %, que cobraba $800 o $1.200.
   describe('NxM: lleva N, paga M', () => {
-    const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
     let itemMil: string;
     let itemOchocientos: string;
     let promoNombre: string;
-    let garzon: { id: string; pin: string };
+    let garzon: Garzon;
     let mesaId: string;
 
     /** A $1.000 ×2 y B $800 ×1: el carrito del ejemplo del owner. */
@@ -664,16 +700,7 @@ describe('Motor de promociones (e2e)', () => {
         scopes: [{ tipoScope: 'items', itemIds: [itemMil, itemOchocientos] }],
       });
 
-      // Garzón propio (molde del describe 'Cuenta de salón'): la sesión es
-      // única por garzón y el del seed lo pisan otros specs.
-      garzon = await post<{ id: string; pin: string }>('/api/garzones', {
-        nombre: `Garzón 3x1 E2E ${marca}`,
-      });
-      await post('/api/sesiones-garzon/iniciar', {
-        garzonId: garzon.id,
-        pin: garzon.pin,
-        turnoId: TURNO_MANANA_ID,
-      });
+      garzon = await garzonConSesion(`Garzón 3x1 E2E ${marca}`);
       const salonId = (
         await post<IdResponse>('/api/salones', {
           nombre: `Salón 3x1 E2E ${marca}`,
@@ -686,16 +713,7 @@ describe('Motor de promociones (e2e)', () => {
       ).id;
     });
 
-    afterAll(async () => {
-      try {
-        await request(app.getHttpServer())
-          .post('/api/sesiones-garzon/cerrar')
-          .set('Authorization', `Bearer ${tokenAdmin}`)
-          .send({ garzonId: garzon.id, pin: garzon.pin });
-      } catch {
-        // best-effort, igual que en 'Cuenta de salón'
-      }
-    });
+    afterAll(() => cerrarSesionGarzon(garzon));
 
     it('/calcular: el 3x1 regala una de $1.000 y la de $800, y cobra $1.000', async () => {
       const res = await calcular({ lineas: carrito3x1() });
@@ -932,16 +950,11 @@ describe('Motor de promociones (e2e)', () => {
   // ─── 6. Cuenta de salón ──────────────────────────────────────────────────
 
   describe('Cuenta de salón', () => {
-    const TURNO_MANANA_ID = '550e8400-e29b-41d4-a716-446655440277';
-    interface GarzonCreado {
-      id: string;
-      pin: string;
-    }
     interface CuentaDetalle {
       id: string;
     }
 
-    let garzon: GarzonCreado;
+    let garzon: Garzon;
     let mesaId: string;
     let itemId: string;
     let promoNombre: string;
@@ -949,18 +962,7 @@ describe('Motor de promociones (e2e)', () => {
     beforeAll(async () => {
       const marca = Date.now();
 
-      // ⚠️ Garzón PROPIO, no el del seed: la sesión es única por garzón y el
-      // estado se filtra de un spec al siguiente (`jest-e2e.json` corre con
-      // `maxWorkers: 1`) — molde `salones-comanda.e2e-spec.ts` /
-      // `vigencia-cuenta.e2e-spec.ts`.
-      garzon = await post<GarzonCreado>('/api/garzones', {
-        nombre: `Garzón promo E2E ${marca}`,
-      });
-      await post('/api/sesiones-garzon/iniciar', {
-        garzonId: garzon.id,
-        pin: garzon.pin,
-        turnoId: TURNO_MANANA_ID,
-      });
+      garzon = await garzonConSesion(`Garzón promo E2E ${marca}`);
 
       const salonId = (
         await post<IdResponse>('/api/salones', {
@@ -985,20 +987,7 @@ describe('Motor de promociones (e2e)', () => {
       });
     });
 
-    afterAll(async () => {
-      // El garzón es propio: dejar la sesión abierta no cambia el escenario
-      // de nadie, pero se cierra igual para no ensuciar el historial de
-      // turnos de la base de dev (higiene, no aserción — `try/finally` como
-      // en `salones-comanda.e2e-spec.ts`).
-      try {
-        await request(app.getHttpServer())
-          .post('/api/sesiones-garzon/cerrar')
-          .set('Authorization', `Bearer ${tokenAdmin}`)
-          .send({ garzonId: garzon.id, pin: garzon.pin });
-      } catch {
-        // best-effort
-      }
-    });
+    afterAll(() => cerrarSesionGarzon(garzon));
 
     it('abrir cuenta, agregar línea, cerrar → la venta lleva la promo vigente y la congela', async () => {
       const cuenta = await post<CuentaDetalle>(`/api/mesas/${mesaId}/cuentas`, {
@@ -1121,6 +1110,168 @@ describe('Motor de promociones (e2e)', () => {
       expect(Number(trazaDescuento!.valorAplicado)).toBe(100);
       expect(Number(detalle.promociones[0].monto)).toBe(200);
     });
+  });
+
+  // ─── 7b. Las aplicaciones que comparten línea compiten juntas ───────────
+
+  /**
+   * El carrito con el que se le preguntó al owner (2026-10-13): 5 cervezas de
+   * $1.000 al 30 % de catálogo y un agua de $100, con "no se suman". Las
+   * tandas del 3x1 y del 2x1 comparten la línea de cervezas y compiten juntas
+   * contra su catálogo. Comparando cada tanda sola cobraban $3.100 y $3.500.
+   */
+  describe('Con "no se suman", las tandas que comparten línea compiten juntas', () => {
+    let original: PreferenciasFinancieras;
+    let garzon: Garzon;
+    let salonId: string;
+    const carritos: Record<string, { itemId: string; cantidad: string }[]> = {};
+
+    const putPrefs = (promosAcumulanDescuentos: boolean) =>
+      request(app.getHttpServer())
+        .put('/api/tenants/preferencias-financieras')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send({ ...bodyPreferencias(original), promosAcumulanDescuentos });
+
+    beforeAll(async () => {
+      const prefs = await request(app.getHttpServer())
+        .get('/api/tenants/preferencias-financieras')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(prefs.status).toBe(200);
+      original = prefs.body as PreferenciasFinancieras;
+      expect((await putPrefs(false)).status).toBe(200);
+
+      const marca = Date.now();
+      const treintaPorCiento = (
+        await post<IdResponse>('/api/descuentos', {
+          nombre: `Descuento 30 cervezas E2E ${marca}`,
+          tipoReglaId: TIPO_DESCUENTO_DIRECTO,
+          modo: 'porcentaje',
+          valorPorcentaje: '0.30',
+        })
+      ).id;
+
+      // Un par cerveza + agua por promo: con las dos sobre los mismos ítems,
+      // el greedy entre promos repartiría las unidades.
+      for (const [promo, cadaN] of [
+        ['3x1', 3],
+        ['2x1', 2],
+      ] as const) {
+        const cerveza = (
+          await crearItem(`Cerveza ${promo} E2E ${marca}`, {
+            precioBase: '1000',
+            clasificacionTributaria: 'exento',
+            descuentosIds: [treintaPorCiento],
+          })
+        ).id;
+        const agua = (
+          await crearItem(`Agua ${promo} E2E ${marca}`, {
+            precioBase: '100',
+            clasificacionTributaria: 'exento',
+          })
+        ).id;
+        await crearPromo(`Promo ${promo} juntas E2E ${marca}`, {
+          tipo: 'nxm',
+          valorPorcentaje: '1',
+          cadaN,
+          pagaM: 1,
+          scopes: [{ tipoScope: 'items', itemIds: [cerveza, agua] }],
+        });
+        carritos[promo] = [
+          { itemId: cerveza, cantidad: '5' },
+          { itemId: agua, cantidad: '1' },
+        ];
+      }
+
+      garzon = await garzonConSesion(`Garzón juntas E2E ${marca}`);
+      salonId = (
+        await post<IdResponse>('/api/salones', {
+          nombre: `Salón juntas E2E ${marca}`,
+        })
+      ).id;
+    });
+
+    afterAll(async () => {
+      try {
+        await cerrarSesionGarzon(garzon);
+      } finally {
+        // Preferencia GLOBAL del tenant: misma higiene que 'El interruptor'.
+        if (original !== undefined) {
+          const restaurar = await putPrefs(original.promosAcumulanDescuentos);
+          expect(restaurar.status).toBe(200);
+        }
+      }
+    });
+
+    const CASOS = [
+      ['3x1', 2000],
+      ['2x1', 3000],
+    ] as const;
+
+    it.each(CASOS)('/calcular: el %s cobra $%i', async (promo, total) => {
+      const res = await calcular({ lineas: carritos[promo] });
+      expect(res.status).toBe(201);
+      const body = res.body as ResultadoVentaResponse;
+      expect(Number(body.totales.totalFinal)).toBe(total);
+    });
+
+    it.each(CASOS)(
+      'POS: el %s cobra $%i, congela todas sus tandas y el 30 %% en cero',
+      async (promo, total) => {
+        const res = await crearVenta({ lineas: carritos[promo] });
+        expect(res.status).toBe(201);
+        const venta = res.body as VentaCreateResponse;
+        expect(Number(venta.totalFinal)).toBe(total);
+
+        const detalle = await detalleVenta(venta.id);
+        const regalado = detalle.promociones.reduce(
+          (a, p) => a + Number(p.monto),
+          0,
+        );
+        expect(regalado).toBe(5100 - total);
+        expect(detalle.descuentos.map((d) => Number(d.valorAplicado))).toEqual([
+          0,
+        ]);
+      },
+    );
+
+    it.each(CASOS)(
+      'cuenta de salón: cerrar la mesa con el %s cobra $%i',
+      async (promo, total) => {
+        const mesaId = (
+          await post<IdResponse>(`/api/salones/${salonId}/mesas`, {
+            nombre: `Mesa ${promo}`,
+          })
+        ).id;
+        const cuenta = await post<IdResponse>(`/api/mesas/${mesaId}/cuentas`, {
+          garzonId: garzon.id,
+          pin: garzon.pin,
+        });
+        for (const l of carritos[promo]) {
+          await post(`/api/cuentas/${cuenta.id}/lineas`, l);
+        }
+        const cierre = await post<{ ventaId: string }>(
+          `/api/cuentas/${cuenta.id}/cerrar`,
+          { garzonId: garzon.id, pin: garzon.pin, pagos: [] },
+        );
+        const detalle = await detalleVenta(cierre.ventaId);
+        expect(Number(detalle.totalFinal)).toBe(total);
+      },
+    );
+
+    it.each(CASOS)(
+      'online: la venta pagada completa con el %s cobra $%i',
+      async (promo, total) => {
+        const res = await crearVenta({
+          canal: 'online',
+          lineas: carritos[promo],
+          pagos: [{ metodoPagoId: EFECTIVO_ID, monto: String(total) }],
+        });
+        expect(res.status).toBe(201);
+        const venta = res.body as VentaCreateResponse;
+        expect(venta.canal).toBe('online');
+        expect(Number(venta.totalFinal)).toBe(total);
+      },
+    );
   });
 
   // ─── 8. Canal ────────────────────────────────────────────────────────────
