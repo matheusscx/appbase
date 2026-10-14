@@ -109,7 +109,10 @@ y pisaba lo guardado (owner, 2026-10-04). `manualModo` solo con `MANUAL`.
 ```
 
 Reglas: Σ `porcentaje` de activos = `1`; un tipo activo a la vez; `MANUAL`
-exige `manualModo`; pesos solo con `MANUAL` + `PESOS`.
+exige `manualModo`; pesos solo con `MANUAL` + `PESOS`. Cada peso es mayor que
+cero. Tiene 4 decimales como máximo, igual que el `pesoManual` de un participante
+en `PATCH /propinas/liquidaciones/:id`: con más es 400 y no se guarda (owner,
+2026-10-13).
 
 Enforcement de los flags al crear la venta (ignorar propina de canal
 deshabilitado, no rechazar): [pagos.md](./pagos.md#propina-en-el-pos).

@@ -6,6 +6,7 @@ import { TenantGuard } from '../../common/guards/tenant.guard';
 import { PermisosGuard } from '../../common/guards/permisos.guard';
 import { RequiresPermiso } from '../../common/decorators/requires-permiso.decorator';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { PropinaDistribucionService } from './propina-distribucion.service';
 import { UpdateDistribucionDto } from './dto/update-distribucion.dto';
 
@@ -44,7 +45,10 @@ export class PropinaDistribucionController {
 
   @Put('distribucion')
   @RequiresPermiso('Propinas', 'Configurar')
-  reemplazar(@Req() req: Request, @Body() dto: UpdateDistribucionDto) {
+  reemplazar(
+    @Req() req: Request,
+    @Body(EscalaMonedaPipe) dto: UpdateDistribucionDto,
+  ) {
     const user = req.user as JwtUser;
     return this.distribucion.reemplazar(user.tenantId!, user.id, dto);
   }

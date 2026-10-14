@@ -431,17 +431,6 @@ prohíbe.
   Descartadas: "descartar la marca con un motivo escrito" (la recomendada) y "ligarla a una nota
   existente". Si aparece, se reabre con esas dos opciones.
 
-- [ ] **El peso de un garzón en el reparto de propinas redondea el quinto decimal, sin aviso**
-  (backend; anotado el 2026-10-13 al cerrar "Una cantidad con más de 4 decimales se rechaza con
-  aviso", [`resueltos.md`](resueltos.md); **leído, no medido**). `PesoManualDto.peso`
-  (`propinas/dto/update-distribucion.dto.ts`) y `pesoManual` (`propinas/dto/update-liquidacion.dto.ts`)
-  llevan solo `@IsDecimalPersistible(18, 4)`, que redondea antes de mirar el techo, y van a
-  columnas `NUMERIC(18,4)`: un peso de `1.23456` se guardaría `1.2346`. Es el mismo mecanismo que
-  la regla de las cantidades, pero un peso no es una cantidad: reparte plata entre garzones, así
-  que el frente de las cantidades no lo tomó. **La pregunta para el owner:** ¿un peso con más de 4
-  decimales se rechaza con aviso, como las cantidades y los impuestos, o se deja redondear? Si es
-  rechazar, es una marca `@EsCantidad` con su mensaje en los dos campos, medido antes por HTTP.
-
 ## 5. Carreras de concurrencia
 
 ---

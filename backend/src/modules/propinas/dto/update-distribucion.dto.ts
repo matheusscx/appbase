@@ -17,6 +17,7 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { IsDecimalPersistible } from '../../../common/decorators/decimal-signo.decorator';
+import { EsCantidad } from '../../../common/decorators/escala-moneda.decorator';
 import { TipoGarzon } from '../../garzones/enums/tipo-garzon.enum';
 import { CriterioDistribucion } from '../enums/criterio-distribucion.enum';
 import { BaseVentasGrupo } from '../enums/base-ventas-grupo.enum';
@@ -27,8 +28,12 @@ export class PesoManualDto {
   @IsUUID()
   garzonId: string;
 
+  // El peso no es una cantidad, pero va a una columna `NUMERIC(18,4)` y el
+  // reparto se hace con lo guardado: con más de 4 decimales es 400, no se
+  // redondea (owner, 2026-10-13). El techo de la columna lo pone el de arriba.
   @IsNumberString()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad('El peso admite como máximo 4 decimales.')
   peso: string;
 }
 

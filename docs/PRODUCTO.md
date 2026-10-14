@@ -484,6 +484,13 @@ Descartada: redondear como hasta entonces. Lo que el sistema **calcula** se sigu
 como la cantidad pasada de gramos a kilos o lo que vuelve por un ingrediente: la regla es sobre lo
 que se escribe.
 
+**El peso de un garzón en el reparto de propinas sigue la misma regla** (owner, 2026-10-13, en el
+chat de la orquestadora, con el reparto a mano de ejemplo "Ana peso 2, Bruno y Carla peso 1,
+$30.000 → $15.000 / $7.500 / $7.500": "rechazalo con aviso"). Un peso no es una cantidad, pero
+reparte plata y se guarda con 4 decimales: con más, el aviso dice *"El peso admite como máximo 4
+decimales."* y no se guarda nada. Vale para el peso de un grupo que reparte por pesos y para el
+peso a mano de un garzón en una liquidación. No cambia cómo se reparte.
+
 **El costo de una receta o un combo que el sistema no puede guardar tampoco se guarda** (owner,
 2026-10-13, por AskUserQuestion de la orquestadora, con la escena "2 kg de un ingrediente de $90
 billones el kilo; igual un combo": "No guardar, con aviso"). Cada costo cabe y la suma puede no

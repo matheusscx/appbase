@@ -23,6 +23,69 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## El peso de un garzón con más de 4 decimales se rechaza con aviso, no se redondea (cerrada 2026-10-14)
+
+Frente chico lanzado por la orquestadora a pedido del owner. **Decisión del owner** (2026-10-13,
+en el chat de la orquestadora, después de que le explicara el reparto a mano con el ejemplo "Ana
+peso 2, Bruno y Carla peso 1, $30.000 → $15.000 / $7.500 / $7.500"): **"rechazalo con aviso"**.
+Un peso con más de 4 decimales da 400 y no se guarda, igual que las cantidades (`87a3d437`) y el
+porcentaje de los impuestos (`cac160f9`).
+
+### Medido
+
+Por HTTP (supertest), sobre la base nueva de `entorno.sh db`, con el código de `origin/main` en
+`cd986fdf`. Lo guardado, leído en la base.
+
+| Camino | `1.5` | `1.0001` | `1.50005` antes | `1.50005` ahora |
+|---|---|---|---|---|
+| `PUT /propinas/distribucion`, `grupos[].pesos[].peso` (grupo `MANUAL` + `PESOS`) | 200, `1.5000` | 200, `1.0001` | **200, `1.5001`** | 400, no escribe (la `version` de la configuración no se mueve) |
+| `PATCH /propinas/liquidaciones/:id`, `participantes[].pesoManual` | 200, `1.5000` | 200, `1.0001` | **200, `1.5001`** | 400, queda `1.0001` |
+
+Los dos guardaban el quinto decimal redondeado, pero no en el mismo lugar: el peso de un grupo lo
+redondea el service (`new Decimal(p.peso).toFixed(4)`) y el peso a mano, Postgres al escribir la
+columna. No hay otro campo de peso en un DTO del backend (grep de `peso` en `*.dto.ts`: solo
+estos dos).
+
+### Lo que se hizo
+
+- `@EsCantidad('El peso admite como máximo 4 decimales.')` en `PesoManualDto.peso` y en
+  `UpdateLiquidacionParticipanteDto.pesoManual`, al lado del techo de columna
+  `@IsDecimalPersistible(18, 4)` (`e99310a7`), que sigue dando su 400 con un peso de 10^14.
+  Es la misma marca de las cantidades, con mensaje propio: un peso no es una cantidad, pero va a
+  la misma escala de columna, y una marca nueva sería una cuarta rama del pipe para la misma regla.
+- `EscalaMonedaPipe` en `PUT /propinas/distribucion`, que no lo tenía. `PATCH
+  /propinas/liquidaciones/:id` ya lo tenía por el `monto` del participante. `PropinasModule` ya
+  importaba `MonedasModule`.
+- **No cambia** el motor de liquidación ni cómo se reparte: solo se valida lo que entra.
+- El frontend no cambia. El peso de un grupo se tipea en un `UInput` de texto
+  (`configuracion/propinas-distribucion.vue`), y el toast de guardar muestra el `message` del 400.
+  `pesoManual` no tiene pantalla que lo escriba.
+
+### Tests y mutantes
+
+`backend/test/peso-propinas-cuatro-decimales.e2e-spec.ts`: cada camino con `1.5` y `1.0001` (entran,
+guardados tal cual) y `1.50005` (400 con el mensaje exacto, sin escribir).
+
+Mutantes, medidos contra ese spec:
+- Sin el pipe en `PUT /propinas/distribucion`: cae solo la fila del grupo, con 200.
+- Sin la marca en `PesoManualDto.peso`: cae solo la fila del grupo, con 200.
+- Sin la marca en `pesoManual`: cae solo la fila de la liquidación, con 200.
+
+### La entrada que cierra, como estaba en `pendientes.md` § 4
+
+- [ ] **El peso de un garzón en el reparto de propinas redondea el quinto decimal, sin aviso**
+  (backend; anotado el 2026-10-13 al cerrar "Una cantidad con más de 4 decimales se rechaza con
+  aviso", [`resueltos.md`](resueltos.md); **leído, no medido**). `PesoManualDto.peso`
+  (`propinas/dto/update-distribucion.dto.ts`) y `pesoManual` (`propinas/dto/update-liquidacion.dto.ts`)
+  llevan solo `@IsDecimalPersistible(18, 4)`, que redondea antes de mirar el techo, y van a
+  columnas `NUMERIC(18,4)`: un peso de `1.23456` se guardaría `1.2346`. Es el mismo mecanismo que
+  la regla de las cantidades, pero un peso no es una cantidad: reparte plata entre garzones, así
+  que el frente de las cantidades no lo tomó. **La pregunta para el owner:** ¿un peso con más de 4
+  decimales se rechaza con aviso, como las cantidades y los impuestos, o se deja redondear? Si es
+  rechazar, es una marca `@EsCantidad` con su mensaje en los dos campos, medido antes por HTTP.
+
+---
+
 ## Rate limiting: límites de intentos por persona, destino y garzón (cerrada 2026-10-13)
 
 Frente de la orquestadora a pedido del owner (*"investiguemos un limite yo diria poco menos de 100 o

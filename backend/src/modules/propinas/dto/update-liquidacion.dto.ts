@@ -16,7 +16,10 @@ import {
   IsDecimalPersistible,
   IsMontoPersistible,
 } from '../../../common/decorators/decimal-signo.decorator';
-import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
+import {
+  EsCantidad,
+  EsMontoCobrado,
+} from '../../../common/decorators/escala-moneda.decorator';
 
 // `@ValidateIf` y no `@IsOptional()` en `incluido` y `monto`: sus columnas son
 // NOT NULL e `IsOptional` trata `null` igual que ausente y saltea el validador
@@ -45,16 +48,18 @@ export class UpdateLiquidacionParticipanteDto {
   @IsString()
   motivoAjuste?: string;
 
+  // Mismo motivo que `PesoManualDto.peso`: con más de 4 decimales es 400.
   @IsOptional()
   @IsNumberString()
   @IsDecimalPersistible(18, 4)
+  @EsCantidad('El peso admite como máximo 4 decimales.')
   pesoManual?: string;
 
   // Mismo motivo que en `ajustes-reparto.dto.ts`: sin esto el negativo llegaba
   // al CHECK de BD y salía como 500 en vez de 400.
   // `@EsMontoCobrado()`, igual que su gemelo de `ajustes-reparto.dto.ts`: es el
-  // monto que el garzón cobra. `pesoManual` de arriba NO se marca: es un peso
-  // de reparto, no plata.
+  // monto que el garzón cobra. `pesoManual` de arriba no lleva esta marca: es
+  // un peso de reparto, no plata.
   @ValidateIf((_o, v) => v !== undefined)
   @IsDecimalNoNegativo()
   @IsMontoPersistible()

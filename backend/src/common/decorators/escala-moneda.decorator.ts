@@ -58,6 +58,9 @@ export const EsCosto =
  * de crédito y el kardex. Lo hace efectivo `EscalaMonedaPipe`, igual que las
  * otras dos marcas.
  *
+ * También la llevan los pesos del reparto de propinas (owner, 2026-10-13): no
+ * son cantidades, pero van a una columna `NUMERIC(18,4)` y se redondeaban igual.
+ *
  * Siempre lleva mensaje, porque lo lee quien atiende el local: el genérico
  * dice "la cantidad", y un campo que el local llama distinto (el conteo, el
  * stock inicial) pasa el suyo.
