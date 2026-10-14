@@ -78,6 +78,7 @@ Cada feature implementada tiene su doc operativa en [`features/`](./features/) (
 | [compras.md](./features/compras.md) | Compras, pieza 1 (recibir mercadería): borrador, confirmar, completar y corregir precio y cantidad, descuento al total y anular; el costo se rehace desde la compra por la `secuencia` del kardex sin tocar lo vendido |
 | [papelera.md](./features/papelera.md) | Papelera (restaurar eliminados): `incluirEliminados` + `POST .../:id/restaurar` en 18 recursos de catálogo/config; frontend cableado solo en items y categorías |
 | [dashboard-inicio.md](./features/dashboard-inicio.md) | Dashboard de inicio: `GET /resumen-negocio/hoy` (ventas, por cobrar, pérdidas, más vendidos) con permiso propio `Resumen del negocio: Leer`; `pages/index.vue` con las zonas "Ahora" (refresco periódico) y "Hoy" (carga única + "Actualizar") |
+| [emision-electronica.md](./features/emision-electronica.md) | Motor de la boleta electrónica (sin envío): funciones puras que arman y firman el `<DTE>` y el sobre `EnvioBOLETA` desde lo ya congelado; verifica los montos, rechaza con código lo que el SII rechazaría, y deja explícito qué solo confirma la certificación |
 
 ## Otros
 

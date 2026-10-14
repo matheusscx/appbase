@@ -363,8 +363,11 @@ es parte del enunciado y viaja con ella.
   [investigación](investigaciones/2026-10-13-emision-electronica-sii.md): construir en vez de
   contratar un proveedor). Seis subproyectos, cada uno con su spec, plan y verificación:
   1. perfil fiscal: datos del emisor, certificado cifrado, CAF y folios usados;
-  2. **motor de la boleta**: spec en
-     [`2026-10-14-motor-boleta-electronica-design.md`](../superpowers/specs/2026-10-14-motor-boleta-electronica-design.md);
+  2. ✅ **motor de la boleta** (hecho el 2026-10-14, último commit de código `2d92199e`): spec en
+     [`2026-10-14-motor-boleta-electronica-design.md`](../superpowers/specs/2026-10-14-motor-boleta-electronica-design.md),
+     decisión en [ADR-033](../adr/033-emisor-dte-propio.md), detalle en
+     [`features/emision-electronica.md`](../features/emision-electronica.md). **No emite nada al
+     SII**: son funciones puras que nadie importa todavía;
   3. cliente del SII y cola de envío;
   4. conexión con la venta y la nota de crédito;
   5. certificación;
@@ -374,6 +377,20 @@ es parte del enunciado y viaja con ella.
   subproyecto 4 tienen que estar cerrados dos frentes que dispara el motor (§ 7 y § 9 de su spec):
   - qué hace el SII con el ILA y los demás impuestos adicionales en la boleta;
   - el límite del nombre del ítem en el catálogo: 80 caracteres en ISO-8859-1.
+
+  **Preguntas abiertas para el owner que dejó el motor** (fiscales; detalle en
+  `features/emision-electronica.md`):
+  - **`CdgIntRecep` sobre 135 UF.** El formato v4.2, campo 19, dice *"Dato obligatorio si
+    Indicador Servicio = 3 y RUT = 0, o Monto Total > 135 UF (Ley 21.713)"*. La spec pidió sobre
+    135 UF solo RUT, nombre y medio de pago, y el contrato no trae código interno del receptor.
+    ¿Es exigible, y qué se escribe en él?
+  - **Líneas gratis** (precio o cantidad 0: cortesía, modificador sin costo). Hoy el motor las
+    **rechaza** (`MONTO_INVALIDO`) porque el XSD pide `QtyItem` y `PrcItem` > 0; omitir esos
+    campos para esa línea es decisión del owner. Sin ella, el subproyecto 4 no puede emitir una
+    boleta con una línea gratis.
+  - Riesgos de forma que solo confirma la certificación (subproyecto 5): aplanado del `<DD>`,
+    namespaces del `<DTE>`, ubicación de `RutProvSW`/`RznSocProvSW`, `<RSR></RSR>` vacío y
+    escape de solo `& < >`.
 
 - [ ] **La compra online pide los datos del cliente, como un ecommerce** (producto + backend +
   frontend; **pedido por el owner el 2026-10-11** en el chat de la orquestadora: *"hay que pedir

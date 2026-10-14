@@ -120,6 +120,12 @@ todo compatible con SII, sin integrarlo.
 - Reglas exactas de redondeo del IVA del SII (el motor ya usa Decimal.js con redondeo
   configurable; se afina en la certificación).
 
+  ✅ **Actualización 2026-10-14 — el diferimiento se cerró para la boleta.** La generación del
+  XML, el timbre y la firma de la boleta (39/41) se construyeron como un motor propio de
+  funciones puras, sin envío. Decisión, razones y lo que sigue diferido (folios, web service del
+  SII, ILA, factura): [ADR-033](./033-emisor-dte-propio.md). Detalle:
+  [`features/emision-electronica.md`](../features/emision-electronica.md).
+
   ⚠️ **Actualización 2026-08-21 — este diferimiento dejó de ser neutro.** El cierre del
   redondeo de plata tuvo que decidir *una* regla ahora, y decidió que con precio de
   góndola el total cierra a la etiqueta y **el IVA absorbe el residuo**. Consecuencia:

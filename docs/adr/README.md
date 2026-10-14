@@ -44,6 +44,7 @@ Format based on [Michael Nygard's ADR template](https://github.com/joelparkerhen
 | [030](./030-esquema-por-migraciones.md) | El esquema lo arman las migraciones, en todos los entornos (`migrationsRun`, `synchronize` apagado): la línea base reproduce lo que armaban `synchronize` + los índices de expresión del seeder, el CI frena una entity cambiada sin migración y el demo corre las migraciones al arrancar | Accepted | 2026-10-12 |
 | [031](./031-arbitraje-promo-catalogo-por-bloques.md) | Con "no se suman", la promo y el catálogo se comparan por bloques: las aplicaciones que comparten una línea, de la misma promo o de otra, compiten juntas contra el catálogo de sus líneas; reemplaza la comparación por aplicación del 2026-08-27 | Accepted | 2026-10-13 |
 | [032](./032-limites-de-intentos.md) | Límites de intentos con `@nestjs/throttler` global: 100/min por persona (JWT verificado), login por correo, correos por destino, PIN por garzón en `verificarPin`; la IP del cliente solo con el secreto del proxy, nunca de `X-Forwarded-For`; en memoria mientras haya una réplica | Accepted | 2026-10-13 |
+| [033](./033-emisor-dte-propio.md) | Emisor de DTE propio: el motor de la boleta (XML, timbre y firma) se construye en el repo como funciones puras, sin proveedor; cierra el diferimiento de ADR-010 para ese tramo, y cada tenant pasa su propia certificación | Accepted | 2026-10-14 |
 
 ## Creating a New ADR
 

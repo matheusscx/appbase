@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-- **Status:** Draft
+- **Status:** Done (2026-10-14)
 - **Date:** 2026-10-14
 - **Owner:** Cesar Matheus
 
@@ -24,7 +24,7 @@
 
 ## Global Constraints
 
-**Regla de plan:** las Tasks 6 a 8 dependen de lo que mida la Task 1, y por eso llevan **intención, contrato y casos**, no código. Al cerrar la Task 1 se completa su código en este archivo, en el mismo commit que el hallazgo (memoria *plan no fijar código antes del spike*).
+**Regla de plan:** las Tasks 6 a 8 dependen de lo que mida la Task 1, y por eso llevan **intención, contrato y casos**, no código. Lo que pasó: la Task 1 dejó su hallazgo en este archivo, y las Tasks 6 a 8 **conservaron solo el contrato**; sus implementadores las escribieron con TDD desde ese contrato, sin código completo en el plan (memoria *plan no fijar código antes del spike*). Para el estado final del código manda `backend/src/modules/dte/`, no los bloques de este archivo.
 
 **Plata y montos:**
 - Plata con Decimal.js. `MntNeto`, `MntExe`, `IVA` y `MntTotal` en **pesos enteros**. Cantidad y precio unitario, hasta 6 decimales.
@@ -338,12 +338,15 @@ export interface DatosBoleta {
   montos: MontosBoleta;
 }
 
+// Así era la unión al escribir el plan. La final (26 códigos, con los de las rondas de arreglos)
+// vive en `backend/src/modules/dte/dte.types.ts`, que es la fuente de verdad.
 export type CodigoDteError =
   | 'TOTALES_NO_CIERRAN'
   | 'LINEA_NO_CIERRA'
   | 'MONTO_NO_ENTERO'
   | 'MONTO_NEGATIVO'
   | 'TOTAL_NO_POSITIVO'
+  | 'SIN_LINEAS'
   | 'BOLETA_EXENTA_CON_AFECTO'
   | 'FOLIO_FUERA_DE_RANGO'
   | 'CAF_OTRO_RUT'
@@ -353,10 +356,17 @@ export type CodigoDteError =
   | 'TEXTO_NO_ISO_8859_1'
   | 'TEXTO_DEMASIADO_LARGO'
   | 'RUT_INVALIDO'
+  | 'CDG_SUCURSAL_INVALIDO'
   | 'FALTA_IDENTIFICACION_135_UF'
   | 'IMPUESTO_ADICIONAL_NO_SOPORTADO'
   | 'ENVIO_VACIO'
-  | 'ENVIO_DEMASIADAS_BOLETAS';
+  | 'ENVIO_DEMASIADAS_BOLETAS'
+  | 'ENVIO_FOLIO_REPETIDO'
+  | 'ENVIO_OTRO_EMISOR'
+  | 'NRO_RESOL_INVALIDO'
+  | 'FECHA_INVALIDA'
+  | 'MONTO_INVALIDO'
+  | 'DEMASIADAS_LINEAS';
 
 /** Error del motor con un código por motivo, para que el que llama sepa qué pasó. */
 export class DteError extends Error {
