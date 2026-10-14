@@ -358,6 +358,23 @@ No entran de arrastre dentro de otra tarea. Las que llevan una pregunta para el 
 tienen como primer paso: después queda la spec entera. El contexto de dónde salió cada una
 es parte del enunciado y viaja con ella.
 
+- [ ] **El emisor de DTE propio, empezando por la boleta** (fiscal, **frente propio**; owner,
+  2026-10-14, por AskUserQuestion después de la
+  [investigación](investigaciones/2026-10-13-emision-electronica-sii.md): construir en vez de
+  contratar un proveedor). Seis subproyectos, cada uno con su spec, plan y verificación:
+  1. perfil fiscal: datos del emisor, certificado cifrado, CAF y folios usados;
+  2. **motor de la boleta**: spec en
+     [`2026-10-14-motor-boleta-electronica-design.md`](../superpowers/specs/2026-10-14-motor-boleta-electronica-design.md);
+  3. cliente del SII y cola de envío;
+  4. conexión con la venta y la nota de crédito;
+  5. certificación;
+  6. intercambio de factura.
+
+  Hoy **no hay RUT piloto**, así que la certificación espera a que haya uno. Antes del
+  subproyecto 4 tienen que estar cerrados dos frentes que dispara el motor (§ 7 y § 9 de su spec):
+  - qué hace el SII con el ILA y los demás impuestos adicionales en la boleta;
+  - el límite del nombre del ítem en el catálogo: 80 caracteres en ISO-8859-1.
+
 - [ ] **La compra online pide los datos del cliente, como un ecommerce** (producto + backend +
   frontend; **pedido por el owner el 2026-10-11** en el chat de la orquestadora: *"hay que pedir
   los datos del cliente en compras online como hacen los ecommerce"*). Hoy la orden de la tienda
