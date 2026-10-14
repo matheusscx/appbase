@@ -50,11 +50,17 @@ const CLAVE_CERTIFICADO = 'clave-de-prueba';
  * X.509 autofirmado RSA 2048 dentro de un .pfx. El RUT va en el `serialNumber` del sujeto
  * (el SII lo pone ahí o en un subjectAltName; este es el más simple de leer de vuelta).
  */
-export function certificadoDePrueba(): {
+export function certificadoDePrueba(
+  opciones: {
+    /** RUT del `serialNumber`; `null` lo omite (certificado sin RUT). */
+    rut?: string | null;
+  } = {},
+): {
   pfx: Buffer;
   clave: string;
   rut: string;
 } {
+  const rut = opciones.rut === undefined ? RUT_CERTIFICADO : opciones.rut;
   // La llave se genera con Node: la de forge tarda segundos en RSA 2048.
   const { privateKey, publicKey } = generateKeyPairSync('rsa', {
     modulusLength: 2048,
@@ -72,7 +78,7 @@ export function certificadoDePrueba(): {
   cert.validity.notAfter = new Date('2036-01-01T00:00:00Z');
   const sujeto = [
     { name: 'commonName', value: 'Firmante de Prueba' },
-    { name: 'serialNumber', value: RUT_CERTIFICADO },
+    ...(rut === null ? [] : [{ name: 'serialNumber', value: rut }]),
   ];
   cert.setSubject(sujeto);
   cert.setIssuer(sujeto);
@@ -86,6 +92,6 @@ export function certificadoDePrueba(): {
   return {
     pfx: Buffer.from(forge.asn1.toDer(p12).getBytes(), 'binary'),
     clave: CLAVE_CERTIFICADO,
-    rut: RUT_CERTIFICADO,
+    rut: rut ?? '',
   };
 }
