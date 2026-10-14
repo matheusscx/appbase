@@ -23,6 +23,33 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## simple-git sale del frontend con `@nuxt/devtools` 3.4.3 (cerrada 2026-10-14)
+
+Sale de [`pendientes.md` § *Vulnerabilidades aceptadas en el escaneo de dependencias*](pendientes.md),
+a pedido del owner tras las alertas de Dependabot del push del 2026-10-14 (2 críticas y 2 altas de
+las 10). El sub-ítem, verbatim:
+
+- **simple-git (y su `@simple-git/argv-parser`), node-forge, braces** (frontend; vigilar,
+  no hay qué hacer hoy): son críticos
+  y altos, pero viven en la cadena de desarrollo y build de nuxt (`@nuxt/devtools`, el
+  `listhen` de `@nuxt/cli` y el globbing de nitropack) y no entran en `.output/`, que es lo
+  único que corre en Railway (verificado buildeando el 2026-10-11). De node-forge (1.4.0) y
+  braces (3.0.3) no hay versión arreglada publicada. simple-git sí la tiene (4.0.1), pero
+  ninguna versión estable de `@nuxt/devtools` sale de simple-git 3.
+
+**Qué cambió.** `@nuxt/devtools` 3.4.3 (publicada el 2026-10-14) cambió simple-git por `tinyexec`.
+Cabe en el `^3.4.2` que pide `nuxt`, así que solo se movió el lockfile: devtools, devtools-kit y
+devtools-wizard 3.4.2 → 3.4.3, y salen `simple-git`, `@simple-git/argv-parser`,
+`@simple-git/args-pathspec` y los dos `@kwsites/*`. Se borraron las dos excepciones de
+`scripts/check-dependencias.mjs`, que el job ya marcaba como vencidas. node-forge y braces
+siguen en `pendientes.md`.
+
+**Comprobación.** `npm ci` en limpio con el npm 10 del host pasa, y `npm install
+--package-lock-only` con npm 10 no mueve el lock. Sigue habiendo una sola `node_modules/reka-ui`.
+`node scripts/check-dependencias.mjs` termina sin avisos de excepción vencida.
+
+---
+
 ## El peso de un garzón con más de 4 decimales se rechaza con aviso, no se redondea (cerrada 2026-10-14)
 
 Frente chico lanzado por la orquestadora a pedido del owner. **Decisión del owner** (2026-10-13,

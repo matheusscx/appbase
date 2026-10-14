@@ -691,13 +691,11 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   es una entrada de `EXCEPCIONES` en `scripts/check-dependencias.mjs`, y se borra de los dos
   lados en el mismo commit que la arregla. Si el arreglo llega solo, el job `dependencias`
   avisa con "Excepción vencida".
-  - **simple-git (y su `@simple-git/argv-parser`), node-forge, braces** (frontend; vigilar,
-    no hay qué hacer hoy): son críticos
-    y altos, pero viven en la cadena de desarrollo y build de nuxt (`@nuxt/devtools`, el
-    `listhen` de `@nuxt/cli` y el globbing de nitropack) y no entran en `.output/`, que es lo
-    único que corre en Railway (verificado buildeando el 2026-10-11). De node-forge (1.4.0) y
-    braces (3.0.3) no hay versión arreglada publicada. simple-git sí la tiene (4.0.1), pero
-    ninguna versión estable de `@nuxt/devtools` sale de simple-git 3.
+  - **node-forge, braces** (frontend; vigilar, no hay qué hacer hoy): son altos, pero viven en
+    la cadena de desarrollo y build de nuxt (el `listhen` de `@nuxt/cli` y de nitropack, y el
+    globbing de nitropack) y no entran en `.output/`, que es lo único que corre en Railway
+    (verificado buildeando el 2026-10-11). De node-forge (1.4.0) y braces (3.0.3) no hay versión
+    arreglada publicada. (simple-git salió el 2026-10-14: [`resueltos.md`](resueltos.md).)
   - **node-forge en el backend** (producción; anotado el 2026-10-14 con el motor de la boleta,
     [`features/emision-electronica.md`](../features/emision-electronica.md)): alto,
     GHSA-86w9-cpqp-85rv, verificación de firmas RSA PKCS#1 v1.5. `modules/dte/firma.ts` lo usa
@@ -709,7 +707,10 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   - **El lockfile del frontend no se puede regenerar con npm 10.9**: `npm update` y
     `npm audit fix` revientan con *"Cannot read properties of null (reading 'edgesOut')"* (un
     bug de arborist con los peers exactos de tiptap), y `npm install <paquete>@<versión>` con
-    *"The "from" argument must be of type string"*. Cómo se hizo el 2026-10-11 (dos veces):
+    *"The "from" argument must be of type string"*. El 2026-10-14 `npx npm@11 update
+    @nuxt/devtools` sí anduvo, pero borró dos peers opcionales de `@nuxt/cli` (`cac`,
+    `commander`) que el `npm ci` de npm 10 exige: se repusieron a mano desde el lock anterior.
+    Cómo se hizo el 2026-10-11 (dos veces):
     `npx npm@11.6.2 install` (con `node_modules` borrado si una corrida de npm 10 lo dejó a
     medias: si no, npm 11 sale con `ENOTEMPTY`) y después `npm install --package-lock-only` con el npm 10 del
     host, para que el `npm ci` de npm 10 (el del CI y el de los Dockerfile) no falle por

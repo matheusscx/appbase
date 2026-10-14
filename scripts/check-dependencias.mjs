@@ -51,20 +51,6 @@ const TOPE_MS = 20_000
 const EXCEPCIONES = [
   {
     dir: 'frontend',
-    paquete: 'simple-git',
-    ids: ['GHSA-x6jw-m9v5-85vh', 'GHSA-g4wm-2vf7-vfgr', 'GHSA-858h-whjf-mvg5'],
-    motivo:
-      'Solo lo usa @nuxt/devtools (servidor de desarrollo); no entra en `.output/`. ' +
-      'Ninguna versión estable de devtools sale de simple-git 3.',
-  },
-  {
-    dir: 'frontend',
-    paquete: '@simple-git/argv-parser',
-    ids: ['GHSA-v5rq-49vh-5v5c'],
-    motivo: 'Dependencia de simple-git: mismo motivo que la entrada de arriba.',
-  },
-  {
-    dir: 'frontend',
     paquete: 'node-forge',
     ids: ['GHSA-86w9-cpqp-85rv'],
     motivo:
