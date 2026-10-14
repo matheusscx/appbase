@@ -277,10 +277,64 @@ CREATE TABLE "razones_sociales" (
   "telefono"        VARCHAR(50),
   "habilitado"      BOOLEAN     NOT NULL DEFAULT false,
   "preferida"       BOOLEAN     NOT NULL DEFAULT false,
+  -- Perfil fiscal del emisor DTE (spec perfil fiscal § 2.1): todo nulo hasta que se completa.
+  "giro"            VARCHAR(80),
+  "comuna"          VARCHAR(20),
+  "ambiente_sii"    TEXT,        -- 'certificacion' | 'produccion': decide qué CAF sirven
+  "fecha_resolucion" DATE,       -- FchResol de la carátula
+  "numero_resolucion" INTEGER,   -- NroResol; 0 en certificación
   "creado_el"       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"  TIMESTAMPTZ,
-  "eliminado_el"    TIMESTAMPTZ
+  "eliminado_el"    TIMESTAMPTZ,
+  CONSTRAINT chk_razones_sociales_ambiente_sii CHECK ("ambiente_sii" IN ('certificacion','produccion')),
+  CONSTRAINT chk_razones_sociales_numero_resolucion CHECK ("numero_resolucion" >= 0)
 );
+
+-- Certificado del firmante de la razón social emisora (spec perfil fiscal § 2.2). Vigente hay
+-- uno por razón social; al reemplazarlo, el anterior queda con reemplazado_el y el blob en null.
+CREATE TABLE "dte_certificados" (
+  "certificado_id"     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"          UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "razon_social_id"    UUID        NOT NULL REFERENCES "razones_sociales" ("razon_social_id"),
+  "credencial_cifrada" TEXT,       -- CertificadoLeido en JSON, cifrado (CifradoDteService). Null = reemplazado
+  "rut_firmante"       VARCHAR(12) NOT NULL,
+  "nombre_firmante"    TEXT        NOT NULL,
+  "vence_el"           TIMESTAMPTZ NOT NULL,
+  "reemplazado_el"     TIMESTAMPTZ,
+  "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "eliminado_el"       TIMESTAMPTZ
+);
+CREATE INDEX "idx_dte_certificados_razon_social" ON "dte_certificados" ("razon_social_id");
+CREATE UNIQUE INDEX "uq_dte_certificados_vigente" ON "dte_certificados" ("razon_social_id")
+  WHERE "reemplazado_el" IS NULL AND "eliminado_el" IS NULL;
+
+-- Un CAF subido (spec perfil fiscal § 2.3). siguiente_folio es el próximo a entregar; el CAF
+-- está agotado cuando pasa "hasta". El XML va cifrado porque trae RSASK.
+CREATE TABLE "dte_cafs" (
+  "caf_id"             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"          UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "razon_social_id"    UUID        NOT NULL REFERENCES "razones_sociales" ("razon_social_id"),
+  "tipo"               SMALLINT    NOT NULL,  -- 39 | 41
+  "rut_emisor"         VARCHAR(12) NOT NULL,
+  "ambiente"           TEXT        NOT NULL,  -- 'certificacion' | 'produccion'
+  "desde"              INTEGER     NOT NULL,
+  "hasta"              INTEGER     NOT NULL,
+  "siguiente_folio"    INTEGER     NOT NULL,
+  "idk"                INTEGER     NOT NULL,
+  "fecha_autorizacion" DATE        NOT NULL,
+  "xml_cifrado"        TEXT        NOT NULL,
+  "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "eliminado_el"       TIMESTAMPTZ,
+  CONSTRAINT chk_dte_cafs_tipo CHECK ("tipo" IN (39, 41)),
+  CONSTRAINT chk_dte_cafs_ambiente CHECK ("ambiente" IN ('certificacion','produccion')),
+  CONSTRAINT chk_dte_cafs_rango CHECK ("desde" >= 1 AND "desde" <= "hasta"),
+  CONSTRAINT chk_dte_cafs_siguiente CHECK ("siguiente_folio" >= "desde" AND "siguiente_folio" <= "hasta" + 1)
+);
+CREATE INDEX "idx_dte_cafs_razon_social" ON "dte_cafs" ("razon_social_id");
+CREATE UNIQUE INDEX "uq_dte_cafs_desde" ON "dte_cafs" ("razon_social_id", "tipo", "desde")
+  WHERE "eliminado_el" IS NULL;
 
 -- Directorio de entidades externas del tenant: proveedores, empresas, personas naturales
 CREATE TABLE "terceros" (

@@ -1,4 +1,5 @@
 import {
+  Check,
   Entity,
   PrimaryGeneratedColumn,
   Column,
@@ -6,8 +7,14 @@ import {
   UpdateDateColumn,
   DeleteDateColumn,
 } from 'typeorm';
+import type { AmbienteSii } from '../../dte/entities/dte-caf.entity';
 
 @Entity('razones_sociales')
+@Check(
+  'chk_razones_sociales_ambiente_sii',
+  `"ambiente_sii" IN ('certificacion','produccion')`,
+)
+@Check('chk_razones_sociales_numero_resolucion', '"numero_resolucion" >= 0')
 export class RazonSocial {
   @PrimaryGeneratedColumn('uuid', { name: 'razon_social_id' })
   id: string;
@@ -32,6 +39,24 @@ export class RazonSocial {
 
   @Column({ default: false })
   preferida: boolean;
+
+  @Column({ type: 'varchar', length: 80, nullable: true })
+  giro: string | null;
+
+  @Column({ type: 'varchar', length: 20, nullable: true })
+  comuna: string | null;
+
+  /** Ambiente del SII en que emite: decide qué CAF sirven (perfil fiscal, spec § 2.1). */
+  @Column({ name: 'ambiente_sii', type: 'text', nullable: true })
+  ambienteSii: AmbienteSii | null;
+
+  /** `FchResol` de la carátula, AAAA-MM-DD. */
+  @Column({ name: 'fecha_resolucion', type: 'date', nullable: true })
+  fechaResolucion: string | null;
+
+  /** `NroResol` de la carátula; 0 en certificación. */
+  @Column({ name: 'numero_resolucion', type: 'integer', nullable: true })
+  numeroResolucion: number | null;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

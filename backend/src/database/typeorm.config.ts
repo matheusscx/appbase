@@ -19,6 +19,8 @@ import { CajaTestigo } from '../modules/caja/entities/caja-testigo.entity';
 import { MovimientoCaja } from '../modules/caja/entities/movimiento-caja.entity';
 import { CajaArqueoMedio } from '../modules/caja/entities/caja-arqueo-medio.entity';
 import { CajaIntentoRechazado } from '../modules/caja/entities/caja-intento-rechazado.entity';
+import { DteCaf } from '../modules/dte/entities/dte-caf.entity';
+import { DteCertificado } from '../modules/dte/entities/dte-certificado.entity';
 import { RazonSocial } from '../modules/tenants/entities/razon-social.entity';
 import { Rol } from '../modules/roles/entities/rol.entity';
 import { RolUsuario } from '../modules/roles/entities/rol-usuario.entity';
@@ -158,6 +160,8 @@ export const ENTIDADES = [
   Cajon,
   CajonUsuario,
   RazonSocial,
+  DteCertificado,
+  DteCaf,
   Rol,
   RolUsuario,
   ModuloRol,
