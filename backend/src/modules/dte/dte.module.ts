@@ -9,6 +9,7 @@ import { DteDocumento } from './entities/dte-documento.entity';
 import { DteEnvio } from './entities/dte-envio.entity';
 import { FoliosService } from './folios.service';
 import { PerfilFiscalService } from './perfil-fiscal.service';
+import { SiiBoletaCliente } from './sii-boleta.cliente';
 
 @Module({
   imports: [
@@ -21,7 +22,12 @@ import { PerfilFiscalService } from './perfil-fiscal.service';
     ]),
   ],
   controllers: [DteController],
-  providers: [PerfilFiscalService, CifradoDteService, FoliosService],
+  providers: [
+    PerfilFiscalService,
+    CifradoDteService,
+    FoliosService,
+    SiiBoletaCliente,
+  ],
   exports: [PerfilFiscalService, CifradoDteService, FoliosService],
 })
 export class DteModule {}
