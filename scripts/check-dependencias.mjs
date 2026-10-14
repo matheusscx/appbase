@@ -72,6 +72,15 @@ const EXCEPCIONES = [
       'No hay versión arreglada publicada.',
   },
   {
+    dir: 'backend',
+    paquete: 'node-forge',
+    ids: ['GHSA-86w9-cpqp-85rv'],
+    motivo:
+      'El motor de la boleta (modules/dte/firma.ts) solo abre el .pfx y exporta llave y ' +
+      'certificado; nunca llama a publicKey.verify, que es lo vulnerable: las firmas las ' +
+      'verifica crypto de Node vía xml-crypto. No hay versión arreglada publicada.',
+  },
+  {
     dir: 'frontend',
     paquete: 'braces',
     ids: ['GHSA-vfj7-8cjw-p6xm'],

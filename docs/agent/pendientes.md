@@ -698,6 +698,14 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
     único que corre en Railway (verificado buildeando el 2026-10-11). De node-forge (1.4.0) y
     braces (3.0.3) no hay versión arreglada publicada. simple-git sí la tiene (4.0.1), pero
     ninguna versión estable de `@nuxt/devtools` sale de simple-git 3.
+  - **node-forge en el backend** (producción; anotado el 2026-10-14 con el motor de la boleta,
+    [`features/emision-electronica.md`](../features/emision-electronica.md)): alto,
+    GHSA-86w9-cpqp-85rv, verificación de firmas RSA PKCS#1 v1.5. `modules/dte/firma.ts` lo usa
+    solo para abrir el `.pfx` (`pkcs12FromAsn1`, cuyo chequeo es un MAC HMAC) y exportar la llave
+    y el certificado; **nunca llama a `publicKey.verify`**: las firmas las verifica `crypto` de
+    Node vía xml-crypto. No hay versión arreglada (1.4.0 es la última). Si un cambio futuro
+    verifica firmas con forge, la excepción deja de valer. Salida si no llega el arreglo: leer el
+    PKCS#12 con otra librería (Node no lo trae).
   - **El lockfile del frontend no se puede regenerar con npm 10.9**: `npm update` y
     `npm audit fix` revientan con *"Cannot read properties of null (reading 'edgesOut')"* (un
     bug de arborist con los peers exactos de tiptap), y `npm install <paquete>@<versión>` con
