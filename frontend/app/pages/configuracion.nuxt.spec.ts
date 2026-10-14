@@ -9,7 +9,14 @@ import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Configuracion from './configuracion.vue'
 
 let esAdmin = false
+let esSuperadmin = false
 let permisos: string[] = []
+
+mockNuxtImport('useAuthStore', () => {
+  return () => ({
+    get isSuperadmin() { return esSuperadmin },
+  })
+})
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -88,6 +95,7 @@ async function arbolMontado() {
 
 beforeEach(() => {
   esAdmin = false
+  esSuperadmin = false
   permisos = []
 })
 
@@ -104,6 +112,34 @@ describe('menú de configuración agrupado', () => {
     expect(rutas).toHaveLength(27)
     expect(new Set(rutas).size).toBe(27)
     expect(separadores).toBe(7)
+  })
+
+  // Hasta que el sistema emita, la pantalla de boletas es solo del superadmin (owner,
+  // 2026-10-14): el admin de un comercio no ve una pantalla que promete lo que todavía no sale.
+  it('Boleta electrónica la ve el superadmin y no el admin de un comercio', async () => {
+    esAdmin = true
+    const comercio = await arbolMontado()
+    expect(Object.values(comercio.arbol).flat()).not.toContain('/configuracion/boleta-electronica')
+
+    esSuperadmin = true
+    const { arbol } = await arbolMontado()
+
+    expect(arbol['Organización']).toEqual([
+      '/configuracion/empresa',
+      '/configuracion/razones-sociales',
+      '/configuracion/boleta-electronica',
+      '/configuracion/usuarios',
+      '/configuracion/roles',
+    ])
+    expect(Object.values(arbol).flat()).toHaveLength(28)
+  })
+
+  it('un superadmin que no es admin del tenant no la ve: la ruta lo mandaría al índice', async () => {
+    esSuperadmin = true
+
+    const { arbol } = await arbolMontado()
+
+    expect(arbol).toEqual(PERFIL)
   })
 
   it('sin permisos queda solo Perfil, sin encabezados de grupos vacíos', async () => {

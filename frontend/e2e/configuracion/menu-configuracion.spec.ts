@@ -24,14 +24,16 @@ test('el admin ve los ocho grupos en orden y ninguna etiqueta se corta', async (
   await expect(menu.locator('[data-slot="label"]')).toHaveText([
     'Mi cuenta', 'Organización', 'Catálogo', 'Precios', 'Cobros', 'Caja', 'Inventario', 'Restaurante',
   ])
-  await expect(menu.getByRole('link')).toHaveCount(27)
+  // 27 de siempre + Boleta electrónica, que ve el superadmin (el admin del e2e lo es) y no el
+  // admin de un comercio: `configuracion.nuxt.spec.ts` fija las dos mitades.
+  await expect(menu.getByRole('link')).toHaveCount(28)
 
   // `truncate` corta con elipsis sin avisar: el texto completo sigue en el DOM, así que
   // un `toHaveText` pasa igual. Lo que delata el corte es el ancho.
   // Contadas antes de medir: sobre un locator vacío `evaluateAll` devuelve `[]` y pasa.
   // Acotadas a los links: el encabezado de cada grupo también lleva un `linkLabel`.
   const etiquetas = menu.locator('[data-slot="link"] [data-slot="linkLabel"]')
-  await expect(etiquetas).toHaveCount(27)
+  await expect(etiquetas).toHaveCount(28)
   const cortadas = await etiquetas.evaluateAll(els =>
     els.filter(el => el.scrollWidth > el.clientWidth).map(el => el.textContent),
   )

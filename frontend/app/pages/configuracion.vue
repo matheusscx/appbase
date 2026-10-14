@@ -4,6 +4,7 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 const permissionsStore = usePermissionsStore()
+const auth = useAuthStore()
 
 onMounted(() => {
   if (!permissionsStore.permisos.length && !permissionsStore.loading)
@@ -34,6 +35,10 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
       items: [
         admin && { label: 'Empresa', icon: 'i-lucide-building-2', to: '/configuracion/empresa' },
         admin && { label: 'Razones sociales', icon: 'i-lucide-file-text', to: '/configuracion/razones-sociales' },
+        // Hasta que el sistema emita (subproyecto 4) la ve solo el superadmin: un comercio no ve una
+        // pantalla que promete boletas que todavía no salen (owner, 2026-10-14). La ruta sigue siendo
+        // admin del tenant (`admin`, el gate de la ruta); abrirla a todos es quitar `auth.isSuperadmin`.
+        admin && auth.isSuperadmin && { label: 'Boleta electrónica', icon: 'i-lucide-receipt-text', to: '/configuracion/boleta-electronica' },
         admin && { label: 'Usuarios', icon: 'i-lucide-users', to: '/configuracion/usuarios' },
         admin && { label: 'Roles y permisos', icon: 'i-lucide-shield-check', to: '/configuracion/roles' },
       ],
