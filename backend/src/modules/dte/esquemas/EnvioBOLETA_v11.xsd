@@ -1,12 +1,7 @@
 <?xml version="1.0" encoding="ISO-8859-1"?>
-<xs:schema targetNamespace="http://www.sii.cl/SiiDte" xmlns:SiiDte="http://www.sii.cl/SiiDte" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:xs="http://www.w3.org/2001/XMLSchema" elementFormDefault="qualified" attributeFormDefault="unqualified">
+<!-- edited with XMLSPY v5 rel. 4 U (http://www.xmlspy.com) by Zulema Olguín Traro (Servicios de Impuestos Internos) -->
+<xs:schema targetNamespace="http://www.sii.cl/SiiDte" xmlns:xs="http://www.w3.org/2001/XMLSchema" xmlns:ds="http://www.w3.org/2000/09/xmldsig#" xmlns:SiiDte="http://www.sii.cl/SiiDte" elementFormDefault="qualified" attributeFormDefault="unqualified">
 	<xs:import namespace="http://www.w3.org/2000/09/xmldsig#" schemaLocation="xmldsignature_v10.xsd"/>
-	<!--
-	  Modificacion		 : 16 de Abril del  2007. 
-         Nueva version		: EnvioBOLETA_v11.xsd
-         Modificacion 		: 22 de Abril del  2010. 
-         Nueva version		: EnvioBOLETA_v11.xsd
-      -->
 	<xs:element name="EnvioBOLETA">
 		<xs:annotation>
 			<xs:documentation>Envio de Boletas Electronicas</xs:documentation>
@@ -86,7 +81,7 @@
 									<xs:attribute name="version" type="xs:decimal" use="required" fixed="1.0"/>
 								</xs:complexType>
 							</xs:element>
-							<xs:element name="DTE" type="SiiDte:BOLETADefType" maxOccurs="unbounded">
+							<xs:element name="DTE" type="SiiDte:BOLETADefType" maxOccurs="500">
 								<xs:annotation>
 									<xs:documentation>Boletas Electronicas Enviadas</xs:documentation>
 								</xs:annotation>
@@ -429,7 +424,7 @@
 								</xs:sequence>
 							</xs:complexType>
 						</xs:element>
-						<xs:element name="Detalle" maxOccurs="1000">
+						<xs:element name="Detalle" minOccurs="0" maxOccurs="1000">
 							<xs:annotation>
 								<xs:documentation>Detalle de Itemes del Documento</xs:documentation>
 							</xs:annotation>
@@ -565,7 +560,7 @@
 														</xs:restriction>
 													</xs:simpleType>
 												</xs:element>
-												<xs:element name="TpoTiket">
+												<xs:element name="TpoTicket">
 													<xs:annotation>
 														<xs:documentation>Tipo de ticket, Por ejemplo: Adulto, Niño, etc</xs:documentation>
 													</xs:annotation>
@@ -745,7 +740,7 @@
 											</xs:restriction>
 										</xs:simpleType>
 									</xs:element>
-									<xs:element name="OrdenSTI">
+									<xs:element name="OrdenSTI" minOccurs="0">
 										<xs:annotation>
 											<xs:documentation>Ubicación para Impresión </xs:documentation>
 										</xs:annotation>
@@ -898,6 +893,26 @@
 										<xs:simpleType>
 											<xs:restriction base="xs:positiveInteger">
 												<xs:maxInclusive value="40"/>
+											</xs:restriction>
+										</xs:simpleType>
+									</xs:element>
+									<xs:element name="TpoDocRef" minOccurs="0">
+										<xs:annotation>
+											<xs:documentation>Tipo Documento de referencia </xs:documentation>
+										</xs:annotation>
+										<xs:simpleType>
+											<xs:restriction base="xs:string">
+												<xs:maxLength value="3"/>
+											</xs:restriction>
+										</xs:simpleType>
+									</xs:element>
+									<xs:element name="FolioRef" minOccurs="0">
+										<xs:annotation>
+											<xs:documentation>Folio de Referencia</xs:documentation>
+										</xs:annotation>
+										<xs:simpleType>
+											<xs:restriction base="xs:string">
+												<xs:maxLength value="18"/>
 											</xs:restriction>
 										</xs:simpleType>
 									</xs:element>

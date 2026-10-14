@@ -149,7 +149,8 @@ como con uno que canonicaliza. Ningún atributo del motor lleva texto libre.
   canonicaliza igual suelto y dentro del sobre, y su firma verifica en los dos contextos.
 - **Sobre**: se firma el `SetDTE` ya con los `<DTE>` adentro (firmarlo antes los dejaría fuera de
   lo firmado).
-- **XSD**: el SII no publica un esquema posterior al `EnvioBOLETA_v11` (2007). Las pruebas
+- **XSD**: `esquemas/EnvioBOLETA_v11.xsd` es el que publica el SII en `schema_envio_bol_720.zip`
+  (bajado el 2026-10-14: tope de 500 `DTE` por sobre, `Detalle` opcional). Las pruebas
   validan contra una copia en `esquemas/` con los cinco campos del formato v4.2 que v11 no trae
   (`MedioPago`, `CorreoRecep`, `TelefonoRecep`, `RutProvSW`, `RznSocProvSW`), cada uno citando su
   fila del formato.
