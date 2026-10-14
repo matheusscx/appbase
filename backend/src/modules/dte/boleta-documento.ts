@@ -127,7 +127,9 @@ export function armarDocumento(
             t(`NmbItem de la línea ${i + 1}`, l.nombre, MAX_NOMBRE_ITEM),
           ) +
           (l.cantidad === undefined ? '' : el('QtyItem', num(l.cantidad))) +
-          (l.precioUnitario === undefined
+          // Línea gratis: el XSD pide PrcItem > 0, así que con precio 0 no se emite.
+          (l.precioUnitario === undefined ||
+          new Decimal(l.precioUnitario).isZero()
             ? ''
             : el('PrcItem', num(l.precioUnitario))) +
           (l.descuentoMonto === undefined

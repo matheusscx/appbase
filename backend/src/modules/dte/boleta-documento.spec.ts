@@ -253,6 +253,26 @@ describe('armarDocumento', () => {
     );
   });
 
+  it('una línea gratis sale con QtyItem y MontoItem 0, sin PrcItem, y valida contra el XSD', async () => {
+    const d = boleta({
+      lineas: [
+        linea(),
+        linea({
+          nombre: 'Cortesía',
+          cantidad: '1',
+          precioUnitario: '0',
+          monto: '0',
+        }),
+      ],
+    });
+    const r = armar(d);
+    expect(r.xml).toContain(
+      '<NmbItem>Cortesía</NmbItem><QtyItem>1</QtyItem><MontoItem>0</MontoItem>',
+    );
+    expect(r.xml.match(/<PrcItem>/g)).toHaveLength(1);
+    expect(await validar(r.xml, 39)).toEqual({ valido: true, errores: [] });
+  });
+
   it('una línea sin cantidad ni precio no los emite', async () => {
     const d = boleta({
       lineas: [{ nombre: 'Varios', monto: '4470', exenta: false }],

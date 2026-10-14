@@ -352,8 +352,7 @@ describe('verificarMontos: entradas que el SII rechaza', () => {
   });
 
   it.each([
-    ['cantidad 0 (línea gratis)', { cantidad: '0', monto: '0' }],
-    ['precio 0 (línea gratis)', { precioUnitario: '0', monto: '0' }],
+    ['cantidad 0 (no describe una venta)', { cantidad: '0', monto: '0' }],
     ['cantidad negativa', { cantidad: '-3' }],
     ['precio negativo', { precioUnitario: '-1490' }],
     ['cantidad con 7 decimales', { cantidad: '0.1234567', monto: '0' }],
@@ -364,6 +363,36 @@ describe('verificarMontos: entradas que el SII rechaza', () => {
       expect(codigo(() => verificarMontos(con(over)))).toBe('MONTO_INVALIDO');
     },
   );
+
+  it('una línea gratis (precio 0, monto 0) junto a una pagada cierra; el IVA sale de la pagada', () => {
+    const d = boleta({
+      lineas: [
+        linea(),
+        linea({
+          nombre: 'Cortesía',
+          cantidad: '1',
+          precioUnitario: '0',
+          monto: '0',
+        }),
+      ],
+    });
+    expect(verificarMontos(d)).toEqual({ diferenciaIvaRedondeo: '0' });
+  });
+
+  it('precio 0 con un descuento en pesos: el monto quedaría negativo → LINEA_NO_CIERRA', () => {
+    const d = boleta({
+      lineas: [
+        linea(),
+        linea({
+          cantidad: '1',
+          precioUnitario: '0',
+          descuentoMonto: '100',
+          monto: '0',
+        }),
+      ],
+    });
+    expect(codigo(() => verificarMontos(d))).toBe('LINEA_NO_CIERRA');
+  });
 
   it('cantidad y precio con exactamente 6 decimales sí pasan', () => {
     const d = con({

@@ -35,12 +35,25 @@ function entero(campo: string, v: Decimal): Decimal {
   return v;
 }
 
-/** `QtyItem` y `PrcItem`, si vienen: mayores que cero y con a lo más 6 decimales. */
-function cantidadOPrecio(campo: string, v: string | undefined) {
+/**
+ * `QtyItem` y `PrcItem`, si vienen, con a lo más 6 decimales. La cantidad tiene que ser mayor
+ * que cero (una cantidad 0 no describe una venta); el precio admite 0, que es la línea
+ * gratis (cortesía): sale sin `PrcItem` y con `MontoItem` 0.
+ */
+function cantidadOPrecio(
+  campo: string,
+  v: string | undefined,
+  admiteCero: boolean,
+) {
   if (v === undefined) return undefined;
   const n = aDecimal(campo, v);
-  if (!n.gt(0))
-    throw montoInvalido(campo, `tiene que ser mayor que cero y vale ${v}`);
+  if (admiteCero ? n.isNegative() : !n.gt(0))
+    throw montoInvalido(
+      campo,
+      admiteCero
+        ? `no puede ser negativo y vale ${v}`
+        : `tiene que ser mayor que cero y vale ${v}`,
+    );
   if (n.decimalPlaces() > DECIMALES_CANTIDAD_PRECIO)
     throw montoInvalido(
       campo,
@@ -120,8 +133,8 @@ export function verificarMontos(datos: DatosBoleta): {
       n('MontoItem'),
       entero(n('MontoItem'), aDecimal(n('MontoItem'), l.monto)),
     );
-    const cantidad = cantidadOPrecio(n('QtyItem'), l.cantidad);
-    const precio = cantidadOPrecio(n('PrcItem'), l.precioUnitario);
+    const cantidad = cantidadOPrecio(n('QtyItem'), l.cantidad, false);
+    const precio = cantidadOPrecio(n('PrcItem'), l.precioUnitario, true);
     const descuento = montoEnteroNoNegativo(
       n('DescuentoMonto'),
       l.descuentoMonto,
