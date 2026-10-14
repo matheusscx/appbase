@@ -16,6 +16,8 @@ export type AmbienteSii = 'certificacion' | 'produccion';
  * Un CAF subido (spec perfil fiscal § 2.3). `siguiente_folio` es el próximo a entregar; el CAF
  * está agotado cuando pasa `hasta`. Los usados se derivan (`siguiente_folio - desde`): el folio
  * de cada documento lo guarda el documento. El XML va cifrado porque trae `RSASK`.
+ * El SII numera cada ambiente por separado: el mismo rango puede existir en certificación y en
+ * producción, así que `ambiente` entra en la clave de unicidad de `desde`.
  */
 @Entity('dte_cafs')
 @Check('chk_dte_cafs_tipo', '"tipo" IN (39, 41)')
@@ -26,7 +28,7 @@ export type AmbienteSii = 'certificacion' | 'produccion';
   '"siguiente_folio" >= "desde" AND "siguiente_folio" <= "hasta" + 1',
 )
 @Index('idx_dte_cafs_razon_social', ['razonSocialId'])
-@Index('uq_dte_cafs_desde', ['razonSocialId', 'tipo', 'desde'], {
+@Index('uq_dte_cafs_desde', ['razonSocialId', 'tipo', 'ambiente', 'desde'], {
   unique: true,
   where: '"eliminado_el" IS NULL',
 })

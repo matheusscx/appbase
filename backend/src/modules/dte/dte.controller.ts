@@ -1,7 +1,10 @@
 import {
   Body,
   Controller,
+  Delete,
   Get,
+  Param,
+  ParseUUIDPipe,
   Patch,
   Post,
   Req,
@@ -12,6 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
 import { ActualizarPerfilDto } from './dto/actualizar-perfil.dto';
+import { SubirCafDto } from './dto/subir-caf.dto';
 import { SubirCertificadoDto } from './dto/subir-certificado.dto';
 import { PerfilFiscalService } from './perfil-fiscal.service';
 
@@ -40,5 +44,17 @@ export class DteController {
   subirCertificado(@Req() req: Request, @Body() dto: SubirCertificadoDto) {
     const user = req.user as { tenantId: string };
     return this.perfil.subirCertificado(user.tenantId, dto, new Date());
+  }
+
+  @Post('cafs')
+  subirCaf(@Req() req: Request, @Body() dto: SubirCafDto) {
+    const user = req.user as { tenantId: string };
+    return this.perfil.subirCaf(user.tenantId, dto);
+  }
+
+  @Delete('cafs/:id')
+  borrarCaf(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
+    const user = req.user as { tenantId: string };
+    return this.perfil.borrarCaf(user.tenantId, id);
   }
 }

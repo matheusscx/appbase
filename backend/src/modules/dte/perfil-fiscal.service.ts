@@ -1,13 +1,20 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { unwrap } from '../../common/utils/pg-returning.util';
+import { normalizarRut } from '../../common/utils/rut.util';
 import { RazonSocial } from '../tenants/entities/razon-social.entity';
 import type { ActualizarPerfilDto } from './dto/actualizar-perfil.dto';
+import type { SubirCafDto } from './dto/subir-caf.dto';
 import type { SubirCertificadoDto } from './dto/subir-certificado.dto';
 import { CifradoDteService } from './cifrado-dte.service';
 import { DteError, type TipoBoleta } from './dte.types';
+import { leerCaf, type CafLeido } from './caf';
 import type { AmbienteSii } from './entities/dte-caf.entity';
 import { leerCertificado, type CertificadoLeido } from './firma';
 import {
@@ -76,6 +83,11 @@ interface FilaCaf {
   fecha_autorizacion: string;
   idk: number;
 }
+
+/** El folio es un `integer` de Postgres: el CAF no puede pedir uno más allá. */
+const FOLIO_MAXIMO = 2_147_483_646;
+/** `idk` también es un `integer`. */
+const IDK_MAXIMO = 2_147_483_647;
 
 const SIN_EMISORA =
   'Primero hay que marcar una razón social como preferida en Razones sociales';
@@ -165,18 +177,7 @@ export class PerfilFiscalService {
           ORDER BY tipo, desde`,
         [emisor.razonSocialId, tenantId],
       );
-      cafs = filasCaf.map((f) => ({
-        id: f.caf_id,
-        tipo: f.tipo,
-        ambiente: f.ambiente,
-        desde: f.desde,
-        hasta: f.hasta,
-        usados: f.siguiente_folio - f.desde,
-        restantes: f.hasta - f.siguiente_folio + 1,
-        fechaAutorizacion: f.fecha_autorizacion,
-        idk: f.idk,
-        borrable: f.siguiente_folio === f.desde,
-      }));
+      cafs = filasCaf.map(aCafListado);
     }
 
     const { faltantes, avisos } = evaluarPerfil(
@@ -294,6 +295,132 @@ export class PerfilFiscalService {
       };
     });
   }
+  /**
+   * Guarda un CAF (el archivo de folios del SII) de la razón social emisora, cifrado: trae la
+   * llave privada con la que se firman los timbres. Todo en una transacción que parte tomando la
+   * fila de la razón social, para que un doble clic no meta el mismo rango dos veces.
+   */
+  subirCaf(tenantId: string, dto: SubirCafDto): Promise<CafListado> {
+    return this.db.transaccion(async () => {
+      const emisora = await this.emisora(tenantId, true);
+      if (!emisora) throw new BadRequestException(SIN_EMISORA);
+      if (!emisora.ambiente)
+        throw new BadRequestException(
+          'Primero hay que elegir el ambiente (certificación o producción)',
+        );
+
+      // El SII entrega el archivo en ISO-8859-1: leerlo como utf8 rompería las tildes y la Ñ.
+      const xml = Buffer.from(dto.xmlBase64, 'base64').toString('latin1');
+      let caf: CafLeido;
+      try {
+        caf = leerCaf(xml);
+      } catch (e) {
+        aBadRequest(e);
+      }
+      if (caf.tipo !== 39 && caf.tipo !== 41)
+        throw new BadRequestException(
+          `Este CAF es de documentos tipo ${caf.tipo}; por ahora solo se cargan boletas (39 y 41)`,
+        );
+      if (caf.rutEmisor !== normalizarRut(emisora.rut))
+        throw new BadRequestException(
+          `Este archivo de folios es del RUT ${caf.rutEmisor}, no de la empresa (${normalizarRut(emisora.rut)})`,
+        );
+      if (caf.desde < 1)
+        throw new BadRequestException(
+          'Este CAF empieza en el folio 0; los folios parten desde el 1',
+        );
+      if (caf.idk > IDK_MAXIMO)
+        throw new BadRequestException(
+          'Este archivo de folios trae un número de llave (IDK) que no se puede guardar',
+        );
+      if (caf.hasta > FOLIO_MAXIMO)
+        throw new BadRequestException(
+          `El rango de folios del CAF llega a ${caf.hasta}; el máximo que se admite es ${FOLIO_MAXIMO}`,
+        );
+
+      const solapado = await this.db.query<unknown[]>(
+        `SELECT 1 FROM dte_cafs
+          WHERE razon_social_id = $1 AND tipo = $2 AND eliminado_el IS NULL
+            AND ambiente = $5 AND desde <= $4 AND hasta >= $3
+          LIMIT 1`,
+        [
+          emisora.razonSocialId,
+          caf.tipo,
+          caf.desde,
+          caf.hasta,
+          emisora.ambiente,
+        ],
+      );
+      if (solapado.length > 0)
+        throw new BadRequestException('Esos folios ya están cargados');
+
+      const [fila] = unwrap<FilaCaf>(
+        await this.db.query(
+          `INSERT INTO dte_cafs
+             (tenant_id, razon_social_id, tipo, rut_emisor, ambiente, desde, hasta,
+              siguiente_folio, idk, fecha_autorizacion, xml_cifrado)
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $6, $8, $9, $10)
+           RETURNING caf_id, tipo, ambiente, desde, hasta, siguiente_folio, idk,
+                     to_char(fecha_autorizacion, 'YYYY-MM-DD') AS fecha_autorizacion`,
+          [
+            tenantId,
+            emisora.razonSocialId,
+            caf.tipo,
+            caf.rutEmisor,
+            emisora.ambiente,
+            caf.desde,
+            caf.hasta,
+            caf.idk,
+            caf.fechaAutorizacion,
+            this.cifrado.cifrar(xml),
+          ],
+        ),
+      );
+      return aCafListado(fila);
+    });
+  }
+
+  /**
+   * Quita un CAF que todavía no entregó ningún folio. Con folios usados no se puede: los
+   * documentos emitidos con él dependen de que su rango quede registrado.
+   */
+  async borrarCaf(tenantId: string, id: string): Promise<void> {
+    const borrados = unwrap<{ caf_id: string }>(
+      await this.db.query(
+        `UPDATE dte_cafs SET eliminado_el = now()
+          WHERE caf_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+            AND siguiente_folio = desde
+          RETURNING caf_id`,
+        [id, tenantId],
+      ),
+    );
+    if (borrados.length > 0) return;
+
+    const existe = await this.db.query<unknown[]>(
+      `SELECT 1 FROM dte_cafs
+        WHERE caf_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+      [id, tenantId],
+    );
+    if (existe.length === 0) throw new NotFoundException('CAF no encontrado');
+    throw new BadRequestException(
+      'Este CAF ya entregó folios y no se puede borrar',
+    );
+  }
+}
+
+function aCafListado(f: FilaCaf): CafListado {
+  return {
+    id: f.caf_id,
+    tipo: f.tipo,
+    ambiente: f.ambiente,
+    desde: f.desde,
+    hasta: f.hasta,
+    usados: f.siguiente_folio - f.desde,
+    restantes: f.hasta - f.siguiente_folio + 1,
+    fechaAutorizacion: f.fecha_autorizacion,
+    idk: f.idk,
+    borrable: f.siguiente_folio === f.desde,
+  };
 }
 
 /** Un `DteError` es un dato mal puesto por el usuario: 400 con su mensaje. Lo demás sigue de largo. */

@@ -1,10 +1,13 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Db } from '../../common/db/db.service';
 import { assertSinHuecos } from '../../common/db/db.spec-helper';
 import { RazonSocial } from '../tenants/entities/razon-social.entity';
-import { certificadoDePrueba } from './__fixtures__/credenciales-prueba';
+import {
+  cafDePrueba,
+  certificadoDePrueba,
+} from './__fixtures__/credenciales-prueba';
 import { CifradoDteService } from './cifrado-dte.service';
 import { PerfilFiscalService } from './perfil-fiscal.service';
 
@@ -363,6 +366,291 @@ describe('PerfilFiscalService', () => {
         nombreFirmante: 'Ana Pérez',
         venceEl: '2036-01-01T00:00:00.000Z',
       });
+    });
+  });
+
+  describe('subirCaf', () => {
+    const EMISORA_CON_AMBIENTE = {
+      ...FILA_EMISORA,
+      ambiente_sii: 'certificacion',
+    };
+    const conAmbiente = () =>
+      db.query.mockResolvedValueOnce([EMISORA_CON_AMBIENTE]);
+    const subida = (
+      opciones: Partial<Parameters<typeof cafDePrueba>[0]> = {},
+    ) => {
+      const xml = cafDePrueba({
+        rut: '77777777-7',
+        tipo: 39,
+        desde: 1,
+        hasta: 50,
+        ...opciones,
+      });
+      return {
+        xml,
+        dto: { xmlBase64: Buffer.from(xml, 'latin1').toString('base64') },
+      };
+    };
+    const FILA_INSERTADA = {
+      caf_id: 'caf-nuevo',
+      tipo: 39,
+      ambiente: 'certificacion',
+      desde: 1,
+      hasta: 50,
+      siguiente_folio: 1,
+      idk: 100,
+      fecha_autorizacion: '2026-10-01',
+    };
+
+    it('sin emisora: 400 y no escribe', async () => {
+      sinEmisora();
+      await expect(service.subirCaf(TENANT, subida().dto)).rejects.toThrow(
+        /marcar una razón social como preferida/,
+      );
+      expect(cifrado.cifrar).not.toHaveBeenCalled();
+    });
+
+    it('sin ambiente elegido: 400 que lo pide primero', async () => {
+      conEmisora();
+      await expect(service.subirCaf(TENANT, subida().dto)).rejects.toThrow(
+        'Primero hay que elegir el ambiente (certificación o producción)',
+      );
+      expect(db.query).toHaveBeenCalledTimes(1);
+    });
+
+    it('la emisora se toma con FOR UPDATE dentro de la transacción', async () => {
+      conAmbiente();
+      db.query.mockResolvedValueOnce([]); // el solape
+      db.query.mockResolvedValueOnce([FILA_INSERTADA]);
+      await service.subirCaf(TENANT, subida().dto);
+
+      expect(db.transaccion).toHaveBeenCalledTimes(1);
+      const [sql] = db.query.mock.calls[0] as [string];
+      expect(sql).toMatch(/FOR UPDATE/);
+    });
+
+    it('un base64 que no es un CAF: 400 con el motivo del motor', async () => {
+      conAmbiente();
+      const dto = {
+        xmlBase64: Buffer.from('no soy un CAF').toString('base64'),
+      };
+      const error = await service
+        .subirCaf(TENANT, dto)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as Error).message).toMatch(/El CAF no es válido/);
+      expect(cifrado.cifrar).not.toHaveBeenCalled();
+    });
+
+    it('un tipo que no es boleta: 400 que dice cuál es', async () => {
+      conAmbiente();
+      const error = await service
+        .subirCaf(TENANT, subida({ tipo: 33 }).dto)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as Error).message).toBe(
+        'Este CAF es de documentos tipo 33; por ahora solo se cargan boletas (39 y 41)',
+      );
+      expect(cifrado.cifrar).not.toHaveBeenCalled();
+    });
+
+    it('el CAF de otro RUT: 400 con ambos RUT', async () => {
+      conAmbiente();
+      const error = await service
+        .subirCaf(TENANT, subida({ rut: '76543210-3' }).dto)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as Error).message).toBe(
+        'Este archivo de folios es del RUT 76543210-3, no de la empresa (77777777-7)',
+      );
+      expect(cifrado.cifrar).not.toHaveBeenCalled();
+    });
+
+    it('compara el RUT normalizado: la emisora con puntos igual coincide', async () => {
+      db.query.mockResolvedValueOnce([
+        { ...EMISORA_CON_AMBIENTE, rut: '77.777.777-7' },
+      ]);
+      db.query.mockResolvedValueOnce([]);
+      db.query.mockResolvedValueOnce([FILA_INSERTADA]);
+      await expect(
+        service.subirCaf(TENANT, subida().dto),
+      ).resolves.toBeDefined();
+    });
+
+    it('un folio final que no cabe en un integer: 400', async () => {
+      conAmbiente();
+      await expect(
+        service.subirCaf(
+          TENANT,
+          subida({ desde: 1, hasta: 2_147_483_647 }).dto,
+        ),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(cifrado.cifrar).not.toHaveBeenCalled();
+    });
+
+    it('un CAF que empieza en el folio 0: 400 (no un 500 de la base)', async () => {
+      conAmbiente();
+      const error = await service
+        .subirCaf(TENANT, subida({ desde: 0, hasta: 50 }).dto)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as Error).message).toMatch(/folio 0/);
+      expect(cifrado.cifrar).not.toHaveBeenCalled();
+    });
+
+    it('un IDK que no cabe en un integer: 400 (no un 500 de la base)', async () => {
+      conAmbiente();
+      const xml = subida().xml.replace(
+        '<IDK>100</IDK>',
+        '<IDK>2147483648</IDK>',
+      );
+      const error = await service
+        .subirCaf(TENANT, {
+          xmlBase64: Buffer.from(xml, 'latin1').toString('base64'),
+        })
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as Error).message).toMatch(/IDK/);
+      expect(cifrado.cifrar).not.toHaveBeenCalled();
+    });
+
+    it('el IDK tope exacto (2.147.483.647) todavía entra', async () => {
+      conAmbiente();
+      db.query.mockResolvedValueOnce([]);
+      db.query.mockResolvedValueOnce([FILA_INSERTADA]);
+      const xml = subida().xml.replace(
+        '<IDK>100</IDK>',
+        '<IDK>2147483647</IDK>',
+      );
+      await expect(
+        service.subirCaf(TENANT, {
+          xmlBase64: Buffer.from(xml, 'latin1').toString('base64'),
+        }),
+      ).resolves.toBeDefined();
+    });
+
+    it('el tope exacto (2.147.483.646) todavía entra', async () => {
+      conAmbiente();
+      db.query.mockResolvedValueOnce([]);
+      db.query.mockResolvedValueOnce([FILA_INSERTADA]);
+      await expect(
+        service.subirCaf(
+          TENANT,
+          subida({ desde: 1, hasta: 2_147_483_646 }).dto,
+        ),
+      ).resolves.toBeDefined();
+    });
+
+    it('folios que se solapan con un CAF vivo del mismo tipo: 400', async () => {
+      conAmbiente();
+      db.query.mockResolvedValueOnce([{ '?column?': 1 }]);
+      await expect(
+        service.subirCaf(TENANT, subida({ desde: 40, hasta: 90 }).dto),
+      ).rejects.toThrow('Esos folios ya están cargados');
+
+      const [sql, params] = db.query.mock.calls[1] as [string, unknown[]];
+      expect(sql).toMatch(/FROM dte_cafs/);
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+      expect(sql).toMatch(/ambiente = \$5 AND desde <= \$4 AND hasta >= \$3/);
+      expect(params).toEqual([RAZON_SOCIAL, 39, 40, 90, 'certificacion']);
+      assertSinHuecos(sql, params);
+      expect(cifrado.cifrar).not.toHaveBeenCalled();
+    });
+
+    it('OK: guarda el XML cifrado, siguiente_folio = desde y el ambiente de la emisora', async () => {
+      conAmbiente();
+      db.query.mockResolvedValueOnce([]);
+      db.query.mockResolvedValueOnce([[FILA_INSERTADA], 1]);
+      const { xml, dto } = subida({
+        tipo: 41,
+        desde: 3011,
+        hasta: 3412,
+        razonSocial: 'PANADERÍA ÑUÑOA',
+        windows: true,
+      });
+
+      const caf = await service.subirCaf(TENANT, dto);
+
+      // El texto que se cifra es el archivo tal cual, con sus tildes (latin1, no utf8).
+      expect(cifrado.cifrar).toHaveBeenCalledTimes(1);
+      expect(cifrado.cifrar).toHaveBeenCalledWith(xml);
+      const [sql, params] = db.query.mock.calls[2] as [string, unknown[]];
+      expect(sql).toMatch(/INSERT INTO dte_cafs/);
+      expect(sql).toMatch(/VALUES \(\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$6, /);
+      assertSinHuecos(sql, params);
+      expect(params).toEqual([
+        TENANT,
+        RAZON_SOCIAL,
+        41,
+        '77777777-7',
+        'certificacion',
+        3011,
+        3412,
+        100,
+        '2026-10-01',
+        `cifrado:${xml.length}`,
+      ]);
+      expect(caf).toEqual({
+        id: 'caf-nuevo',
+        tipo: 39,
+        ambiente: 'certificacion',
+        desde: 1,
+        hasta: 50,
+        usados: 0,
+        restantes: 50,
+        fechaAutorizacion: '2026-10-01',
+        idk: 100,
+        borrable: true,
+      });
+    });
+  });
+
+  describe('borrarCaf', () => {
+    const ID = '99999999-2222-4333-8444-555555555555';
+
+    it('un CAF sin folios usados se marca borrado y no hace más consultas', async () => {
+      db.query.mockResolvedValueOnce([[{ caf_id: ID }], 1]);
+      await expect(service.borrarCaf(TENANT, ID)).resolves.toBeUndefined();
+
+      expect(db.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = db.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toMatch(/UPDATE dte_cafs SET eliminado_el = now\(\)/);
+      expect(sql).toMatch(/tenant_id = \$2/);
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+      expect(sql).toMatch(/siguiente_folio = desde/);
+      expect(sql).not.toMatch(/DELETE FROM/);
+      expect(params).toEqual([ID, TENANT]);
+      assertSinHuecos(sql, params);
+    });
+
+    it('un CAF que no existe en el tenant: 404', async () => {
+      db.query.mockResolvedValueOnce([[], 0]);
+      db.query.mockResolvedValueOnce([]);
+      await expect(service.borrarCaf(TENANT, ID)).rejects.toBeInstanceOf(
+        NotFoundException,
+      );
+      const [sql, params] = db.query.mock.calls[1] as [string, unknown[]];
+      expect(sql).toMatch(/tenant_id = \$2/);
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+      assertSinHuecos(sql, params);
+    });
+
+    it('un CAF con folios usados: 400 y no lo borra', async () => {
+      db.query.mockResolvedValueOnce([[], 0]);
+      db.query.mockResolvedValueOnce([{ '?column?': 1 }]);
+      const error = await service
+        .borrarCaf(TENANT, ID)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      expect((error as Error).message).toBe(
+        'Este CAF ya entregó folios y no se puede borrar',
+      );
     });
   });
 });

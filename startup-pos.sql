@@ -333,7 +333,7 @@ CREATE TABLE "dte_cafs" (
   CONSTRAINT chk_dte_cafs_siguiente CHECK ("siguiente_folio" >= "desde" AND "siguiente_folio" <= "hasta" + 1)
 );
 CREATE INDEX "idx_dte_cafs_razon_social" ON "dte_cafs" ("razon_social_id");
-CREATE UNIQUE INDEX "uq_dte_cafs_desde" ON "dte_cafs" ("razon_social_id", "tipo", "desde")
+CREATE UNIQUE INDEX "uq_dte_cafs_desde" ON "dte_cafs" ("razon_social_id", "tipo", "ambiente", "desde")
   WHERE "eliminado_el" IS NULL;
 
 -- Directorio de entidades externas del tenant: proveedores, empresas, personas naturales

@@ -8,7 +8,7 @@ export class PerfilFiscalEmisor1792006780176 implements MigrationInterface {
       `CREATE TABLE "dte_cafs" ("caf_id" uuid NOT NULL DEFAULT uuid_generate_v4(), "tenant_id" uuid NOT NULL, "razon_social_id" uuid NOT NULL, "tipo" smallint NOT NULL, "rut_emisor" character varying(12) NOT NULL, "ambiente" text NOT NULL, "desde" integer NOT NULL, "hasta" integer NOT NULL, "siguiente_folio" integer NOT NULL, "idk" integer NOT NULL, "fecha_autorizacion" date NOT NULL, "xml_cifrado" text NOT NULL, "creado_el" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "actualizado_el" TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT now(), "eliminado_el" TIMESTAMP WITH TIME ZONE, CONSTRAINT "chk_dte_cafs_siguiente" CHECK ("siguiente_folio" >= "desde" AND "siguiente_folio" <= "hasta" + 1), CONSTRAINT "chk_dte_cafs_rango" CHECK ("desde" >= 1 AND "desde" <= "hasta"), CONSTRAINT "chk_dte_cafs_ambiente" CHECK ("ambiente" IN ('certificacion','produccion')), CONSTRAINT "chk_dte_cafs_tipo" CHECK ("tipo" IN (39, 41)), CONSTRAINT "PK_13881efdb73edebc1b8cfa222e3" PRIMARY KEY ("caf_id"))`,
     );
     await queryRunner.query(
-      `CREATE UNIQUE INDEX "uq_dte_cafs_desde" ON "dte_cafs"  ("razon_social_id", "tipo", "desde") WHERE "eliminado_el" IS NULL`,
+      `CREATE UNIQUE INDEX "uq_dte_cafs_desde" ON "dte_cafs"  ("razon_social_id", "tipo", "ambiente", "desde") WHERE "eliminado_el" IS NULL`,
     );
     await queryRunner.query(
       `CREATE INDEX "idx_dte_cafs_razon_social" ON "dte_cafs"  ("razon_social_id") `,

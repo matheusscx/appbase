@@ -7,11 +7,17 @@ import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import { normalizarRut } from '../src/common/utils/rut.util';
-import { certificadoDePrueba } from '../src/modules/dte/__fixtures__/credenciales-prueba';
+import {
+  cafDePrueba,
+  certificadoDePrueba,
+} from '../src/modules/dte/__fixtures__/credenciales-prueba';
+import { CifradoDteService } from '../src/modules/dte/cifrado-dte.service';
+import { correrCarrera } from './helpers/carrera';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
 
 /**
- * Perfil fiscal del emisor por API: `GET`/`PATCH /dte/perfil` y `POST /dte/certificado`.
+ * Perfil fiscal del emisor por API: `GET`/`PATCH /dte/perfil`, `POST /dte/certificado` y
+ * `POST`/`DELETE /dte/cafs`.
  *
  * La razón social emisora es propia de este archivo ('Emisor e2e perfil fiscal'): el spec la
  * crea, la marca preferida y limpia sus CAF y certificados, de modo que correr dos veces da lo
@@ -31,6 +37,9 @@ const PROHIBIDOS = [
   'credencialCifrada',
   'llavePrivadaPem',
   'PRIVATE KEY',
+  'xml_cifrado',
+  'xmlCifrado',
+  'RSASK',
 ];
 
 interface TokenResponse {
@@ -41,6 +50,16 @@ interface RazonSocialResponse {
   nombre: string;
   habilitado: boolean;
 }
+interface CafResponse {
+  id: string;
+  tipo: number;
+  ambiente: string;
+  desde: number;
+  hasta: number;
+  usados: number;
+  restantes: number;
+  borrable: boolean;
+}
 interface PerfilResponse {
   emisor: { rut: string; nombre: string; giro: string | null } | null;
   certificado: {
@@ -49,7 +68,7 @@ interface PerfilResponse {
     nombreFirmante: string;
     venceEl: string;
   } | null;
-  cafs: unknown[];
+  cafs: CafResponse[];
   faltantes: { codigo: string }[];
   avisos: { codigo: string }[];
 }
@@ -84,7 +103,7 @@ describe('Perfil fiscal del emisor (e2e)', () => {
 
   /** La respuesta cruda; el texto se guarda para revisar al final que no filtró la llave. */
   async function llamar(
-    metodo: 'get' | 'patch' | 'post',
+    metodo: 'get' | 'patch' | 'post' | 'delete',
     url: string,
     conToken: string,
     body?: Record<string, unknown>,
@@ -95,6 +114,15 @@ describe('Perfil fiscal del emisor (e2e)', () => {
     const res = await (body === undefined ? req : req.send(body));
     respuestas.push(res.text);
     return res;
+  }
+
+  /** El CAF de la emisora, en base64 como lo manda la pantalla (el archivo del SII es latin1). */
+  function cafBase64(opciones: Parameters<typeof cafDePrueba>[0]): {
+    xml: string;
+    xmlBase64: string;
+  } {
+    const xml = cafDePrueba(opciones);
+    return { xml, xmlBase64: Buffer.from(xml, 'latin1').toString('base64') };
   }
 
   /** Lo que una corrida anterior (o esta) dejó cargado en la razón social propia. */
@@ -340,7 +368,343 @@ describe('Perfil fiscal del emisor (e2e)', () => {
     expect(basura.status).toBe(400);
   });
 
-  it('un usuario que no es admin recibe 403 en las tres rutas', async () => {
+  it('POST /dte/cafs: un 39 válido se guarda, cifrado, y el GET ya no pide folios', async () => {
+    const { xml, xmlBase64 } = cafBase64({
+      rut: '77777777-7',
+      tipo: 39,
+      desde: 2041,
+      hasta: 2077,
+    });
+    const res = await llamar('post', '/api/dte/cafs', token, { xmlBase64 });
+    expect(res.status).toBe(201);
+    const caf = res.body as CafResponse;
+    expect(caf).toMatchObject({
+      tipo: 39,
+      ambiente: 'certificacion',
+      desde: 2041,
+      hasta: 2077,
+      usados: 0,
+      restantes: 37,
+      borrable: true,
+    });
+
+    const filas: { xml_cifrado: string; siguiente_folio: number }[] =
+      await ds.query(
+        `SELECT xml_cifrado, siguiente_folio FROM dte_cafs WHERE caf_id = $1`,
+        [caf.id],
+      );
+    expect(filas).toHaveLength(1);
+    expect(filas[0].siguiente_folio).toBe(2041);
+    // Cifrado de verdad: la llave del CAF no queda en claro, y se recupera tal cual.
+    expect(filas[0].xml_cifrado).toMatch(/^v1:/);
+    expect(filas[0].xml_cifrado).not.toContain('RSASK');
+    expect(app.get(CifradoDteService).descifrar(filas[0].xml_cifrado)).toBe(
+      xml,
+    );
+
+    const perfil = await llamar('get', '/api/dte/perfil', token);
+    expect(perfil.status).toBe(200);
+    const cuerpo = perfil.body as PerfilResponse;
+    expect(cuerpo.faltantes.map((f) => f.codigo)).not.toContain(
+      'SIN_FOLIOS_39',
+    );
+    expect(cuerpo.cafs.map((c) => c.id)).toContain(caf.id);
+  });
+
+  it('POST /dte/cafs: un CAF al estilo Windows (latin1, CRLF, tildes y Ñ) se guarda y se recupera igual', async () => {
+    const { xml, xmlBase64 } = cafBase64({
+      rut: '77777777-7',
+      tipo: 41,
+      desde: 3011,
+      hasta: 3412,
+      razonSocial: 'PANADERÍA ÑUÑOA',
+      windows: true,
+    });
+    // Los bytes de la Ñ en el archivo son los de latin1 (0xD1), no los de utf8 (0xC3 0x91).
+    expect(Buffer.from(xmlBase64, 'base64').includes(0xd1)).toBe(true);
+
+    const res = await llamar('post', '/api/dte/cafs', token, { xmlBase64 });
+    expect(res.status).toBe(201);
+    const caf = res.body as CafResponse;
+    expect(caf).toMatchObject({ tipo: 41, desde: 3011, hasta: 3412 });
+
+    const filas: { xml_cifrado: string }[] = await ds.query(
+      `SELECT xml_cifrado FROM dte_cafs WHERE caf_id = $1`,
+      [caf.id],
+    );
+    const guardado = app.get(CifradoDteService).descifrar(filas[0].xml_cifrado);
+    expect(guardado).toBe(xml);
+    expect(guardado).toContain('PANADERÍA ÑUÑOA');
+    expect(guardado).toContain('\r\n');
+  });
+
+  it('POST /dte/cafs rechaza el de otro RUT, el que no es boleta y el que no es un CAF', async () => {
+    const otroRut = await llamar('post', '/api/dte/cafs', token, {
+      xmlBase64: cafBase64({
+        rut: '76543210-3',
+        tipo: 39,
+        desde: 4001,
+        hasta: 4050,
+      }).xmlBase64,
+    });
+    expect(otroRut.status).toBe(400);
+    expect(JSON.stringify(otroRut.body)).toContain('del RUT');
+
+    // El motor (`leerCaf`) no mira el tipo: el 400 sale del service, con su mensaje.
+    const factura = await llamar('post', '/api/dte/cafs', token, {
+      xmlBase64: cafBase64({
+        rut: '77777777-7',
+        tipo: 33,
+        desde: 4001,
+        hasta: 4050,
+      }).xmlBase64,
+    });
+    expect(factura.status).toBe(400);
+    expect(JSON.stringify(factura.body)).toContain('solo se cargan boletas');
+
+    const basura = await llamar('post', '/api/dte/cafs', token, {
+      xmlBase64: Buffer.from('<AUTORIZACION></AUTORIZACION>').toString(
+        'base64',
+      ),
+    });
+    expect(basura.status).toBe(400);
+    expect(JSON.stringify(basura.body)).toContain('El CAF no es válido');
+
+    const noBase64 = await llamar('post', '/api/dte/cafs', token, {
+      xmlBase64: '¡esto no es base64!',
+    });
+    expect(noBase64.status).toBe(400);
+
+    const filas: { n: string }[] = await ds.query(
+      `SELECT count(*) AS n FROM dte_cafs
+        WHERE razon_social_id = $1 AND eliminado_el IS NULL AND desde = 4001`,
+      [razonSocialId],
+    );
+    expect(Number(filas[0].n)).toBe(0);
+  });
+
+  it('POST /dte/cafs: un rango que se solapa con uno cargado es 400', async () => {
+    // El 39 de 2041 a 2077 ya está cargado (test de arriba).
+    const res = await llamar('post', '/api/dte/cafs', token, {
+      xmlBase64: cafBase64({
+        rut: '77777777-7',
+        tipo: 39,
+        desde: 2070,
+        hasta: 2090,
+      }).xmlBase64,
+    });
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain('ya están cargados');
+  });
+
+  it('POST /dte/cafs: el mismo archivo en dos clics a la vez entra una sola vez', async () => {
+    const { xmlBase64 } = cafBase64({
+      rut: '77777777-7',
+      tipo: 39,
+      desde: 5003,
+      hasta: 5104,
+    });
+    const [a, b] = await Promise.all([
+      llamar('post', '/api/dte/cafs', token, { xmlBase64 }),
+      llamar('post', '/api/dte/cafs', token, { xmlBase64 }),
+    ]);
+    expect([a.status, b.status].sort()).toEqual([201, 400]);
+    const rechazada = a.status === 400 ? a : b;
+    expect(rechazada.status).toBe(400);
+    expect(JSON.stringify(rechazada.body)).toContain('ya están cargados');
+
+    const filas: { n: string }[] = await ds.query(
+      `SELECT count(*) AS n FROM dte_cafs
+        WHERE razon_social_id = $1 AND tipo = 39 AND desde = 5003 AND eliminado_el IS NULL`,
+      [razonSocialId],
+    );
+    expect(Number(filas[0].n)).toBe(1);
+  });
+
+  it('POST /dte/cafs espera a quien tiene tomada la razón social (el candado que serializa los clics)', async () => {
+    // El doble clic de arriba sale bien aunque no haya candado si un clic le gana al otro por
+    // unos milisegundos. Acá la carrera es forzada: alguien retiene la fila de la razón social,
+    // se dispara la subida y se mide (con `pg_blocking_pids`) que quedó frenada en la base.
+    const { esperando, respuestas } = await correrCarrera(
+      ds,
+      [
+        `SELECT 1 FROM razones_sociales WHERE razon_social_id = $1 FOR UPDATE`,
+        [razonSocialId],
+      ],
+      [
+        () =>
+          llamar('post', '/api/dte/cafs', token, {
+            xmlBase64: cafBase64({
+              rut: '77777777-7',
+              tipo: 41,
+              desde: 9501,
+              hasta: 9510,
+            }).xmlBase64,
+          }),
+      ],
+    );
+    expect(esperando).toBeGreaterThanOrEqual(1);
+    expect(respuestas[0].status).toBe(201);
+  });
+
+  it('POST /dte/cafs: un rango contiguo al cargado (2078-2090 tras 2041-2077) no se solapa', async () => {
+    const res = await llamar('post', '/api/dte/cafs', token, {
+      xmlBase64: cafBase64({
+        rut: '77777777-7',
+        tipo: 39,
+        desde: 2078,
+        hasta: 2090,
+      }).xmlBase64,
+    });
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ desde: 2078, hasta: 2090, restantes: 13 });
+  });
+
+  it('POST /dte/cafs: el SII numera cada ambiente aparte, así que producción puede repetir el rango de certificación', async () => {
+    // El 39 de 2041 a 2077 de certificación ya está cargado (y en el test de solape, 2070-2090
+    // en certificación se rechaza). En producción el mismo rango es otro CAF.
+    const cambiar = (ambienteSii: string) =>
+      llamar('patch', '/api/dte/perfil', token, { ambienteSii });
+    const xmlBase64 = cafBase64({
+      rut: '77777777-7',
+      tipo: 39,
+      desde: 2041,
+      hasta: 2077,
+    }).xmlBase64;
+    const enProduccion = await cambiar('produccion');
+    expect(enProduccion.status).toBe(200);
+    try {
+      const res = await llamar('post', '/api/dte/cafs', token, { xmlBase64 });
+      expect(res.status).toBe(201);
+      const caf = res.body as CafResponse;
+      expect(caf).toMatchObject({
+        ambiente: 'produccion',
+        desde: 2041,
+        hasta: 2077,
+      });
+      // Y dentro de producción el solape sigue valiendo.
+      const repetido = await llamar('post', '/api/dte/cafs', token, {
+        xmlBase64,
+      });
+      expect(repetido.status).toBe(400);
+      expect(JSON.stringify(repetido.body)).toContain('ya están cargados');
+
+      // Se deja como estaba: sin ese CAF de producción.
+      const borrado = await llamar('delete', `/api/dte/cafs/${caf.id}`, token);
+      expect(borrado.status).toBe(200);
+    } finally {
+      const vuelta = await cambiar('certificacion');
+      expect(vuelta.status).toBe(200);
+    }
+  });
+
+  it('DELETE /dte/cafs/:id: un CAF sin usar se quita y deja de aparecer', async () => {
+    const creado = await llamar('post', '/api/dte/cafs', token, {
+      xmlBase64: cafBase64({
+        rut: '77777777-7',
+        tipo: 39,
+        desde: 7001,
+        hasta: 7010,
+      }).xmlBase64,
+    });
+    expect(creado.status).toBe(201);
+    const { id } = creado.body as CafResponse;
+
+    const res = await llamar('delete', `/api/dte/cafs/${id}`, token);
+    expect(res.status).toBe(200);
+    expect(res.text).toBe('');
+
+    const perfil = await llamar('get', '/api/dte/perfil', token);
+    expect(perfil.status).toBe(200);
+    expect((perfil.body as PerfilResponse).cafs.map((c) => c.id)).not.toContain(
+      id,
+    );
+    // Borrado lógico: la fila sigue, marcada.
+    const filas: { eliminado_el: Date | null }[] = await ds.query(
+      `SELECT eliminado_el FROM dte_cafs WHERE caf_id = $1`,
+      [id],
+    );
+    expect(filas).toHaveLength(1);
+    expect(filas[0].eliminado_el).not.toBeNull();
+
+    // Ya borrado: para la API no existe.
+    const otraVez = await llamar('delete', `/api/dte/cafs/${id}`, token);
+    expect(otraVez.status).toBe(404);
+
+    // Y su rango quedó libre para cargarlo de nuevo.
+    const recargado = await llamar('post', '/api/dte/cafs', token, {
+      xmlBase64: cafBase64({
+        rut: '77777777-7',
+        tipo: 39,
+        desde: 7001,
+        hasta: 7010,
+      }).xmlBase64,
+    });
+    expect(recargado.status).toBe(201);
+  });
+
+  it('DELETE /dte/cafs/:id: el id de otro tenant es 404 y el CAF sigue', async () => {
+    const creado = await llamar('post', '/api/dte/cafs', token, {
+      xmlBase64: cafBase64({
+        rut: '77777777-7',
+        tipo: 39,
+        desde: 8001,
+        hasta: 8010,
+      }).xmlBase64,
+    });
+    expect(creado.status).toBe(201);
+    const { id } = creado.body as CafResponse;
+
+    const tokenOtro = await loginSegundoTenant(app);
+    const res = await llamar('delete', `/api/dte/cafs/${id}`, tokenOtro);
+    expect(res.status).toBe(404);
+
+    const filas: { eliminado_el: Date | null }[] = await ds.query(
+      `SELECT eliminado_el FROM dte_cafs WHERE caf_id = $1`,
+      [id],
+    );
+    expect(filas[0].eliminado_el).toBeNull();
+
+    const inexistente = await llamar(
+      'delete',
+      '/api/dte/cafs/00000000-0000-4000-8000-000000000000',
+      token,
+    );
+    expect(inexistente.status).toBe(404);
+    const noUuid = await llamar('delete', '/api/dte/cafs/no-es-uuid', token);
+    expect(noUuid.status).toBe(400);
+  });
+
+  it('DELETE /dte/cafs/:id: un CAF que ya entregó un folio no se puede quitar', async () => {
+    const creado = await llamar('post', '/api/dte/cafs', token, {
+      xmlBase64: cafBase64({
+        rut: '77777777-7',
+        tipo: 39,
+        desde: 6001,
+        hasta: 6050,
+      }).xmlBase64,
+    });
+    expect(creado.status).toBe(201);
+    const { id } = creado.body as CafResponse;
+
+    // Tomar folios es la tarea 7 (todavía no hay endpoint que lo haga): acá solo se prueba la
+    // regla del borrado, así que se simula que ya salió el primero.
+    await ds.query(
+      `UPDATE dte_cafs SET siguiente_folio = desde + 1 WHERE caf_id = $1`,
+      [id],
+    );
+
+    const res = await llamar('delete', `/api/dte/cafs/${id}`, token);
+    expect(res.status).toBe(400);
+    expect(JSON.stringify(res.body)).toContain('ya entregó folios');
+
+    const perfil = await llamar('get', '/api/dte/perfil', token);
+    expect(perfil.status).toBe(200);
+    const caf = (perfil.body as PerfilResponse).cafs.find((c) => c.id === id)!;
+    expect(caf).toMatchObject({ usados: 1, restantes: 49, borrable: false });
+  });
+
+  it('un usuario que no es admin recibe 403 en todas las rutas', async () => {
     const tokenEncargado = await loginComo(ENCARGADO, PARIS_TENANT_ID);
     const cert = certificadoDePrueba();
 
@@ -355,6 +719,21 @@ describe('Perfil fiscal del emisor (e2e)', () => {
       clave: cert.clave,
     });
     expect(post.status).toBe(403);
+    const caf = await llamar('post', '/api/dte/cafs', tokenEncargado, {
+      xmlBase64: cafBase64({
+        rut: '77777777-7',
+        tipo: 39,
+        desde: 9001,
+        hasta: 9010,
+      }).xmlBase64,
+    });
+    expect(caf.status).toBe(403);
+    const borrar = await llamar(
+      'delete',
+      '/api/dte/cafs/00000000-0000-4000-8000-000000000000',
+      tokenEncargado,
+    );
+    expect(borrar.status).toBe(403);
   });
 
   it('otro tenant no ve el perfil de este', async () => {
