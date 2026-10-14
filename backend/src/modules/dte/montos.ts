@@ -140,6 +140,12 @@ export function verificarMontos(datos: DatosBoleta): {
       l.descuentoMonto,
     );
     const recargo = montoEnteroNoNegativo(n('RecargoMonto'), l.recargoMonto);
+    // Precio 0 sin cantidad saldría como línea pagada sin precio: la gratis necesita su QtyItem.
+    if (precio?.isZero() && cantidad === undefined)
+      throw montoInvalido(
+        n('PrcItem'),
+        'es 0 (línea gratis) y necesita su QtyItem',
+      );
     if (cantidad !== undefined && precio !== undefined) {
       const esperado = precio.mul(cantidad).minus(descuento).plus(recargo);
       if (esperado.minus(monto).abs().gte(1)) {

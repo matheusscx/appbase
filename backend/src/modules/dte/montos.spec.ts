@@ -379,6 +379,13 @@ describe('verificarMontos: entradas que el SII rechaza', () => {
     expect(verificarMontos(d)).toEqual({ diferenciaIvaRedondeo: '0' });
   });
 
+  it('precio 0 sin cantidad con monto > 0: saldría como línea pagada sin precio → MONTO_INVALIDO', () => {
+    const d = boleta({
+      lineas: [linea({ cantidad: undefined, precioUnitario: '0' })],
+    });
+    expect(codigo(() => verificarMontos(d))).toBe('MONTO_INVALIDO');
+  });
+
   it('precio 0 con un descuento en pesos: el monto quedaría negativo → LINEA_NO_CIERRA', () => {
     const d = boleta({
       lineas: [
