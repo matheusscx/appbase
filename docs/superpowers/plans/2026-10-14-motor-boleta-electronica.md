@@ -69,7 +69,7 @@ Todo vive en `backend/src/modules/dte/`.
 | `__fixtures__/sii/F60T33-ejemplo.xml` | Ejemplo firmado oficial del SII (`ejemplo_xml.zip`) | 1 |
 | `esquemas/EnvioBOLETA_v11.xsd`, `esquemas/xmldsignature_v10.xsd` | XSD oficiales (`schema_envio_bol.zip`) | 1 |
 | `esquemas/EnvioDTE_v10.xsd`, `DTE_v10.xsd`, `SiiTypes_v10.xsd` | XSD oficiales (`schema_dte.zip`), para validar el ejemplo | 1 |
-| `firma-sii.spike.spec.ts` | Spike: verificar el ejemplo del SII y firmar SHA1 en Node 22 | 1 |
+| `firma-sii.spec.ts` | Regresión contra el ejemplo del SII: firmas, `FRMT` y SHA1 de 512 bits en Node 22 (nació como el spike de la Task 1) | 1 |
 | `dte.types.ts` | Contrato de entrada, resultado y `DteError` | 2 |
 | `texto.ts` | Validar texto ISO-8859-1 y largos, escapar XML, codificar a latin1 | 2 |
 | `montos.ts` | Las igualdades de la spec § 4, el aviso de IVA y los montos no negativos | 4 |
@@ -93,7 +93,7 @@ Cada `.ts` tiene su `.spec.ts` al lado.
 **Files:**
 - Create: los fixtures y los esquemas del mapa marcados "1".
 - Create: `backend/src/modules/dte/__fixtures__/xsd.ts`.
-- Create: `backend/src/modules/dte/firma-sii.spike.spec.ts`.
+- Create: `backend/src/modules/dte/firma-sii.spec.ts`.
 - Modify: `backend/package.json` y `backend/package-lock.json`.
 
 **Interfaces:**
@@ -103,7 +103,7 @@ Cada `.ts` tiene su `.spec.ts` al lado.
   - la regla de serialización del `<DD>` que hace verificar el `FRMT`;
   - si Node 22 firma SHA1 con una llave RSA de 512 bits, el tamaño de las llaves del CAF.
 
-- [ ] **Step 1: Instalar las dependencias con versión exacta**
+- [x] **Step 1: Instalar las dependencias con versión exacta**
 
 ```bash
 export PATH="$HOME/.nvm/versions/node/v22.23.3/bin:$PATH"
@@ -116,7 +116,7 @@ npm install --save-dev --save-exact xmllint-wasm@5.3.0 @types/node-forge
 
 Después: `docker-compose up --build backend` en el entorno propio, para que la imagen tenga los paquetes (`CLAUDE.md`, Comandos).
 
-- [ ] **Step 2: Copiar los fixtures oficiales**
+- [x] **Step 2: Copiar los fixtures oficiales**
 
 ```bash
 mkdir -p src/modules/dte/__fixtures__/sii src/modules/dte/esquemas
@@ -132,7 +132,7 @@ ls src/modules/dte/esquemas
 
 Expected: `DTE_v10.xsd EnvioBOLETA_v11.xsd EnvioDTE_v10.xsd SiiTypes_v10.xsd xmldsignature_v10.xsd`. Las dos copias de `xmldsignature_v10.xsd` tienen que ser idénticas; si no lo son, para y avisá. Los archivos se guardan **sin reencodear**: son ISO-8859-1.
 
-- [ ] **Step 3: El validador de XSD de las pruebas**
+- [x] **Step 3: El validador de XSD de las pruebas**
 
 `src/modules/dte/__fixtures__/xsd.ts`:
 
@@ -167,85 +167,13 @@ export async function validarContraXsd(
 }
 ```
 
-- [ ] **Step 4: El spike como prueba**
+- [x] **Step 4: El spike como prueba**
 
-`src/modules/dte/firma-sii.spike.spec.ts`:
+`src/modules/dte/firma-sii.spec.ts` (el código vive ahí, no se repite en el plan). Seis casos: el XSD, el defecto de las llaves del ejemplo, la firma del `Documento` sobre el `<DTE>` aislado, la firma del `SetDTE` sobre el sobre completo, el `FRMT` y SHA1 con 512 bits. La versión que se escribió primero verificaba con la llave del `X509Certificate` y fallaba: ver el hallazgo.
 
-```ts
-import { createPublicKey, createSign, createVerify, generateKeyPairSync } from 'crypto';
-import { readFileSync } from 'fs';
-import { join } from 'path';
-import { DOMParser } from '@xmldom/xmldom';
-import { SignedXml } from 'xml-crypto';
-import { validarContraXsd } from './__fixtures__/xsd';
+- [x] **Step 5: Correrlo y registrar lo que pasa**
 
-const EJEMPLO = readFileSync(
-  join(__dirname, '__fixtures__', 'sii', 'F60T33-ejemplo.xml'),
-  'latin1',
-);
-const DSIG = 'http://www.w3.org/2000/09/xmldsig#';
-const SII = 'http://www.sii.cl/SiiDte';
-
-const b64aUrl = (s: string) =>
-  Buffer.from(s.replace(/\s/g, ''), 'base64').toString('base64url');
-
-const certPem = (b64: string) =>
-  `-----BEGIN CERTIFICATE-----\n${b64.replace(/\s/g, '').match(/.{1,64}/g)!.join('\n')}\n-----END CERTIFICATE-----\n`;
-
-describe('spike: firma del SII', () => {
-  const doc = new DOMParser().parseFromString(EJEMPLO, 'text/xml');
-  const firmas = Array.from(doc.getElementsByTagNameNS(DSIG, 'Signature'));
-
-  it('el ejemplo del SII valida contra EnvioDTE_v10.xsd', async () => {
-    const r = await validarContraXsd(EJEMPLO, 'EnvioDTE_v10.xsd', [
-      'DTE_v10.xsd',
-      'SiiTypes_v10.xsd',
-      'xmldsignature_v10.xsd',
-    ]);
-    expect(r.errores).toEqual([]);
-  });
-
-  it.each([0, 1])('xml-crypto verifica la firma %i del ejemplo', (i) => {
-    const firma = firmas[i];
-    const x509 = firma.getElementsByTagNameNS(DSIG, 'X509Certificate')[0];
-    const sig = new SignedXml({
-      publicCert: certPem(x509.textContent ?? ''),
-      getCertFromKeyInfo: () => null,
-    });
-    sig.loadSignature(firma);
-    expect(sig.checkSignature(EJEMPLO)).toBe(true);
-  });
-
-  it('el FRMT del TED verifica con la RSAPK del CAF (regla: DD aplanado en latin1)', () => {
-    const ted = doc.getElementsByTagNameNS(SII, 'TED')[0];
-    const ddInicio = EJEMPLO.indexOf('<DD>');
-    const ddFin = EJEMPLO.indexOf('</DD>') + '</DD>'.length;
-    // Candidata 1: el texto tal cual, sin el espacio entre tags.
-    const aplanado = EJEMPLO.slice(ddInicio, ddFin).replace(/>\s+</g, '><');
-    const m = ted.getElementsByTagNameNS(SII, 'M')[0].textContent ?? '';
-    const e = ted.getElementsByTagNameNS(SII, 'E')[0].textContent ?? '';
-    const pub = createPublicKey({
-      key: { kty: 'RSA', n: b64aUrl(m), e: b64aUrl(e) },
-      format: 'jwk',
-    });
-    const frmt = ted.getElementsByTagNameNS(SII, 'FRMT')[0].textContent ?? '';
-    const ok = createVerify('RSA-SHA1')
-      .update(Buffer.from(aplanado, 'latin1'))
-      .verify(pub, frmt.replace(/\s/g, ''), 'base64');
-    expect(ok).toBe(true);
-  });
-
-  it('Node 22 firma y verifica SHA1 con una llave RSA de 512 bits (tamaño de la llave del CAF)', () => {
-    const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 512 });
-    const firma = createSign('RSA-SHA1').update('dd').sign(privateKey);
-    expect(createVerify('RSA-SHA1').update('dd').verify(publicKey, firma)).toBe(true);
-  });
-});
-```
-
-- [ ] **Step 5: Correrlo y registrar lo que pasa**
-
-Run: `npx jest src/modules/dte/firma-sii.spike.spec.ts`
+Run: `npx jest src/modules/dte/firma-sii.spec.ts`
 
 Por cada caso se anota el resultado **literal**, con el mensaje de error si falla.
 
@@ -260,13 +188,13 @@ Por cada caso se anota el resultado **literal**, con el mensaje de error si fall
 - **Falla SHA1 con 512 bits:** parar y reportar. Es la llave que el SII entrega en el CAF y no la elegimos nosotros.
 - **Falla el XSD por el schemaLocation u otro detalle de carga:** arreglar el `preload` y registrar.
 
-- [ ] **Step 6: Escribir el hallazgo en este plan y completar las Tasks 6 a 8**
+- [x] **Step 6: Escribir el hallazgo en este plan y completar las Tasks 6 a 8**
 
 - En la sección "Hallazgo de la Task 1" de abajo: qué verificó, qué ajustes hicieron falta y la regla de serialización del DD.
-- Reescribir las Tasks 6, 7 y 8 con su código, siguiendo el formato de las Tasks 2 y 4.
+- Ajustar la intención y el contrato de las Tasks 6, 7 y 8 a lo medido. Su código lo escribe quien las implementa, con TDD, a partir de ese contrato.
 - El spike se queda como prueba de regresión, renombrado a `firma-sii.spec.ts`: es la única prueba que compara contra una firma real del SII.
 
-- [ ] **Step 7: Gate y commit**
+- [x] **Step 7: Gate y commit**
 
 ```bash
 npm run lint:check && npm run typecheck && npm test
@@ -279,7 +207,44 @@ git commit -m "test(dte): la firma del SII verifica con xml-crypto y SHA1 firma 
 
 #### Hallazgo de la Task 1
 
-> *(Lo completa quien ejecuta la Task 1, con resultados literales. Mientras esté vacío, las Tasks 6 a 8 no se empiezan.)*
+Medido el 2026-10-14 con `xml-crypto@6.3.3`, `@xmldom/xmldom@0.8.15` y Node 22.23.3 sobre el ejemplo oficial `F60T33-ejemplo.xml` (una factura 33 de 2003, dentro de `EnvioDTE`; trae CRLF).
+
+**Primera corrida del spike tal como estaba escrito** (verificar con la llave del `X509Certificate`):
+
+| Caso | Resultado |
+|---|---|
+| El ejemplo valida contra `EnvioDTE_v10.xsd` (con `DTE_v10`, `SiiTypes_v10` y `xmldsignature_v10` en el `preload`) | Pasa, `errores = []`. No hizo falta tocar el `preload`. |
+| Firma 0 (`#F60T33`, el `Documento`) | Falla: `checkSignature` devuelve `false`. |
+| Firma 1 (`#SetDoc`) | Falla: `invalid signature: the signature value sBnr8Yq14vVAcrN/pKLD/BrqUFczKMW3y1t3JOrdsxhhq6IxvS13SgyMXbIN/T9ciRaFgNabs3pi732XhcpeiSmD1ktzbRctEbSIszYkFJY49k0eB+TVzq3eVaQr4INrymfuOnWj78BZcwKuXvDy4iAcx6/TBbAAkPFwMP9ql2s= is incorrect`. |
+| `FRMT` con "DD aplanado en latin1" | Pasa a la primera. No hizo falta C14N. |
+| SHA1 con una llave RSA de 512 bits en Node 22 | Pasa. |
+
+**Los dos fallbacks del Step 5, en orden, y por qué no sirvieron:**
+1. `idAttribute: 'ID'`: peor. El default de xml-crypto ya busca `Id`, `ID` e `id`; pasarlo duplica el atributo y rompe con `Cannot validate a document which contains multiple elements with the same value for the ID / Id / Id attributes, in order to prevent signature wrapping attack.` (las dos firmas, con CRLF y con LF).
+2. Verificar sobre el `<DTE>` aislado y reparseado, con la llave del certificado: `invalid signature: the signature value JG1Ig0pvSIH85kIKGRZUjkyX6CNaY08Y94j4UegTgDe8+wl61Gz…` (la firma 0).
+
+Con dos intentos fallidos se paró y se reportó. La causa salió de medir, no de un tercer intento a ciegas:
+
+**1. Las llaves del ejemplo están cruzadas.** En las dos firmas, el módulo del `X509Certificate` es distinto del `Modulus` del `RSAKeyValue` del mismo `KeyInfo` (128 bytes los dos). Las firmas son de la llave del `RSAKeyValue`. Verificar con el certificado falla siempre, y no dice nada de xml-crypto. Un caso del spec lo fija.
+
+**2. La firma del `Documento` solo verifica con el `<DTE>` suelto.** Con la llave del `RSAKeyValue`:
+
+| Qué se verifica | Resultado |
+|---|---|
+| Firma 0 sobre el `<DTE>` aislado y reparseado (sin namespace) | `true` |
+| Firma 0 dentro del sobre completo | `false` (digest calculado `4GXbxCc2Fhaiol1WYeMzcwRKnT4=`, el declarado es `hlmQtu/AyjUjTDhM3852wvRCr8w=`) |
+| Firma 1 sobre el sobre completo | `true`, con CRLF y con LF |
+
+El digest declarado de la firma 0 se reproduce solo con el `<Documento>` canonicalizado **sin** `xmlns`. El ejemplo de 2003 firmó el `Documento` antes de meterlo al sobre. Dentro del sobre hereda `xmlns="http://www.sii.cl/SiiDte"` y `xmlns:xsi`, y la canonicalización inclusiva los mete en el digest. Los CRLF no cambian nada: xml-crypto da el mismo digest con CRLF y con LF.
+
+**3. Lo que sí queda fijado** (spec en verde, 6 de 6):
+- xml-crypto verifica las firmas del SII con la llave del `RSAKeyValue`: el `Documento` sobre el `<DTE>` aislado, el `SetDTE` sobre el sobre completo.
+- El `FRMT` del `TED` verifica con la regla "`<DD>` aplanado en latin1": el texto del `<DD>` sin los blancos entre tags y los bytes en ISO-8859-1. Los blancos **dentro** de un texto se conservan (el ejemplo tiene `RSR` = `EMPRESA  LTDA`, con dos espacios).
+- Node 22 firma y verifica SHA1 con RSA de 512 bits.
+- La `Reference` del ejemplo usa **un solo** `Transform`: C14N inclusivo `http://www.w3.org/TR/2001/REC-xml-c14n-20010315`, sin `enveloped-signature` (la `Signature` es hermana del nodo firmado, no hija). Digest SHA1, firma `rsa-sha1`, `CanonicalizationMethod` C14N inclusivo.
+- El ejemplo no es una boleta y no trae un `RSR` por defecto (el receptor es una empresa con nombre): el texto cuando el receptor no tiene nombre sigue sin salir de acá.
+
+**Regla de diseño (decisión de la orquestadora, 2026-10-14):** el `<DTE>` declara los mismos namespaces que la raíz del sobre (`xmlns="http://www.sii.cl/SiiDte"` y `xmlns:xsi`). Por qué: así la forma canónica inclusiva del `<Documento>` es la misma suelta y dentro del sobre, y la firma verifica en los dos contextos. **No verificado todavía:** qué hace el verificador propio del SII con esto. Se comprueba en la certificación (subproyecto 5).
 
 ---
 
@@ -920,7 +885,7 @@ git commit -m "feat(dte): el Documento de la boleta valida contra el XSD con los
 
 ### Task 6: El timbre (TED)
 
-> ⛔ **No empezar hasta que la Task 1 tenga su hallazgo escrito.** El código de esta task se completa en ese commit.
+> La Task 1 ya tiene su hallazgo escrito. Esta task se implementa con TDD a partir de este contrato.
 
 **Files:**
 - Create: `backend/src/modules/dte/ted.ts`
@@ -939,12 +904,13 @@ git commit -m "feat(dte): el Documento de la boleta valida contra el XSD con los
   - `MNT` (total);
   - `IT1`: el primer `NmbItem`, a 40 caracteres, con la misma verificación;
   - el `xmlCaf` copiado literal, y `TSTED`.
-- Firma con `createSign('RSA-SHA1')` sobre los bytes que fijó la Task 1 ("DD aplanado en latin1" si el spike lo confirmó) y la llave privada del CAF.
+- Firma con `createSign('RSA-SHA1')` sobre el `<DD>` aplanado y codificado a latin1 (la Task 1 lo confirmó contra el `FRMT` del ejemplo del SII) y la llave privada del CAF. "Aplanado" quiere decir sin los blancos **entre** tags; los blancos dentro de un texto se conservan.
 
 **Casos:**
 - El `FRMT` verifica con `caf.llavePublica` sobre el `<DD>` del resultado, con la misma regla.
 - El `<CAF>` dentro del TED es **byte a byte** el del archivo.
 - Cambiar un dígito de `MNT` después de firmar hace fallar la verificación.
+- El `FRMT` también verifica con ese mismo `<DD>` después de pasar por `aLatin1` y releer como latin1 (tildes del receptor).
 - Un nombre de receptor de 60 caracteres sale con `RSR` de 40.
 - Folio fuera del rango → `FOLIO_FUERA_DE_RANGO`, sin TED.
 
@@ -952,7 +918,7 @@ git commit -m "feat(dte): el Documento de la boleta valida contra el XSD con los
 
 ### Task 7: La firma XMLDSig
 
-> ⛔ **No empezar hasta que la Task 1 tenga su hallazgo escrito.**
+> La Task 1 ya tiene su hallazgo escrito.
 
 **Files:**
 - Create: `backend/src/modules/dte/firma.ts`
@@ -966,13 +932,17 @@ git commit -m "feat(dte): el Documento de la boleta valida contra el XSD con los
 **Intención:** usa `xml-crypto` con:
 - `canonicalizationAlgorithm` = C14N inclusivo;
 - `signatureAlgorithm` = `rsa-sha1`;
-- una referencia a `#id` con digest SHA1 y la transformación que fije la Task 1;
+- una referencia a `#id` con digest SHA1 y **una sola** transformación, C14N inclusivo (`http://www.w3.org/TR/2001/REC-xml-c14n-20010315`), que es la que usa el ejemplo del SII; sin `enveloped-signature`, porque la `Signature` es hermana del nodo firmado;
+- `idAttribute` se deja en el default de xml-crypto, que ya busca `ID`: pasarlo de nuevo rompe con "multiple elements with the same value" (Task 1);
 - `KeyInfo` con `KeyValue/RSAKeyValue` (módulo y exponente) **y** `X509Data/X509Certificate`, en ese orden, como el ejemplo del SII.
 
-Si `xml-crypto` no emite `RSAKeyValue` por defecto, se arma con `getKeyInfoContent`.
+Si `xml-crypto` no emite `RSAKeyValue` por defecto, se arma con `getKeyInfoContent`. El `RSAKeyValue` y el certificado salen de la **misma** llave: el ejemplo del SII las trae cruzadas y por eso el verificador no se puede fiar del `KeyInfo`.
+
+**El verificador de las pruebas** toma la llave del `RSAKeyValue` o de nuestro propio certificado, nunca de lo que diga el `KeyInfo` del XML que está verificando (la Task 1 verifica el ejemplo con el `RSAKeyValue`, porque su certificado es de otra llave).
 
 **Casos:**
-- Firmar un nodo y verificarlo con el mismo verificador que el spike: `true`.
+- Firmar un nodo y verificarlo con el mismo verificador que `firma-sii.spec.ts`: `true`.
+- El `<Documento>` firmado verifica **suelto** (en su `<DTE>` aislado) y **dentro de un sobre** que declara los mismos namespaces que el `<DTE>` (regla de la Task 1).
 - El `KeyInfo` resultante tiene `RSAKeyValue` y `X509Certificate`.
 - Alterar un carácter del nodo firmado hace fallar la verificación.
 - Un pfx con clave equivocada → `CERTIFICADO_INVALIDO`.
@@ -1012,7 +982,7 @@ export function armarEnvioBoleta(
 ```
 
 **Intención:**
-- `emitirBoleta` arma el TED (Task 6), el `<Documento>` (Task 5), el `<DTE version="1.0">` y firma el `Documento` (Task 7).
+- `emitirBoleta` arma el TED (Task 6), el `<Documento>` (Task 5), el `<DTE version="1.0">` con las mismas declaraciones de namespace que la raíz del sobre (regla de la Task 1) y firma el `Documento` (Task 7).
 - `armarEnvioBoleta`:
   - valida el tamaño: 0 → `ENVIO_VACIO`, más de 500 → `ENVIO_DEMASIADAS_BOLETAS`;
   - arma la `Caratula`: `RutEmisor`, `RutEnvia` = RUT del certificado, `RutReceptor` = `60803000-K` (el SII), `FchResol`, `NroResol`, `TmstFirmaEnv` y `SubTotDTE` por tipo;
@@ -1022,7 +992,8 @@ export function armarEnvioBoleta(
 - Boleta afecta, exenta y mixta, de punta a punta. Cada una:
   - valida contra el XSD (la copia v4.2);
   - verifica la firma del `Documento` y del `SetDTE`, y el `FRMT`;
-  - se vuelve a verificar **después de pasar por `aLatin1` y releer como latin1** (**Review Focus 1**: emisor "Panadería Ñuñoa SpA", comuna "Peñalolén").
+  - se vuelve a verificar **después de pasar por `aLatin1` y releer como latin1** (**Review Focus 1**: emisor "Panadería Ñuñoa SpA", comuna "Peñalolén");
+  - la firma del `Documento` verifica **las dos veces**: sobre el `<DTE>` aislado y dentro del `EnvioBOLETA` ya armado. El `<DTE>` lleva las mismas declaraciones de namespace que la raíz del sobre (`xmlns="http://www.sii.cl/SiiDte"` y `xmlns:xsi`), regla de la Task 1; sin ella, la verificación dentro del sobre falla como falla la del ejemplo de 2003.
 - Sobre con tres boletas (39, 39, 41): `SubTotDTE` da 2 de tipo 39 y 1 de tipo 41.
 - Sobre con 500 boletas: sale. Con 501, o vacío: error con su código (**Review Focus 5**). Las 500 se generan con un mismo CAF de rango 1–600; si tarda más de 10 s, se arman los `<DTE>` sin firmar para ese caso y se anota el porqué.
 - Góndola $993: la boleta sale con `diferenciaIvaRedondeo` = `'1'`.
