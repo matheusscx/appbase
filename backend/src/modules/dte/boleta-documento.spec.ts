@@ -478,6 +478,26 @@ describe('armarDocumento', () => {
   });
 });
 
+describe('armarDocumento con fechas', () => {
+  it.each(['14-10-2026', '2026-02-30', new Date().toISOString()])(
+    'FchEmis %s da FECHA_INVALIDA',
+    (fechaEmision) => {
+      expect(codigo(() => armar(boleta({ fechaEmision })))).toBe(
+        'FECHA_INVALIDA',
+      );
+    },
+  );
+
+  it.each(['2026-10-14 12:00:00', '2026-10-14T24:00:00', '2026-10-14'])(
+    'TmstFirma %s da FECHA_INVALIDA',
+    (tmst) => {
+      expect(
+        codigo(() => armarDocumento(boleta(), tedParaXsd(39, 101), tmst)),
+      ).toBe('FECHA_INVALIDA');
+    },
+  );
+});
+
 describe('armarDocumento sin líneas', () => {
   it('una boleta sin líneas da SIN_LINEAS, no un descuadre de totales', () => {
     expect(codigo(() => armar(boleta({ lineas: [] })))).toBe('SIN_LINEAS');

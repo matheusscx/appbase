@@ -126,7 +126,7 @@ export function validarFolio(
       `El CAF es del tipo ${caf.tipo}, no del ${tipo}`,
     );
   }
-  if (folio < caf.desde || folio > caf.hasta) {
+  if (!Number.isInteger(folio) || folio < caf.desde || folio > caf.hasta) {
     throw new DteError(
       'FOLIO_FUERA_DE_RANGO',
       `El folio ${folio} está fuera del rango ${caf.desde}-${caf.hasta} del CAF`,

@@ -127,6 +127,15 @@ describe('validarFolio', () => {
     );
   });
 
+  it.each([Number.NaN, 1.5, Number.POSITIVE_INFINITY])(
+    'un folio que no es entero (%s) da FOLIO_FUERA_DE_RANGO',
+    (folio) => {
+      expect(codigoDe(() => validarFolio(leido, RUT, 39, folio))).toBe(
+        'FOLIO_FUERA_DE_RANGO',
+      );
+    },
+  );
+
   it('un CAF de factura de otro tipo no sirve para una boleta 39', () => {
     const caf41 = leerCaf(caf({ tipo: 41 }));
     expect(codigoDe(() => validarFolio(caf41, RUT, 39, 120))).toBe(

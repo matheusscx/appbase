@@ -1,5 +1,11 @@
 import { DteError } from './dte.types';
-import { aLatin1, escaparXml, validarTexto } from './texto';
+import {
+  aLatin1,
+  escaparXml,
+  validarFecha,
+  validarFechaHora,
+  validarTexto,
+} from './texto';
 
 describe('validarTexto', () => {
   it('acepta tildes y eñes, que están en ISO-8859-1', () => {
@@ -42,6 +48,69 @@ describe('escaparXml', () => {
 
   it('escapa el & primero: no vuelve a escapar lo que acaba de escapar', () => {
     expect(escaparXml('&lt;')).toBe('&amp;lt;');
+  });
+});
+
+const fechaMala = (fn: () => unknown) => {
+  try {
+    fn();
+  } catch (e) {
+    return (e as { codigo?: string }).codigo;
+  }
+  return 'NO_LANZO';
+};
+
+describe('validarFecha', () => {
+  it.each(['2026-10-14', '2028-02-29', '2026-12-31', '2026-01-01'])(
+    'acepta %s',
+    (f) => {
+      expect(validarFecha('FchEmis', f)).toBe(f);
+    },
+  );
+
+  it.each([
+    '14-10-2026',
+    '2026-10-14T12:00:00',
+    '2026-02-30',
+    '2027-02-29',
+    '2026-13-01',
+    '2026-00-10',
+    '2026-10-00',
+    '2026-04-31',
+    '2026-1-4',
+    '',
+    ' 2026-10-14',
+  ])('rechaza %j con FECHA_INVALIDA', (f) => {
+    expect(fechaMala(() => validarFecha('FchEmis', f))).toBe('FECHA_INVALIDA');
+  });
+
+  it('el mensaje nombra el campo', () => {
+    expect(() => validarFecha('FchResol', '14-10-2026')).toThrow(/FchResol/);
+  });
+});
+
+describe('validarFechaHora', () => {
+  it.each([
+    '2026-10-14T12:00:00',
+    '2026-10-14T00:00:00',
+    '2026-10-14T23:59:59',
+  ])('acepta %s', (f) => {
+    expect(validarFechaHora('TSTED', f)).toBe(f);
+  });
+
+  it.each([
+    '2026-10-14 12:00:00',
+    new Date('2026-10-14T12:00:00Z').toISOString(),
+    '2026-10-14',
+    '2026-02-30T10:00:00',
+    '2026-10-14T24:00:00',
+    '2026-10-14T12:60:00',
+    '2026-10-14T12:00:60',
+    '2026-10-14T1:00:00',
+  ])('rechaza %j con FECHA_INVALIDA', (f) => {
+    expect(fechaMala(() => validarFechaHora('TSTED', f))).toBe(
+      'FECHA_INVALIDA',
+    );
   });
 });
 

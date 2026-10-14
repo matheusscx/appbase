@@ -4,7 +4,27 @@ import { type DatosBoleta, DteError } from './dte.types';
 /** IVA de Chile. El motor solo emite boletas chilenas (otros países en pausa). */
 const TASA_IVA = new Decimal('0.19');
 
-const d = (v: string | undefined) => new Decimal(v ?? '0');
+/** Topes del XSD: `Detalle` admite 1000 y `DscRcgGlobal`, 20. */
+const MAX_LINEAS = 1000;
+const MAX_AJUSTES = 20;
+
+/** `QtyItem` y `PrcItem` (Dec5Type): como mucho 6 decimales. */
+const DECIMALES_CANTIDAD_PRECIO = 6;
+
+const montoInvalido = (campo: string, motivo: string) =>
+  new DteError('MONTO_INVALIDO', `${campo} ${motivo}`);
+
+/** Un texto de monto a `Decimal`; lo que no es un número finito es `MONTO_INVALIDO`, nunca un `DecimalError`. */
+export function aDecimal(campo: string, v: string | undefined): Decimal {
+  let n: Decimal;
+  try {
+    n = new Decimal(v ?? '0');
+  } catch {
+    throw montoInvalido(campo, `no es un número: "${v}"`);
+  }
+  if (!n.isFinite()) throw montoInvalido(campo, `no es un número: "${v}"`);
+  return n;
+}
 
 function entero(campo: string, v: Decimal): Decimal {
   if (!v.isInteger())
@@ -13,6 +33,31 @@ function entero(campo: string, v: Decimal): Decimal {
       `${campo} tiene que ir en pesos enteros y vale ${v.toString()}`,
     );
   return v;
+}
+
+/** `QtyItem` y `PrcItem`, si vienen: mayores que cero y con a lo más 6 decimales. */
+function cantidadOPrecio(campo: string, v: string | undefined) {
+  if (v === undefined) return undefined;
+  const n = aDecimal(campo, v);
+  if (!n.gt(0))
+    throw montoInvalido(campo, `tiene que ser mayor que cero y vale ${v}`);
+  if (n.decimalPlaces() > DECIMALES_CANTIDAD_PRECIO)
+    throw montoInvalido(
+      campo,
+      `admite ${DECIMALES_CANTIDAD_PRECIO.toString()} decimales y vale ${v}`,
+    );
+  return n;
+}
+
+/** `DescuentoMonto` y `RecargoMonto`, si vienen: pesos enteros, cero o más. Ausente vale 0. */
+function montoEnteroNoNegativo(campo: string, v: string | undefined) {
+  const n = aDecimal(campo, v);
+  if (!n.isInteger() || n.isNegative())
+    throw montoInvalido(
+      campo,
+      `tiene que ser un entero de cero o más y vale ${v}`,
+    );
+  return n;
 }
 
 function noNegativo(campo: string, v: Decimal): Decimal {
@@ -32,17 +77,35 @@ function noNegativo(campo: string, v: Decimal): Decimal {
 export function verificarMontos(datos: DatosBoleta): {
   diferenciaIvaRedondeo: string;
 } {
+  if (datos.lineas.length > MAX_LINEAS) {
+    throw new DteError(
+      'DEMASIADAS_LINEAS',
+      `Una boleta admite ${MAX_LINEAS.toString()} líneas y trae ${datos.lineas.length.toString()}`,
+    );
+  }
+  if (datos.ajustesGlobales.length > MAX_AJUSTES) {
+    throw new DteError(
+      'DEMASIADAS_LINEAS',
+      `Una boleta admite ${MAX_AJUSTES.toString()} descuentos o recargos globales y trae ${datos.ajustesGlobales.length.toString()}`,
+    );
+  }
   const m = datos.montos;
-  if (d(m.adicionales).gt(0)) {
+  if (aDecimal('adicionales', m.adicionales).gt(0)) {
     throw new DteError(
       'IMPUESTO_ADICIONAL_NO_SOPORTADO',
       'La boleta no informa impuestos adicionales; falta definir cómo los trata el SII',
     );
   }
-  const neto = noNegativo('MntNeto', entero('MntNeto', d(m.neto)));
-  const exento = noNegativo('MntExe', entero('MntExe', d(m.exento)));
-  const iva = noNegativo('IVA', entero('IVA', d(m.iva)));
-  const total = entero('MntTotal', d(m.total));
+  const neto = noNegativo(
+    'MntNeto',
+    entero('MntNeto', aDecimal('MntNeto', m.neto)),
+  );
+  const exento = noNegativo(
+    'MntExe',
+    entero('MntExe', aDecimal('MntExe', m.exento)),
+  );
+  const iva = noNegativo('IVA', entero('IVA', aDecimal('IVA', m.iva)));
+  const total = entero('MntTotal', aDecimal('MntTotal', m.total));
   if (!total.gt(0))
     throw new DteError(
       'TOTAL_NO_POSITIVO',
@@ -52,15 +115,20 @@ export function verificarMontos(datos: DatosBoleta): {
   let afectas = new Decimal(0);
   let exentas = new Decimal(0);
   datos.lineas.forEach((l, i) => {
+    const n = (campo: string) => `${campo} de la línea ${i + 1}`;
     const monto = noNegativo(
-      `MontoItem de la línea ${i + 1}`,
-      entero(`MontoItem de la línea ${i + 1}`, d(l.monto)),
+      n('MontoItem'),
+      entero(n('MontoItem'), aDecimal(n('MontoItem'), l.monto)),
     );
-    if (l.cantidad !== undefined && l.precioUnitario !== undefined) {
-      const esperado = d(l.precioUnitario)
-        .mul(d(l.cantidad))
-        .minus(d(l.descuentoMonto))
-        .plus(d(l.recargoMonto));
+    const cantidad = cantidadOPrecio(n('QtyItem'), l.cantidad);
+    const precio = cantidadOPrecio(n('PrcItem'), l.precioUnitario);
+    const descuento = montoEnteroNoNegativo(
+      n('DescuentoMonto'),
+      l.descuentoMonto,
+    );
+    const recargo = montoEnteroNoNegativo(n('RecargoMonto'), l.recargoMonto);
+    if (cantidad !== undefined && precio !== undefined) {
+      const esperado = precio.mul(cantidad).minus(descuento).plus(recargo);
       if (esperado.minus(monto).abs().gte(1)) {
         throw new DteError(
           'LINEA_NO_CIERRA',
@@ -74,8 +142,13 @@ export function verificarMontos(datos: DatosBoleta): {
   for (const a of datos.ajustesGlobales) {
     const v = noNegativo(
       `ValorDR "${a.glosa}"`,
-      entero(`ValorDR "${a.glosa}"`, d(a.monto)),
+      entero(`ValorDR "${a.glosa}"`, aDecimal(`ValorDR "${a.glosa}"`, a.monto)),
     );
+    if (v.isZero())
+      throw montoInvalido(
+        `ValorDR "${a.glosa}"`,
+        'tiene que ser mayor que cero',
+      );
     const signo = a.tipo === 'D' ? v.neg() : v;
     if (a.exento) exentas = exentas.plus(signo);
     else afectas = afectas.plus(signo);

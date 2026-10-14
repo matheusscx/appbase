@@ -2,7 +2,12 @@ import Decimal from 'decimal.js';
 import { normalizarRut, rutValido } from '../../common/utils/rut.util';
 import { type DatosBoleta, DteError } from './dte.types';
 import { verificarMontos } from './montos';
-import { escaparXml, validarTexto } from './texto';
+import {
+  escaparXml,
+  validarFecha,
+  validarFechaHora,
+  validarTexto,
+} from './texto';
 
 /** RUT genérico del receptor cuando la boleta no lo identifica (Formato Boletas v4.2, campo 18). */
 const RUT_GENERICO = '66666666-6';
@@ -75,7 +80,7 @@ export function armarDocumento(
   const idDoc =
     el('TipoDTE', String(datos.tipo)) +
     el('Folio', String(datos.folio)) +
-    el('FchEmis', t('FchEmis', datos.fechaEmision, 10)) +
+    el('FchEmis', validarFecha('FchEmis', datos.fechaEmision)) +
     el('IndServicio', '3') +
     (datos.medioPago === undefined
       ? ''
@@ -166,7 +171,7 @@ export function armarDocumento(
     detalle +
     ajustes +
     tedXml +
-    el('TmstFirma', t('TmstFirma', tmstFirma, 19)) +
+    el('TmstFirma', validarFechaHora('TmstFirma', tmstFirma)) +
     '</Documento>';
 
   return { xml, id, diferenciaIvaRedondeo };

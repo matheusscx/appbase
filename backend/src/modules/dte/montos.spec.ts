@@ -229,7 +229,9 @@ describe('verificarMontos', () => {
 
   it('total $0 → TOTAL_NO_POSITIVO (Review Focus 4)', () => {
     const d = boleta({
-      lineas: [linea({ monto: '0', precioUnitario: '0' })],
+      lineas: [
+        linea({ monto: '0', cantidad: undefined, precioUnitario: undefined }),
+      ],
       montos: {
         neto: '0',
         exento: '0',
@@ -292,5 +294,149 @@ describe('verificarMontos', () => {
       },
     });
     expect(verificarMontos(d)).toEqual({ diferenciaIvaRedondeo: '0' });
+  });
+});
+
+describe('verificarMontos: entradas que el SII rechaza', () => {
+  const con = (over: Partial<LineaBoleta>) => boleta({ lineas: [linea(over)] });
+
+  it('el borde exacto de 1,00 de la tolerancia de línea no cierra', () => {
+    // 1490 × 3 − 1 = 4469 contra un MontoItem de 4470: se aparta justo un peso.
+    expect(codigo(() => verificarMontos(con({ descuentoMonto: '1' })))).toBe(
+      'LINEA_NO_CIERRA',
+    );
+  });
+
+  it('0,99 de diferencia sí cierra', () => {
+    // 1490,33 × 3 = 4470,99 contra 4470.
+    expect(verificarMontos(con({ precioUnitario: '1490.33' }))).toEqual({
+      diferenciaIvaRedondeo: '0',
+    });
+  });
+
+  it.each([
+    ['monto', { monto: 'abc' }],
+    ['monto vacío', { monto: '' }],
+    ['monto NaN', { monto: 'NaN' }],
+    ['monto Infinity', { monto: 'Infinity' }],
+    ['cantidad', { cantidad: 'tres' }],
+    ['precioUnitario', { precioUnitario: 'x' }],
+    ['descuentoMonto', { descuentoMonto: 'x' }],
+    ['recargoMonto', { recargoMonto: 'x' }],
+  ] as Array<[string, Partial<LineaBoleta>]>)(
+    '%s que no es un número → MONTO_INVALIDO, nunca un DecimalError',
+    (_, over) => {
+      expect(codigo(() => verificarMontos(con(over)))).toBe('MONTO_INVALIDO');
+    },
+  );
+
+  it.each(['neto', 'exento', 'iva', 'total', 'adicionales'] as const)(
+    'el total congelado %s que no es un número → MONTO_INVALIDO',
+    (campo) => {
+      const d = boleta();
+      expect(
+        codigo(() =>
+          verificarMontos({ ...d, montos: { ...d.montos, [campo]: 'x' } }),
+        ),
+      ).toBe('MONTO_INVALIDO');
+    },
+  );
+
+  it('el ValorDR que no es un número → MONTO_INVALIDO', () => {
+    const d = boleta({
+      ajustesGlobales: [
+        { tipo: 'D', glosa: 'Promo', monto: 'x', exento: false },
+      ],
+    });
+    expect(codigo(() => verificarMontos(d))).toBe('MONTO_INVALIDO');
+  });
+
+  it.each([
+    ['cantidad 0 (línea gratis)', { cantidad: '0', monto: '0' }],
+    ['precio 0 (línea gratis)', { precioUnitario: '0', monto: '0' }],
+    ['cantidad negativa', { cantidad: '-3' }],
+    ['precio negativo', { precioUnitario: '-1490' }],
+    ['cantidad con 7 decimales', { cantidad: '0.1234567', monto: '0' }],
+    ['precio con 7 decimales', { precioUnitario: '1490.1234567' }],
+  ] as Array<[string, Partial<LineaBoleta>]>)(
+    '%s → MONTO_INVALIDO',
+    (_, over) => {
+      expect(codigo(() => verificarMontos(con(over)))).toBe('MONTO_INVALIDO');
+    },
+  );
+
+  it('cantidad y precio con exactamente 6 decimales sí pasan', () => {
+    const d = con({
+      cantidad: '1.000000',
+      precioUnitario: '4470.000000',
+    });
+    expect(verificarMontos(d)).toEqual({ diferenciaIvaRedondeo: '0' });
+  });
+
+  it.each([
+    ['descuentoMonto con decimales', { descuentoMonto: '1.5' }],
+    ['descuentoMonto negativo', { descuentoMonto: '-1' }],
+    ['recargoMonto con decimales', { recargoMonto: '0.5' }],
+    ['recargoMonto negativo', { recargoMonto: '-1' }],
+  ] as Array<[string, Partial<LineaBoleta>]>)(
+    '%s → MONTO_INVALIDO',
+    (_, over) => {
+      expect(codigo(() => verificarMontos(con(over)))).toBe('MONTO_INVALIDO');
+    },
+  );
+
+  it('descuentoMonto y recargoMonto en 0 sí pasan', () => {
+    expect(
+      verificarMontos(con({ descuentoMonto: '0', recargoMonto: '0' })),
+    ).toEqual({ diferenciaIvaRedondeo: '0' });
+  });
+
+  it('un ValorDR en 0 → MONTO_INVALIDO (el XSD pide más que 0)', () => {
+    const d = boleta({
+      ajustesGlobales: [
+        { tipo: 'D', glosa: 'Promo', monto: '0', exento: false },
+      ],
+    });
+    expect(codigo(() => verificarMontos(d))).toBe('MONTO_INVALIDO');
+  });
+
+  it('1000 líneas pasan el conteo y 1001 dan DEMASIADAS_LINEAS', () => {
+    const una = linea({
+      cantidad: undefined,
+      precioUnitario: undefined,
+      monto: '1',
+    });
+    const con1000 = boleta({
+      lineas: Array.from({ length: 1000 }, () => una),
+      montos: {
+        neto: '840',
+        exento: '0',
+        iva: '160',
+        total: '1000',
+        adicionales: '0',
+      },
+    });
+    expect(codigo(() => verificarMontos(con1000))).not.toBe(
+      'DEMASIADAS_LINEAS',
+    );
+    const con1001 = boleta({ lineas: Array.from({ length: 1001 }, () => una) });
+    expect(codigo(() => verificarMontos(con1001))).toBe('DEMASIADAS_LINEAS');
+  });
+
+  it('20 ajustes globales pasan el conteo y 21 dan DEMASIADAS_LINEAS', () => {
+    const ajuste = {
+      tipo: 'D' as const,
+      glosa: 'Promo',
+      monto: '1',
+      exento: false,
+    };
+    const con20 = boleta({
+      ajustesGlobales: Array.from({ length: 20 }, () => ajuste),
+    });
+    expect(codigo(() => verificarMontos(con20))).not.toBe('DEMASIADAS_LINEAS');
+    const con21 = boleta({
+      ajustesGlobales: Array.from({ length: 21 }, () => ajuste),
+    });
+    expect(codigo(() => verificarMontos(con21))).toBe('DEMASIADAS_LINEAS');
   });
 });

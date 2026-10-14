@@ -378,6 +378,108 @@ describe('armarEnvioBoleta', () => {
     ).toBe('RUT_INVALIDO');
   });
 
+  it('BoletaEmitida lleva el RUT del emisor normalizado', () => {
+    const d = boleta();
+    d.emisor.rut = '76.543.210-3';
+    expect(emitir(d).rutEmisor).toBe('76543210-3');
+  });
+
+  it('una boleta de otro emisor da ENVIO_OTRO_EMISOR', () => {
+    const ajena: BoletaEmitida = {
+      ...emitir(boleta()),
+      rutEmisor: '77777777-7',
+    };
+    expect(codigo(() => envio([emitir(boleta({ folio: 2 })), ajena]))).toBe(
+      'ENVIO_OTRO_EMISOR',
+    );
+  });
+
+  it('el emisor de la boleta se compara con la Carátula normalizada', () => {
+    expect(
+      codigo(() =>
+        armarEnvioBoleta(
+          [emitir(boleta())],
+          { ...caratula, rutEmisor: '76.543.210-3' },
+          certificado,
+          AHORA,
+        ),
+      ),
+    ).toBe('NO_LANZO');
+  });
+
+  it('un mismo (tipo, folio) dos veces da ENVIO_FOLIO_REPETIDO; el mismo folio en otro tipo no', () => {
+    const b = emitir(boleta({ folio: 5 }));
+    expect(codigo(() => envio([b, emitir(boleta({ folio: 6 })), b]))).toBe(
+      'ENVIO_FOLIO_REPETIDO',
+    );
+    expect(codigo(() => envio([b, emitir(exenta(5))]))).toBe('NO_LANZO');
+  });
+
+  it.each([-1, 1.5, Number.NaN, 1_000_000])(
+    'NroResol %s da NRO_RESOL_INVALIDO',
+    (nroResol) => {
+      expect(
+        codigo(() =>
+          armarEnvioBoleta(
+            [emitir(boleta())],
+            { ...caratula, nroResol },
+            certificado,
+            AHORA,
+          ),
+        ),
+      ).toBe('NRO_RESOL_INVALIDO');
+    },
+  );
+
+  it.each([0, 999_999])('NroResol %s vale', (nroResol) => {
+    expect(
+      codigo(() =>
+        armarEnvioBoleta(
+          [emitir(boleta())],
+          { ...caratula, nroResol },
+          certificado,
+          AHORA,
+        ),
+      ),
+    ).toBe('NO_LANZO');
+  });
+
+  it.each(['15-01-2026', '2026-02-30', new Date().toISOString()])(
+    'FchResol %s da FECHA_INVALIDA',
+    (fchResol) => {
+      expect(
+        codigo(() =>
+          armarEnvioBoleta(
+            [emitir(boleta())],
+            { ...caratula, fchResol },
+            certificado,
+            AHORA,
+          ),
+        ),
+      ).toBe('FECHA_INVALIDA');
+    },
+  );
+
+  it.each(['2026-10-14 12:00:00', '2026-10-14', new Date().toISOString()])(
+    'TmstFirmaEnv %s da FECHA_INVALIDA',
+    (ahora) => {
+      expect(
+        codigo(() =>
+          armarEnvioBoleta([emitir(boleta())], caratula, certificado, ahora),
+        ),
+      ).toBe('FECHA_INVALIDA');
+    },
+  );
+
+  it('el último cinturón: un sobre con un carácter fuera de ISO-8859-1 da TEXTO_NO_ISO_8859_1', () => {
+    const euro = String.fromCharCode(0x20ac);
+    const intruso: BoletaEmitida = {
+      ...emitir(boleta()),
+      xml: `<DTE version="1.0"><Documento ID="X">${euro}</Documento></DTE>`,
+    };
+    expect(codigo(() => envio([intruso]))).toBe('TEXTO_NO_ISO_8859_1');
+  });
+
   it('un error de firma que no es DteError llega tal cual (un ID repetido es un bug de programación)', () => {
     const intruso: BoletaEmitida = {
       ...emitir(boleta()),

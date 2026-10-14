@@ -41,6 +41,60 @@ export function escaparXml(valor: string): string {
     .replace(/>/g, '&gt;');
 }
 
+const FECHA = /^(\d{4})-(\d{2})-(\d{2})$/;
+const FECHA_HORA = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})$/;
+
+const bisiesto = (a: number) => (a % 4 === 0 && a % 100 !== 0) || a % 400 === 0;
+
+/** Un día que existe en el calendario. */
+function esFecha(valor: string): boolean {
+  const m = FECHA.exec(valor);
+  if (!m) return false;
+  const [anio, mes, dia] = [Number(m[1]), Number(m[2]), Number(m[3])];
+  const diasDelMes = [
+    31,
+    bisiesto(anio) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ];
+  return mes >= 1 && mes <= 12 && dia >= 1 && dia <= diasDelMes[mes - 1];
+}
+
+const fechaInvalida = (campo: string, valor: string, formato: string) =>
+  new DteError(
+    'FECHA_INVALIDA',
+    `${campo} tiene que ir como ${formato} y ser una fecha real: "${valor}"`,
+  );
+
+/** `AAAA-MM-DD`. Sin zona horaria: la hora de Chile la decide quien llama. */
+export function validarFecha(campo: string, valor: string): string {
+  if (!esFecha(valor)) throw fechaInvalida(campo, valor, 'AAAA-MM-DD');
+  return valor;
+}
+
+/** `AAAA-MM-DDTHH:MM:SS`: ni un `toISOString()` (con Z y milisegundos) ni un espacio en vez de la T. */
+export function validarFechaHora(campo: string, valor: string): string {
+  const m = FECHA_HORA.exec(valor);
+  if (
+    !m ||
+    !esFecha(m[1]) ||
+    Number(m[2]) > 23 ||
+    Number(m[3]) > 59 ||
+    Number(m[4]) > 59
+  ) {
+    throw fechaInvalida(campo, valor, 'AAAA-MM-DDTHH:MM:SS');
+  }
+  return valor;
+}
+
 /** Los bytes que viajan al SII: el XML declara ISO-8859-1. */
 export function aLatin1(xml: string): Buffer {
   return Buffer.from(xml, 'latin1');

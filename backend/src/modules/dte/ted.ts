@@ -1,9 +1,15 @@
 import { createSign } from 'crypto';
-import Decimal from 'decimal.js';
 import { normalizarRut, rutValido } from '../../common/utils/rut.util';
 import { type CafLeido, validarFolio } from './caf';
 import { type DatosBoleta, DteError } from './dte.types';
-import { aLatin1, escaparXml, validarTexto } from './texto';
+import { aDecimal } from './montos';
+import {
+  aLatin1,
+  escaparXml,
+  validarFecha,
+  validarFechaHora,
+  validarTexto,
+} from './texto';
 
 /** RUT genérico del receptor cuando la boleta no lo identifica (Formato Boletas v4.2, campo 18). */
 const RUT_GENERICO = '66666666-6';
@@ -44,6 +50,13 @@ export function armarTed(
   caf: CafLeido,
   tsted: string,
 ): string {
+  // Antes que el folio: un RUT malformado no es un CAF de otro RUT.
+  if (!rutValido(datos.emisor.rut)) {
+    throw new DteError(
+      'RUT_INVALIDO',
+      `RE no es un RUT válido: "${datos.emisor.rut}"`,
+    );
+  }
   validarFolio(caf, datos.emisor.rut, datos.tipo, datos.folio);
   if (datos.lineas.length === 0) throw sinLineas();
 
@@ -58,13 +71,13 @@ export function armarTed(
     el('RE', normalizarRut(datos.emisor.rut)) +
     el('TD', datos.tipo.toString()) +
     el('F', datos.folio.toString()) +
-    el('FE', validarTexto('FE', datos.fechaEmision, 10)) +
+    el('FE', validarFecha('FE', datos.fechaEmision)) +
     el('RR', r ? rutReceptor(r.rut) : RUT_GENERICO) +
     `<RSR>${rsr}</RSR>` +
-    el('MNT', new Decimal(datos.montos.total).toFixed()) +
+    el('MNT', aDecimal('MntTotal', datos.montos.total).toFixed()) +
     el('IT1', it1) +
     caf.xmlCaf +
-    el('TSTED', validarTexto('TSTED', tsted, 19)) +
+    el('TSTED', validarFechaHora('TSTED', tsted)) +
     '</DD>';
 
   const aplanado = dd.replace(/>\s+</g, '><');

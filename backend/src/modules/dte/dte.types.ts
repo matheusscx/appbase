@@ -93,7 +93,13 @@ export type CodigoDteError =
   | 'FALTA_IDENTIFICACION_135_UF'
   | 'IMPUESTO_ADICIONAL_NO_SOPORTADO'
   | 'ENVIO_VACIO'
-  | 'ENVIO_DEMASIADAS_BOLETAS';
+  | 'ENVIO_DEMASIADAS_BOLETAS'
+  | 'ENVIO_FOLIO_REPETIDO'
+  | 'ENVIO_OTRO_EMISOR'
+  | 'NRO_RESOL_INVALIDO'
+  | 'FECHA_INVALIDA'
+  | 'MONTO_INVALIDO'
+  | 'DEMASIADAS_LINEAS';
 
 /** Error del motor con un código por motivo, para que el que llama sepa qué pasó. */
 export class DteError extends Error {

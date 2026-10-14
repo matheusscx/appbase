@@ -230,6 +230,38 @@ describe('armarTed', () => {
     ).toBe('RUT_INVALIDO');
   });
 
+  it('un RUT de emisor malformado da RUT_INVALIDO, no CAF_OTRO_RUT', () => {
+    const malo = boleta({ emisor: { ...boleta().emisor, rut: '76543210-4' } });
+    expect(codigo(() => armarTed(malo, caf, TSTED))).toBe('RUT_INVALIDO');
+  });
+
+  it('un folio que no es entero da FOLIO_FUERA_DE_RANGO', () => {
+    expect(codigo(() => armarTed(boleta({ folio: 101.5 }), caf, TSTED))).toBe(
+      'FOLIO_FUERA_DE_RANGO',
+    );
+    expect(
+      codigo(() => armarTed(boleta({ folio: Number.NaN }), caf, TSTED)),
+    ).toBe('FOLIO_FUERA_DE_RANGO');
+  });
+
+  it.each(['14-10-2026', '2026-02-30', new Date().toISOString()])(
+    'una fecha de emisión mal formada (%s) da FECHA_INVALIDA',
+    (fechaEmision) => {
+      expect(codigo(() => armarTed(boleta({ fechaEmision }), caf, TSTED))).toBe(
+        'FECHA_INVALIDA',
+      );
+    },
+  );
+
+  it.each(['2026-10-14 12:00:00', '2026-10-14', new Date().toISOString()])(
+    'un TSTED mal formado (%s) da FECHA_INVALIDA',
+    (tsted) => {
+      expect(codigo(() => armarTed(boleta(), caf, tsted))).toBe(
+        'FECHA_INVALIDA',
+      );
+    },
+  );
+
   it('un folio fuera del rango del CAF da FOLIO_FUERA_DE_RANGO, sin TED', () => {
     expect(codigo(() => armarTed(boleta({ folio: 151 }), caf, TSTED))).toBe(
       'FOLIO_FUERA_DE_RANGO',
