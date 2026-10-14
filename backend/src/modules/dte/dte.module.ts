@@ -5,12 +5,20 @@ import { CifradoDteService } from './cifrado-dte.service';
 import { DteController } from './dte.controller';
 import { DteCaf } from './entities/dte-caf.entity';
 import { DteCertificado } from './entities/dte-certificado.entity';
+import { DteDocumento } from './entities/dte-documento.entity';
+import { DteEnvio } from './entities/dte-envio.entity';
 import { FoliosService } from './folios.service';
 import { PerfilFiscalService } from './perfil-fiscal.service';
 
 @Module({
   imports: [
-    RepositoriosModule.forFeature([DteCertificado, DteCaf, RazonSocial]),
+    RepositoriosModule.forFeature([
+      DteCertificado,
+      DteCaf,
+      DteDocumento,
+      DteEnvio,
+      RazonSocial,
+    ]),
   ],
   controllers: [DteController],
   providers: [PerfilFiscalService, CifradoDteService, FoliosService],

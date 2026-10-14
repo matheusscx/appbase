@@ -340,6 +340,65 @@ CREATE INDEX "idx_dte_cafs_razon_social" ON "dte_cafs" ("razon_social_id");
 CREATE UNIQUE INDEX "uq_dte_cafs_desde" ON "dte_cafs" ("razon_social_id", "tipo", "ambiente", "desde")
   WHERE "eliminado_el" IS NULL;
 
+-- Una boleta electrónica emitida y su camino al SII (cola de envío; una fila por boleta). "xml" es
+-- el <DTE> firmado tal como lo devolvió emitirBoleta: el documento legal. "intentos" y
+-- "ultimo_error" van acá porque la espera creciente es por boleta. "envio_id" apunta al sobre en
+-- que viajó. Los REFERENCES describen la relación, pero la base real (las migraciones) no crea
+-- estos FK y las entities tampoco declaran la relación.
+CREATE TABLE "dte_documentos" (
+  "documento_id"       UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"          UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "razon_social_id"    UUID        NOT NULL REFERENCES "razones_sociales" ("razon_social_id"),
+  "caf_id"             UUID        NOT NULL REFERENCES "dte_cafs" ("caf_id"),
+  "tipo"               SMALLINT    NOT NULL,  -- 39 | 41
+  "folio"              INTEGER     NOT NULL,
+  "ambiente"           TEXT        NOT NULL,  -- 'certificacion' | 'produccion'
+  "rut_emisor"         VARCHAR(12) NOT NULL,
+  "xml"                TEXT        NOT NULL,
+  "estado"             TEXT        NOT NULL,  -- 'pendiente' | 'enviado' | 'aceptado' | 'reparos' | 'rechazado'
+  "envio_id"           UUID        REFERENCES "dte_envios" ("envio_id"),
+  "detalle_sii"        JSONB,                 -- errores del SII para esta boleta, o el motivo del rechazo del sobre
+  "emitido_el"         TIMESTAMPTZ NOT NULL,
+  "proximo_intento_el" TIMESTAMPTZ NOT NULL,
+  "intentos"           INTEGER     NOT NULL DEFAULT 0,
+  "ultimo_error"       TEXT,
+  "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "eliminado_el"       TIMESTAMPTZ,
+  CONSTRAINT chk_dte_documentos_tipo CHECK ("tipo" IN (39, 41)),
+  CONSTRAINT chk_dte_documentos_estado CHECK ("estado" IN ('pendiente','enviado','aceptado','reparos','rechazado')),
+  CONSTRAINT chk_dte_documentos_ambiente CHECK ("ambiente" IN ('certificacion','produccion'))
+);
+CREATE UNIQUE INDEX "uq_dte_documentos_folio" ON "dte_documentos" ("razon_social_id", "tipo", "ambiente", "folio")
+  WHERE "eliminado_el" IS NULL;
+CREATE INDEX "idx_dte_documentos_cola" ON "dte_documentos" ("razon_social_id", "emitido_el")
+  WHERE "estado" = 'pendiente' AND "eliminado_el" IS NULL;
+CREATE INDEX "idx_dte_documentos_envio" ON "dte_documentos" ("envio_id");
+
+-- Un sobre mandado al SII (cola de envío). El estado de cada boleta vive en "dte_documentos"; acá
+-- queda lo del envío. "reservado_hasta" es la reserva del sobre en vuelo: si el proceso se cae,
+-- vence y las boletas vuelven a la cola. Mismo aviso sobre los REFERENCES que en "dte_cafs".
+CREATE TABLE "dte_envios" (
+  "envio_id"          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"         UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "razon_social_id"   UUID        NOT NULL REFERENCES "razones_sociales" ("razon_social_id"),
+  "ambiente"          TEXT        NOT NULL,  -- 'certificacion' | 'produccion'
+  "trackid"           BIGINT,                -- el pg lo devuelve como string; la entity lo guarda así
+  "estado_sii"        VARCHAR(3),
+  "enviado_el"        TIMESTAMPTZ,
+  "consultar_desde"   TIMESTAMPTZ,
+  "reservado_hasta"   TIMESTAMPTZ,
+  "intentos_consulta" INTEGER     NOT NULL DEFAULT 0,
+  "ultimo_error"      TEXT,
+  "respuesta_sii"     JSONB,
+  "creado_el"         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "eliminado_el"      TIMESTAMPTZ,
+  CONSTRAINT chk_dte_envios_ambiente CHECK ("ambiente" IN ('certificacion','produccion'))
+);
+CREATE INDEX "idx_dte_envios_consulta" ON "dte_envios" ("consultar_desde")
+  WHERE "trackid" IS NOT NULL AND "eliminado_el" IS NULL;
+
 -- Directorio de entidades externas del tenant: proveedores, empresas, personas naturales
 CREATE TABLE "terceros" (
   "tercero_id"     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
