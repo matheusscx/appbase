@@ -1,7 +1,10 @@
 import { DteError } from './dte.types';
 
-/** ISO-8859-1: U+0000–U+00FF. Los de control salvo tab y saltos no entran en un XML. */
-const FUERA_DE_LATIN1 = /[^\t\n\r\u0020-\u007E\u00A0-\u00FF]/u;
+/**
+ * Lo que cabe en un campo del motor: ISO-8859-1 imprimible (U+0020 a U+007E y U+00A0 a
+ * U+00FF). Quedan fuera los de control, también tab y saltos: todos los campos son de una línea.
+ */
+const FUERA_DE_LATIN1 = /[^\u0020-\u007E\u00A0-\u00FF]/u;
 
 /**
  * Devuelve el valor si cabe en el campo del SII. No corrige ni corta (spec § 5):
@@ -16,7 +19,7 @@ export function validarTexto(
   if (FUERA_DE_LATIN1.test(valor)) {
     throw new DteError(
       'TEXTO_NO_ISO_8859_1',
-      `${campo} tiene un carácter que la boleta no admite: "${valor}"`,
+      `${campo} tiene un carácter que la boleta no admite (fuera de ISO-8859-1, tab o salto de línea): ${JSON.stringify(valor)}`,
     );
   }
   if (valor.length > max) {

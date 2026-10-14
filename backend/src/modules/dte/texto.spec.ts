@@ -23,6 +23,44 @@ describe('validarTexto', () => {
     },
   );
 
+  it.each([
+    ['tab', 0x09],
+    ['salto de línea', 0x0a],
+    ['retorno de carro', 0x0d],
+  ])(
+    'rechaza un %s: todos los campos del motor son de una línea',
+    (_n, cod) => {
+      const valor = `Café${String.fromCharCode(cod)}Ñuñoa`;
+      expect(() => validarTexto('GlosaDR', valor, 45)).toThrow(
+        expect.objectContaining({ codigo: 'TEXTO_NO_ISO_8859_1' }),
+      );
+    },
+  );
+
+  it.each([
+    ['U+0020', 0x20],
+    ['U+007E', 0x7e],
+    ['U+00A0', 0xa0],
+    ['U+00FF', 0xff],
+  ])('acepta %s, dentro del rango', (_n, cod) => {
+    const valor = `a${String.fromCharCode(cod)}b`;
+    expect(validarTexto('NmbItem', valor, 80)).toBe(valor);
+  });
+
+  it.each([
+    ['U+0100', 0x100],
+    ['U+007F', 0x7f],
+    ['U+0080', 0x80],
+    ['U+009F', 0x9f],
+    ['U+0000', 0x00],
+    ['U+001F', 0x1f],
+  ])('rechaza %s, fuera del rango', (_n, cod) => {
+    const valor = `a${String.fromCharCode(cod)}b`;
+    expect(() => validarTexto('NmbItem', valor, 80)).toThrow(
+      expect.objectContaining({ codigo: 'TEXTO_NO_ISO_8859_1' }),
+    );
+  });
+
   it('acepta exactamente el máximo y rechaza uno más, sin cortar', () => {
     expect(validarTexto('NmbItem', 'a'.repeat(80), 80)).toHaveLength(80);
     expect(() => validarTexto('NmbItem', 'a'.repeat(81), 80)).toThrow(
