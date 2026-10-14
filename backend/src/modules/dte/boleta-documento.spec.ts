@@ -458,7 +458,7 @@ describe('armarDocumento', () => {
     expect(codigo(() => armar(d))).toBe('TOTALES_NO_CIERRAN');
   });
 
-  it('el texto con acentos y Ñ sale tal cual y los especiales de XML, escapados', () => {
+  it('el texto con acentos y Ñ sale tal cual; & < > se escapan y las comillas van crudas', () => {
     const d = boleta({
       emisor: { ...boleta().emisor, razonSocial: 'Panadería Ñuñoa SpA' },
       lineas: [linea({ nombre: 'Pan <A&B> "x"' })],
@@ -466,9 +466,7 @@ describe('armarDocumento', () => {
     const { xml } = armar(d);
     expect(xml).toContain('<RznSocEmisor>Panadería Ñuñoa SpA</RznSocEmisor>');
     expect(xml).not.toContain('&#');
-    expect(xml).toContain(
-      '<NmbItem>Pan &lt;A&amp;B&gt; &quot;x&quot;</NmbItem>',
-    );
+    expect(xml).toContain('<NmbItem>Pan &lt;A&amp;B&gt; "x"</NmbItem>');
   });
 
   it('el TED y TmstFirma van al final, el TED tal cual', () => {

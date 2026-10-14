@@ -1,4 +1,6 @@
+import { DOMParser } from '@xmldom/xmldom';
 import { createVerify } from 'crypto';
+import { C14nCanonicalization } from 'xml-crypto';
 import { cafDePrueba } from './__fixtures__/credenciales-prueba';
 import { envolverParaXsd } from './__fixtures__/envio-boleta';
 import { validarContraXsd } from './__fixtures__/xsd';
@@ -133,6 +135,33 @@ describe('armarTed', () => {
     ).toBe(true);
     expect(releido).toContain('<RS>Panadería Ñuñoa SpA</RS>');
     expect(verifica(leido, aplanado(releido), frmt(releido))).toBe(true);
+  });
+
+  it('con \', " y & en RSR e IT1 el FRMT verifica sobre el DD crudo y sobre el DD canonicalizado', () => {
+    const ted = armarTed(
+      {
+        ...conReceptor(`Café d'Or "Ltda" & Cía`),
+        lineas: [linea({ nombre: `Pan d'or "x" & Co` })],
+      },
+      caf,
+      TSTED,
+    );
+    // Las comillas y el apóstrofo van crudos; solo & < > se escapan.
+    expect(ted).toContain(`<RSR>Café d'Or "Ltda" &amp; Cía</RSR>`);
+    expect(ted).toContain(`<IT1>Pan d'or "x" &amp; Co</IT1>`);
+    expect(ted).not.toContain('&quot;');
+    expect(ted).not.toContain('&apos;');
+
+    // Lectura 1: el verificador firma/verifica el DD crudo que viaja.
+    expect(verifica(caf, aplanado(ted), frmt(ted))).toBe(true);
+
+    // Lectura 2: el verificador parsea el <DD> y lo canonicaliza (C14N inclusivo).
+    const nodo = new DOMParser().parseFromString(dd(ted), 'text/xml')
+      .documentElement as unknown as Node;
+    const canonico = new C14nCanonicalization()
+      .process(nodo, {})
+      .replace(/>\s+</g, '><');
+    expect(verifica(caf, canonico, frmt(ted))).toBe(true);
   });
 
   it('RSR e IT1 salen a 40 caracteres cuando el origen es más largo', () => {

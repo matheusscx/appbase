@@ -28,13 +28,17 @@ export function validarTexto(
   return valor;
 }
 
+/**
+ * Escapa solo `&`, `<` y `>`: lo que la forma C14N del texto de un elemento escapa. Así los
+ * bytes emitidos son los mismos que los canonicalizados y el `FRMT` verifica tanto si el
+ * verificador del SII lee el DD crudo como si lo canonicaliza. Solo para texto de elemento:
+ * ningún atributo del motor lleva texto libre.
+ */
 export function escaparXml(valor: string): string {
   return valor
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&apos;');
+    .replace(/>/g, '&gt;');
 }
 
 /** Los bytes que viajan al SII: el XML declara ISO-8859-1. */

@@ -36,10 +36,12 @@ describe('validarTexto', () => {
 });
 
 describe('escaparXml', () => {
-  it('escapa los cinco caracteres reservados', () => {
-    expect(escaparXml(`A&B <C> "D" 'E'`)).toBe(
-      'A&amp;B &lt;C&gt; &quot;D&quot; &apos;E&apos;',
-    );
+  it('escapa solo & < >, y deja las comillas y el apóstrofo crudos', () => {
+    expect(escaparXml(`A&B <C> "D" 'E'`)).toBe(`A&amp;B &lt;C&gt; "D" 'E'`);
+  });
+
+  it('escapa el & primero: no vuelve a escapar lo que acaba de escapar', () => {
+    expect(escaparXml('&lt;')).toBe('&amp;lt;');
   });
 });
 
