@@ -206,7 +206,7 @@ verdad es `CodigoDteError` en `dte.types.ts`.
 | `ENVIO_OTRO_EMISOR` | Una boleta del sobre es de un RUT distinto del de la Carátula |
 | `NRO_RESOL_INVALIDO` | `NroResol` no es un entero de 0 a 999.999 |
 | `FECHA_INVALIDA` | Una fecha no es `AAAA-MM-DD` / `AAAA-MM-DDTHH:MM:SS` o no existe en el calendario |
-| `MONTO_INVALIDO` | No es un número; cantidad ≤ 0, precio negativo, o cualquiera de los dos con más de 6 decimales; descuento o recargo no entero o negativo; un ajuste global en 0 |
+| `MONTO_INVALIDO` | No es un número; cantidad ≤ 0, precio negativo, precio 0 sin cantidad, o cualquiera de los dos con más de 6 decimales; descuento o recargo no entero o negativo; un ajuste global en 0 |
 | `DEMASIADAS_LINEAS` | Más de 1.000 líneas o más de 20 descuentos/recargos globales |
 
 ---
