@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { RazonSocial } from '../tenants/entities/razon-social.entity';
 import { CifradoDteService } from './cifrado-dte.service';
+import { ColaDteService } from './cola-dte.service';
 import { DteController } from './dte.controller';
 import { DteCaf } from './entities/dte-caf.entity';
 import { DteCertificado } from './entities/dte-certificado.entity';
@@ -26,8 +27,14 @@ import { SiiBoletaCliente } from './sii-boleta.cliente';
     PerfilFiscalService,
     CifradoDteService,
     FoliosService,
+    ColaDteService,
     SiiBoletaCliente,
   ],
-  exports: [PerfilFiscalService, CifradoDteService, FoliosService],
+  exports: [
+    PerfilFiscalService,
+    CifradoDteService,
+    FoliosService,
+    ColaDteService,
+  ],
 })
 export class DteModule {}
