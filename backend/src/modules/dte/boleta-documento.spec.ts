@@ -315,6 +315,15 @@ describe('armarDocumento', () => {
     expect(await validar(r.xml, 39)).toEqual({ valido: true, errores: [] });
   });
 
+  it('un código de sucursal que no es un entero de 1 a 9 dígitos → CDG_SUCURSAL_INVALIDO', () => {
+    for (const malo of ['abc', '0123', '1234567890', '12 3', '-5', '1.5']) {
+      const d = boleta({
+        emisor: { ...boleta().emisor, cdgSiiSucur: malo },
+      });
+      expect(codigo(() => armar(d))).toBe('CDG_SUCURSAL_INVALIDO');
+    }
+  });
+
   it('RUT del emisor con dígito malo → RUT_INVALIDO', () => {
     const d = boleta({ emisor: { ...boleta().emisor, rut: '76543210-4' } });
     expect(codigo(() => armar(d))).toBe('RUT_INVALIDO');

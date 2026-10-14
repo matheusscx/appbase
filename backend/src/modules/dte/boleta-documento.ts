@@ -25,6 +25,16 @@ function rut(campo: string, valor: string): string {
   return normalizarRut(valor);
 }
 
+/** `CdgSIISucur` es un entero positivo de hasta 9 dígitos (campo 14): sin ceros a la izquierda. */
+function sucursal(valor: string): string {
+  if (!/^[1-9]\d{0,8}$/.test(valor))
+    throw new DteError(
+      'CDG_SUCURSAL_INVALIDO',
+      `CdgSIISucur tiene que ser un entero de 1 a 9 dígitos sin ceros a la izquierda: "${valor}"`,
+    );
+  return valor;
+}
+
 /**
  * Arma el `<Documento>` de la boleta con el orden del XSD (EnvioBOLETA v11 + campos del
  * formato v4.2). Antes de escribir una línea verifica los montos y valida todo texto:
@@ -73,9 +83,7 @@ export function armarDocumento(
     el('RUTEmisor', rutEmisor) +
     el('RznSocEmisor', t('RznSocEmisor', e.razonSocial, 100)) +
     el('GiroEmisor', t('GiroEmisor', e.giro, 80)) +
-    (e.cdgSiiSucur
-      ? el('CdgSIISucur', t('CdgSIISucur', e.cdgSiiSucur, 9))
-      : '') +
+    (e.cdgSiiSucur ? el('CdgSIISucur', sucursal(e.cdgSiiSucur)) : '') +
     el('DirOrigen', t('DirOrigen', e.direccion, 70)) +
     el('CmnaOrigen', t('CmnaOrigen', e.comuna, 20));
 
