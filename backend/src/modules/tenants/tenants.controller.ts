@@ -32,6 +32,7 @@ import { CreateRazonSocialDto } from './dto/create-razon-social.dto';
 import { UpdateRazonSocialDto } from './dto/update-razon-social.dto';
 import { UpdatePreferenciasFinancierasDto } from './dto/update-preferencias-financieras.dto';
 import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
+import { Limite } from '../../common/limites/limites.config';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Admin routes — /admin/tenants
@@ -97,12 +98,14 @@ export class TenantsConfirmacionController {
    * válidos de verificación, invitación y reset.
    */
   /** Lo que necesita la pantalla para preguntar "¿entrás a X?". No quema nada. */
+  @Limite('token')
   @Get(':token')
   verificar(@Param('token') token: string) {
     return this.tenantsService.verificarConfirmacion(token);
   }
 
   /** El sí: crea la membresía, asigna los roles congelados y quema el link. */
+  @Limite('token')
   @Post(':token')
   @HttpCode(HttpStatus.OK)
   confirmar(@Param('token') token: string) {

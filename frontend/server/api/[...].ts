@@ -1,4 +1,5 @@
 import { createError, defineEventHandler, proxyRequest } from 'h3'
+import { cabecerasDelCliente } from '../utils/cabeceras-del-cliente'
 
 /**
  * Todo `/api/**` que pida el navegador lo reenvía este servidor al backend.
@@ -42,9 +43,18 @@ export default defineEventHandler((event) => {
     throw createError({ statusCode: 404, statusMessage: 'Not Found' })
   }
 
+  // Quién es el cliente, para los límites por IP del backend (ADR-032). Lo que
+  // haya mandado el navegador con estos nombres se borra antes de reenviar: el
+  // proxy reenvía todas las cabeceras tal cual, y estas dos solo las escribe él.
+  const entrantes = event.node.req.headers
+  delete entrantes['x-cliente-ip']
+  delete entrantes['x-proxy-secreto']
+  const deCliente = cabecerasDelCliente(entrantes, event.node.req.socket.remoteAddress, process.env)
+
   // El backend monta su API en `/api` (`API_PREFIX`), así que la ruta va 1:1 y
   // no hay reescritura que mantener sincronizada.
   return proxyRequest(event, `${destino}${ruta.pathname}${ruta.search}`, {
+    headers: deCliente ?? undefined,
     // ⚠️ Sin esto, un 3xx del backend lo sigue ESTE servidor y el navegador
     // recibe 200 con el resultado de la redirección. Rompe el login con Google,
     // que es una navegación de nivel superior a `/api/auth/google`: el backend

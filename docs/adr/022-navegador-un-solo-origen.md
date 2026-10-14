@@ -104,8 +104,10 @@ app»: es exactamente lo que hace posible este proxy.
   ningún `multipart` ni gateway de WS en el backend.
 - **Lo que ve el backend como cliente es este servidor, no el navegador.** Nadie usa la IP del
   cliente hoy —medido: sin `req.ip`, sin throttler, sin `X-Forwarded-For`—, pero el día del
-  rate limiting «por IP» todos los usuarios comparten un balde. La nota accionable vive en la
-  entrada de rate limiting de [`docs/agent/pendientes.md`](../agent/pendientes.md).
+  rate limiting «por IP» todos los usuarios comparten un balde. Medido en Railway el
+  2026-10-13: el backend ve una sola IP, la del frontend. Cómo se resolvió (el proxy nombra al
+  cliente con un secreto compartido, y el global cuenta por persona):
+  [ADR-032](./032-limites-de-intentos.md).
 
 **Mejora pendiente, con su prerequisito:** el salto sale hoy a la red pública de Railway.
 Pasarlo a `*.railway.internal` exige antes que el backend escuche en IPv6 —`main.ts` hace

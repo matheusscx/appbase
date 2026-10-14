@@ -5,6 +5,7 @@ import { GarzonesService } from './garzones.service';
 import { GarzonesController } from './garzones.controller';
 import { SesionGarzon } from '../turnos/entities/sesion-garzon.entity';
 import { RolesModule } from '../roles/roles.module';
+import { IntentosPin } from './intentos-pin';
 
 @Module({
   // `RolesModule` por `otorgarPermisoOperar`: conceder `Salones:Operar` es
@@ -13,7 +14,7 @@ import { RolesModule } from '../roles/roles.module';
   // hay ciclo.
   imports: [RepositoriosModule.forFeature([Garzon, SesionGarzon]), RolesModule],
   controllers: [GarzonesController],
-  providers: [GarzonesService],
+  providers: [GarzonesService, IntentosPin],
   exports: [GarzonesService],
 })
 export class GarzonesModule {}

@@ -550,6 +550,20 @@ defensa entre los llamadores funciona hasta que aparece el que se olvida.
 
 ---
 
+### Una ruta pública nueva: qué límite le toca (2026-10-13)
+
+Todo lo de la API ya está limitado por `LimitesGuard`, que es global: 100 por minuto por persona,
+y 30 por minuto por IP lo anónimo ([ADR-032](../adr/032-limites-de-intentos.md)). Una ruta
+autenticada no necesita nada más. Una pública necesita su propio `@Limite(...)` si:
+
+- **manda algo afuera**, como un correo: `@Limite('correo')`, que cuenta por destino y por IP;
+- **valida una credencial**: `@Limite('login')` o `@Limite('token')`, según cómo se adivine.
+
+Si toma un PIN de garzón, va por `GarzonesService.verificarPin`, que es donde vive el contador de
+fallos: un PIN comparado en otro lado no tiene límite. Si el límite que hace falta no existe, se
+agrega una definición en `common/limites/limites.config.ts`, con su variable `LIMITE_*`. Nunca se
+saca la clave de `req.ip` ni de `X-Forwarded-For`: la IP sale de `ipDelCliente`.
+
 ## 5. Module
 
 `RepositoriosModule.forFeature([...])` (`src/common/db`) con las entities que el

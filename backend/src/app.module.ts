@@ -6,6 +6,7 @@ import { opcionesTypeOrm } from './database/typeorm.config';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { CommonModule } from './common/common.module';
+import { LimitesModule } from './common/limites/limites.module';
 import { UsersModule } from './modules/users/users.module';
 import { AuthModule } from './modules/auth/auth.module';
 import { CatalogModule } from './modules/catalog/catalog.module';
@@ -80,6 +81,7 @@ import { ReportesModule } from './modules/reportes/reportes.module';
     }),
     SeederModule,
     CommonModule,
+    LimitesModule,
     CatalogModule,
     UsersModule,
     AuthModule,

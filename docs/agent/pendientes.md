@@ -80,6 +80,28 @@ Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o miran
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
 
+- [ ] **En la mesa, cada línea agregada pide `GET /items` dos veces** (frontend, salones;
+  **medido, causa no investigada**). Lo midió el frente de rate limiting el 2026-10-13 con
+  Playwright contando los requests del navegador: abrir una cuenta y agregarle 3 platos dio 6
+  `GET /api/items`, junto a 3 `POST /cuentas/:id/lineas` y 3 `POST /calculo-precios/calcular`. Es
+  decir, 4 requests por línea cuando el POS gasta 1. Puede ser un refetch redundante o dos
+  componentes que piden lo mismo. Pesa en el límite de 100 por minuto por persona (ADR-032): un
+  garzón que carga 10 líneas gasta 40.
+- [ ] **Cambiar la contraseña desde "Mi cuenta" es un oráculo de la contraseña actual limitado solo
+  por el global de 100 por minuto** (backend, `me.service.ts`; visto por la revisión de seguridad
+  del rate limiting el 2026-10-13, **leído, no medido**). Quien robe un JWT vigente puede probar
+  `contrasenaActual` 100 veces por minuto. No tiene un límite propio porque no estaba en la entrada
+  del rate limiting. **Medir** si pasa por la misma comparación que el login. Si pasa, decidir si
+  lleva un límite por usuario como el del login (10 cada 15 min) o un contador de fallos como el
+  del PIN.
+- [ ] **Recargar la página con el límite de la persona agotado lleva al login** (frontend, auth;
+  **leído, no medido**, anotado al cerrar el rate limiting el 2026-10-13). El middleware llama a
+  `fetchMe`, y `fetchMe` trata cualquier error de `/auth/me`, un 429 incluido, como sesión
+  inválida: intenta el refresh y después `clearAuth`. Dentro de la app no pasa, porque
+  `useApiFetch` ya no cierra la sesión ante un 429. Para chocarlo hay que pasar las 100 por minuto
+  y apretar F5; el peor caso medido de una persona es 55-70. Falta medirlo con el stack y decidir
+  qué muestra la pantalla mientras espera, porque sin `user` el layout no tiene con qué dibujarse.
+
 - [ ] **`selector-items-busqueda.spec.ts:123` cae en local y pasa en CI** (Playwright; medido A/B
   el 2026-10-13 al cerrar el NxM, a pedido de la orquestadora). Sobre `e4df6dea`, con stack propio
   y base recién sembrada, cae **3 de 3**; con el diff del NxM, 2 de 3. Siempre en el mismo punto:
@@ -208,6 +230,19 @@ destapa una decisión que no es mía).
   (`exigirCompraOnlineBajoUmbral`)—, pero un pago por API (`POST /pasarela/api/pagos`) lleva su
   propio monto, y lo que se le valida es el formato (DTO) y la escala (service), no el tamaño. **Medir:** si ese
   camino llega al `INSERT` con más de 10^12 y da 500.
+
+- [ ] **`pasarela/api/*` comparte el límite anónimo: 30 requests por minuto por IP del integrador**
+  — ⬇️ **prioridad baja**, por analogía con las demás de la pasarela (owner, 2026-10-08: la pasarela
+  va después del resto de los arreglos)
+  (backend, `common/limites/limites.config.ts`; decidido el 2026-10-13 por la orquestadora al cerrar
+  el rate limiting, [ADR-032](../adr/032-limites-de-intentos.md)). La API de servidor a servidor
+  entra con API key y sin JWT, así que cae en el global anónimo. Un comercio que integra cobros y
+  reembolsos desde su sistema, con más de 30 llamadas por minuto, recibe 429. Hoy se acepta: no se
+  conoce ningún integrador activo. **El paso siguiente, para quien prenda la pasarela:** un throttler
+  propio para esas rutas (por ejemplo 120/min por IP con `LIMITE_PASARELA_API_POR_MINUTO`) que
+  **reemplace** al anónimo en vez de sumarse. Hoy `@Limite` solo suma, así que hace falta un
+  mecanismo para excluir el anónimo en una ruta. No se recomienda contar por API key: obliga a ir
+  a la base desde el guard o a confiar en una cabecera sin verificar.
 
 ## 3. Ya decidido, falta construir
 
@@ -577,66 +612,6 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   post-hoc. El deployment roto ya reemplazó al bueno cuando el smoke se pone rojo; lo que
   evita que eso pase es el `healthcheckPath` (ya hecho) y, para el resto, el portón de
   arriba.
-- [ ] 🚩 **Rate limiting — BLOQUEANTE PARA PRODUCCIÓN** (backend) — decisión del owner,
-  2026-08-09: no se construye ahora, pero **no se sale a producción sin esto**. Hoy el
-  proyecto **no tiene throttler de ningún tipo**; se anotó tres veces por separado y son el
-  mismo trabajo, así que van juntas para decidir la infraestructura **una vez**.
-
-  Los cinco, ordenados por lo que cuesta el abuso:
-
-  1. **`POST /auth/recuperar`** — el peor, y el más nuevo (2026-08-09). Es público, sin
-     auth, y **dispara un envío saliente a una dirección que elige quien llama**. `login`
-     también es público pero no manda nada afuera. Con un loop, cualquiera bombardea una
-     casilla ajena y quema la reputación del remitente —que con SMTP propio es la cuenta
-     del owner—. La respuesta es idéntica exista o no el correo, así que no filtra cuentas:
-     el problema es el **volumen**.
-  2. **`POST /auth/login` y `/auth/refresh`** — brute-forceables sin límite de intentos.
-  3. **`POST /garzones/verificar-pin`** — oráculo de PIN: dice si un PIN pertenece a **un
-     garzón concreto**, sin ejecutar nada. El fix del selector (2026-08-08) lo abarató 20×:
-     agotar 10⁶ contra un garzón concreto pasó de ~14 días de CPU a **~17 h**. Comprometer a
-     *alguno* cuesta casi lo mismo que antes —no es una regresión— pero la cifra de "no es
-     un vector práctico" archivada en [`resueltos.md`](resueltos.md) **ya no aplica al caso
-     dirigido**. Decidir si `Salones:Operar` —que ya es un permiso de confianza— alcanza
-     como barrera, o si hace falta límite por garzón.
-  4. **`POST /auth/invitacion/:token` y `/auth/recuperar/:token`** — públicos por diseño.
-     Adivinar un token de 256 bits no es un vector, pero sin límite son superficie gratis.
-  5. **`pasarela/retorno/inscripcion` y `pasarela/retorno/pago`** (GET y POST cada uno:
-     Webpay vuelve por uno u otro según el desenlace) — agregado el 2026-08-11 al revisar
-     el healthcheck. Va último porque **el costo del abuso es de otra naturaleza**: no es
-     adivinar una credencial —el token de un solo uso de Transbank no se adivina— sino
-     **agotar el pool**. Son anónimos por diseño (la credencial es ese token, no un guard:
-     `pasarela-retorno.controller.ts` no tiene `@UseGuards`) y cada request va a la base
-     —`pagos-redirect.service.ts:152,255,279` hace `ordenRepo.findOne`, e
-     `inscripciones.service.ts` inyecta `DataSource` y repositorios—. Con el pool de `pg` en
-     su default (~10 conexiones, `app.module.ts` no lo sube) y sin throttler, un flood
-     anónimo compite con el tráfico autenticado real.
-     ⚠️ **Esta lista decía cuatro y estaba incompleta**: la revisión independiente del
-     healthcheck lo encontró porque yo había afirmado que `/api/health` era la única ruta
-     anónima que tocaba la base, y era falso. `/api/health` **no** entra en esta lista: se
-     defiende solo, con ventana de 2 s + single-flight (`app.service.ts`). Estos dos son la
-     misma forma sin esa defensa — y cuando se encare el throttler global, ese mecanismo
-     casero se puede tirar.
-
-  **Al encararlo:** `@nestjs/throttler`, límite global por IP + límites estrictos por
-  endpoint. ⚠️ **La key no puede filtrar entre tenants** ni dejar que un tenant agote la
-  cuota de otro. Y con varias instancias detrás de un load balancer el límite en memoria no
-  sirve: hace falta store compartido (Redis) — que es dependencia nueva y necesita
-  confirmación del owner.
-  🚨 **«Límite por IP» dejó de significar «por usuario» — leer antes de escribir la key.**
-  Desde ADR-022 (2026-08-23) el navegador no llega al backend: llega el **servidor del
-  frontend**, que hace de proxy de `/api`. El par TCP que ve el backend es siempre el mismo,
-  así que `req.ip` es **una sola IP para todos los usuarios**: un límite por IP se convierte
-  en un balde compartido y el local que venda más rápido deja afuera a los demás. Es una
-  falla que además se ve como «el rate limiting funciona» en cualquier prueba de un solo
-  cliente.
-  **Lo que hay que hacer al tomarla:** `app.set('trust proxy', …)` en el backend y derivar la
-  key de `X-Forwarded-For`, **después de medir qué llega**. Lo que está verificado hoy es que
-  el proxy reenvía las cabeceras entrantes tal cual —`x-forwarded-for` no está en la lista de
-  ignoradas de h3, sí lo está `host`—; lo que **no** está medido es si el borde de Railway
-  puebla esa cabecera en la entrada al frontend. Se mide con un request real antes de elegir
-  la key, no se supone.
-  📌 Y ojo con el cruce: una key mal derivada de una cabecera que el cliente puede escribir es
-  peor que no tener límite, porque se saltea poniendo un valor distinto en cada request.
 - [ ] **El proxy de `/api` cambió tres supuestos de producción** (infra + backend, anotado
   2026-08-23 al desplegar ADR-022) — no es trabajo pendiente por sí solo: es lo que hay que
   saber **antes** de tomar otras entradas de esta sección, porque cada punto muerde durante
@@ -962,7 +937,9 @@ mezclar") se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md) § 2 y no bl
   el `JwtAuthGuard` no se atrapó ninguno—: dejó de reproducirse, que no es lo mismo que resuelto.
   **Descartado con evidencia, para no rehacerlo:** re-siembra (`--verificar` tras una corrida roja:
   un solo `Seed complete`); estado corrupto de los usuarios del seed; vencimiento o firma del JWT
-  (`JWT_EXPIRATION=15m`, ningún spec toca `process.env`); throttler (no hay); y el
+  (`JWT_EXPIRATION=15m`, ningún spec toca `process.env`); throttler (no había: desde ADR-032 hay
+  uno, que el e2e escala ×1000 salvo en `limites.e2e-spec.ts`, el único spec que toca
+  `process.env` y lo restaura en su `afterAll`); y el
   `DeprecationWarning` de `pg` (~45 por corrida), que salía del `Promise.all` de TypeORM en
   `DataSource.synchronize`, uno por app de test (hasta ADR-030).
   **Lo que sigue igual y es el riesgo de fondo:** las suites comparten los usuarios del seed con

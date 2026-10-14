@@ -23,6 +23,7 @@ import {
   SesionGarzon,
 } from '../turnos/entities/sesion-garzon.entity';
 import { RolesService } from '../roles/roles.service';
+import { IntentosPin } from './intentos-pin';
 
 const BCRYPT_COST = 10;
 // El PIN se genera automáticamente; estos acotan la generación única.
@@ -238,6 +239,7 @@ export class GarzonesService {
     private readonly sesionRepo: Repository<SesionGarzon>,
     private readonly db: Db,
     private readonly rolesService: RolesService,
+    private readonly intentosPin: IntentosPin,
   ) {}
 
   private toPublico(
@@ -1255,9 +1257,26 @@ export class GarzonesService {
     const garzon = await this.garzonRepo.findOne({
       where: { id: garzonId, tenantId, activo: true },
     });
-    if (!garzon || !(await bcrypt.compare(pin, garzon.pinHash))) {
+    // Un id inventado no adivina nada: no reserva intento, y así no deja llenar
+    // la memoria con ids al azar.
+    if (!garzon) throw new BadRequestException('PIN inválido');
+    // Por (tenant, garzón): el id solo no alcanza para decir de quién es, y un
+    // tenant no puede bloquearle el PIN a un garzón de otro. El id es el de la
+    // base y no el que mandó el cliente: el DTO acepta un UUID en mayúsculas y
+    // Postgres lo encuentra igual, así que cada combinación de mayúsculas sería
+    // un cupo nuevo para el mismo garzón (lo encontró la revisión de seguridad;
+    // patrón en `docs/patterns/backend.md` § 4, "Un UUID validado puede venir en
+    // mayúsculas"). El intento se
+    // reserva ANTES del compare, sin un await en el medio: si se contara al
+    // fallar, N requests en paralelo pasarían todas antes de que la primera
+    // falle (ver `IntentosPin`).
+    const clave = `${tenantId}:${garzon.id}`;
+    this.intentosPin.reservarIntento(clave);
+    if (!(await bcrypt.compare(pin, garzon.pinHash))) {
+      this.intentosPin.registrarFallo(clave);
       throw new BadRequestException('PIN inválido');
     }
+    this.intentosPin.registrarAcierto(clave);
     return garzon;
   }
 

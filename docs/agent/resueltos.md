@@ -23,6 +23,194 @@ vivo, la regla es la contraria: ahí una cita que apunta a otra cosa se corrige 
 
 ---
 
+## Rate limiting: límites de intentos por persona, destino y garzón (cerrada 2026-10-13)
+
+Frente de la orquestadora a pedido del owner (*"investiguemos un limite yo diria poco menos de 100 o
+100 e ir aumentando solo tenemos un interesado en probarla y no tiene muchas ventas al dia"*). Se
+hizo en dos fases: medir y proponer, y construir después del OK. **Decisiones del owner**
+(2026-10-13, por AskUserQuestion de la orquestadora, con escena y costo por opción): *"100 por minuto
+por persona"*, *"5 fallos y espera 5 min"* para el PIN, *"10 intentos cada 15 min"* para el login y
+*"Sí, agregarla"* para `@nestjs/throttler`. El resto de los números lo aprobó la orquestadora. El
+porqué completo está en [ADR-032](../adr/032-limites-de-intentos.md).
+
+### Medido
+
+- **Uso real** (Playwright contra el stack propio, contando cada request del navegador a `/api`):
+  - login: 2 requests;
+  - elegir el local y cargar el dashboard: 10;
+  - dashboard abierto: 5 por minuto;
+  - abrir el POS: 15;
+  - una venta de 3 líneas: ~8, con 1 por línea;
+  - una mesa de 3 líneas: ~22, con 4 por línea.
+
+  El peor caso de una persona da 55-70 por minuto y el de un local 150-200. Por eso el 100 es por
+  persona: por local o por IP se corta con dos o tres personas.
+- **Qué IP ve el backend en Railway.** Por el proxy, una sola para todos: la salida del frontend.
+  Un `X-Forwarded-For` o un `X-Real-IP` falsos no la cambian. Con un log temporal (`14b7922c` →
+  `b0183b5d`) se vio que el borde pisa `X-Real-IP` con el cliente real y reescribe
+  `X-Forwarded-For`, así que `IP_CABECERA_BORDE=X-Real-IP` es confiable.
+- La revisión de seguridad sospechó que un `Connection: X-Real-IP` del cliente le hiciera sacar esa
+  cabecera al borde. **Medido con el log todavía vivo: no pasa.** El borde la pone igual.
+- **Réplicas:** 1, en `sfo`. La memoria alcanza; Redis hace falta recién con más de una.
+
+### Lo que se hizo
+
+- `backend/src/common/limites/`: guard global (`LimitesGuard`, sobre `ThrottlerGuard`) y ocho
+  throttlers con su clave.
+  - El global cuenta por el usuario del JWT **verificado**, y un token vencido pero bien firmado
+    cuenta a su dueño.
+  - La clave no incluye la ruta: la de la librería sí la incluía.
+  - La IP sale de `ipDelCliente`, nunca de `req.ip` ni de `X-Forwarded-For`.
+  - Rutas: `@Limite('login'|'refresh'|'correo'|'token')` en `auth.controller.ts` y `@SinLimite()`
+    en `/api/health`.
+  - Mensajes en español con `Retry-After`. Los conteos salen de `LIMITE_*`, y `LIMITES_ESCALA`
+    está solo para test y dev.
+- **PIN:** `IntentosPin` dentro de `GarzonesService.verificarPin`. El PIN tenía nueve caminos y la
+  entrada nombraba uno. El intento se reserva antes del `bcrypt.compare`: contado al fallar, diez
+  requests en paralelo pasaban todas, como encontró la revisión independiente.
+- **Frontend:**
+  - `server/utils/cabeceras-del-cliente.ts`: el proxy borra lo que manda el navegador como
+    `x-cliente-ip`/`x-proxy-secreto` y pone las suyas, firmadas con `PROXY_SECRETO`.
+  - `useApiFetch` ya no cierra la sesión ante un 429. Antes cualquier error posterior a un refresh
+    la cerraba.
+- **Entorno:** `LIMITES_ESCALA=1000` en `backend/test/setup-env.ts`, en el compose de desarrollo y
+  en el job `e2e-navegador` del CI. `PROXY_SECRETO` en el compose y en ese job, para ejercitar el
+  camino del proxy.
+
+### Tests y mutantes
+
+`test/limites.e2e-spec.ts` (17 casos), más los unitarios de `ipDelCliente`, `IntentosPin`,
+`verificarPin`, `cabecerasDelCliente` y `useApiFetch`. Cada mutante revierte una defensa. Cada uno
+se corrió contra el e2e de límites **y** contra los unitarios de `common/limites`,
+`modules/garzones` y `modules/auth` (168). La tabla dice todo lo que cae; ningún otro test cayó.
+
+| Mutante | e2e que caen | Unitarios que caen |
+|---|---|---|
+| M1 `jwt.decode` en vez de `verify` (el `sub` sin firma) | "un sub sin firma válida NO estrena balde" | — |
+| M2 `x-cliente-ip` creída sin el secreto | "sin el secreto del proxy, x-cliente-ip no cuenta" | `ipDelCliente`: "sin el secreto…", "con un secreto equivocado…", "si el backend no tiene secreto…" |
+| M3 La clave por defecto de la librería (por ruta) | "cuenta por persona en TODAS las rutas" | — |
+| M4 El correo sin normalizar | "por correo: el cuarto intento es 429…" | — |
+| M5 Sin `Retry-After` estándar | "cuenta por persona en TODAS las rutas" | — |
+| M6 `/api/health` sin `@SinLimite` | "/api/health no se limita" | — |
+| M7 Sin el chequeo de "bloqueado" en `reservarIntento` | "cinco fallos seguidos…" y "diez PINes equivocados en paralelo…" | `verificarPin`: "el quinto fallo seguido…" y "en una ráfaga en paralelo, el PIN correcto…"; `IntentosPin`: "bloqueado, ni siquiera se deja probar…", "el aviso dice cuánto falta…", "en paralelo, el sexto intento…" y "un acierto que llega con el bloqueo ya puesto…" |
+| M8 La clave del PIN sin tenant | — | `verificarPin`: "el mismo id en otro tenant cuenta aparte" |
+| M9 Un token vencido no identifica | "un token vencido pero bien firmado sigue contando a su dueño" | — |
+| M10 El PIN contado al fallar (la versión que vio la revisión, `IntentosPin` viejo entero) | "diez PINes equivocados en paralelo…", **en 1 de 2 corridas** | `verificarPin`: "en una ráfaga en paralelo, el PIN correcto…"; `IntentosPin`: "en paralelo, el sexto intento…" y "un acierto que llega con el bloqueo ya puesto…" |
+| M11 El límite por correo antes que el de IP en el login | "por IP: probar muchos correos desde la misma IP también corta" | — |
+| M12 Sin el balde común fuera de ASCII | "un correo fuera de ASCII cae en un balde común" | — |
+| M13 Los límites por correo con `X-RateLimit-*` | "por correo: el cuarto intento es 429…" | — |
+| M14 `throwThrottlingException` sin guardar la espera del detalle (cae al 1 de respaldo en todos los límites) | "por correo…" y "recuperar, por IP…" (el aviso pasa a decir "1 segundos") | — |
+| M15 `tenants/confirmacion/:token` sin `@Limite` | "el link de confirmación de ingreso a un tenant también…" | — |
+| M16 La clave del PIN con el `garzonId` que mandó el cliente | "cinco fallos seguidos…" | `verificarPin`: "el id en mayúsculas es el mismo garzón" |
+| M17 El correo del login leído solo del body | "el correo por query cuenta en el balde del correo, como lo lee passport" | — |
+| M18 El correo del login sin mirar la verdad del valor (`String(v)`: un `email: ''` ya no cae a la query) | "el correo por query cuenta…" | — |
+| M19 El correo del login con la query antes que el body | "el correo por query cuenta…" | — |
+
+**M10 en el e2e no es determinista**, y por eso el que lo fija es el unitario. Con la versión vieja
+el e2e en paralelo dio "17 pasados" una vez y lo cazó la otra. Lo que varía es cuándo llegan las
+consultas de los intentos 6 a 10 respecto del quinto fallo: si llegan después del bloqueo, la
+versión vieja ya los frena. Sobre el código correcto no puede fallar: un 400 exige que el
+contador, que incluye los intentos en vuelo, esté por debajo de 5, así que solo las cuatro
+primeras reservas pueden dar 400. El unitario "en una ráfaga en paralelo, el PIN correcto
+que llega pasado el cupo no se evalúa" sí es determinista: con el repo mockeado, las reservas siguen
+el orden de llamada. Además prueba lo que importa, que ningún intento pasado el cupo diga si acertó,
+y no solo cuántos 400 hubo.
+
+M16 y M17 son el segundo y el tercer hallazgo de la revisión de seguridad.
+- M16: el DTO acepta el UUID en mayúsculas y Postgres encuentra al mismo garzón, así que cada
+  combinación de mayúsculas estrenaba un cupo. La clave ahora es el `garzon.id` de la base.
+- M17: passport-local toma el correo del body y, si no hay, de `?email=`. Ahora la clave lo lee
+  igual.
+
+Lo que engañó en el primer intento, anotado porque se puede repetir (tres mutantes que
+sobrevivieron por culpa del mutante o del test, y la tabla misma):
+- Sacar el chequeo de "bloqueado" **y además** condicionar el reinicio del contador a que el
+  bloqueo haya vencido es equivalente. Lo anoté como tal hasta que la revisión independiente marcó
+  que el mutante de verdad (M7) deja que el reinicio de abajo levante un bloqueo vigente. El chequeo
+  sostiene el bloqueo: no es redundante.
+- Contar el PIN después del `compare` pero antes de responder no reabre el bug, porque el atacante
+  igual no ve la respuesta de los intentos que pasan del cupo. El mutante fiel es la versión vieja
+  entera (M10).
+- El test del orden pasaba con el orden invertido: el límite anónimo de 4 del e2e cortaba antes.
+  Ahora mide con el mismo request que bloquea la IP.
+- La primera tabla decía "lo mata solo su test", pero cada mutante se había corrido contra el e2e
+  y no contra los unitarios. La revisión de documentación lo marcó. Esta tabla está medida contra
+  las dos capas.
+
+### Qué quedó afuera
+
+- Recargar la página con el límite de la persona agotado lleva al login: el middleware trata un
+  429 de `/auth/me` como sesión inválida. Está en `pendientes.md` § 2.
+- El doble `GET /items` por línea de la mesa: medido, causa no investigada, en `pendientes.md` § 2.
+- La defensa casera de `/api/health` (ventana de 2 s + single-flight) **sigue haciendo falta**: la
+  entrada decía que con el throttler se podía tirar, pero la ruta queda fuera de los límites a
+  propósito.
+
+### La entrada que cierra, como estaba en `pendientes.md` § Endurecimiento para producción
+
+- [ ] 🚩 **Rate limiting — BLOQUEANTE PARA PRODUCCIÓN** (backend) — decisión del owner,
+  2026-08-09: no se construye ahora, pero **no se sale a producción sin esto**. Hoy el
+  proyecto **no tiene throttler de ningún tipo**; se anotó tres veces por separado y son el
+  mismo trabajo, así que van juntas para decidir la infraestructura **una vez**.
+
+  Los cinco, ordenados por lo que cuesta el abuso:
+
+  1. **`POST /auth/recuperar`** — el peor, y el más nuevo (2026-08-09). Es público, sin
+     auth, y **dispara un envío saliente a una dirección que elige quien llama**. `login`
+     también es público pero no manda nada afuera. Con un loop, cualquiera bombardea una
+     casilla ajena y quema la reputación del remitente —que con SMTP propio es la cuenta
+     del owner—. La respuesta es idéntica exista o no el correo, así que no filtra cuentas:
+     el problema es el **volumen**.
+  2. **`POST /auth/login` y `/auth/refresh`** — brute-forceables sin límite de intentos.
+  3. **`POST /garzones/verificar-pin`** — oráculo de PIN: dice si un PIN pertenece a **un
+     garzón concreto**, sin ejecutar nada. El fix del selector (2026-08-08) lo abarató 20×:
+     agotar 10⁶ contra un garzón concreto pasó de ~14 días de CPU a **~17 h**. Comprometer a
+     *alguno* cuesta casi lo mismo que antes —no es una regresión— pero la cifra de "no es
+     un vector práctico" archivada en [`resueltos.md`](resueltos.md) **ya no aplica al caso
+     dirigido**. Decidir si `Salones:Operar` —que ya es un permiso de confianza— alcanza
+     como barrera, o si hace falta límite por garzón.
+  4. **`POST /auth/invitacion/:token` y `/auth/recuperar/:token`** — públicos por diseño.
+     Adivinar un token de 256 bits no es un vector, pero sin límite son superficie gratis.
+  5. **`pasarela/retorno/inscripcion` y `pasarela/retorno/pago`** (GET y POST cada uno:
+     Webpay vuelve por uno u otro según el desenlace) — agregado el 2026-08-11 al revisar
+     el healthcheck. Va último porque **el costo del abuso es de otra naturaleza**: no es
+     adivinar una credencial —el token de un solo uso de Transbank no se adivina— sino
+     **agotar el pool**. Son anónimos por diseño (la credencial es ese token, no un guard:
+     `pasarela-retorno.controller.ts` no tiene `@UseGuards`) y cada request va a la base
+     —`pagos-redirect.service.ts:152,255,279` hace `ordenRepo.findOne`, e
+     `inscripciones.service.ts` inyecta `DataSource` y repositorios—. Con el pool de `pg` en
+     su default (~10 conexiones, `app.module.ts` no lo sube) y sin throttler, un flood
+     anónimo compite con el tráfico autenticado real.
+     ⚠️ **Esta lista decía cuatro y estaba incompleta**: la revisión independiente del
+     healthcheck lo encontró porque yo había afirmado que `/api/health` era la única ruta
+     anónima que tocaba la base, y era falso. `/api/health` **no** entra en esta lista: se
+     defiende solo, con ventana de 2 s + single-flight (`app.service.ts`). Estos dos son la
+     misma forma sin esa defensa — y cuando se encare el throttler global, ese mecanismo
+     casero se puede tirar.
+
+  **Al encararlo:** `@nestjs/throttler`, límite global por IP + límites estrictos por
+  endpoint. ⚠️ **La key no puede filtrar entre tenants** ni dejar que un tenant agote la
+  cuota de otro. Y con varias instancias detrás de un load balancer el límite en memoria no
+  sirve: hace falta store compartido (Redis) — que es dependencia nueva y necesita
+  confirmación del owner.
+  🚨 **«Límite por IP» dejó de significar «por usuario» — leer antes de escribir la key.**
+  Desde ADR-022 (2026-08-23) el navegador no llega al backend: llega el **servidor del
+  frontend**, que hace de proxy de `/api`. El par TCP que ve el backend es siempre el mismo,
+  así que `req.ip` es **una sola IP para todos los usuarios**: un límite por IP se convierte
+  en un balde compartido y el local que venda más rápido deja afuera a los demás. Es una
+  falla que además se ve como «el rate limiting funciona» en cualquier prueba de un solo
+  cliente.
+  **Lo que hay que hacer al tomarla:** `app.set('trust proxy', …)` en el backend y derivar la
+  key de `X-Forwarded-For`, **después de medir qué llega**. Lo que está verificado hoy es que
+  el proxy reenvía las cabeceras entrantes tal cual —`x-forwarded-for` no está en la lista de
+  ignoradas de h3, sí lo está `host`—; lo que **no** está medido es si el borde de Railway
+  puebla esa cabecera en la entrada al frontend. Se mide con un request real antes de elegir
+  la key, no se supone.
+  📌 Y ojo con el cruce: una key mal derivada de una cabecera que el cliente puede escribir es
+  peor que no tener límite, porque se saltea poniendo un valor distinto en cada request.
+
+---
+
 ## Una cantidad con más de 4 decimales se rechaza con aviso, no se redondea (cerrada 2026-10-13)
 
 Frente fiscal e inventario propio (CLAUDE.md, "Lo fiscal va solo"), lanzado por la orquestadora a

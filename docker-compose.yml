@@ -75,6 +75,12 @@ services:
       QZ_PRIVATE_KEY: ${QZ_PRIVATE_KEY:-}
       QZ_CERTIFICATE: ${QZ_CERTIFICATE:-}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3000}
+      # Límites de intentos (ADR-032). En desarrollo la escala los vuelve
+      # inalcanzables: Playwright entra cientos de veces con el mismo admin. El
+      # secreto es el que comparte con el proxy del frontend, para que este nombre
+      # al cliente en `x-cliente-ip`; acá no protege nada, solo ejercita el camino.
+      LIMITES_ESCALA: ${LIMITES_ESCALA:-1000}
+      PROXY_SECRETO: ${PROXY_SECRETO:-solo-desarrollo}
     ports:
       - "${PUERTO_BACKEND:-3000}:3000"
     depends_on:
@@ -115,6 +121,8 @@ services:
       # borrado `API_INTERNAL_URL`: aquella era para RENDERIZAR, ésta es para
       # TRANSPORTAR. Ver ADR-022.
       API_PROXY_TARGET: ${API_PROXY_TARGET:-http://backend:3000}
+      # El mismo del backend (ADR-032): con él, el proxy le nombra al cliente.
+      PROXY_SECRETO: ${PROXY_SECRETO:-solo-desarrollo}
       VITE_APP_NAME: ${VITE_APP_NAME:-Prueba Técnica}
     command: npm run dev -- --host
     depends_on:

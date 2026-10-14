@@ -24,6 +24,7 @@ import { SwitchTenantDto } from './dto/switch-tenant.dto';
 import { JwtAuthGuard } from './guards/jwt-auth.guard';
 import { LocalAuthGuard } from './guards/local-auth.guard';
 import { Usuario } from '../users/usuario.entity';
+import { Limite } from '../../common/limites/limites.config';
 
 interface AuthenticatedRequest extends Request {
   user: Usuario;
@@ -60,6 +61,7 @@ export class AuthController {
    * enumerador público de cuentas, y devolver sesión haría distinguibles los
    * casos por la sola presencia del token.
    */
+  @Limite('correo')
   @Post('register')
   @HttpCode(HttpStatus.OK)
   register(@Body() dto: RegisterDto) {
@@ -75,6 +77,7 @@ export class AuthController {
    * 43 caracteres de base64url. Ponerle el pipe devolvería 400 a *todos* los links
    * válidos de verificación, invitación y reset.
    */
+  @Limite('token')
   @Post('verificar/:token')
   @HttpCode(HttpStatus.OK)
   verificarCorreo(@Param('token') token: string) {
@@ -86,11 +89,13 @@ export class AuthController {
    * autenticarse todavía —o no puede más—. La prueba de identidad es el token
    * del link, no un JWT.
    */
+  @Limite('token')
   @Get('invitacion/:token')
   verificarInvitacion(@Param('token') token: string) {
     return this.authService.verificarToken(token, TipoTokenAcceso.INVITACION);
   }
 
+  @Limite('token')
   @Post('invitacion/:token')
   @HttpCode(HttpStatus.OK)
   aceptarInvitacion(
@@ -104,6 +109,7 @@ export class AuthController {
     );
   }
 
+  @Limite('token')
   @Get('recuperar/:token')
   verificarReset(@Param('token') token: string) {
     return this.authService.verificarToken(token, TipoTokenAcceso.RESET);
@@ -114,12 +120,14 @@ export class AuthController {
    * El `200` fijo es parte del contrato: un 404 acá convertiría el endpoint en
    * un enumerador público de cuentas.
    */
+  @Limite('correo')
   @Post('recuperar')
   @HttpCode(HttpStatus.OK)
   recuperar(@Body() dto: RecuperarContrasenaDto) {
     return this.authService.recuperar(dto.correo);
   }
 
+  @Limite('token')
   @Post('recuperar/:token')
   @HttpCode(HttpStatus.OK)
   restablecer(@Param('token') token: string, @Body() dto: ElegirContrasenaDto) {
@@ -130,6 +138,7 @@ export class AuthController {
     );
   }
 
+  @Limite('login')
   @UseGuards(LocalAuthGuard)
   @Post('login')
   @HttpCode(HttpStatus.OK)
@@ -160,6 +169,7 @@ export class AuthController {
     res.redirect(`${frontendUrl}/auth/callback?token=${access_token}`);
   }
 
+  @Limite('refresh')
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   async refresh(

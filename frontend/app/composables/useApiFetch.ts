@@ -36,7 +36,12 @@ export async function useApiFetch<T>(
       }
       await refreshing
       return await $fetch<T>(url, buildOptions())
-    } catch {
+    } catch (errTrasRefresh: any) {
+      // Un 429 —del refresh o del reintento— es "esperá", no "tu sesión no
+      // vale" (ADR-032): cerrarla sacaría al cajero a mitad de una venta por un
+      // límite que se vacía solo. Llega a la pantalla con su aviso.
+      const statusTrasRefresh = errTrasRefresh?.status ?? errTrasRefresh?.response?.status
+      if (statusTrasRefresh === 429) throw errTrasRefresh
       store.clearAuth()
       navigateTo('/login')
       throw err

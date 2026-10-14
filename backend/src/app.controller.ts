@@ -1,5 +1,6 @@
 import { Controller, Get } from '@nestjs/common';
 import { AppService } from './app.service';
+import { SinLimite } from './common/limites/limites.config';
 
 @Controller()
 export class AppController {
@@ -13,6 +14,7 @@ export class AppController {
   // Sin `@UseGuards`: el healthcheck de Railway pega sin credenciales. En este
   // proyecto los guards se aplican por controlador, así que esto es explícito
   // por omisión, no un olvido.
+  @SinLimite()
   @Get('health')
   verificarSalud(): Promise<{ estado: string; base: string }> {
     return this.appService.verificarSalud();

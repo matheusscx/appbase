@@ -11,6 +11,8 @@ import * as bcrypt from 'bcryptjs';
 import { Db } from '../../common/db/db.service';
 import { GarzonesService } from './garzones.service';
 import { RolesService } from '../roles/roles.service';
+import { ConfigService } from '@nestjs/config';
+import { IntentosPin } from './intentos-pin';
 import { Garzon } from './entities/garzon.entity';
 import { GarzonPinEvento } from './entities/garzon-pin-evento.entity';
 import { TipoGarzon } from './enums/tipo-garzon.enum';
@@ -151,6 +153,8 @@ describe('GarzonesService', () => {
         { provide: getRepositoryToken(SesionGarzon), useValue: sesionRepo },
         { provide: Db, useValue: db },
         { provide: RolesService, useValue: roles },
+        IntentosPin,
+        { provide: ConfigService, useValue: { get: () => undefined } },
       ],
     }).compile();
     service = module.get<GarzonesService>(GarzonesService);
@@ -287,6 +291,84 @@ describe('GarzonesService', () => {
       await expect(
         service.verificarPin(TENANT, 'inexistente', '111111'),
       ).rejects.toThrow('PIN inválido');
+    });
+
+    // ADR-032. El contador vive acá y no en la ruta porque por acá pasan
+    // los nueve caminos del PIN; el detalle de la ventana lo cubre intentos-pin.spec.
+    it('el quinto fallo seguido contra el mismo garzón es 429, y bloqueado ni el PIN correcto entra', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', pin: '111111' }));
+      for (let i = 0; i < 4; i++) {
+        await expect(
+          service.verificarPin(TENANT, 'g1', '999999'),
+        ).rejects.toThrow(BadRequestException);
+      }
+      await expect(
+        service.verificarPin(TENANT, 'g1', '999999'),
+      ).rejects.toMatchObject({ status: 429 });
+      await expect(
+        service.verificarPin(TENANT, 'g1', '111111'),
+      ).rejects.toMatchObject({ status: 429 });
+    });
+
+    // Lo que importa de una ráfaga no es cuántos 400 da, sino que ningún
+    // intento pasado el cupo llegue a decir si acertó. Con el repo mockeado las
+    // reservas siguen el orden de llamada, así que el correcto, último de diez,
+    // es determinísticamente el décimo.
+    it('en una ráfaga en paralelo, el PIN correcto que llega pasado el cupo no se evalúa: 429', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', pin: '111111' }));
+      const pines = [...Array.from({ length: 9 }, () => '999999'), '111111'];
+      const resultados = await Promise.allSettled(
+        pines.map((pin) => service.verificarPin(TENANT, 'g1', pin)),
+      );
+      const correcto = resultados[9];
+      expect(correcto.status).toBe('rejected');
+      expect((correcto as PromiseRejectedResult).reason).toMatchObject({
+        status: 429,
+      });
+    });
+
+    it('un acierto en el medio vuelve a cero: cuentan los fallos seguidos', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', pin: '111111' }));
+      for (let i = 0; i < 4; i++) {
+        await service.verificarPin(TENANT, 'g1', '999999').catch(() => null);
+      }
+      await service.verificarPin(TENANT, 'g1', '111111');
+      await expect(
+        service.verificarPin(TENANT, 'g1', '999999'),
+      ).rejects.toThrow(BadRequestException);
+    });
+
+    it('un garzón que no existe no suma fallos', async () => {
+      repo.findOne.mockResolvedValue(null);
+      for (let i = 0; i < 10; i++) {
+        await expect(
+          service.verificarPin(TENANT, 'inexistente', '111111'),
+        ).rejects.toThrow(BadRequestException);
+      }
+    });
+
+    it('el id en mayúsculas es el mismo garzón: comparte el cupo', async () => {
+      // El DTO acepta un UUID en mayúsculas y la base lo encuentra igual. Con
+      // la clave por el id que mandó el cliente, cada variante estrenaba cupo.
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', pin: '111111' }));
+      for (const id of ['g1', 'G1', 'g1', 'G1']) {
+        await expect(
+          service.verificarPin(TENANT, id, '999999'),
+        ).rejects.toThrow(BadRequestException);
+      }
+      await expect(
+        service.verificarPin(TENANT, 'G1', '999999'),
+      ).rejects.toMatchObject({ status: 429 });
+    });
+
+    it('el mismo id en otro tenant cuenta aparte', async () => {
+      repo.findOne.mockResolvedValue(garzon({ id: 'g1', pin: '111111' }));
+      for (let i = 0; i < 5; i++) {
+        await service.verificarPin(TENANT, 'g1', '999999').catch(() => null);
+      }
+      await expect(
+        service.verificarPin('otro-tenant', 'g1', '111111'),
+      ).resolves.toMatchObject({ id: 'g1' });
     });
   });
 
@@ -1909,6 +1991,8 @@ describe('GarzonesService.asegurarMostrador', () => {
         // Solo para satisfacer la inyección: ningún test de este describe
         // otorga permisos.
         { provide: RolesService, useValue: { otorgarOperarSalon: jest.fn() } },
+        IntentosPin,
+        { provide: ConfigService, useValue: { get: () => undefined } },
       ],
     }).compile();
     service = module.get(GarzonesService);

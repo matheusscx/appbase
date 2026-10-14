@@ -115,12 +115,19 @@ y una cookie `SameSite=Lax` no viaja cross-site.
 El servidor de Nuxt existe aunque la app sea una SPA: `ssr: false` apaga el *renderizado*
 server-side, no el servidor ([ADR-017](./adr/017-spa-sin-ssr.md)).
 
+Como el backend ve al proxy como el par TCP de todos los usuarios, el proxy le nombra al
+cliente en `x-cliente-ip`, firmado con `x-proxy-secreto` (`PROXY_SECRETO`, el mismo en los
+dos servicios). Lo que mande el navegador con esos nombres lo borra antes de reenviar. Lo usan
+los límites por IP → [ADR-032](./adr/032-limites-de-intentos.md).
+
 ## Backend
 
 ### Flujo de una request
 
 ```
 [HTTP Request]
+    ↓
+[LimitesGuard — global, límites de intentos (ADR-032)]
     ↓
 [Guards — JwtAuthGuard / TenantAdminGuard / SuperadminGuard]
     ↓
@@ -159,6 +166,7 @@ el `main.ts` real en un proceso aparte (el resto del e2e arma su app y no pasa p
    siempre; el contenedor recibe HTTP, así que un redirect por `req.secure` mandaría todo a
    HTTPS, healthcheck y proxy interno incluidos. Tampoco hay `trust proxy`: nada lee
    `req.ip`/`req.protocol`, y encenderlo sin un lector solo vuelve confiable `X-Forwarded-*`.
+   Los límites por IP tampoco lo usan: la IP sale de `ipDelCliente` ([ADR-032](./adr/032-limites-de-intentos.md)).
 2. **CORS por lista** — `CORS_ORIGINS` (coma-separado); sin ella, el origen de
    `FRONTEND_URL` (dev: `http://localhost:5173`). Desde ADR-022 **no está en el camino del
    navegador**, que llega por el proxy del frontend; es defensa en profundidad para lo que
@@ -198,6 +206,7 @@ modules/<feature>/
 | `JwtAuthGuard` | `@UseGuards(JwtAuthGuard)` | Toda ruta autenticada |
 | `TenantAdminGuard` | `@UseGuards(TenantAdminGuard)` | Mutaciones de configuración del tenant (rol admin) |
 | `SuperadminGuard` | `@UseGuards(SuperadminGuard)` | Rutas `/admin/*` (flag `es_superadmin`) |
+| `LimitesGuard` | global (`APP_GUARD`); `@Limite(...)` suma uno propio, `@SinLimite()` lo saca | Toda ruta: 100/min por persona, 30/min por IP lo anónimo ([ADR-032](./adr/032-limites-de-intentos.md)) |
 
 ### UUID en entidades TypeORM (crítico)
 
@@ -332,6 +341,10 @@ const data = await useApiFetch<ResponseType>(`${apiUrl}/endpoint`)
 | `FRONTEND_URL` | Base de los links al frontend (mails, retornos de pago); su origen es el CORS por defecto |
 | `CORS_ORIGINS` | Orígenes CORS permitidos, coma-separados; vacía → el de `FRONTEND_URL` |
 | `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_CALLBACK_URL` | Google OAuth |
+| `LIMITE_*` | Conteo de cada límite de intentos; sin definir, el de producción (lista en `.env.example`, ADR-032) |
+| `LIMITES_ESCALA` | Multiplica todos los conteos. Solo para e2e, Playwright y el compose de desarrollo; en producción no se define |
+| `PROXY_SECRETO` | El que comparte con el proxy del frontend: sin él, `x-cliente-ip` no vale |
+| `IP_CABECERA_BORDE` | La cabecera con la IP del cliente que pone el borde de Railway, para lo que llega directo (retorno de Webpay) |
 
 ### Frontend
 
@@ -339,6 +352,8 @@ const data = await useApiFetch<ResponseType>(`${apiUrl}/endpoint`)
 |---|---|
 | `API_PROXY_TARGET` | Origen del backend al que el servidor de Nuxt reenvía `/api` (compose: `http://backend:3000`) |
 | `VITE_APP_NAME` | Título de la app |
+| `PROXY_SECRETO` | El mismo del backend: con él, el proxy firma la `x-cliente-ip` que le manda |
+| `IP_CABECERA_BORDE` | De qué cabecera saca el proxy la IP del cliente; sin ella, del par TCP |
 
 ⚠️ **El navegador no tiene URL de backend, y no es configurable.** `apiUrl` es `/api`,
 relativa y constante en `nuxt.config.ts`. Que fuera una URL absoluta configurable es lo que
