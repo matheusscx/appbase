@@ -71,6 +71,27 @@ describe('leerCaf', () => {
     );
   });
 
+  it('un RSASK que no es una llave RSA (Ed25519) es inválido', () => {
+    const ed = generateKeyPairSync('ed25519')
+      .privateKey.export({ type: 'pkcs8', format: 'pem' })
+      .toString();
+    const conEd = caf().replace(
+      /<RSASK>[\s\S]*<\/RSASK>/,
+      () => `<RSASK>${ed}</RSASK>`,
+    );
+    expect(codigoDe(() => leerCaf(conEd))).toBe('CAF_INVALIDO');
+  });
+
+  it('un CAF cuyo RE tiene el dígito verificador malo es inválido', () => {
+    expect(codigoDe(() => leerCaf(caf({ rut: '76543210-4' })))).toBe(
+      'CAF_INVALIDO',
+    );
+  });
+
+  it('un texto vacío es inválido', () => {
+    expect(codigoDe(() => leerCaf(''))).toBe('CAF_INVALIDO');
+  });
+
   it('un texto que no es XML de CAF es inválido', () => {
     expect(codigoDe(() => leerCaf('no es xml'))).toBe('CAF_INVALIDO');
     expect(codigoDe(() => leerCaf('<otra/>'))).toBe('CAF_INVALIDO');

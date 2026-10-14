@@ -40,7 +40,8 @@ export function leerCaf(xmlAutorizacion: string): CafLeido {
     return Number(valor);
   };
 
-  const raiz = doc.documentElement;
+  // xmldom devuelve undefined con un texto vacío.
+  const raiz = (doc as Document | undefined)?.documentElement;
   if (!raiz || raiz.tagName !== 'AUTORIZACION') {
     throw invalido('no es una AUTORIZACION');
   }
@@ -73,15 +74,15 @@ export function leerCaf(xmlAutorizacion: string): CafLeido {
       .map((linea) => linea.trim())
       .join('\n');
     llavePrivada = createPrivateKey(pem);
+    // La privada tiene que ser la par de la pública: firmar y verificar un texto fijo.
+    // Una llave que no es RSA (Ed25519…) hace fallar el firmar: también es inválida.
+    const firma = createSign('RSA-SHA1').update('caf').sign(llavePrivada);
+    if (!createVerify('RSA-SHA1').update('caf').verify(llavePublica, firma)) {
+      throw invalido('RSASK no corresponde a RSAPK');
+    }
   } catch (e) {
     if (e instanceof DteError) throw e;
-    throw invalido('las llaves no se pueden leer');
-  }
-
-  // La privada tiene que ser la par de la pública: firmar y verificar un texto fijo.
-  const firma = createSign('RSA-SHA1').update('caf').sign(llavePrivada);
-  if (!createVerify('RSA-SHA1').update('caf').verify(llavePublica, firma)) {
-    throw invalido('RSASK no corresponde a RSAPK');
+    throw invalido('las llaves no se pueden leer o no son un par RSA');
   }
 
   const xmlCaf = /<CAF[\s>][\s\S]*<\/CAF>/.exec(xmlAutorizacion)?.[0];
