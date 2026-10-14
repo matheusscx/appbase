@@ -6,7 +6,7 @@ import forge from 'node-forge';
 import { SignedXml } from 'xml-crypto';
 import { certificadoDePrueba } from './__fixtures__/credenciales-prueba';
 import { DteError } from './dte.types';
-import { firmarNodo, leerCertificado } from './firma';
+import { firmarDocumento, firmarNodo, leerCertificado } from './firma';
 
 const DSIG = 'http://www.w3.org/2000/09/xmldsig#';
 const SII = 'http://www.sii.cl/SiiDte';
@@ -295,5 +295,62 @@ describe('firmarNodo', () => {
     it('un ID que no existe en el documento falla en vez de devolver el XML sin firmar', () => {
       expect(() => firmarNodo(dteConDocumento(), 'NoExiste', cert)).toThrow();
     });
+  });
+});
+
+describe('firmarDocumento', () => {
+  const { pfx, clave } = certificadoDePrueba();
+  const cert = leerCertificado(pfx, clave);
+
+  const SEMILLA_SII = '030530912644';
+  const DIGEST_SII = 'l2s9BqLppHaWo+w1Al1J5SsYScs=';
+  const getToken = (semilla: string) =>
+    `<?xml version="1.0" encoding="UTF-8"?>\n<getToken><item><Semilla>${semilla}</Semilla></item></getToken>`;
+
+  it('el digest del getToken de la semilla de ejemplo es el que publica el SII', () => {
+    const firmado = firmarDocumento(getToken(SEMILLA_SII), cert);
+    expect(firmado).toContain(`<DigestValue>${DIGEST_SII}</DigestValue>`);
+    expect(firmado).toContain('<Reference URI="">');
+    expect(firmado.endsWith('</Signature></getToken>')).toBe(true);
+  });
+
+  it('la firma verifica y quitar la Signature devuelve el documento original', () => {
+    const entrada = getToken(SEMILLA_SII);
+    const firmado = firmarDocumento(entrada, cert);
+    expect(verificar(firmado, cert.certificadoB64)).toBe(true);
+    expect(firmado.replace(/<Signature[\s\S]*<\/Signature>/, '')).toBe(entrada);
+  });
+
+  it('alterar la semilla de un documento firmado hace fallar la verificación', () => {
+    const firmado = firmarDocumento(getToken(SEMILLA_SII), cert);
+    expect(
+      verificar(
+        firmado.replace(SEMILLA_SII, '030530912645'),
+        cert.certificadoB64,
+      ),
+    ).toBe(false);
+  });
+
+  it('otra semilla da otro digest', () => {
+    const firmado = firmarDocumento(getToken('030530912645'), cert);
+    expect(firmado).toContain('<DigestValue>');
+    expect(firmado).not.toContain(DIGEST_SII);
+  });
+
+  it('el KeyInfo trae RSAKeyValue y X509Certificate, como el de firmarNodo', () => {
+    const firma = firmas(firmarDocumento(getToken(SEMILLA_SII), cert))[0];
+    const hijos = Array.from(
+      firma
+        .getElementsByTagNameNS(DSIG, 'KeyInfo')[0]
+        .getElementsByTagNameNS(DSIG, '*'),
+    ).map((e) => e.localName);
+    expect(hijos).toEqual([
+      'KeyValue',
+      'RSAKeyValue',
+      'Modulus',
+      'Exponent',
+      'X509Data',
+      'X509Certificate',
+    ]);
   });
 });

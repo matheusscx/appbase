@@ -18,6 +18,7 @@ export interface CertificadoLeido {
 }
 
 const C14N = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
+const ENVELOPED = 'http://www.w3.org/2000/09/xmldsig#enveloped-signature';
 const RSA_SHA1 = 'http://www.w3.org/2000/09/xmldsig#rsa-sha1';
 const SHA1 = 'http://www.w3.org/2000/09/xmldsig#sha1';
 
@@ -128,6 +129,24 @@ function finDelNodo(xml: string, id: string): number {
   throw new Error(`El elemento con ID="${id}" no se cierra`);
 }
 
+/** El firmador común: llave del certificado, C14N inclusivo, RSA-SHA1 y el KeyInfo del SII. */
+function firmador(cert: CertificadoLeido): SignedXml {
+  const jwk = new X509Certificate(
+    Buffer.from(cert.certificadoB64, 'base64'),
+  ).publicKey.export({ format: 'jwk' });
+  const b64 = (s: string) => Buffer.from(s, 'base64url').toString('base64');
+
+  return new SignedXml({
+    privateKey: createPrivateKey(cert.llavePrivadaPem),
+    canonicalizationAlgorithm: C14N,
+    signatureAlgorithm: RSA_SHA1,
+    // El RSAKeyValue y el certificado salen de la misma llave (el ejemplo del SII las trae cruzadas).
+    getKeyInfoContent: () =>
+      `<KeyValue><RSAKeyValue><Modulus>${b64(jwk.n!)}</Modulus><Exponent>${b64(jwk.e!)}</Exponent></RSAKeyValue></KeyValue>` +
+      `<X509Data><X509Certificate>${cert.certificadoB64}</X509Certificate></X509Data>`,
+  });
+}
+
 /**
  * Firma (XMLDSig, RSA-SHA1, C14N inclusivo) el nodo con `ID="id"` y pone la `<Signature>`
  * como su hermana siguiente, como en el ejemplo del SII.
@@ -144,20 +163,7 @@ export function firmarNodo(
 ): string {
   const fin = finDelNodo(xml, id);
 
-  const jwk = new X509Certificate(
-    Buffer.from(cert.certificadoB64, 'base64'),
-  ).publicKey.export({ format: 'jwk' });
-  const b64 = (s: string) => Buffer.from(s, 'base64url').toString('base64');
-
-  const sig = new SignedXml({
-    privateKey: createPrivateKey(cert.llavePrivadaPem),
-    canonicalizationAlgorithm: C14N,
-    signatureAlgorithm: RSA_SHA1,
-    // El RSAKeyValue y el certificado salen de la misma llave (el ejemplo del SII las trae cruzadas).
-    getKeyInfoContent: () =>
-      `<KeyValue><RSAKeyValue><Modulus>${b64(jwk.n!)}</Modulus><Exponent>${b64(jwk.e!)}</Exponent></RSAKeyValue></KeyValue>` +
-      `<X509Data><X509Certificate>${cert.certificadoB64}</X509Certificate></X509Data>`,
-  });
+  const sig = firmador(cert);
   // `idAttribute` se queda en el default (ya busca ID): pasarlo duplica el atributo y xml-crypto rechaza.
   sig.addReference({
     xpath: `//*[@ID='${id}']`,
@@ -167,4 +173,28 @@ export function firmarNodo(
   sig.computeSignature(xml);
 
   return xml.slice(0, fin) + sig.getSignatureXml() + xml.slice(fin);
+}
+
+/**
+ * Firma el documento entero (`Reference URI=""`, enveloped-signature + C14N) y deja la
+ * `<Signature>` como último hijo de la raíz. Es el XML `getToken` con que se pide el token al SII.
+ *
+ * Como `firmarNodo`, inserta la firma como texto antes del cierre de la raíz y no usa
+ * `getSignedXml()`, que reserializa. Supone que el último `</` del texto es el cierre de la
+ * raíz (sin comentarios ni instrucciones al final): vale para el `getToken` que arma el cliente.
+ */
+export function firmarDocumento(xml: string, cert: CertificadoLeido): string {
+  const cierre = xml.lastIndexOf('</');
+  if (cierre === -1) throw new Error('El documento no tiene elemento raíz');
+
+  const sig = firmador(cert);
+  sig.addReference({
+    xpath: '/*',
+    transforms: [ENVELOPED, C14N],
+    digestAlgorithm: SHA1,
+    isEmptyUri: true,
+  });
+  sig.computeSignature(xml);
+
+  return xml.slice(0, cierre) + sig.getSignatureXml() + xml.slice(cierre);
 }
