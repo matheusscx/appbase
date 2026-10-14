@@ -81,8 +81,10 @@ describe('armarDocumento', () => {
     expect(r.xml).toContain('<IndServicio>3</IndServicio>');
     expect(r.xml).not.toContain('IndMntNeto');
     expect(r.xml).not.toContain('<MedioPago>');
-    expect(r.xml).toContain('<RutProvSW>77777777-7</RutProvSW>');
-    expect(r.xml).toContain('<RznSocProvSW>Venka SpA</RznSocProvSW>');
+    expect(r.xml).toContain(
+      '</Receptor><RutProvSW>77777777-7</RutProvSW><RznSocProvSW>Venka SpA</RznSocProvSW><Totales>',
+    );
+    expect(r.xml).not.toMatch(/<Emisor>[^]*ProvSW[^]*<\/Emisor>/);
     expect(r.xml).toContain(
       '<MntNeto>3756</MntNeto><IVA>714</IVA><MntTotal>4470</MntTotal>',
     );
@@ -300,6 +302,17 @@ describe('armarDocumento', () => {
     expect(codigo(() => armar({ ...base, receptor: con('66666666-6') }))).toBe(
       'FALTA_IDENTIFICACION_135_UF',
     );
+  });
+
+  it('el código de sucursal de 9 dígitos sale entre GiroEmisor y DirOrigen y valida', async () => {
+    const d = boleta({
+      emisor: { ...boleta().emisor, cdgSiiSucur: '123456789' },
+    });
+    const r = armar(d);
+    expect(r.xml).toContain(
+      '</GiroEmisor><CdgSIISucur>123456789</CdgSIISucur><DirOrigen>',
+    );
+    expect(await validar(r.xml, 39)).toEqual({ valido: true, errores: [] });
   });
 
   it('RUT del emisor con dígito malo → RUT_INVALIDO', () => {

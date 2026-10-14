@@ -286,23 +286,6 @@
 														</xs:restriction>
 													</xs:simpleType>
 												</xs:element>
-												<!-- formato Boletas v4.2, campo 30 (agregado al v11) -->
-												<xs:element name="RutProvSW" type="SiiDte:RUTType" minOccurs="0">
-													<xs:annotation>
-														<xs:documentation>RUT del Proveedor del Software de Boleta Electronica</xs:documentation>
-													</xs:annotation>
-												</xs:element>
-												<!-- formato Boletas v4.2, campo 31 (agregado al v11) -->
-												<xs:element name="RznSocProvSW" minOccurs="0">
-													<xs:annotation>
-														<xs:documentation>Nombre o Razon Social del Proveedor del Software</xs:documentation>
-													</xs:annotation>
-													<xs:simpleType>
-														<xs:restriction base="xs:string">
-															<xs:maxLength value="100"/>
-														</xs:restriction>
-													</xs:simpleType>
-												</xs:element>
 											</xs:sequence>
 										</xs:complexType>
 									</xs:element>
@@ -431,6 +414,24 @@
 												</xs:element>
 											</xs:sequence>
 										</xs:complexType>
+									</xs:element>
+									<!-- formato Boletas v4.2, campos 30 y 31: el padre (Encabezado, entre Receptor y Totales) se infiere de la numeracion del formato; el SII no lo publica -->
+									<!-- formato Boletas v4.2, campo 30 (agregado al v11) -->
+									<xs:element name="RutProvSW" type="SiiDte:RUTType" minOccurs="0">
+										<xs:annotation>
+											<xs:documentation>RUT del Proveedor del Software de Boleta Electronica</xs:documentation>
+										</xs:annotation>
+									</xs:element>
+									<!-- formato Boletas v4.2, campo 31 (agregado al v11) -->
+									<xs:element name="RznSocProvSW" minOccurs="0">
+										<xs:annotation>
+											<xs:documentation>Nombre o Razon Social del Proveedor del Software</xs:documentation>
+										</xs:annotation>
+										<xs:simpleType>
+											<xs:restriction base="xs:string">
+												<xs:maxLength value="100"/>
+											</xs:restriction>
+										</xs:simpleType>
 									</xs:element>
 									<xs:element name="Totales">
 										<xs:annotation>

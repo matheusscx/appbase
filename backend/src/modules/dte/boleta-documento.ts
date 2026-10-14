@@ -77,12 +77,7 @@ export function armarDocumento(
       ? el('CdgSIISucur', t('CdgSIISucur', e.cdgSiiSucur, 9))
       : '') +
     el('DirOrigen', t('DirOrigen', e.direccion, 70)) +
-    el('CmnaOrigen', t('CmnaOrigen', e.comuna, 20)) +
-    el('RutProvSW', rutProv) +
-    el(
-      'RznSocProvSW',
-      t('RznSocProvSW', datos.proveedorSoftware.razonSocial, 100),
-    );
+    el('CmnaOrigen', t('CmnaOrigen', e.comuna, 20));
 
   const receptor =
     el('RUTRecep', rutRecep) +
@@ -91,6 +86,15 @@ export function armarDocumento(
     (r?.telefono
       ? el('TelefonoRecep', t('TelefonoRecep', r.telefono, 20))
       : '');
+
+  // Campos 30 y 31 del formato: hijos de Encabezado entre Receptor y Totales (el padre se
+  // infiere de la numeración, el SII no lo publica).
+  const proveedor =
+    el('RutProvSW', rutProv) +
+    el(
+      'RznSocProvSW',
+      t('RznSocProvSW', datos.proveedorSoftware.razonSocial, 100),
+    );
 
   // Sin MntNeto ni IVA en la 41 (y el IVA no admite 0 en el XSD): solo lo que vale algo.
   const m = datos.montos;
@@ -146,6 +150,7 @@ export function armarDocumento(
       el('IdDoc', idDoc) +
         el('Emisor', emisor) +
         el('Receptor', receptor) +
+        proveedor +
         el('Totales', totales),
     ) +
     detalle +
