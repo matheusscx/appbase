@@ -58,6 +58,8 @@ jobs:
       # CredencialesService (módulo pasarela) tira error en el constructor si falta
       # → sin esto, todo test e2e muere al bootear AppModule. Valor de test (32 bytes b64).
       PASARELA_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      # CifradoDteService (módulo dte) hace lo mismo con su propia clave. Valor de test.
+      DTE_ENCRYPTION_KEY: JLHn+lnKC1wCp+GmSRpUyuuBf8uwR18F9KyNsn24ews=
 
     steps:
       - uses: actions/checkout@v5
@@ -214,6 +216,7 @@ jobs:
       # en el mismo host, así que el destino es localhost.
       API_PROXY_TARGET: http://localhost:3000
       PASARELA_ENCRYPTION_KEY: MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=
+      DTE_ENCRYPTION_KEY: JLHn+lnKC1wCp+GmSRpUyuuBf8uwR18F9KyNsn24ews=
       # Límites de intentos (ADR-032): la suite entra cientos de veces con el
       # mismo admin y chocaría el de login en el primer minuto. El e2e de API no
       # lo necesita acá: lo fija `backend/test/setup-env.ts`. El secreto hace que

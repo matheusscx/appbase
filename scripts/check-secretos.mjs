@@ -15,7 +15,7 @@
 //      saltea con `git add -f`;
 //   2. formatos de proveedor que no se confunden con nada: tokens de GitHub, Google,
 //      AWS, Slack, Stripe y Anthropic, un JWT firmado y la cabecera de una clave privada PEM;
-//   3. una variable sensible del proyecto (`JWT_SECRET`, `PASARELA_ENCRYPTION_KEY`,
+//   3. una variable sensible del proyecto (`JWT_SECRET`, `PASARELA_ENCRYPTION_KEY`, `DTE_ENCRYPTION_KEY`,
 //      `SMTP_PASSWORD`, `GOOGLE_CLIENT_SECRET`, `RAILWAY_TOKEN`…) asignada a un literal,
 //      como default de una interpolación o como fallback en código;
 //   4. una URL de Postgres con el password escrito en ella;
@@ -52,6 +52,8 @@ const PERMITIDOS = new Set([
   '4acc5a41fffd5b02bdac6d2f0d7248959ee9ffea2d1e791638bf9eed82e62075',
   // .env.example y ci.yml: PASARELA_ENCRYPTION_KEY de prueba (base64 de un patrón fijo)
   '2cf5e6ec387461b4bf954f587ad4d957753fcbc48bf892b5e49996b90cf3b476',
+  // .env.example, docker-compose.yml, ci.yml y setup-env.ts: DTE_ENCRYPTION_KEY de prueba
+  '7ff842fdfa5bed3c11a3f81826602c46359e9428c33b596e91738ca4fb0d9640',
   // ci.yml: JWT_SECRET y JWT_REFRESH_SECRET del CI ("ci-only-not-a-real-secret")
   '684e3c6b566b714c1714349a36df3c00c79837585c0ec200dd11a11ac854e53a',
   'ea00e90e0b273717ec4bc625495c7ed7194306ffdefa0da498de893fdca554d8',
@@ -87,7 +89,7 @@ const FORMATOS = [
 ]
 
 const NOMBRES =
-  'JWT_(?:REFRESH_)?SECRET|PASARELA_ENCRYPTION_KEY|QZ_PRIVATE_KEY|SMTP_PASSWORD|' +
+  'JWT_(?:REFRESH_)?SECRET|PASARELA_ENCRYPTION_KEY|DTE_ENCRYPTION_KEY|QZ_PRIVATE_KEY|SMTP_PASSWORD|' +
   'GOOGLE_CLIENT_SECRET|RAILWAY_(?:API_)?TOKEN|GITHUB_TOKEN|DB_PASSWORD|POSTGRES_PASSWORD'
 // El valor entre comillas va hasta la comilla de cierre (puede tener espacios); sin
 // comillas, hasta el primer separador. El `:` seguido de `-` es el de un default.

@@ -16,3 +16,11 @@ if (process.env.DATABASE_URL) {
 // con el mismo admin y los chocaría en el primer minuto. La escala los vuelve
 // inalcanzables salvo para `limites.e2e-spec.ts`, que la baja a 1 para medirlos.
 process.env.LIMITES_ESCALA ??= '1000';
+
+// CifradoDteService (módulo dte) tira error en el constructor si falta su clave, y
+// AppModule la construye al bootear (una vez que el módulo dte lo registra). Los
+// `.env` de los worktrees creados antes del 2026-10-14 no la tienen: sin este
+// default, todo e2e de ese worktree muere al arrancar. Valor de test (32 bytes b64),
+// el mismo de `.env.example`.
+process.env.DTE_ENCRYPTION_KEY ??=
+  'JLHn+lnKC1wCp+GmSRpUyuuBf8uwR18F9KyNsn24ews=';
