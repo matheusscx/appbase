@@ -55,9 +55,31 @@ Las decisiones que lo moldean, todas del owner el 2026-10-14:
 | Certificado del dueño | Se guarda cifrado; la consulta legal o al SII va en paralelo | Frenar el diseño |
 
 El motor vive en `backend/src/modules/dte/` como **funciones puras**: no lee la base, el reloj ni
-la red, y no es un módulo de Nest todavía (sin providers, un módulo vacío sería código muerto;
-nace con el primer service, en el subproyecto 3 o 4). Detalle y reglas:
-[`features/emision-electronica.md`](../features/emision-electronica.md).
+la red. El módulo de Nest nació con el primer service, el del perfil fiscal (subproyecto 1, hecho
+el 2026-10-14), que guarda el certificado, los CAF y la cuenta de folios; el motor sigue siendo
+puro. Detalle y reglas: [`features/emision-electronica.md`](../features/emision-electronica.md).
+
+### El certificado y los CAF se cifran con una clave propia
+
+**Se cifran con `DTE_ENCRYPTION_KEY`**, no con `PASARELA_ENCRYPTION_KEY` (owner, 2026-10-14). El
+formato es el de [ADR-008](./008-cifrado-credenciales-pasarela.md) (`v1:<iv>:<tag>:<data>`,
+AES-256-GCM, 32 bytes en base64) y el único punto que lo usa es `CifradoDteService`. Por qué
+separada:
+
+- la llave privada del certificado firma en nombre de la empresa y la del CAF timbra sus folios:
+  si se filtra la clave de la pasarela, esas no deben caer con ella, ni al revés;
+- cada clave se rota por separado.
+
+Operación:
+
+- **Sin la variable el backend no arranca**, igual que con la de la pasarela. En Railway hay que
+  cargarla **antes** del push que la exige, con `openssl rand -base64 32` y un valor distinto del
+  de `.env.example` (ese es de desarrollo y de CI).
+- **Rotarla es manual, como en ADR-008, y no hay script**: descifrar con la clave vieja
+  `dte_certificados.credencial_cifrada` y `dte_cafs.xml_cifrado` (las dos columnas que cifra este
+  módulo; la primera es nula en los certificados reemplazados) y volver a cifrar con la nueva, en una
+  sola transacción, antes de cambiar la variable. Perder la clave sin respaldo deja el
+  certificado y los CAF ilegibles.
 
 ## Consequences
 
@@ -84,10 +106,9 @@ nace con el primer service, en el subproyecto 3 o 4). Detalle y reglas:
 
 ### Neutral
 
-- **Todavía no se emite nada al SII.** Falta guardar el documento, llevar los folios usados,
-  enviar y conectar con la venta (subproyectos 1, 3 y 4).
-- Siguen diferidos de ADR-010: el web service del SII (subproyecto 3), la gestión de folios
-  (subproyecto 1), y los impuestos adicionales (ILA) en la boleta, que el motor rechaza con
+- **Todavía no se emite nada al SII.** Falta guardar el documento, enviar y conectar con la
+  venta (subproyectos 3 y 4). El subproyecto 1 ya lleva la cuenta de los folios usados.
+- Siguen diferidos de ADR-010: el web service del SII (subproyecto 3), y los impuestos adicionales (ILA) en la boleta, que el motor rechaza con
   código hasta saber qué hace el SII con ellos.
 - Dependencias nuevas, aprobadas por el owner: `node-forge`, `xml-crypto` y `@xmldom/xmldom` en
   producción; `xmllint-wasm` solo en desarrollo.

@@ -1,8 +1,12 @@
-# Feature: Emisión electrónica — el motor de la boleta (sin envío)
+# Feature: Emisión electrónica — el motor de la boleta y el perfil fiscal del emisor (sin envío)
 
-**Status**: In Development — el motor está terminado; **todavía no se emite nada al SII**
+**Status**: In Development — el motor y el perfil fiscal están terminados; **todavía no se emite nada al SII**
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-10-14
+
+Este documento tiene dos partes: **el motor** (subproyecto 2, funciones puras) y, más abajo,
+[**el perfil fiscal del emisor**](#perfil-fiscal-del-emisor) (subproyecto 1: certificado, CAF y
+folios, con su pantalla).
 
 Decisión y razones: [ADR-033](../adr/033-emisor-dte-propio.md). Diseño:
 [`2026-10-14-motor-boleta-electronica-design.md`](../superpowers/specs/2026-10-14-motor-boleta-electronica-design.md).
@@ -18,8 +22,9 @@ Investigación de mercado y norma: [`2026-10-13-emision-electronica-sii.md`](../
 Un conjunto de **funciones puras** (`backend/src/modules/dte/`) que reciben los datos de una
 boleta (39 afecta, 41 exenta), un CAF y un certificado, y devuelven el `<DTE>` con su timbre
 (TED) y su firma, y el sobre `EnvioBOLETA` firmado que agrupa de 1 a 500 boletas. No lee la base,
-el reloj ni la red. No es un módulo de Nest todavía: sin controller, entity ni provider, nadie lo
-importa.
+el reloj ni la red. Las funciones siguen siendo puras aunque el módulo `dte` ya existe (nació con
+el perfil fiscal): el perfil usa `leerCaf` y `leerCertificado` al subir y al descifrar; nadie
+llama todavía a `emitirBoleta` ni a `armarEnvioBoleta`.
 
 ### Why does it exist?
 
@@ -30,12 +35,13 @@ RUT piloto: se prueba contra los XSD y contra la firma del ejemplo oficial, sin 
 ### Scope
 
 - Incluido: armar y firmar la boleta y el sobre; leer un CAF y un `.pfx`; verificar los montos;
-  rechazar con código lo que el SII rechazaría.
+  rechazar con código lo que el SII rechazaría. Lo que guarda el emisor y la cuenta de folios
+  está en el [perfil fiscal](#perfil-fiscal-del-emisor).
 - **No incluido** (cada cosa tiene su dueño):
-  - guardar el documento ni llevar la cuenta de los folios usados (subproyecto 1);
+  - guardar el documento (subproyecto 4; la cuenta de folios ya la lleva el perfil fiscal);
   - enviar al SII y reintentar (subproyecto 3);
   - leer `venta_documentos` o armar el contrato desde una venta (subproyecto 4);
-  - verificar la firma `FRMA` del SII sobre el CAF (subproyecto 1);
+  - verificar la firma `FRMA` del SII sobre el CAF (sigue abierto, ver el perfil fiscal);
   - impuestos adicionales (ILA): el motor los rechaza con código (ver más abajo);
   - factura, nota de crédito y nota de débito;
   - el resumen diario RCOF/RVD, derogado desde el 2022-08-01 (Res. 53/2022);
@@ -178,7 +184,8 @@ cd backend && npm test -- modules/dte
 ## Códigos de error
 
 `DteError.codigo` existe para que el subproyecto 4 le diga al cajero qué pasó. La fuente de
-verdad es `CodigoDteError` en `dte.types.ts`.
+verdad es `CodigoDteError` en `dte.types.ts`. Los cinco últimos los lanza el perfil fiscal, no el
+motor.
 
 | Código | Cuándo |
 |---|---|
@@ -208,6 +215,11 @@ verdad es `CodigoDteError` en `dte.types.ts`.
 | `FECHA_INVALIDA` | Una fecha no es `AAAA-MM-DD` / `AAAA-MM-DDTHH:MM:SS` o no existe en el calendario |
 | `MONTO_INVALIDO` | No es un número; cantidad ≤ 0, precio negativo, precio 0 sin cantidad, o cualquiera de los dos con más de 6 decimales; descuento o recargo no entero o negativo; un ajuste global en 0 |
 | `DEMASIADAS_LINEAS` | Más de 1.000 líneas o más de 20 descuentos/recargos globales |
+| `SIN_FOLIOS` | Del perfil fiscal: no queda un folio libre del tipo, o no se encuentra el CAF con que se tomó el folio |
+| `SIN_CERTIFICADO` | Del perfil fiscal: la razón social emisora no tiene certificado vigente |
+| `CERTIFICADO_VENCIDO` | Del perfil fiscal: el certificado vigente ya venció |
+| `PERFIL_INCOMPLETO` | Del perfil fiscal: falta giro, comuna, dirección, ambiente o resolución |
+| `AMBIENTE_DISTINTO` | Del perfil fiscal: la razón social cambió de ambiente entre tomar el folio y firmar con su CAF |
 
 ---
 
@@ -228,6 +240,196 @@ son, riesgos, no hechos. Cada una tiene un arreglo acotado si el SII exige otra 
 Además: el esquema real del SII (el que valida su servidor, no el v11 de 2007) se mide en la
 certificación; y el ejemplo oficial no es una boleta ni trae `RSR` por defecto.
 
+## Perfil fiscal del emisor
+
+Subproyecto 1 de 6 (hecho el 2026-10-14). Guarda lo que el motor necesita y no tenía: los datos
+completos del emisor, su certificado digital, sus CAF y la cuenta de los folios. Más una pantalla
+para que el admin lo cargue. **Todavía no se emite nada**: ninguna venta toma un folio (subproyecto
+4). Código: `backend/src/modules/dte/` (`perfil-fiscal.service.ts`, `folios.service.ts`,
+`perfil-fiscal.ts`) y `frontend/app/pages/configuracion/boleta-electronica.vue`.
+
+### Quién emite y dónde viven los datos
+
+- **Un solo RUT emisor por tenant** (owner): el de la razón social **preferida y habilitada**, la
+  que ya imprime el ticket. Sin una que cumpla las dos no hay emisor y el perfil lo dice. La
+  emisión **no** usa el fallback "la primera habilitada" del frontend: el RUT con que se emite se
+  elige, no se deduce por orden alfabético.
+- `razones_sociales` suma `giro`, `comuna`, `ambiente_sii` (`certificacion` o `produccion`),
+  `fecha_resolucion` y `numero_resolucion` (en certificación es 0, por eso se pregunta por `null`).
+  Todas nulas: una razón social que no emite las deja vacías. Se editan en
+  `/configuracion/boleta-electronica` (`PATCH /dte/perfil`), no en Razones sociales
+  ([`tenants-razones-sociales.md`](./tenants-razones-sociales.md)).
+- `dte_certificados`: una fila por certificado subido, **uno vigente por razón social** (índice
+  único parcial). Guarda en claro lo que se muestra (`rut_firmante`, `nombre_firmante`, `vence_el`)
+  y cifrada la llave y el certificado (`credencial_cifrada`).
+- `dte_cafs`: una fila por CAF. El `<AUTORIZACION>` entero va cifrado (`xml_cifrado`) porque trae
+  la llave privada del rango. `siguiente_folio` es el próximo a entregar (nace en `desde`); el CAF
+  está agotado cuando pasa de `hasta` (CHECK: `desde ≤ siguiente_folio ≤ hasta + 1`). Los usados se
+  derivan (`siguiente_folio − desde`): no hay tabla de folios, el folio de cada documento lo guarda
+  el documento.
+- **El ambiente es parte de la clave del CAF** (índice único `razon_social_id, tipo, ambiente,
+  desde` y el chequeo de rangos que se pisan). Por qué: al terminar la certificación la empresa
+  pasa a producción y sube CAF de producción, que el SII numera aparte; sin el ambiente en la
+  clave chocarían con los de certificación ya usados. El CAF toma el `ambiente_sii` de la razón
+  social **al subirlo**.
+
+### Cifrado
+
+- Clave propia, `DTE_ENCRYPTION_KEY` (32 bytes en base64), separada de la de la pasarela. Mismo
+  formato `v1:<iv>:<tag>:<data>` (AES-256-GCM). Detalle y rotación en
+  [ADR-033](../adr/033-emisor-dte-propio.md).
+- `CifradoDteService` es el único punto que cifra y descifra estos blobs. Copia las dos funciones
+  de `CredencialesService` (el repo acepta un duplicado; se extrae a la tercera).
+- **Sin la variable el backend no arranca.** En Railway hay que cargarla antes del push que la
+  exige, o el deploy cae.
+- **Ninguna ruta devuelve un blob**, cifrado ni descifrado, ni el PEM ni la clave del `.pfx`.
+
+### Lo que se valida al subir
+
+Todo rechazo es un 400 con un mensaje para el dueño del local.
+
+- **Certificado** (`POST /dte/certificado`, `{pfxBase64, clave}`): se abre con `leerCertificado`.
+  Clave incorrecta, archivo que no es `.pfx` o certificado vencido (hora del servidor) → 400. **El
+  `.pfx` y la clave se descartan**: se guardan solo la llave y el certificado, porque guardar la
+  clave del dueño no hace falta para firmar. El RUT del firmante **no** se compara con el del
+  emisor: es una persona (el representante), no la empresa. **Reemplazar** marca el anterior con
+  `reemplazado_el` y le pone en null `credencial_cifrada` (un `UPDATE`, no un `DELETE`): no se
+  guarda la llave de un certificado que ya no se usa.
+- **CAF** (`POST /dte/cafs`, `{xmlBase64}`): el archivo del SII es ISO-8859-1 y el
+  `TextDecoder('iso-8859-1')` del navegador en realidad decodifica windows-1252 (los bytes
+  0x80–0x9F cambian), así que `leerCaf` lo rechazaría. El navegador manda los bytes en base64 y el
+  backend los decodifica como `latin1`. Se rechaza si:
+  - la razón social no tiene ambiente elegido;
+  - el tipo no es 39 ni 41 (factura y nota de crédito no entran);
+  - el RUT del CAF no es el de la razón social emisora;
+  - el rango empieza antes del folio 1, o `hasta` o `idk` no caben en un `integer` de Postgres;
+  - el rango se pisa con otro CAF del mismo tipo y ambiente sin borrar (rechaza también subir dos
+    veces el mismo archivo).
+  Además `leerCaf` ya comprueba que la llave privada sea par de la pública.
+- **Borrar un CAF** (`DELETE /dte/cafs/:id`): soft delete **solo si no entregó ningún folio**
+  (`siguiente_folio = desde`); sirve para arreglar un CAF subido por error. Uno usado no se
+  borra (400): sus folios ya están en documentos. Uno que no existe es 404.
+- **Concurrencia:** las subidas toman con `FOR UPDATE` la fila de la razón social, y lo mismo hacen
+  su edición y su borrado (`TenantsService`). Así un doble clic no mete el mismo rango dos veces ni
+  el índice del certificado vigente choca, y un cambio de RUT no se cruza con una subida.
+- **Una razón social con certificado vigente o un CAF no borrado no cambia de RUT ni se borra**
+  (400): si cambiara, los folios quedarían de otro RUT. Reescribir el mismo RUT con otro formato
+  no es un cambio.
+
+### Tomar un folio
+
+`FoliosService.tomarFolio(tenantId, tipo) → { cafId, folio }`. Es un método sin ruta que **corre
+dentro de la transacción de quien lo pide** (falla si no hay una activa): el subproyecto 4 decide en
+qué punto de la suya lo llama, respetando el orden de bloqueo de filas del proyecto
+(`docs/patterns/backend.md`). Este método bloquea una sola fila, la del CAF.
+
+- Un `UPDATE … WHERE caf_id = (SELECT … ORDER BY desde LIMIT 1 FOR UPDATE)` toma el CAF de la
+  razón social emisora, del tipo y del ambiente de la razón social, con folios y de menor `desde`,
+  le suma 1 a `siguiente_folio` y devuelve el valor anterior.
+- **Dos cajas a la vez:** la segunda espera el bloqueo y sale con el folio siguiente. Nunca
+  repite. **Si la venta se cae**, el rollback deshace la suma y el folio vuelve; una secuencia de
+  Postgres no vuelve, y cada hueco es un folio que hay que anular ante el SII.
+- **Reintenta una vez, y el porqué se midió.** En READ COMMITTED, si el CAF bloqueado se agota
+  mientras se espera su bloqueo y ya existía otro, Postgres salta al siguiente dentro de la misma
+  sentencia. Lo que da vacío es otro caso: **que se confirme un CAF nuevo mientras la sentencia
+  espera el bloqueo**, porque no estaba en su foto. La segunda sentencia toma una foto nueva y lo
+  ve. Sin folios tras los dos intentos → `SIN_FOLIOS`.
+
+### Las credenciales para firmar
+
+`FoliosService.credencialesParaFirmar(tenantId, cafId, ahora) → { caf, certificado, emisor,
+caratula }`. También sin ruta: el JSON descifrado no sale del proceso. Descifra el CAF y el
+certificado vigente y arma `EmisorBoleta` y la carátula (el receptor del envío es el SII,
+`60803000-K`). Falla con código si:
+
+- falta el giro, la comuna, la dirección, el ambiente o la resolución → `PERFIL_INCOMPLETO`;
+- no hay certificado vigente → `SIN_CERTIFICADO`; venció → `CERTIFICADO_VENCIDO`;
+- el CAF no existe o es de otro tenant → `SIN_FOLIOS`;
+- **el ambiente del CAF no es el actual de la razón social → `AMBIENTE_DISTINTO`.** `tomarFolio`
+  bloquea solo el CAF, y en READ COMMITTED un `PATCH` del ambiente puede confirmarse entre
+  `tomarFolio` y esta lectura; firmar con el CAF del otro ambiente quemaría el folio.
+
+### El estado del perfil
+
+`GET /dte/perfil` devuelve todo lo que la pantalla muestra y el dato que el aviso al cajero va a
+necesitar. La ruta es solo del admin del tenant: un cajero recibe 403, así que ese aviso (subproyecto 4)
+necesita su propia ruta o su propio guard.
+Son tres consultas fijas (emisor, certificado vigente, CAF), sin importar cuántos CAF haya.
+
+- **Emisor** (`null` si no hay una preferida y habilitada), **certificado vigente** (firmante, RUT,
+  `venceEl`) y **CAF** (tipo, rango, usados, restantes, ambiente, fecha, y `borrable`).
+- `faltantes`, lo que impide emitir (`evaluarPerfil`, pura): sin emisor, RUT inválido, sin giro,
+  comuna, dirección, ambiente o resolución, texto fuera de ISO-8859-1 o más largo de lo que admite
+  el SII (nombre 100, giro 80, comuna 20, dirección 70), sin certificado o vencido, y sin folios
+  de boleta (39) **del ambiente vigente**. Esos límites se validan acá y no en el CRUD de razones
+  sociales: una que no emite sigue aceptando 255.
+- `avisos`, lo que conviene mirar ya: menos de **100** folios de un tipo (se suman todos sus CAF
+  del ambiente vigente) o certificado que vence en menos de **30** días. Son constantes del
+  módulo (`UMBRAL_FOLIOS`, `DIAS_AVISO_CERTIFICADO`); que sean configurables se decide cuando
+  alguien lo pida.
+- **Cambiar de ambiente** con CAF cargados no los borra: dejan de servir (el `tomarFolio` los
+  ignora) y la pantalla los muestra como de otro ambiente. Es el paso normal al terminar la
+  certificación.
+
+### Permisos y pantalla
+
+- Las cinco rutas llevan `TenantAdminGuard` (configuración del tenant, no un módulo RBAC) y el
+  `tenant_id` sale del token.
+- `/configuracion/boleta-electronica`: arriba lo que falta para emitir, y tres tarjetas: emisor
+  (giro, comuna, ambiente y resolución se editan acá; nombre, RUT y dirección, de solo lectura con
+  link a Razones sociales), certificado (firmante, vencimiento, subir o reemplazar; nunca muestra
+  la clave) y folios (tabla de CAF, subir, y borrar solo en los sin folios usados).
+- **El menú de Configuración la muestra solo al superadmin** (owner, 2026-10-14): un comercio no ve
+  una pantalla que promete boletas que todavía no salen. La **ruta** sigue siendo del admin del
+  tenant; abrirla a todos es quitar `auth.isSuperadmin` de `configuracion.vue`, y toca decidirlo
+  con el subproyecto 4.
+
+### Pruebas
+
+Unitarias (`perfil-fiscal.spec.ts`, `perfil-fiscal.service.spec.ts`, `folios.service.spec.ts`,
+`cifrado-dte.service.spec.ts`), e2e contra Postgres real (`backend/test/dte-perfil.e2e-spec.ts`,
+`dte-folios.e2e-spec.ts`: 20 `tomarFolio` en paralelo dan 20 folios distintos y consecutivos,
+rollback que devuelve el folio, paso al CAF siguiente, ambientes y tenants cruzados, ninguna
+respuesta con un blob) y Playwright de la pantalla (`frontend/e2e/configuracion/boleta-electronica.spec.ts`).
+Las reglas de subida y de `evaluarPerfil` se revisaron con mutantes: los fixtures evitan el 1 y los
+rangos que empiezan igual.
+
+### Lo que queda abierto
+
+- **Sin ruta para quitar el certificado vigente ni un CAF que ya entregó folios** (decisión de
+  producto abierta, del owner): una razón social que ya emitió queda fija, sin poder cambiar de RUT
+  ni borrarse, aunque la empresa cierre o cambie de RUT. Hoy solo se reemplaza el certificado.
+- **Un CAF de producción subido mientras la razón social está en certificación no se detecta.** El
+  CAF toma el ambiente de la razón social al subirlo. El `IDK` no sirve para deducirlo: según el
+  instructivo técnico del SII (A.1, letra h) identifica la llave pública del SII que verifica la
+  firma del CAF, no un ambiente. Se guarda solo para mostrarlo.
+- **La firma del SII sobre el CAF (`FRMA`) no se verifica.** Hace falta la llave pública del SII y
+  una investigación aparte. Un CAF adulterado lo rechaza el SII al recibir el envío.
+- **¿Vencen los CAF de boleta?** La investigación no lo encontró. Se guarda `FA` y no se valida
+  un vencimiento.
+- **Custodia del certificado:** la consulta legal o al SII sigue en paralelo. El diseño guarda lo
+  mínimo para firmar.
+- **`CdgSIISucur` por local:** los locales (`ubicaciones`) no tienen dirección ni código SII; la
+  boleta sale con la dirección de la razón social.
+- **Cambio de ambiente o de razón social preferida después de `credencialesParaFirmar`:** esa
+  lectura no bloquea nada, así que el subproyecto 4 tiene que decidir en qué punto de su
+  transacción la hace para que no se cruce con un `PATCH` (hoy solo `AMBIENTE_DISTINTO` lo cubre,
+  y solo entre `tomarFolio` y ella).
+- **El aviso al cajero** (pocos folios, certificado por vencer) llega con el subproyecto 4. Este
+  deja la pantalla y el dato que ese aviso va a necesitar (la ruta es de admin: el aviso, que lo ve el
+  cajero, tiene que traer la suya).
+- **Los CAF de una ex emisora no se ven en ninguna parte.** El perfil lista solo los CAF de la
+  razón social preferida de hoy. Una razón social que dejó de ser preferida sigue protegida (no
+  cambia de RUT ni se borra mientras tenga folios o certificado), pero sus CAF no aparecen en la
+  pantalla, así que no se pueden quitar desde ahí: el camino es volver a marcarla preferida.
+- **`setPreferida` no toma el bloqueo de la razón social.** Una subida de CAF o de certificado que
+  espera ese bloqueo puede dar un 400 "marca una preferida" que no corresponde, o dejar el CAF en
+  una razón social que acaba de dejar de ser preferida. No hay interbloqueo y los datos quedan
+  consistentes; el costo es un rechazo o un CAF en la razón social anterior.
+- **No hay script de rotación** de `DTE_ENCRYPTION_KEY` (ver ADR-033).
+
+---
+
 ## Pendiente de decisión
 
 El tratamiento de **ILA y otros impuestos adicionales** en la boleta no está decidido (la
@@ -239,6 +441,8 @@ frente aparte (`docs/agent/desarrollo-nuevo.md`).
 ## Related Features
 
 - [ADR-033](../adr/033-emisor-dte-propio.md) — por qué se construye y qué falta.
+- [`tenants-razones-sociales.md`](./tenants-razones-sociales.md) — las columnas del emisor y la
+  protección del RUT.
 - [`impuestos.md`](./impuestos.md) — el IVA congelado y la deuda del peso de la góndola.
 - [`ventas.md`](./ventas.md) — `venta_documentos` (lo que el subproyecto 4 traducirá al contrato)
   y la identidad sobre 135 UF.

@@ -122,8 +122,9 @@ todo compatible con SII, sin integrarlo.
 
   ✅ **Actualización 2026-10-14 — el diferimiento se cerró para la boleta.** La generación del
   XML, el timbre y la firma de la boleta (39/41) se construyeron como un motor propio de
-  funciones puras, sin envío. Decisión, razones y lo que sigue diferido (folios, web service del
-  SII, ILA, factura): [ADR-033](./033-emisor-dte-propio.md). Detalle:
+  funciones puras, sin envío. Decisión, razones y lo que sigue diferido (web service del
+  SII, ILA, factura; los folios/CAF se cerraron el mismo día con el perfil fiscal del emisor,
+  subproyecto 1): [ADR-033](./033-emisor-dte-propio.md). Detalle:
   [`features/emision-electronica.md`](../features/emision-electronica.md).
 
   ⚠️ **Actualización 2026-08-21 — este diferimiento dejó de ser neutro.** El cierre del

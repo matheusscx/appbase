@@ -362,14 +362,21 @@ es parte del enunciado y viaja con ella.
   2026-10-14, por AskUserQuestion después de la
   [investigación](investigaciones/2026-10-13-emision-electronica-sii.md): construir en vez de
   contratar un proveedor). Seis subproyectos, cada uno con su spec, plan y verificación:
-  1. perfil fiscal: datos del emisor, certificado cifrado, CAF y folios usados;
+  1. ✅ **perfil fiscal** (hecho el 2026-10-14, último commit de código `6fb44592`): datos del
+     emisor, certificado cifrado, CAF y folios usados, con su pantalla
+     (`/configuracion/boleta-electronica`, el menú solo para el superadmin). Detalle en
+     [`features/emision-electronica.md`](../features/emision-electronica.md), clave de cifrado en
+     [ADR-033](../adr/033-emisor-dte-propio.md). **Tampoco emite nada al SII**: ninguna venta toma
+     un folio todavía;
   2. ✅ **motor de la boleta** (hecho el 2026-10-14, último commit de código `2d92199e`): spec en
      [`2026-10-14-motor-boleta-electronica-design.md`](../superpowers/specs/2026-10-14-motor-boleta-electronica-design.md),
      decisión en [ADR-033](../adr/033-emisor-dte-propio.md), detalle en
      [`features/emision-electronica.md`](../features/emision-electronica.md). **No emite nada al
-     SII**: son funciones puras que nadie importa todavía;
-  3. cliente del SII y cola de envío;
-  4. conexión con la venta y la nota de crédito;
+     SII**: son funciones puras que nadie llama todavía para emitir;
+  3. cliente del SII y cola de envío (sigue; recibe el sobre que arma el motor con lo que entrega
+     `credencialesParaFirmar`);
+  4. conexión con la venta y la nota de crédito (llama a `tomarFolio` dentro de la transacción de
+     la venta; abre la pantalla a todos los admin y trae el aviso al cajero);
   5. certificación;
   6. intercambio de factura.
 
@@ -380,6 +387,18 @@ es parte del enunciado y viaja con ella.
 
   **Decidido por el owner (2026-10-14):** `CdgIntRecep` no se envía sobre 135 UF, y la línea
   gratis sale sin `PrcItem` y con `MontoItem` 0 (`features/emision-electronica.md`).
+
+  **Lo que dejó el perfil fiscal y falta decidir o hacer** (detalle en
+  `features/emision-electronica.md`, § "Lo que queda abierto"):
+  - decisión del owner: **no hay ruta para quitar el certificado vigente ni un CAF que ya entregó
+    folios**, así que una razón social que ya emitió queda fija (sin cambiar de RUT ni borrarse);
+  - un CAF de producción subido mientras la razón social está en certificación no se detecta;
+  - la firma del SII sobre el CAF (`FRMA`) no se verifica;
+  - el vencimiento del CAF de boleta, la custodia del certificado y `CdgSIISucur` por local;
+  - no hay script de rotación de `DTE_ENCRYPTION_KEY`;
+  - para el subproyecto 4: en qué punto de su transacción pide el folio y las credenciales
+    (orden de bloqueo), y qué pasa si el ambiente o la razón social preferida cambian entre
+    medio.
 
   **Lo que dejó el motor y solo confirma la certificación (subproyecto 5):**
   - Riesgos de forma: aplanado del `<DD>`, namespaces del `<DTE>`, ubicación de
