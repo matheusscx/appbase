@@ -5,6 +5,7 @@ import { CifradoDteService } from './cifrado-dte.service';
 import { DteController } from './dte.controller';
 import { DteCaf } from './entities/dte-caf.entity';
 import { DteCertificado } from './entities/dte-certificado.entity';
+import { FoliosService } from './folios.service';
 import { PerfilFiscalService } from './perfil-fiscal.service';
 
 @Module({
@@ -12,7 +13,7 @@ import { PerfilFiscalService } from './perfil-fiscal.service';
     RepositoriosModule.forFeature([DteCertificado, DteCaf, RazonSocial]),
   ],
   controllers: [DteController],
-  providers: [PerfilFiscalService, CifradoDteService],
-  exports: [PerfilFiscalService, CifradoDteService],
+  providers: [PerfilFiscalService, CifradoDteService, FoliosService],
+  exports: [PerfilFiscalService, CifradoDteService, FoliosService],
 })
 export class DteModule {}
