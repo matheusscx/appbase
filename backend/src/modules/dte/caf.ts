@@ -8,13 +8,17 @@ import {
 import { DOMParser } from '@xmldom/xmldom';
 import { normalizarRut, rutValido } from '../../common/utils/rut.util';
 import { DteError, type TipoBoleta } from './dte.types';
-import { aLatin1 } from './texto';
+import { aLatin1, validarFecha } from './texto';
 
 export interface CafLeido {
   rutEmisor: string; // normalizado
   tipo: number; // TD
   desde: number; // RNG/D
   hasta: number; // RNG/H
+  /** `IDK`: la llave pública del SII que verifica la firma del CAF. No dice el ambiente. */
+  idk: number;
+  /** `FA`, AAAA-MM-DD. */
+  fechaAutorizacion: string;
   /** El nodo <CAF> tal cual, para copiarlo adentro del TED sin reserializar. */
   xmlCaf: string;
   llavePrivada: KeyObject; // RSASK
@@ -61,6 +65,16 @@ export function leerCaf(xmlAutorizacion: string): CafLeido {
   const desde = entero(rng, 'D');
   const hasta = entero(rng, 'H');
   if (desde > hasta) throw invalido('el rango está al revés');
+  const idk = entero(da, 'IDK');
+  let fechaAutorizacion: string;
+  try {
+    fechaAutorizacion = validarFecha('FA', texto(da, 'FA'));
+  } catch (e) {
+    if (e instanceof DteError && e.codigo === 'FECHA_INVALIDA') {
+      throw invalido('FA no es una fecha AAAA-MM-DD');
+    }
+    throw e;
+  }
 
   const rsapk = da.getElementsByTagName('RSAPK')[0];
   const b64aUrl = (s: string) =>
@@ -101,6 +115,8 @@ export function leerCaf(xmlAutorizacion: string): CafLeido {
     tipo,
     desde,
     hasta,
+    idk,
+    fechaAutorizacion,
     xmlCaf,
     llavePrivada,
     llavePublica,

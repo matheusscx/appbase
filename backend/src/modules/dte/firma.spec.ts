@@ -151,6 +151,24 @@ describe('leerCertificado', () => {
       '76543210-3',
     );
   });
+
+  it('devuelve el nombre del firmante y el vencimiento', () => {
+    const venceEl = new Date('2027-03-15T12:00:00Z');
+    const { pfx, clave } = certificadoDePrueba({
+      venceEl,
+      nombre: 'Ana Pérez',
+    });
+    const cert = leerCertificado(pfx, clave);
+    expect(cert.nombre).toBe('Ana Pérez');
+    expect(cert.venceEl.toISOString()).toBe(venceEl.toISOString());
+  });
+
+  it('por defecto el firmante es el de prueba y vence en 2036', () => {
+    const { pfx, clave } = certificadoDePrueba();
+    const cert = leerCertificado(pfx, clave);
+    expect(cert.nombre).toBe('Firmante de Prueba');
+    expect(cert.venceEl.toISOString()).toBe('2036-01-01T00:00:00.000Z');
+  });
 });
 
 describe('firmarNodo', () => {

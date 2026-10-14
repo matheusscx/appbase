@@ -106,7 +106,12 @@ export type CodigoDteError =
   | 'NRO_RESOL_INVALIDO'
   | 'FECHA_INVALIDA'
   | 'MONTO_INVALIDO'
-  | 'DEMASIADAS_LINEAS';
+  | 'DEMASIADAS_LINEAS'
+  // Los cuatro de abajo los usa el perfil fiscal del emisor (tarea 7), no el motor.
+  | 'SIN_FOLIOS' // no queda ningún folio libre en los CAF del tipo
+  | 'SIN_CERTIFICADO' // el emisor no subió el certificado digital
+  | 'CERTIFICADO_VENCIDO' // el certificado ya venció
+  | 'PERFIL_INCOMPLETO'; // falta algún dato del perfil fiscal para emitir
 
 /** Error del motor con un código por motivo, para que el que llama sepa qué pasó. */
 export class DteError extends Error {

@@ -82,7 +82,8 @@ Una fila por CAF subido.
 |---|---|
 | `tenant_id`, `razon_social_id` | Dueño |
 | `tipo` | 39 o 41 (CHECK) |
-| `rut_emisor`, `ambiente` | Leídos del CAF al subirlo |
+| `rut_emisor` | Leído del CAF al subirlo |
+| `ambiente` | El de la razón social al subirlo. No se lee del CAF (§ 3) |
 | `desde`, `hasta` | El rango (`RNG`) |
 | `siguiente_folio` | El próximo a entregar. Nace en `desde`. El CAF está agotado cuando `siguiente_folio > hasta` (CHECK: `desde ≤ siguiente_folio ≤ hasta + 1`) |
 | `fecha_autorizacion` | `FA` del CAF, para mostrar |
@@ -105,21 +106,18 @@ Los folios usados se derivan: `siguiente_folio − desde`. No hay una tabla de f
 - La clave y el `.pfx` **no se guardan ni se loguean**. El body de esta ruta queda fuera de cualquier log de request.
 - El RUT del firmante **no** se compara con el del emisor: es una persona (el representante), no la empresa. Que esté autorizado ante el SII no se puede verificar desde acá.
 
-**CAF:** `POST /dte/cafs` recibe `{xml}`. Se lee con `leerCaf` del motor, que ya comprueba que la llave privada sea par de la pública. Además:
+**CAF:** `POST /dte/cafs` recibe `{ xmlBase64 }`: el archivo del SII es ISO-8859-1 y el `TextDecoder('iso-8859-1')` del navegador en realidad decodifica windows-1252 (los bytes 0x80–0x9F cambian), así que `leerCaf` lo rechazaría; el navegador manda los bytes en base64 y el backend los decodifica con `Buffer.from(b64, 'base64').toString('latin1')`. Se lee con `leerCaf` del motor, que ya comprueba que la llave privada sea par de la pública. Además:
 - tipo 39 o 41;
 - RUT del CAF = RUT de la razón social emisora, normalizado;
-- ambiente del CAF = `ambiente_sii` de la razón social;
+- el CAF toma como ambiente el `ambiente_sii` de la razón social al subirlo; no se deduce del `IDK` (§ 8);
 - el rango no se pisa con otro CAF del mismo RUT y tipo que no esté borrado. Esto rechaza también subir dos veces el mismo archivo.
 
-**El ambiente del CAF** sale de su `IDK`. La fuente dice que el de certificación es 100. La **tarea 1 del plan lo confirma** contra un CAF de certificación real o documentación del SII, antes de escribir la regla. Si no se puede confirmar, la regla no se escribe y queda en § 8.
-
-`leerCaf` hoy no devuelve ni `IDK` ni `FA`, y `leerCertificado` no devuelve ni el vencimiento ni el nombre. El plan los agrega al motor, con su prueba.
+`leerCaf` devuelve además `idk` y `fechaAutorizacion` (`FA`), y `leerCertificado` devuelve `nombre` y `venceEl`; el plan los agregó al motor, con su prueba.
 
 **Borrar un CAF:** `DELETE /dte/cafs/:id` hace un soft delete **solo si no se tomó ningún folio** (`siguiente_folio = desde`). Sirve para arreglar un CAF subido por error. Uno usado no se borra: sus folios ya están en documentos.
 
 Todo rechazo es un 400 con un mensaje para el dueño del local. Por ejemplo:
 - "Este archivo de folios es de otro RUT (76.xxx.xxx-x)";
-- "Es un CAF de certificación y la empresa está en producción";
 - "Esos folios ya están cargados".
 
 ## 4. Tomar un folio
@@ -192,7 +190,7 @@ Los avisos de § 5 se muestran en la tarjeta que corresponde. Tokens del design 
 ## 7. Pruebas
 
 **Unitarias:**
-- Validaciones de subida con el CAF y el certificado de prueba de los fixtures del motor (`cafDePrueba`, `certificadoDePrueba`). Se suman un certificado vencido y un CAF de otro ambiente.
+- Validaciones de subida con el CAF y el certificado de prueba de los fixtures del motor (`cafDePrueba`, `certificadoDePrueba`). Se suma un certificado vencido.
 - El cálculo de `faltantes` y `avisos`.
 - Ida y vuelta del cifrado.
 - **Mutantes:** cada regla de § 3 y § 5 se revierte de a una, y algún caso tiene que caer. Los fixtures no usan el 1 ni rangos que empiecen igual.
@@ -213,7 +211,7 @@ Los avisos de § 5 se muestran en la tarjeta que corresponde. Tokens del design 
 
 ## 8. Lo que queda abierto
 
-- **El `IDK` de certificación** (§ 3): lo confirma la tarea 1 del plan.
+- **Un CAF de producción subido mientras la razón social está en certificación no se detecta.** El CAF toma el ambiente de la razón social al subirlo. El `IDK` no sirve para deducirlo: el instructivo técnico del SII (sección A.1, letra h) lo define como la identificación de la llave pública del SII que verifica la firma del CAF, o sea un id de llave y no un ambiente. Se guarda solo para mostrarlo.
 - **¿Vencen los CAF de boleta?** La investigación no lo encontró. Se guarda `FA` y no se valida un vencimiento.
 - **Custodia del certificado:** la consulta legal o al SII sigue en paralelo. Este diseño guarda lo mínimo para firmar.
 - **`DTE_ENCRYPTION_KEY` en Railway:** la carga el owner antes del push, o la cargo yo con su permiso.

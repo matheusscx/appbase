@@ -11,6 +11,10 @@ export interface CertificadoLeido {
   certificadoB64: string;
   /** Normalizado. Va como `RutEnvia` de la Carátula. */
   rut: string;
+  /** El `commonName` del sujeto, o `''` si no trae. */
+  nombre: string;
+  /** `validity.notAfter` del certificado. */
+  venceEl: Date;
 }
 
 const C14N = 'http://www.w3.org/TR/2001/REC-xml-c14n-20010315';
@@ -77,6 +81,13 @@ export function leerCertificado(pfx: Buffer, clave: string): CertificadoLeido {
       forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes(),
     ),
     rut,
+    nombre:
+      (
+        cert.subject.getField({ name: 'commonName' }) as {
+          value: string;
+        } | null
+      )?.value ?? '',
+    venceEl: cert.validity.notAfter,
   };
 }
 

@@ -59,6 +59,10 @@ export function certificadoDePrueba(
   opciones: {
     /** RUT del `serialNumber`; `null` lo omite (certificado sin RUT). */
     rut?: string | null;
+    /** `notAfter` del certificado; por defecto 2036-01-01. */
+    venceEl?: Date;
+    /** `commonName` del sujeto; por defecto 'Firmante de Prueba'. */
+    nombre?: string;
   } = {},
 ): {
   pfx: Buffer;
@@ -79,10 +83,16 @@ export function certificadoDePrueba(
   const cert = forge.pki.createCertificate();
   cert.publicKey = llavePublica;
   cert.serialNumber = '01';
-  cert.validity.notBefore = new Date('2026-01-01T00:00:00Z');
-  cert.validity.notAfter = new Date('2036-01-01T00:00:00Z');
+  const venceEl = opciones.venceEl ?? new Date('2036-01-01T00:00:00Z');
+  const desde = new Date('2026-01-01T00:00:00Z');
+  if (venceEl < desde) {
+    desde.setTime(venceEl.getTime());
+    desde.setUTCFullYear(desde.getUTCFullYear() - 1);
+  }
+  cert.validity.notBefore = desde;
+  cert.validity.notAfter = venceEl;
   const sujeto = [
-    { name: 'commonName', value: 'Firmante de Prueba' },
+    { name: 'commonName', value: opciones.nombre ?? 'Firmante de Prueba' },
     ...(rut === null ? [] : [{ name: 'serialNumber', value: rut }]),
   ];
   cert.setSubject(sujeto);

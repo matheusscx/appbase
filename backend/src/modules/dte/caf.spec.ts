@@ -124,6 +124,24 @@ describe('leerCaf', () => {
     expect(codigoDe(() => leerCaf('no es xml'))).toBe('CAF_INVALIDO');
     expect(codigoDe(() => leerCaf('<otra/>'))).toBe('CAF_INVALIDO');
   });
+
+  it('devuelve el IDK y la fecha de autorización', () => {
+    const leido = leerCaf(caf({ desde: 7, hasta: 19 }));
+    expect(leido.idk).toBe(100);
+    expect(leido.fechaAutorizacion).toBe('2026-10-01');
+  });
+
+  it('rechaza un CAF sin IDK o con un IDK que no es entero', () => {
+    const sin = caf().split('<IDK>100</IDK>').join('');
+    const noNumerico = caf().split('<IDK>100</IDK>').join('<IDK>abc</IDK>');
+    expect(codigoDe(() => leerCaf(sin))).toBe('CAF_INVALIDO');
+    expect(codigoDe(() => leerCaf(noNumerico))).toBe('CAF_INVALIDO');
+  });
+
+  it('rechaza un FA que no es fecha', () => {
+    const xml = caf().split('<FA>2026-10-01</FA>').join('<FA>ayer</FA>');
+    expect(codigoDe(() => leerCaf(xml))).toBe('CAF_INVALIDO');
+  });
 });
 
 describe('validarFolio', () => {
