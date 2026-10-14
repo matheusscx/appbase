@@ -277,7 +277,7 @@ CREATE TABLE "razones_sociales" (
   "telefono"        VARCHAR(50),
   "habilitado"      BOOLEAN     NOT NULL DEFAULT false,
   "preferida"       BOOLEAN     NOT NULL DEFAULT false,
-  -- Perfil fiscal del emisor DTE (spec perfil fiscal § 2.1): todo nulo hasta que se completa.
+  -- Perfil fiscal del emisor DTE (docs/features/emision-electronica.md, "Perfil fiscal del emisor"): todo nulo hasta que se completa.
   "giro"            VARCHAR(80),
   "comuna"          VARCHAR(20),
   "ambiente_sii"    TEXT,        -- 'certificacion' | 'produccion': decide qué CAF sirven
@@ -290,8 +290,10 @@ CREATE TABLE "razones_sociales" (
   CONSTRAINT chk_razones_sociales_numero_resolucion CHECK ("numero_resolucion" >= 0)
 );
 
--- Certificado del firmante de la razón social emisora (spec perfil fiscal § 2.2). Vigente hay
+-- Certificado del firmante de la razón social emisora (docs/features/emision-electronica.md, "Perfil fiscal del emisor"). Vigente hay
 -- uno por razón social; al reemplazarlo, el anterior queda con reemplazado_el y el blob en null.
+-- Los REFERENCES describen la relación, pero la base real (las migraciones) no crea estos FK y
+-- las entities tampoco declaran la relación.
 CREATE TABLE "dte_certificados" (
   "certificado_id"     UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   "tenant_id"          UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
@@ -309,8 +311,10 @@ CREATE INDEX "idx_dte_certificados_razon_social" ON "dte_certificados" ("razon_s
 CREATE UNIQUE INDEX "uq_dte_certificados_vigente" ON "dte_certificados" ("razon_social_id")
   WHERE "reemplazado_el" IS NULL AND "eliminado_el" IS NULL;
 
--- Un CAF subido (spec perfil fiscal § 2.3). siguiente_folio es el próximo a entregar; el CAF
+-- Un CAF subido (docs/features/emision-electronica.md, "Perfil fiscal del emisor"). siguiente_folio es el próximo a entregar; el CAF
 -- está agotado cuando pasa "hasta". El XML va cifrado porque trae RSASK.
+-- Los REFERENCES describen la relación, pero la base real (las migraciones) no crea estos FK y
+-- las entities tampoco declaran la relación.
 CREATE TABLE "dte_cafs" (
   "caf_id"             UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
   "tenant_id"          UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),

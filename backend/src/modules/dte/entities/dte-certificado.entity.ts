@@ -9,8 +9,8 @@ import {
 } from 'typeorm';
 
 /**
- * Certificado del firmante de la razón social emisora (spec perfil fiscal § 2.2). Vigente hay
- * uno por razón social; al reemplazarlo, el anterior queda con `reemplazado_el` y el blob en
+ * Certificado del firmante de la razón social emisora (`docs/features/emision-electronica.md`,
+ * "Perfil fiscal del emisor"). Vigente hay uno por razón social; al reemplazarlo, el anterior queda con `reemplazado_el` y el blob en
  * null: no se guarda la llave de un certificado que ya no firma.
  */
 @Entity('dte_certificados')

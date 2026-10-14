@@ -66,7 +66,13 @@ export function fechaChile(instante: Date): string {
   return `${de('day')}-${de('month')}-${de('year')}`;
 }
 
-const vacio = (valor: string | null) => valor === null || valor.trim() === '';
+/**
+ * Vacío para el perfil: nulo o solo espacios. Lo comparten `evaluarPerfil` y
+ * `credencialesParaFirmar`. El predicado solo promete el lado falso (si no es vacío, es un
+ * `string`): cuando da `true` el valor puede ser `'  '`, no `null`.
+ */
+export const vacio = (valor: string | null): valor is null =>
+  valor === null || valor.trim() === '';
 
 /**
  * Qué le falta al emisor para poder emitir boletas (`faltantes`) y qué conviene mirar ya

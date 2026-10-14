@@ -13,8 +13,8 @@ import type { TipoBoleta } from '../dte.types';
 export type AmbienteSii = 'certificacion' | 'produccion';
 
 /**
- * Un CAF subido (spec perfil fiscal § 2.3). `siguiente_folio` es el próximo a entregar; el CAF
- * está agotado cuando pasa `hasta`. Los usados se derivan (`siguiente_folio - desde`): el folio
+ * Un CAF subido (`docs/features/emision-electronica.md`, "Perfil fiscal del emisor").
+ * `siguiente_folio` es el próximo a entregar; el CAF está agotado cuando pasa `hasta`. Los usados se derivan (`siguiente_folio - desde`): el folio
  * de cada documento lo guarda el documento. El XML va cifrado porque trae `RSASK`.
  * El SII numera cada ambiente por separado: el mismo rango puede existir en certificación y en
  * producción, así que `ambiente` entra en la clave de unicidad de `desde`.

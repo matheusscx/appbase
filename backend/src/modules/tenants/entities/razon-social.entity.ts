@@ -46,7 +46,10 @@ export class RazonSocial {
   @Column({ type: 'varchar', length: 20, nullable: true })
   comuna: string | null;
 
-  /** Ambiente del SII en que emite: decide qué CAF sirven (perfil fiscal, spec § 2.1). */
+  /**
+   * Ambiente del SII en que emite: decide qué CAF sirven (`docs/features/emision-electronica.md`,
+   * "Perfil fiscal del emisor").
+   */
   @Column({ name: 'ambiente_sii', type: 'text', nullable: true })
   ambienteSii: AmbienteSii | null;
 

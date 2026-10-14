@@ -8,6 +8,7 @@ import { CifradoDteService } from './cifrado-dte.service';
 import { DteError, type EmisorBoleta, type TipoBoleta } from './dte.types';
 import type { CaratulaEnvio } from './envio-boleta';
 import type { CertificadoLeido } from './firma';
+import { vacio } from './perfil-fiscal';
 
 /** El SII es siempre quien recibe el envío de boletas. */
 const RUT_SII = '60803000-K';
@@ -128,9 +129,9 @@ export class FoliosService {
         'PERFIL_INCOMPLETO',
         `Falta completar ${campo} en el perfil fiscal para poder emitir`,
       );
-    if (!fila.giro) throw incompleto('el giro');
-    if (!fila.comuna) throw incompleto('la comuna');
-    if (!fila.direccion) throw incompleto('la dirección');
+    if (vacio(fila.giro)) throw incompleto('el giro');
+    if (vacio(fila.comuna)) throw incompleto('la comuna');
+    if (vacio(fila.direccion)) throw incompleto('la dirección');
     if (!fila.ambiente_sii)
       throw incompleto('el ambiente (certificación o producción)');
     if (!fila.fecha_resolucion)

@@ -247,6 +247,25 @@ describe('FoliosService', () => {
       },
     );
 
+    it.each([
+      ['giro', 'el giro'],
+      ['comuna', 'la comuna'],
+      ['direccion', 'la dirección'],
+    ])(
+      '%s con solo espacios cuenta como vacío (igual que evaluarPerfil): PERFIL_INCOMPLETO',
+      async (columna, texto) => {
+        db.query.mockResolvedValueOnce([filaCaf({ [columna]: '   ' })]);
+
+        const error = await service
+          .credencialesParaFirmar(TENANT, CAF_ID, AHORA)
+          .catch((e) => e);
+        expect(error).toBeInstanceOf(DteError);
+        expect((error as DteError).codigo).toBe('PERFIL_INCOMPLETO');
+        expect((error as DteError).message).toContain(texto);
+        expect(db.query).toHaveBeenCalledTimes(1);
+      },
+    );
+
     it('el CAF es de otro ambiente que el de la empresa: AMBIENTE_DISTINTO, sin buscar el certificado', async () => {
       db.query.mockResolvedValueOnce([filaCaf({ ambiente_sii: 'produccion' })]);
 
