@@ -61,7 +61,7 @@ const cafXml = (razonSocial?: string) =>
 const dd = (ted: string) =>
   ted.slice(ted.indexOf('<DD>'), ted.indexOf('</DD>') + '</DD>'.length);
 
-/** La regla del SII (medida en la Task 1): sin los blancos entre tags, en latin1. */
+/** La regla del SII (medida contra el ejemplo del SII): sin los blancos entre tags, en latin1. */
 const aplanado = (ted: string) => dd(ted).replace(/>\s+</g, '><');
 
 const frmt = (ted: string) =>

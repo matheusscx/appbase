@@ -1,8 +1,10 @@
 import { DteError } from './dte.types';
 import {
   aLatin1,
+  el,
   escaparXml,
   validarFecha,
+  rut,
   validarFechaHora,
   validarTexto,
 } from './texto';
@@ -149,6 +151,26 @@ describe('validarFechaHora', () => {
     expect(fechaMala(() => validarFechaHora('TSTED', f))).toBe(
       'FECHA_INVALIDA',
     );
+  });
+});
+
+describe('el', () => {
+  it('arma el par de tags, también vacío: nunca la forma <X/>', () => {
+    expect(el('RSR', 'Juana')).toBe('<RSR>Juana</RSR>');
+    expect(el('RSR', '')).toBe('<RSR></RSR>');
+  });
+});
+
+describe('rut', () => {
+  it('devuelve el RUT normalizado', () => {
+    expect(rut('RUTEmisor', '76.543.210-3')).toBe('76543210-3');
+  });
+
+  it('un RUT con el dígito malo da RUT_INVALIDO y nombra el campo', () => {
+    expect(() => rut('RUTRecep', '12.345.678-9')).toThrow(
+      expect.objectContaining({ codigo: 'RUT_INVALIDO' }),
+    );
+    expect(() => rut('RUTRecep', '12.345.678-9')).toThrow(/RUTRecep/);
   });
 });
 

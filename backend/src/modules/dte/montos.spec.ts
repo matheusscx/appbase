@@ -227,7 +227,7 @@ describe('verificarMontos', () => {
     ).toBe('MONTO_NO_ENTERO');
   });
 
-  it('total $0 → TOTAL_NO_POSITIVO (Review Focus 4)', () => {
+  it('total $0 → TOTAL_NO_POSITIVO', () => {
     const d = boleta({
       lineas: [
         linea({ monto: '0', cantidad: undefined, precioUnitario: undefined }),
@@ -243,7 +243,7 @@ describe('verificarMontos', () => {
     expect(codigo(() => verificarMontos(d))).toBe('TOTAL_NO_POSITIVO');
   });
 
-  it('línea negativa → MONTO_NEGATIVO (Review Focus 4)', () => {
+  it('línea negativa → MONTO_NEGATIVO', () => {
     const d = boleta({
       lineas: [
         linea(),

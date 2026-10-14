@@ -1,16 +1,21 @@
 import Decimal from 'decimal.js';
 import { normalizarRut, rutValido } from '../../common/utils/rut.util';
-import { type DatosBoleta, DteError } from './dte.types';
+import {
+  type DatosBoleta,
+  DteError,
+  MAX_NOMBRE_ITEM,
+  MAX_NOMBRE_RECEPTOR,
+  RUT_GENERICO,
+} from './dte.types';
 import { verificarMontos } from './montos';
 import {
+  el,
   escaparXml,
+  rut,
   validarFecha,
   validarFechaHora,
   validarTexto,
 } from './texto';
-
-/** RUT genérico del receptor cuando la boleta no lo identifica (Formato Boletas v4.2, campo 18). */
-const RUT_GENERICO = '66666666-6';
 
 /** Texto de un campo del XML: validado contra su largo y escapado. */
 const t = (campo: string, valor: string, max: number) =>
@@ -18,17 +23,6 @@ const t = (campo: string, valor: string, max: number) =>
 
 /** Número sin ceros de relleno ni notación científica: `Decimal`, nunca `number`. */
 const num = (v: string) => new Decimal(v).toFixed();
-
-const el = (tag: string, valor: string) => `<${tag}>${valor}</${tag}>`;
-
-function rut(campo: string, valor: string): string {
-  if (!rutValido(valor))
-    throw new DteError(
-      'RUT_INVALIDO',
-      `${campo} no es un RUT válido: "${valor}"`,
-    );
-  return normalizarRut(valor);
-}
 
 /** `CdgSIISucur` es un entero positivo de hasta 9 dígitos (campo 14): sin ceros a la izquierda. */
 function sucursal(valor: string): string {
@@ -43,7 +37,7 @@ function sucursal(valor: string): string {
 /**
  * Arma el `<Documento>` de la boleta con el orden del XSD (EnvioBOLETA v11 + campos del
  * formato v4.2). Antes de escribir una línea verifica los montos y valida todo texto:
- * lo que sale es exactamente lo congelado, o no sale. El `<DTE>` y el sobre son de la Task 8.
+ * lo que sale es exactamente lo congelado, o no sale.
  */
 export function armarDocumento(
   datos: DatosBoleta,
@@ -96,7 +90,9 @@ export function armarDocumento(
 
   const receptor =
     el('RUTRecep', rutRecep) +
-    (r?.nombre ? el('RznSocRecep', t('RznSocRecep', r.nombre, 100)) : '') +
+    (r?.nombre
+      ? el('RznSocRecep', t('RznSocRecep', r.nombre, MAX_NOMBRE_RECEPTOR))
+      : '') +
     (r?.correo ? el('CorreoRecep', t('CorreoRecep', r.correo, 80)) : '') +
     (r?.telefono
       ? el('TelefonoRecep', t('TelefonoRecep', r.telefono, 20))
@@ -126,7 +122,10 @@ export function armarDocumento(
         'Detalle',
         el('NroLinDet', String(i + 1)) +
           (l.exenta ? el('IndExe', '1') : '') +
-          el('NmbItem', t(`NmbItem de la línea ${i + 1}`, l.nombre, 80)) +
+          el(
+            'NmbItem',
+            t(`NmbItem de la línea ${i + 1}`, l.nombre, MAX_NOMBRE_ITEM),
+          ) +
           (l.cantidad === undefined ? '' : el('QtyItem', num(l.cantidad))) +
           (l.precioUnitario === undefined
             ? ''

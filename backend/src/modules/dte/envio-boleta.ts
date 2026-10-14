@@ -1,10 +1,10 @@
-import { normalizarRut, rutValido } from '../../common/utils/rut.util';
+import { normalizarRut } from '../../common/utils/rut.util';
 import { armarDocumento } from './boleta-documento';
 import type { CafLeido } from './caf';
 import { type DatosBoleta, DteError, type TipoBoleta } from './dte.types';
 import { type CertificadoLeido, firmarNodo } from './firma';
 import { armarTed } from './ted';
-import { aLatin1, validarFecha, validarFechaHora } from './texto';
+import { aLatin1, el, rut, validarFecha, validarFechaHora } from './texto';
 
 const SII = 'http://www.sii.cl/SiiDte';
 const XSI = 'http://www.w3.org/2001/XMLSchema-instance';
@@ -37,8 +37,6 @@ export interface CaratulaEnvio {
   nroResol: number;
 }
 
-const el = (tag: string, valor: string) => `<${tag}>${valor}</${tag}>`;
-
 /**
  * Emite una boleta: TED, `<Documento>` y `<DTE>` con el `Documento` firmado. Todo `DteError`
  * de las etapas sale tal cual; el motor no envuelve ni traga nada. `ahora` es la hora de
@@ -52,7 +50,7 @@ export function emitirBoleta(
   const ted = armarTed(datos, credenciales.caf, ahora);
   const { xml, id, diferenciaIvaRedondeo } = armarDocumento(datos, ted, ahora);
 
-  // Mismos namespaces que la raíz del sobre (Task 1): así la forma canónica inclusiva del
+  // Mismos namespaces que la raíz del sobre: así la forma canónica inclusiva del
   // Documento es la misma suelto y dentro del EnvioBOLETA, y la firma verifica en los dos.
   const dte = `<DTE xmlns="${SII}" xmlns:xsi="${XSI}" version="1.0">${xml}</DTE>`;
 
@@ -63,15 +61,6 @@ export function emitirBoleta(
     tipo: datos.tipo,
     diferenciaIvaRedondeo,
   };
-}
-
-function rut(campo: string, valor: string): string {
-  if (!rutValido(valor))
-    throw new DteError(
-      'RUT_INVALIDO',
-      `${campo} no es un RUT válido: "${valor}"`,
-    );
-  return normalizarRut(valor);
 }
 
 /**

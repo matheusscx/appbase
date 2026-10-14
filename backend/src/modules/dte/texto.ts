@@ -1,3 +1,4 @@
+import { normalizarRut, rutValido } from '../../common/utils/rut.util';
 import { DteError } from './dte.types';
 
 /**
@@ -96,6 +97,19 @@ export function validarFechaHora(campo: string, valor: string): string {
     throw fechaInvalida(campo, valor, 'AAAA-MM-DDTHH:MM:SS');
   }
   return valor;
+}
+
+/** Un elemento del XML. Vacío sale como el par `<X></X>`, la forma C14N, nunca `<X/>`. */
+export const el = (tag: string, valor: string) => `<${tag}>${valor}</${tag}>`;
+
+/** El RUT normalizado (`12345678-5`), o `RUT_INVALIDO` nombrando el campo. */
+export function rut(campo: string, valor: string): string {
+  if (!rutValido(valor))
+    throw new DteError(
+      'RUT_INVALIDO',
+      `${campo} no es un RUT válido: "${valor}"`,
+    );
+  return normalizarRut(valor);
 }
 
 /** Los bytes que viajan al SII: el XML declara ISO-8859-1. */

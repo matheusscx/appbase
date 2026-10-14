@@ -1,3 +1,10 @@
+/** RUT genérico del receptor cuando la boleta no lo identifica (Formato Boletas v4.2, campo 18). */
+export const RUT_GENERICO = '66666666-6';
+
+/** Largos del formato que comparten el timbre y el `<Documento>` (`RznSocRecep`, `NmbItem`). */
+export const MAX_NOMBRE_RECEPTOR = 100;
+export const MAX_NOMBRE_ITEM = 80;
+
 /** Tipos de boleta que emite el motor (SII, Formato Boletas v4.2, campo 2). */
 export type TipoBoleta = 39 | 41;
 

@@ -9,7 +9,7 @@ export interface CertificadoLeido {
   llavePrivadaPem: string;
   /** El certificado X.509 en DER, base64 sin saltos. */
   certificadoB64: string;
-  /** Normalizado. La Task 8 lo usa como `RutEnvia`. */
+  /** Normalizado. Va como `RutEnvia` de la Carátula. */
   rut: string;
 }
 

@@ -223,7 +223,7 @@ describe('emitirBoleta + armarEnvioBoleta, de punta a punta', () => {
       expect(verificar(sobre, 1)).toBe(true); // el SetDTE
       expect(frmtVerifica(sobre, cafDe(datos))).toBe(true);
 
-      // Review Focus 1: lo que viaja son bytes ISO-8859-1; releídos como latin1 todo sigue igual.
+      // Lo que viaja son bytes ISO-8859-1; releídos como latin1 todo sigue igual.
       expect(aLatin1(sobre).toString('latin1')).toBe(sobre);
       const releido = aLatin1(sobre).toString('latin1');
       expect(releido).toContain('Panadería Ñuñoa SpA');

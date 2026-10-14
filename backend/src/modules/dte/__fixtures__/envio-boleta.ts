@@ -25,7 +25,7 @@ export function tedParaXsd(tipo: 39 | 41, folio: number): string {
 /**
  * Envuelve un `<Documento>` en un `EnvioBOLETA` mínimo que el XSD acepta, con
  * firmas de relleno. `Documento` no es un elemento global del esquema: solo
- * se puede validar dentro de su envío. El sobre real es de la Task 8.
+ * se puede validar dentro de su envío. El sobre real lo arma `armarEnvioBoleta`.
  */
 export function envolverParaXsd(documentoXml: string, tipo: 39 | 41): string {
   return (
