@@ -79,6 +79,7 @@ export type CodigoDteError =
   | 'MONTO_NO_ENTERO'
   | 'MONTO_NEGATIVO'
   | 'TOTAL_NO_POSITIVO'
+  | 'SIN_LINEAS'
   | 'BOLETA_EXENTA_CON_AFECTO'
   | 'FOLIO_FUERA_DE_RANGO'
   | 'CAF_OTRO_RUT'

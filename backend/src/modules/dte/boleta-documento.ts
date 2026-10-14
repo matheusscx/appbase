@@ -45,6 +45,8 @@ export function armarDocumento(
   tedXml: string,
   tmstFirma: string,
 ): { xml: string; id: string; diferenciaIvaRedondeo: string } {
+  if (datos.lineas.length === 0)
+    throw new DteError('SIN_LINEAS', 'La boleta no tiene líneas de detalle');
   const { diferenciaIvaRedondeo } = verificarMontos(datos);
 
   // Sobre 135 UF (Ley 21.713): el receptor, su nombre y el medio de pago son obligatorios.

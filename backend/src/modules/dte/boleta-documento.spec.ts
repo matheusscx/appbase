@@ -480,6 +480,12 @@ describe('armarDocumento', () => {
   });
 });
 
+describe('armarDocumento sin líneas', () => {
+  it('una boleta sin líneas da SIN_LINEAS, no un descuadre de totales', () => {
+    expect(codigo(() => armar(boleta({ lineas: [] })))).toBe('SIN_LINEAS');
+  });
+});
+
 describe('XSD con el formato v4.2', () => {
   it('el v11 original rechaza MedioPago y la copia lo acepta', async () => {
     const { xml } = armar(boleta({ medioPago: 1 }));

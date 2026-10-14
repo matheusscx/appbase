@@ -8,6 +8,10 @@ import { aLatin1, escaparXml, validarTexto } from './texto';
 /** RUT genérico del receptor cuando la boleta no lo identifica (Formato Boletas v4.2, campo 18). */
 const RUT_GENERICO = '66666666-6';
 
+/** IT1 es la primera línea: sin líneas no hay boleta que timbrar. */
+const sinLineas = () =>
+  new DteError('SIN_LINEAS', 'La boleta no tiene líneas de detalle');
+
 /** `RSR` e `IT1` del timbre son un extracto: el XSD fija 40 caracteres. */
 const LARGO_EXTRACTO = 40;
 
@@ -41,12 +45,13 @@ export function armarTed(
   tsted: string,
 ): string {
   validarFolio(caf, datos.emisor.rut, datos.tipo, datos.folio);
+  if (datos.lineas.length === 0) throw sinLineas();
 
   const r = datos.receptor;
   // Sin nombre, RSR queda vacío (el XSD solo fija maxLength 40; el formato v4.2 no dice más).
   // Va como el par <RSR></RSR>, la forma C14N de un elemento vacío, nunca <RSR/>.
   const rsr = r?.nombre ? extracto('RznSocRecep', r.nombre, 100) : '';
-  const it1 = extracto('NmbItem', datos.lineas[0]?.nombre ?? '', 80);
+  const it1 = extracto('NmbItem', datos.lineas[0].nombre, 80);
 
   const dd =
     '<DD>' +

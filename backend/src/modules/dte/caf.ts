@@ -8,6 +8,7 @@ import {
 import { DOMParser } from '@xmldom/xmldom';
 import { normalizarRut, rutValido } from '../../common/utils/rut.util';
 import { DteError, type TipoBoleta } from './dte.types';
+import { aLatin1 } from './texto';
 
 export interface CafLeido {
   rutEmisor: string; // normalizado
@@ -25,6 +26,13 @@ const invalido = (motivo: string) =>
 
 /** Parsea `<AUTORIZACION>` del SII. No verifica la `FRMA` (spec § 6) ni cuenta folios usados. */
 export function leerCaf(xmlAutorizacion: string): CafLeido {
+  // El TED se firma en latin1: un carácter fuera de ISO-8859-1 (el U+FFFD de un UTF-8 mal
+  // leído, por ejemplo) se firmaría con otros bytes que los del SII.
+  if (aLatin1(xmlAutorizacion).toString('latin1') !== xmlAutorizacion) {
+    throw invalido(
+      'trae caracteres fuera de ISO-8859-1; ¿se leyó el archivo como UTF-8? Léelo como latin1',
+    );
+  }
   const doc = new DOMParser({
     errorHandler: { warning: () => {}, error: () => {}, fatalError: () => {} },
   }).parseFromString(xmlAutorizacion, 'text/xml');

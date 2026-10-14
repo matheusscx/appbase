@@ -88,6 +88,18 @@ describe('leerCaf', () => {
     );
   });
 
+  it('un CAF con un carácter fuera de ISO-8859-1 (UTF-8 mal leído) es inválido', () => {
+    // El U+FFFD se arma en runtime: ningún literal ni escape alterado en el archivo.
+    const reemplazo = String.fromCharCode(0xfffd);
+    const mal = caf({ razonSocial: `Panader${reemplazo}a SpA` });
+    expect(mal).toContain(reemplazo);
+    expect(codigoDe(() => leerCaf(mal))).toBe('CAF_INVALIDO');
+    // El mismo CAF con la tilde en latin1 sí se lee.
+    expect(
+      codigoDe(() => leerCaf(caf({ razonSocial: 'Panadería SpA' }))),
+    ).toBeNull();
+  });
+
   it('un texto vacío es inválido', () => {
     expect(codigoDe(() => leerCaf(''))).toBe('CAF_INVALIDO');
   });

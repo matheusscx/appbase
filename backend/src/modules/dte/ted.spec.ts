@@ -189,6 +189,12 @@ describe('armarTed', () => {
     expect(ted).toContain('<RR>12345678-5</RR><RSR></RSR>');
   });
 
+  it('una boleta sin líneas da SIN_LINEAS, sin TED', () => {
+    expect(codigo(() => armarTed(boleta({ lineas: [] }), caf, TSTED))).toBe(
+      'SIN_LINEAS',
+    );
+  });
+
   it('un RUT de receptor inválido da RUT_INVALIDO', () => {
     expect(
       codigo(() => armarTed(conReceptor('Juana', '12.345.678-9'), caf, TSTED)),
