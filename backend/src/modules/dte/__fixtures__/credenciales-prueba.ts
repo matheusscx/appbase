@@ -8,6 +8,8 @@ interface OpcionesCaf {
   hasta: number;
   /** `RS` del CAF; el del SII puede traer tildes y Ñ. */
   razonSocial?: string;
+  /** Como lo guarda Windows: declaración XML ISO-8859-1 delante y saltos CRLF. */
+  windows?: boolean;
 }
 
 /** CAF con la forma del SII: llave RSA de 512 bits y `FRMA` falsa (no se verifica, spec § 6). */
@@ -17,6 +19,7 @@ export function cafDePrueba({
   desde,
   hasta,
   razonSocial = 'EMPRESA DE PRUEBA LTDA',
+  windows = false,
 }: OpcionesCaf): string {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', {
     modulusLength: 512,
@@ -27,7 +30,8 @@ export function cafDePrueba({
   // La cabecera PEM sale del export, nunca de un literal en el archivo (el repo es público).
   const rsask = privateKey.export({ type: 'pkcs1', format: 'pem' }).toString();
   const rsapubk = publicKey.export({ type: 'spki', format: 'pem' }).toString();
-  return [
+  const xml = [
+    ...(windows ? ['<?xml version="1.0" encoding="ISO-8859-1"?>'] : []),
     '<AUTORIZACION>',
     '<CAF version="1.0">',
     '<DA>',
@@ -41,6 +45,7 @@ export function cafDePrueba({
     `<RSAPUBK>${rsapubk}</RSAPUBK>`,
     '</AUTORIZACION>',
   ].join('\n');
+  return windows ? `${xml.replace(/\n/g, '\r\n')}\r\n` : xml;
 }
 
 const RUT_CERTIFICADO = '11111111-1';

@@ -102,6 +102,21 @@ describe('armarTed', () => {
     expect(verifica(caf, aplanado(ted), frmt(ted))).toBe(true);
   });
 
+  it('con un CAF de Windows (CRLF y declaración) el <CAF> del TED es el literal y el FRMT verifica', () => {
+    const xmlWin = cafDePrueba({
+      rut: '76543210-3',
+      tipo: 39,
+      desde: 101,
+      hasta: 150,
+      windows: true,
+    });
+    const leido = leerCaf(xmlWin);
+    const ted = armarTed(conReceptor('Juana Pérez'), leido, TSTED);
+    expect(leido.xmlCaf).toContain('\r\n');
+    expect(ted).toContain(leido.xmlCaf);
+    expect(verifica(leido, aplanado(ted), frmt(ted))).toBe(true);
+  });
+
   it('el <CAF> del TED es byte a byte el del archivo', () => {
     const ted = armarTed(boleta(), caf, TSTED);
     expect(xml.includes(caf.xmlCaf)).toBe(true);

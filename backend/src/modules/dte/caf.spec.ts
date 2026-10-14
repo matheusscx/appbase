@@ -36,6 +36,22 @@ describe('leerCaf', () => {
     expect(leido.xmlCaf.endsWith('</CAF>')).toBe(true);
   });
 
+  it('un CAF de Windows (CRLF y declaración ISO-8859-1) se lee y su <CAF> es la subcadena literal', () => {
+    const xml = caf({ windows: true });
+    expect(xml.startsWith('<?xml version="1.0" encoding="ISO-8859-1"?>')).toBe(
+      true,
+    );
+    expect(xml).toContain('\r\n');
+    const leido = leerCaf(xml);
+    expect(leido.rutEmisor).toBe('76543210-3');
+    expect(leido.desde).toBe(101);
+    expect(leido.hasta).toBe(150);
+    expect(leido.xmlCaf).toBe(
+      xml.slice(xml.indexOf('<CAF'), xml.indexOf('</CAF>') + '</CAF>'.length),
+    );
+    expect(leido.xmlCaf).toContain('\r\n');
+  });
+
   it('la llave privada firma lo que la pública verifica', () => {
     const { llavePrivada, llavePublica } = leerCaf(caf());
     const firma = createSign('RSA-SHA1').update('dd').sign(llavePrivada);
