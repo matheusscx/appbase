@@ -378,16 +378,10 @@ es parte del enunciado y viaja con ella.
   - qué hace el SII con el ILA y los demás impuestos adicionales en la boleta;
   - el límite del nombre del ítem en el catálogo: 80 caracteres en ISO-8859-1.
 
-  **Preguntas abiertas para el owner que dejó el motor** (fiscales; detalle en
-  `features/emision-electronica.md`):
-  - **`CdgIntRecep` sobre 135 UF.** El formato v4.2, campo 19, dice *"Dato obligatorio si
-    Indicador Servicio = 3 y RUT = 0, o Monto Total > 135 UF (Ley 21.713)"*. La spec pidió sobre
-    135 UF solo RUT, nombre y medio de pago, y el contrato no trae código interno del receptor.
-    ¿Es exigible, y qué se escribe en él?
-  - **Líneas gratis** (precio o cantidad 0: cortesía, modificador sin costo). Hoy el motor las
-    **rechaza** (`MONTO_INVALIDO`) porque el XSD pide `QtyItem` y `PrcItem` > 0; omitir esos
-    campos para esa línea es decisión del owner. Sin ella, el subproyecto 4 no puede emitir una
-    boleta con una línea gratis.
+  **Decidido por el owner (2026-10-14):** `CdgIntRecep` no se envía sobre 135 UF, y la línea
+  gratis sale sin `PrcItem` y con `MontoItem` 0 (`features/emision-electronica.md`).
+
+  **Lo que dejó el motor y solo confirma la certificación:**
   - Riesgos de forma que solo confirma la certificación (subproyecto 5): aplanado del `<DD>`,
     namespaces del `<DTE>`, ubicación de `RutProvSW`/`RznSocProvSW`, `<RSR></RSR>` vacío y
     escape de solo `& < >`.

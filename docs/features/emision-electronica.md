@@ -78,8 +78,8 @@ Reglas de uso:
 Lo congelado en la venta manda (ADR-010). Si una igualdad no cierra, no se arma nada.
 
 1. **Decimal.js en todo.** `MntNeto`, `MntExe`, `IVA` y `MntTotal` van en **pesos enteros**; un
-   decimal es error. Cantidad y precio unitario admiten hasta 6 decimales y tienen que ser
-   mayores que cero.
+   decimal es error. Cantidad y precio unitario admiten hasta 6 decimales; la cantidad
+   tiene que ser mayor que cero y el precio, cero o más (regla 8).
 2. **El detalle va con IVA incluido** (sin `IndMntNeto`). Por línea,
    `MontoItem ≈ PrcItem × QtyItem − DescuentoMonto + RecargoMonto`, con tolerancia de **menos de
    un peso**: la venta a granel (0,375 kg × $2.990 = 1.121,25) congela 1.121 y tiene que salir.
@@ -96,13 +96,24 @@ Lo congelado en la venta manda (ADR-010). Si una igualdad no cierra, no se arma 
 5. **Boleta exenta (41)**: todo exento; sin líneas afectas, neto ni IVA (`MntNeto` e `IVA` no
    salen en el XML).
 6. **Receptor**: sin cliente va el RUT genérico `66666666-6`. Sobre 135 UF (Res. Ex. SII 44/2025)
-   son obligatorios RUT válido y no genérico, nombre y medio de pago. Quien llama dice si se
-   superó el umbral: el motor no sabe de UF. La captura ya lo exige antes de cobrar
-   ([`ventas.md`](./ventas.md)); el motor lo repite porque el XML no puede salir sin eso.
+   son obligatorios RUT válido y no genérico, nombre y medio de pago. La resolución
+   (resolutivo 1° y Anexo III) pide nombres y apellidos, RUT, forma de pago y la descripción
+   clara de los productos (`RUTRecep` real, `RznSocRecep`, `MedioPago`, `NmbItem`); teléfono y
+   correo son opcionales (`TelefonoRecep`, `CorreoRecep`). **`CdgIntRecep` no se envía**
+   (owner, 2026-10-14): el Anexo III no lo lista, y el campo 19 del formato v4.2 sirve para
+   identificar al cliente que viene con `RUTRecep` = 0, cosa que sobre 135 UF no puede pasar.
+   Si el validador del SII lo exigiera, se ve en la certificación (subproyecto 5); arreglarlo
+   es un campo opcional de hasta 20 caracteres. Quien llama dice si se superó el umbral: el
+   motor no sabe de UF. La captura ya lo exige antes de cobrar ([`ventas.md`](./ventas.md)); el
+   motor lo repite porque el XML no puede salir sin eso.
 7. **Topes del XSD**: 1.000 líneas y 20 descuentos o recargos globales por boleta; 500 boletas por
    sobre.
-8. **Una línea con precio o cantidad 0 se rechaza** (`MONTO_INVALIDO`): ver las preguntas
-   abiertas.
+8. **Línea gratis** (cortesía, producto regalado; owner, 2026-10-14): una línea con precio 0
+   sale con `QtyItem`, **sin `PrcItem`** y con `MontoItem` 0. El XSD pide `PrcItem` mayor que
+   cero (`Dec5Type`) y el formato v4.2 lo marca condicional, así que no se emite; `MontoItem`
+   admite 0. La igualdad de la regla 2 no cambia (`0 × cantidad − descuento + recargo`), de modo
+   que un precio 0 con descuento en pesos da `LINEA_NO_CIERRA`. Una **cantidad** 0 se sigue
+   rechazando con `MONTO_INVALIDO`: no describe una venta.
 
 ## Texto ISO-8859-1, sin cortar
 
@@ -195,7 +206,7 @@ verdad es `CodigoDteError` en `dte.types.ts`.
 | `ENVIO_OTRO_EMISOR` | Una boleta del sobre es de un RUT distinto del de la Carátula |
 | `NRO_RESOL_INVALIDO` | `NroResol` no es un entero de 0 a 999.999 |
 | `FECHA_INVALIDA` | Una fecha no es `AAAA-MM-DD` / `AAAA-MM-DDTHH:MM:SS` o no existe en el calendario |
-| `MONTO_INVALIDO` | No es un número; cantidad o precio ≤ 0 o con más de 6 decimales; descuento o recargo no entero o negativo; un ajuste global en 0 |
+| `MONTO_INVALIDO` | No es un número; cantidad ≤ 0, precio negativo, o cualquiera de los dos con más de 6 decimales; descuento o recargo no entero o negativo; un ajuste global en 0 |
 | `DEMASIADAS_LINEAS` | Más de 1.000 líneas o más de 20 descuentos/recargos globales |
 
 ---
@@ -216,19 +227,9 @@ son, riesgos, no hechos. Cada una tiene un arreglo acotado si el SII exige otra 
 Además: el esquema real del SII (el que valida su servidor, no el v11 de 2007) se mide en la
 certificación; y el ejemplo oficial no es una boleta ni trae `RSR` por defecto.
 
-## Preguntas abiertas para el owner (fiscales, no se deciden acá)
+## Pendiente de decisión
 
-1. **`CdgIntRecep` sobre 135 UF.** El formato v4.2, campo 19, dice: *"Dato obligatorio si
-   Indicador Servicio = 3 y RUT = 0, o Monto Total > 135 UF (Ley 21.713)"*. La spec pidió sobre
-   135 UF solo RUT, nombre y medio de pago, y `ReceptorBoleta` no tiene código interno. Si el
-   campo es exigible, el contrato gana un campo y el motor una regla; si no, queda como está.
-   Qué escribir en él (el código del cliente, el folio interno) también lo define el owner.
-2. **Líneas gratis** (precio o cantidad 0: cortesía, modificador sin costo). Hoy se **rechazan**
-   con `MONTO_INVALIDO`: el XSD pide `QtyItem` y `PrcItem` > 0, y omitirlos para esa línea es una
-   decisión fiscal, no técnica. Hasta que el owner decida, el subproyecto 4 no puede emitir una
-   boleta con una línea gratis.
-
-El tratamiento de **ILA y otros impuestos adicionales** en la boleta tampoco está decidido (la
+El tratamiento de **ILA y otros impuestos adicionales** en la boleta no está decidido (la
 boleta no tiene campo para ellos); el motor rechaza con `IMPUESTO_ADICIONAL_NO_SOPORTADO`. Es un
 frente aparte (`docs/agent/desarrollo-nuevo.md`).
 
