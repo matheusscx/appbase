@@ -29,7 +29,10 @@ Permite al administrador de un tenant editar los datos de su propia empresa (nom
 ## Tablas DB
 
 - `tenants` — se edita vía PATCH /tenants/me
-- `razones_sociales` — CRUD completo con soft delete
+- `razones_sociales` — CRUD completo con soft delete. Además de los datos legales lleva los del
+  emisor de boleta electrónica: `giro`, `comuna`, `ambiente_sii` (certificación o producción),
+  `fecha_resolucion` y `numero_resolucion`. **No se editan en `/configuracion/razones-sociales`**
+  sino en `/configuracion/boleta-electronica` (`PATCH /dte/perfil`).
 - `pais`, `provincia` — solo lectura (catálogos)
 
 ## Decisiones de diseño
@@ -39,3 +42,12 @@ Permite al administrador de un tenant editar los datos de su propia empresa (nom
 - Sub-tenants (`sub_tenants`) fuera de alcance: tabla reservada.
 - `calculo_descuentos` no es editable aquí: corresponde a config de precios.
 - `habilitado` default `false` en razones sociales: el admin activa explícitamente.
+- **Una razón social con folios (CAF) o certificado vigente cargados no cambia de RUT ni se
+  borra** (`PATCH` con un RUT distinto y `DELETE` dan 400). Por qué: el CAF y el certificado se
+  emitieron para ese RUT; cambiarlo, o borrar la razón social, dejaría esos documentos firmando
+  a nombre de otro. La comparación es sobre el RUT normalizado: reescribir el mismo RUT con
+  puntos o sin guion no es un cambio, y el resto de los datos se sigue editando. Los folios sin usar
+  se quitan desde el perfil fiscal, pero **un CAF que ya entregó folios no se puede quitar**: una
+  razón social que ya emitió queda fija aunque no tenga certificado. El certificado vigente, hoy,
+  solo se reemplaza (no hay ruta que lo quite), así que con uno cargado también queda fija. El chequeo corre bajo el mismo
+  `FOR UPDATE` que las subidas del perfil fiscal, así que no se cruza con una en curso.

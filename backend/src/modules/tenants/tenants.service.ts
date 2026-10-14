@@ -14,6 +14,7 @@ import {
   diaNegocioEnZona,
   diaNegocioTenant,
 } from '../../common/utils/rango-fecha.util';
+import { normalizarRut } from '../../common/utils/rut.util';
 import { Usuario } from '../users/usuario.entity';
 import { CrearUsuarioTenantDto } from './dto/crear-usuario-tenant.dto';
 import { Tenant } from './entities/tenant.entity';
@@ -1527,25 +1528,74 @@ export class TenantsService {
     id: string,
     dto: UpdateRazonSocialDto,
   ): Promise<RazonSocial> {
-    const rs = await this.razonSocialRepo.findOne({
-      where: { id, tenantId },
+    return this.db.transaccion(async (manager) => {
+      const rs = await this.tomarRazonSocial(manager, tenantId, id);
+      if (dto.habilitado === false && rs.preferida) {
+        throw new BadRequestException(
+          'No se puede deshabilitar la razón social preferida',
+        );
+      }
+      // Un `rut` que no viene no es un cambio; uno escrito distinto (con puntos, sin
+      // guion) pero que normalizado es el mismo, tampoco.
+      if (
+        dto.rut !== undefined &&
+        normalizarRut(dto.rut) !== normalizarRut(rs.rut)
+      ) {
+        await this.exigirSinCargasDte(manager, id);
+      }
+      Object.assign(rs, dto);
+      return manager.save(rs);
     });
-    if (!rs) throw new NotFoundException(`Razón social ${id} no encontrada`);
-    if (dto.habilitado === false && rs.preferida) {
-      throw new BadRequestException(
-        'No se puede deshabilitar la razón social preferida',
-      );
-    }
-    Object.assign(rs, dto);
-    return this.razonSocialRepo.save(rs);
   }
 
   async removeRazonSocial(tenantId: string, id: string): Promise<void> {
-    const rs = await this.razonSocialRepo.findOne({
+    await this.db.transaccion(async (manager) => {
+      await this.tomarRazonSocial(manager, tenantId, id);
+      await this.exigirSinCargasDte(manager, id);
+      await manager.softDelete(RazonSocial, { id, tenantId });
+    });
+  }
+
+  /**
+   * La razón social del tenant, tomada con `FOR UPDATE`: el mismo candado con que
+   * `PerfilFiscalService` serializa las subidas de certificado y CAF, así un cambio de RUT
+   * o un borrado no se cruza con una subida en curso.
+   */
+  private async tomarRazonSocial(
+    manager: EntityManager,
+    tenantId: string,
+    id: string,
+  ): Promise<RazonSocial> {
+    const rs = await manager.findOne(RazonSocial, {
       where: { id, tenantId },
+      lock: { mode: 'pessimistic_write' },
     });
     if (!rs) throw new NotFoundException(`Razón social ${id} no encontrada`);
-    await this.razonSocialRepo.softDelete({ id, tenantId });
+    return rs;
+  }
+
+  /**
+   * Con folios o certificado de boleta electrónica cargados, el RUT de la razón social es
+   * el del CAF y el del certificado: cambiarlo (o borrarla) dejaría esos documentos
+   * firmando a nombre de otro. Se lee por SQL, sin importar el módulo `dte`.
+   */
+  private async exigirSinCargasDte(
+    manager: EntityManager,
+    razonSocialId: string,
+  ): Promise<void> {
+    const filas: { cargado: boolean }[] = await manager.query(
+      `SELECT EXISTS (SELECT 1 FROM dte_cafs
+                       WHERE razon_social_id = $1 AND eliminado_el IS NULL)
+           OR EXISTS (SELECT 1 FROM dte_certificados
+                       WHERE razon_social_id = $1
+                         AND reemplazado_el IS NULL AND eliminado_el IS NULL) AS cargado`,
+      [razonSocialId],
+    );
+    if (filas[0]?.cargado) {
+      throw new BadRequestException(
+        'Esta razón social tiene folios o certificado de boleta electrónica cargados: no se puede cambiar su RUT ni borrarla',
+      );
+    }
   }
 
   async setPreferida(tenantId: string, id: string): Promise<RazonSocial> {

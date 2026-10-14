@@ -754,54 +754,114 @@ describe('TenantsService', () => {
     });
   });
 
+  /**
+   * El manager de la transacción de `updateRazonSocial`/`removeRazonSocial`: `findOne` devuelve
+   * la razón social ya tomada con `FOR UPDATE` y `query` contesta si hay folios o certificado.
+   */
+  function managerRazonSocial(rs: RazonSocial | null, cargado = false) {
+    const manager = {
+      findOne: jest.fn().mockResolvedValue(rs),
+      query: jest.fn().mockResolvedValue([{ cargado }]),
+      save: jest.fn((e: RazonSocial) => Promise.resolve(e)),
+      softDelete: jest.fn().mockResolvedValue({ affected: 1 }),
+    };
+    dataSource.transaction.mockImplementation(
+      (cb: (m: typeof manager) => Promise<unknown>) => cb(manager),
+    );
+    return manager;
+  }
+
   describe('updateRazonSocial', () => {
     it('actualiza la razon social', async () => {
-      razonSocialRepo.findOne.mockResolvedValue({ ...mockRazonSocial });
-      razonSocialRepo.save.mockResolvedValue({
-        ...mockRazonSocial,
-        nombre: 'Paris SA',
-      });
+      const manager = managerRazonSocial({ ...mockRazonSocial });
       const result = await service.updateRazonSocial('tenant-uuid', 'rs-uuid', {
         nombre: 'Paris SA',
       });
       expect(result.nombre).toBe('Paris SA');
+      expect(manager.save).toHaveBeenCalled();
     });
 
     it('lanza NotFoundException si no pertenece al tenant', async () => {
-      razonSocialRepo.findOne.mockResolvedValue(null);
+      const manager = managerRazonSocial(null);
       await expect(
         service.updateRazonSocial('tenant-uuid', 'otro-id', { nombre: 'X' }),
       ).rejects.toThrow(NotFoundException);
       // No alcanza con que la excepción salga: el mock devuelve `null` pase lo
       // que pase, así que sin esto el test seguía en verde aunque el `where`
-      // dejara de filtrar por tenant (mutante verificado).
-      expect(razonSocialRepo.findOne).toHaveBeenCalledWith({
+      // dejara de filtrar por tenant (mutante verificado). Además toma la fila
+      // con candado: el mismo con que las subidas de CAF y certificado.
+      expect(manager.findOne).toHaveBeenCalledWith(RazonSocial, {
         where: { id: 'otro-id', tenantId: 'tenant-uuid' },
+        lock: { mode: 'pessimistic_write' },
       });
+    });
+
+    it('no pregunta por folios si el RUT no cambia (ausente o el mismo escrito distinto)', async () => {
+      const manager = managerRazonSocial({ ...mockRazonSocial }, true);
+      await service.updateRazonSocial('tenant-uuid', 'rs-uuid', {
+        telefono: '123',
+      });
+      await service.updateRazonSocial('tenant-uuid', 'rs-uuid', {
+        rut: '761234567',
+      });
+      expect(manager.query).not.toHaveBeenCalled();
+      expect(manager.save).toHaveBeenCalledTimes(2);
+    });
+
+    it('con folios o certificado cargados, cambiar el RUT es 400 y no guarda', async () => {
+      const manager = managerRazonSocial({ ...mockRazonSocial }, true);
+      await expect(
+        service.updateRazonSocial('tenant-uuid', 'rs-uuid', {
+          rut: '76.543.210-3',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(manager.save).not.toHaveBeenCalled();
+      expect(manager.query).toHaveBeenCalledWith(
+        expect.stringContaining('dte_cafs'),
+        ['rs-uuid'],
+      );
+    });
+
+    it('sin nada cargado, cambiar el RUT guarda', async () => {
+      const manager = managerRazonSocial({ ...mockRazonSocial }, false);
+      const result = await service.updateRazonSocial('tenant-uuid', 'rs-uuid', {
+        rut: '76.543.210-3',
+      });
+      expect(result.rut).toBe('76.543.210-3');
+      expect(manager.save).toHaveBeenCalled();
     });
   });
 
   describe('removeRazonSocial', () => {
     it('hace soft delete de la razon social', async () => {
-      razonSocialRepo.findOne.mockResolvedValue(mockRazonSocial);
-      razonSocialRepo.softDelete.mockResolvedValue({ affected: 1 });
+      const manager = managerRazonSocial(mockRazonSocial);
       await service.removeRazonSocial('tenant-uuid', 'rs-uuid');
-      expect(razonSocialRepo.softDelete).toHaveBeenCalledWith({
+      expect(manager.softDelete).toHaveBeenCalledWith(RazonSocial, {
         id: 'rs-uuid',
         tenantId: 'tenant-uuid',
       });
     });
 
+    it('con folios o certificado cargados es 400 y no borra', async () => {
+      const manager = managerRazonSocial(mockRazonSocial, true);
+      await expect(
+        service.removeRazonSocial('tenant-uuid', 'rs-uuid'),
+      ).rejects.toThrow(BadRequestException);
+      expect(manager.softDelete).not.toHaveBeenCalled();
+    });
+
     it('lanza NotFoundException si no pertenece al tenant', async () => {
-      razonSocialRepo.findOne.mockResolvedValue(null);
+      const manager = managerRazonSocial(null);
       await expect(
         service.removeRazonSocial('tenant-uuid', 'no-existe'),
       ).rejects.toThrow(NotFoundException);
       // Misma razón que en `updateRazonSocial`: sin verificar el `where`, el
       // mock (`null` fijo) deja pasar un filtro que perdió `tenantId`.
-      expect(razonSocialRepo.findOne).toHaveBeenCalledWith({
+      expect(manager.findOne).toHaveBeenCalledWith(RazonSocial, {
         where: { id: 'no-existe', tenantId: 'tenant-uuid' },
+        lock: { mode: 'pessimistic_write' },
       });
+      expect(manager.softDelete).not.toHaveBeenCalled();
     });
   });
 
@@ -871,7 +931,7 @@ describe('TenantsService', () => {
 
   describe('updateRazonSocial — guard preferida', () => {
     it('lanza BadRequestException al intentar deshabilitar la razón social preferida', async () => {
-      razonSocialRepo.findOne.mockResolvedValue({
+      const manager = managerRazonSocial({
         ...mockRazonSocial,
         habilitado: true,
         preferida: true,
@@ -881,18 +941,13 @@ describe('TenantsService', () => {
           habilitado: false,
         }),
       ).rejects.toThrow(BadRequestException);
-      expect(razonSocialRepo.save).not.toHaveBeenCalled();
+      expect(manager.save).not.toHaveBeenCalled();
     });
 
     it('permite deshabilitar una razón social no preferida', async () => {
-      razonSocialRepo.findOne.mockResolvedValue({
+      managerRazonSocial({
         ...mockRazonSocial,
         habilitado: true,
-        preferida: false,
-      });
-      razonSocialRepo.save.mockResolvedValue({
-        ...mockRazonSocial,
-        habilitado: false,
         preferida: false,
       });
       const result = await service.updateRazonSocial('tenant-uuid', 'rs-uuid', {

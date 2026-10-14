@@ -29,6 +29,9 @@ const ADMIN = { email: 'admin.paris@paris.cl', pass: 'admin' };
 const ENCARGADO = { email: 'encargado.salon@paris.cl', pass: 'admin' };
 const NOMBRE_EMISORA = 'Emisor e2e perfil fiscal';
 const RUT_EMISORA = '77.777.777-7';
+const NOMBRE_SIN_CARGAS = 'Sin cargas e2e perfil fiscal';
+const RUT_SIN_CARGAS = '73.737.373-3';
+const RUT_OTRO = '76.543.210-3';
 const CLAVE_EQUIVOCADA = 'clave-que-no-es-9137';
 
 /** Nada de esto puede salir en una respuesta: es la llave del certificado o su blob cifrado. */
@@ -140,6 +143,15 @@ describe('Perfil fiscal del emisor (e2e)', () => {
     );
   }
 
+  /** Una razón social sin cargas que un caso dejó a medias (si falló antes de borrarla). */
+  async function bajarSinCargas() {
+    await ds.query(
+      `UPDATE razones_sociales SET eliminado_el = now()
+        WHERE nombre = $1 AND eliminado_el IS NULL`,
+      [NOMBRE_SIN_CARGAS],
+    );
+  }
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -181,12 +193,13 @@ describe('Perfil fiscal del emisor (e2e)', () => {
     expect(preferida.status).toBe(200);
 
     await limpiarCargas();
+    await bajarSinCargas();
     await ds.query(
       `UPDATE razones_sociales
-          SET giro = NULL, comuna = NULL, ambiente_sii = NULL,
+          SET rut = $2, giro = NULL, comuna = NULL, ambiente_sii = NULL,
               fecha_resolucion = NULL, numero_resolucion = NULL
         WHERE razon_social_id = $1`,
-      [razonSocialId],
+      [razonSocialId, RUT_EMISORA],
     );
   }, 60000);
 
@@ -196,6 +209,7 @@ describe('Perfil fiscal del emisor (e2e)', () => {
     const fallos: string[] = [];
     try {
       await limpiarCargas();
+      await bajarSinCargas();
       // No hay una ruta que des-marque la preferida (`PATCH …/preferida` solo marca), y las
       // otras suites no esperan que el tenant tenga una.
       await ds.query(
@@ -704,6 +718,211 @@ describe('Perfil fiscal del emisor (e2e)', () => {
     expect(caf).toMatchObject({ usados: 1, restantes: 49, borrable: false });
   });
 
+  describe('una razón social con folios o certificado no cambia de RUT ni se borra', () => {
+    const CARGADO = 'tiene folios o certificado de boleta electrónica cargados';
+
+    /** Algo cargado en la emisora: el certificado vigente y al menos un CAF (lo dejan los casos de arriba). */
+    async function cargadoEnLaEmisora(): Promise<{
+      cafs: number;
+      certs: number;
+    }> {
+      const [fila]: { cafs: string; certs: string }[] = await ds.query(
+        `SELECT (SELECT count(*) FROM dte_cafs
+                  WHERE razon_social_id = $1 AND eliminado_el IS NULL) AS cafs,
+                (SELECT count(*) FROM dte_certificados
+                  WHERE razon_social_id = $1 AND reemplazado_el IS NULL
+                    AND eliminado_el IS NULL) AS certs`,
+        [razonSocialId],
+      );
+      return { cafs: Number(fila.cafs), certs: Number(fila.certs) };
+    }
+
+    async function rutDeLaEmisora(): Promise<string> {
+      const [fila]: { rut: string }[] = await ds.query(
+        `SELECT rut FROM razones_sociales WHERE razon_social_id = $1`,
+        [razonSocialId],
+      );
+      return fila.rut;
+    }
+
+    async function subirCertificado() {
+      const cert = certificadoDePrueba();
+      const res = await llamar('post', '/api/dte/certificado', token, {
+        pfxBase64: cert.pfx.toString('base64'),
+        clave: cert.clave,
+      });
+      expect(res.status).toBe(201);
+    }
+
+    it('con certificado y folios: cambiar el RUT es 400 y el RUT queda como estaba', async () => {
+      const antes = await cargadoEnLaEmisora();
+      expect(antes.certs).toBe(1);
+      expect(antes.cafs).toBeGreaterThan(0);
+
+      const res = await llamar(
+        'patch',
+        `/api/tenants/razones-sociales/${razonSocialId}`,
+        token,
+        { rut: RUT_OTRO },
+      );
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain(CARGADO);
+      expect(await rutDeLaEmisora()).toBe(RUT_EMISORA);
+    });
+
+    it('con certificado y folios: el mismo RUT escrito con otro formato no es un cambio', async () => {
+      const igual = await llamar(
+        'patch',
+        `/api/tenants/razones-sociales/${razonSocialId}`,
+        token,
+        { rut: '77777777-7' },
+      );
+      expect(igual.status).toBe(200);
+      const mayuscula = await llamar(
+        'patch',
+        `/api/tenants/razones-sociales/${razonSocialId}`,
+        token,
+        { rut: RUT_EMISORA },
+      );
+      expect(mayuscula.status).toBe(200);
+    });
+
+    it('con certificado y folios: los otros datos se siguen editando', async () => {
+      const res = await llamar(
+        'patch',
+        `/api/tenants/razones-sociales/${razonSocialId}`,
+        token,
+        { telefono: '+56 9 1234 5678' },
+      );
+      expect(res.status).toBe(200);
+      expect((res.body as { telefono: string }).telefono).toBe(
+        '+56 9 1234 5678',
+      );
+    });
+
+    it('con certificado y folios: borrarla es 400 y sigue viva', async () => {
+      const res = await llamar(
+        'delete',
+        `/api/tenants/razones-sociales/${razonSocialId}`,
+        token,
+      );
+      expect(res.status).toBe(400);
+      expect(JSON.stringify(res.body)).toContain(CARGADO);
+      const [fila]: { eliminado_el: Date | null }[] = await ds.query(
+        `SELECT eliminado_el FROM razones_sociales WHERE razon_social_id = $1`,
+        [razonSocialId],
+      );
+      expect(fila.eliminado_el).toBeNull();
+    });
+
+    it('con solo folios (sin certificado vigente) también está protegida', async () => {
+      await ds.query(
+        `UPDATE dte_certificados
+            SET credencial_cifrada = NULL, reemplazado_el = COALESCE(reemplazado_el, now())
+          WHERE razon_social_id = $1`,
+        [razonSocialId],
+      );
+      const estado = await cargadoEnLaEmisora();
+      expect(estado.certs).toBe(0);
+      expect(estado.cafs).toBeGreaterThan(0);
+
+      const patch = await llamar(
+        'patch',
+        `/api/tenants/razones-sociales/${razonSocialId}`,
+        token,
+        { rut: RUT_OTRO },
+      );
+      expect(patch.status).toBe(400);
+      const borrar = await llamar(
+        'delete',
+        `/api/tenants/razones-sociales/${razonSocialId}`,
+        token,
+      );
+      expect(borrar.status).toBe(400);
+    });
+
+    it('con solo certificado (sin folios) también está protegida', async () => {
+      await subirCertificado();
+      await ds.query(
+        `UPDATE dte_cafs SET eliminado_el = now()
+          WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
+        [razonSocialId],
+      );
+      const estado = await cargadoEnLaEmisora();
+      expect(estado.certs).toBe(1);
+      expect(estado.cafs).toBe(0);
+
+      const patch = await llamar(
+        'patch',
+        `/api/tenants/razones-sociales/${razonSocialId}`,
+        token,
+        { rut: RUT_OTRO },
+      );
+      expect(patch.status).toBe(400);
+      expect(JSON.stringify(patch.body)).toContain(CARGADO);
+      const borrar = await llamar(
+        'delete',
+        `/api/tenants/razones-sociales/${razonSocialId}`,
+        token,
+      );
+      expect(borrar.status).toBe(400);
+      expect(await rutDeLaEmisora()).toBe(RUT_EMISORA);
+    });
+
+    it('sin nada cargado: se puede cambiar el RUT y se puede borrar', async () => {
+      await bajarSinCargas();
+      const creada = await llamar(
+        'post',
+        '/api/tenants/razones-sociales',
+        token,
+        {
+          nombre: NOMBRE_SIN_CARGAS,
+          rut: RUT_SIN_CARGAS,
+        },
+      );
+      expect(creada.status).toBe(201);
+      const { id } = creada.body as RazonSocialResponse;
+
+      const patch = await llamar(
+        'patch',
+        `/api/tenants/razones-sociales/${id}`,
+        token,
+        { rut: RUT_OTRO },
+      );
+      expect(patch.status).toBe(200);
+      expect((patch.body as { rut: string }).rut).toBe(RUT_OTRO);
+
+      const borrar = await llamar(
+        'delete',
+        `/api/tenants/razones-sociales/${id}`,
+        token,
+      );
+      expect(borrar.status).toBe(204);
+      const [fila]: { eliminado_el: Date | null }[] = await ds.query(
+        `SELECT eliminado_el FROM razones_sociales WHERE razon_social_id = $1`,
+        [id],
+      );
+      expect(fila.eliminado_el).not.toBeNull();
+    });
+
+    it('una razón social de otro tenant es 404 (no se filtra si tiene cargas)', async () => {
+      const tokenOtro = await loginSegundoTenant(app);
+      const patch = await llamar(
+        'patch',
+        `/api/tenants/razones-sociales/${razonSocialId}`,
+        tokenOtro,
+        { rut: RUT_OTRO },
+      );
+      expect(patch.status).toBe(404);
+      const borrar = await llamar(
+        'delete',
+        `/api/tenants/razones-sociales/${razonSocialId}`,
+        tokenOtro,
+      );
+      expect(borrar.status).toBe(404);
+    });
+  });
+
   it('un usuario que no es admin recibe 403 en todas las rutas', async () => {
     const tokenEncargado = await loginComo(ENCARGADO, PARIS_TENANT_ID);
     const cert = certificadoDePrueba();
@@ -745,5 +964,74 @@ describe('Perfil fiscal del emisor (e2e)', () => {
     if (perfil.emisor !== null)
       expect(normalizarRut(perfil.emisor.rut)).not.toBe('77777777-7');
     expect(perfil.certificado?.nombreFirmante).not.toBe('Luis Soto');
+  });
+  // Va al final: borra la razón social emisora (el `afterAll` limpia por SQL y no la necesita viva).
+  it('una razón social cuyas cargas ya están reemplazadas o dadas de baja se cambia de RUT y se borra', async () => {
+    // Solo el estado "baja/reemplazo" separa este 200 del 400: si el chequeo dejara de filtrar
+    // `eliminado_el`/`reemplazado_el`, contaría estas filas muertas y negaría el cambio.
+    // Certificado reemplazado: dos subidas por API; la primera queda con `reemplazado_el`.
+    for (let i = 0; i < 2; i++) {
+      const cert = certificadoDePrueba();
+      const subida = await llamar('post', '/api/dte/certificado', token, {
+        pfxBase64: cert.pfx.toString('base64'),
+        clave: cert.clave,
+      });
+      expect(subida.status).toBe(201);
+    }
+    // Un CAF subido y quitado por la API (soft delete).
+    const caf = await llamar('post', '/api/dte/cafs', token, {
+      xmlBase64: cafBase64({
+        rut: '77777777-7',
+        tipo: 39,
+        desde: 9501,
+        hasta: 9510,
+      }).xmlBase64,
+    });
+    expect(caf.status).toBe(201);
+    const quitado = await llamar(
+      'delete',
+      `/api/dte/cafs/${(caf.body as CafResponse).id}`,
+      token,
+    );
+    expect(quitado.status).toBe(200);
+    // Por SQL, porque la API no lo permite: el certificado vigente no tiene ruta de baja (queda
+    // con `eliminado_el`, distinto de reemplazado) y los CAF con folios entregados no se quitan.
+    await ds.query(
+      `UPDATE dte_certificados SET eliminado_el = now()
+        WHERE razon_social_id = $1 AND reemplazado_el IS NULL AND eliminado_el IS NULL`,
+      [razonSocialId],
+    );
+    await ds.query(
+      `UPDATE dte_cafs SET eliminado_el = now()
+        WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
+      [razonSocialId],
+    );
+    const [estado]: { reemplazados: string; dados_de_baja: string }[] =
+      await ds.query(
+        `SELECT (SELECT count(*) FROM dte_certificados
+                  WHERE razon_social_id = $1 AND reemplazado_el IS NOT NULL
+                    AND eliminado_el IS NULL) AS reemplazados,
+                (SELECT count(*) FROM dte_certificados
+                  WHERE razon_social_id = $1 AND reemplazado_el IS NULL
+                    AND eliminado_el IS NOT NULL) AS dados_de_baja`,
+        [razonSocialId],
+      );
+    expect(Number(estado.reemplazados)).toBeGreaterThan(0);
+    expect(Number(estado.dados_de_baja)).toBe(1);
+
+    const patch = await llamar(
+      'patch',
+      `/api/tenants/razones-sociales/${razonSocialId}`,
+      token,
+      { rut: RUT_OTRO },
+    );
+    expect(patch.status).toBe(200);
+    expect((patch.body as { rut: string }).rut).toBe(RUT_OTRO);
+    const borrar = await llamar(
+      'delete',
+      `/api/tenants/razones-sociales/${razonSocialId}`,
+      token,
+    );
+    expect(borrar.status).toBe(204);
   });
 });
