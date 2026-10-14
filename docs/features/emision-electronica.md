@@ -394,11 +394,18 @@ respuesta con un blob) y Playwright de la pantalla (`frontend/e2e/configuracion/
 Las reglas de subida y de `evaluarPerfil` se revisaron con mutantes: los fixtures evitan el 1 y los
 rangos que empiezan igual.
 
+### Decidido por el owner (2026-10-14, por AskUserQuestion)
+
+- **Una razón social que ya emitió queda fija** y no hay ruta para quitar el certificado vigente
+  ni un CAF usado. Un RUT distinto es otro contribuyente ante el SII: para cambiar de RUT se crea
+  otra razón social y se la marca preferida, y lo emitido conserva su rastro.
+- **Nombre del ítem:** el catálogo valida al crear y al editar (80 caracteres en ISO-8859-1). Los
+  ítems que ya no cumplen no se corrigen solos: el motor los rechaza al emitir (texto inválido), y
+  el subproyecto 4 le dice al cajero qué producto renombrar. El seed no tiene ninguno (medido: 12 ítems, máximo 28 caracteres).
+- **ILA y adicionales:** primero una investigación con fuentes del SII; la decisión sale de ahí.
+
 ### Lo que queda abierto
 
-- **Sin ruta para quitar el certificado vigente ni un CAF que ya entregó folios** (decisión de
-  producto abierta, del owner): una razón social que ya emitió queda fija, sin poder cambiar de RUT
-  ni borrarse, aunque la empresa cierre o cambie de RUT. Hoy solo se reemplaza el certificado.
 - **Un CAF de producción subido mientras la razón social está en certificación no se detecta.** El
   CAF toma el ambiente de la razón social al subirlo. El `IDK` no sirve para deducirlo: según el
   instructivo técnico del SII (A.1, letra h) identifica la llave pública del SII que verifica la

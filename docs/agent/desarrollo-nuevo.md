@@ -382,16 +382,19 @@ es parte del enunciado y viaja con ella.
 
   Hoy **no hay RUT piloto**, así que la certificación espera a que haya uno. Antes del
   subproyecto 4 tienen que estar cerrados dos frentes que dispara el motor (§ 7 y § 9 de su spec):
-  - qué hace el SII con el ILA y los demás impuestos adicionales en la boleta;
-  - el límite del nombre del ítem en el catálogo: 80 caracteres en ISO-8859-1.
+  - qué hace el SII con el ILA y los demás impuestos adicionales en la boleta (owner,
+    2026-10-14: **primero una investigación** con fuentes del SII, después decide);
+  - el límite del nombre del ítem en el catálogo: 80 caracteres en ISO-8859-1 (owner,
+    2026-10-14: **se valida al crear y al editar**; los que ya existen no se corrigen solos: el
+    motor los rechaza al emitir y el subproyecto 4 dice qué producto renombrar).
 
   **Decidido por el owner (2026-10-14):** `CdgIntRecep` no se envía sobre 135 UF, y la línea
   gratis sale sin `PrcItem` y con `MontoItem` 0 (`features/emision-electronica.md`).
 
   **Lo que dejó el perfil fiscal y falta decidir o hacer** (detalle en
   `features/emision-electronica.md`, § "Lo que queda abierto"):
-  - decisión del owner: **no hay ruta para quitar el certificado vigente ni un CAF que ya entregó
-    folios**, así que una razón social que ya emitió queda fija (sin cambiar de RUT ni borrarse);
+  - ✅ decidido por el owner (2026-10-14): una razón social que ya emitió **queda fija**; para
+    cambiar de RUT se crea otra razón social (es otro contribuyente ante el SII);
   - un CAF de producción subido mientras la razón social está en certificación no se detecta;
   - la firma del SII sobre el CAF (`FRMA`) no se verifica;
   - el vencimiento del CAF de boleta, la custodia del certificado y `CdgSIISucur` por local;

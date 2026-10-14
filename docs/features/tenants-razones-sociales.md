@@ -50,5 +50,7 @@ Permite al administrador de un tenant editar los datos de su propia empresa (nom
   se quitan desde el perfil fiscal —que lista solo los CAF de la razón social preferida de hoy;
   los de una ex emisora no se ven en ninguna parte, y la salida es volver a marcarla preferida—, pero **un CAF que ya entregó folios no se puede quitar**: una
   razón social que ya emitió queda fija aunque no tenga certificado. El certificado vigente, hoy,
-  solo se reemplaza (no hay ruta que lo quite), así que con uno cargado también queda fija. El chequeo corre bajo el mismo
+  solo se reemplaza (no hay ruta que lo quite), así que con uno cargado también queda fija. Es
+  decisión del owner (2026-10-14): un RUT distinto es otro contribuyente, y para cambiarlo se crea
+  otra razón social. El chequeo corre bajo el mismo
   `FOR UPDATE` que las subidas del perfil fiscal, así que no se cruza con una en curso.
