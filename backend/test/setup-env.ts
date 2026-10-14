@@ -18,7 +18,7 @@ if (process.env.DATABASE_URL) {
 process.env.LIMITES_ESCALA ??= '1000';
 
 // CifradoDteService (módulo dte) tira error en el constructor si falta su clave, y
-// AppModule la construye al bootear (una vez que el módulo dte lo registra). Los
+// AppModule la construye al bootear. Los
 // `.env` de los worktrees creados antes del 2026-10-14 no la tienen: sin este
 // default, todo e2e de ese worktree muere al arrancar. Valor de test (32 bytes b64),
 // el mismo de `.env.example`.

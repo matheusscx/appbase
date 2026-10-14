@@ -57,6 +57,7 @@ import { ComprasModule } from './modules/compras/compras.module';
 // Reportes de negocio. Sin entidades que sumar a `ENTIDADES` (typeorm.config.ts):
 // los reportes solo LEEN tablas que ya registran sus módulos dueños.
 import { ReportesModule } from './modules/reportes/reportes.module';
+import { DteModule } from './modules/dte/dte.module';
 
 @Module({
   imports: [
@@ -129,6 +130,7 @@ import { ReportesModule } from './modules/reportes/reportes.module';
     IdempotenciaModule,
     ComprasModule,
     ReportesModule,
+    DteModule,
   ],
   controllers: [AppController],
   providers: [AppService],

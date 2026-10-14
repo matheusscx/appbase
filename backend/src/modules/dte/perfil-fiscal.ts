@@ -55,7 +55,7 @@ const NOMBRE_BOLETA: Record<TipoBoleta, string> = {
  * (UTC) y al dueño del local se le dice el día que ve en su calendario: a las 22:00 del 15 en
  * Santiago ya es el 16 en UTC.
  */
-function fechaChile(instante: Date): string {
+export function fechaChile(instante: Date): string {
   const partes = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Santiago',
     year: 'numeric',
