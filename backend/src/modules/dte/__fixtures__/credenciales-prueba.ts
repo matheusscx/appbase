@@ -6,10 +6,18 @@ interface OpcionesCaf {
   tipo: number;
   desde: number;
   hasta: number;
+  /** `RS` del CAF; el del SII puede traer tildes y Ñ. */
+  razonSocial?: string;
 }
 
 /** CAF con la forma del SII: llave RSA de 512 bits y `FRMA` falsa (no se verifica, spec § 6). */
-export function cafDePrueba({ rut, tipo, desde, hasta }: OpcionesCaf): string {
+export function cafDePrueba({
+  rut,
+  tipo,
+  desde,
+  hasta,
+  razonSocial = 'EMPRESA DE PRUEBA LTDA',
+}: OpcionesCaf): string {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', {
     modulusLength: 512,
   });
@@ -23,7 +31,7 @@ export function cafDePrueba({ rut, tipo, desde, hasta }: OpcionesCaf): string {
     '<AUTORIZACION>',
     '<CAF version="1.0">',
     '<DA>',
-    `<RE>${rut}</RE><RS>EMPRESA DE PRUEBA LTDA</RS><TD>${tipo}</TD>`,
+    `<RE>${rut}</RE><RS>${razonSocial}</RS><TD>${tipo}</TD>`,
     `<RNG><D>${desde}</D><H>${hasta}</H></RNG><FA>2026-10-01</FA>`,
     `<RSAPK><M>${b64(jwk.n!)}</M><E>${b64(jwk.e!)}</E></RSAPK><IDK>100</IDK>`,
     '</DA>',
