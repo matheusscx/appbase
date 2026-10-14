@@ -100,10 +100,10 @@ Lo congelado en la venta manda (ADR-010). Si una igualdad no cierra, no se arma 
    (resolutivo 1° y Anexo III) pide nombres y apellidos, RUT, forma de pago y la descripción
    clara de los productos (`RUTRecep` real, `RznSocRecep`, `MedioPago`, `NmbItem`); teléfono y
    correo son opcionales (`TelefonoRecep`, `CorreoRecep`). **`CdgIntRecep` no se envía**
-   (owner, 2026-10-14): el Anexo III no lo lista, y el campo 19 del formato v4.2 sirve para
-   identificar al cliente que viene con `RUTRecep` = 0, cosa que sobre 135 UF no puede pasar.
-   Si el validador del SII lo exigiera, se ve en la certificación (subproyecto 5); arreglarlo
-   es un campo opcional de hasta 20 caracteres. Quien llama dice si se superó el umbral: el
+   (owner, 2026-10-14), aunque el campo 19 del formato v4.2 dice *"Dato obligatorio si
+   Indicador Servicio = 3 y RUT = 0, o Monto Total > 135 UF (Ley 21.713)"*: el Anexo III no lo
+   lista, y el campo sirve para identificar al cliente que viene con `RUTRecep` = 0, cosa que
+   sobre 135 UF no puede pasar. Es un riesgo abierto (ver "Riesgos abiertos"). Quien llama dice si se superó el umbral: el
    motor no sabe de UF. La captura ya lo exige antes de cobrar ([`ventas.md`](./ventas.md)); el
    motor lo repite porque el XML no puede salir sin eso.
 7. **Topes del XSD**: 1.000 líneas y 20 descuentos o recargos globales por boleta; 500 boletas por
@@ -222,6 +222,7 @@ son, riesgos, no hechos. Cada una tiene un arreglo acotado si el SII exige otra 
 | **Namespaces del `<DTE>`** | Declara los de la raíz del sobre (`xmlns` y `xmlns:xsi`) para que la firma del `Documento` verifique suelto y dentro del sobre | Si el SII extrae el `<DTE>` con otro contexto, la firma no le verifica; se ve al certificar |
 | **`RutProvSW` / `RznSocProvSW`** | Hijos de `Encabezado` entre `Receptor` y `Totales`: el formato v4.2 los numera 30–31, entre `CiudadPostal` y `MntNeto`, y el SII no publica el padre | El SII rechaza por esquema; son dos elementos del XSD y dos líneas |
 | **`<RSR></RSR>` vacío** | Sin nombre de receptor el `RSR` del timbre va como par de tags vacío (forma C14N); el formato no fija un texto y el XSD solo pone `maxLength 40` | El SII exige un texto; se cambia una constante |
+| **`CdgIntRecep` sobre 135 UF** | No se envía: el Anexo III de la Res. 44/2025 no lo lista y la boleta sobre el umbral lleva `RUTRecep` real. El formato v4.2, campo 19, lo marca obligatorio si el monto pasa 135 UF | El validador del SII lo exige; es un campo opcional de hasta 20 caracteres en el receptor (y el contrato gana qué escribir en él) |
 | **Escape de `& < >` solamente** | Los bytes emitidos son la forma C14N; ningún parser distingue `&apos;` de `'` | Que el SII exigiera `&apos;`/`&quot;` literales: riesgo bajo |
 
 Además: el esquema real del SII (el que valida su servidor, no el v11 de 2007) se mide en la

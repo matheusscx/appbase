@@ -381,10 +381,10 @@ es parte del enunciado y viaja con ella.
   **Decidido por el owner (2026-10-14):** `CdgIntRecep` no se envía sobre 135 UF, y la línea
   gratis sale sin `PrcItem` y con `MontoItem` 0 (`features/emision-electronica.md`).
 
-  **Lo que dejó el motor y solo confirma la certificación:**
-  - Riesgos de forma que solo confirma la certificación (subproyecto 5): aplanado del `<DD>`,
-    namespaces del `<DTE>`, ubicación de `RutProvSW`/`RznSocProvSW`, `<RSR></RSR>` vacío y
-    escape de solo `& < >`.
+  **Lo que dejó el motor y solo confirma la certificación (subproyecto 5):**
+  - Riesgos de forma: aplanado del `<DD>`, namespaces del `<DTE>`, ubicación de
+    `RutProvSW`/`RznSocProvSW`, `<RSR></RSR>` vacío, escape de solo `& < >` y `CdgIntRecep`
+    sobre 135 UF.
 
 - [ ] **La compra online pide los datos del cliente, como un ecommerce** (producto + backend +
   frontend; **pedido por el owner el 2026-10-11** en el chat de la orquestadora: *"hay que pedir
