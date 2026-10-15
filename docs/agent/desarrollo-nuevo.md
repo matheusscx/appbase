@@ -388,9 +388,16 @@ es parte del enunciado y viaja con ella.
   subproyecto 4 tienen que estar cerrados dos frentes que dispara el motor (§ 7 y § 9 de su spec):
   - ✅ el ILA en la boleta (owner, 2026-10-14, por AskUserQuestion tras la investigación): para el
     local que vende al público **es costo**, no un impuesto de venta; la boleta no lo informa y el
-    rechazo del adicional en el motor es la regla. **Falta el aviso** en la pantalla de impuestos
-    cuando un tenant crea uno que parece ILA o alcohol (frente chico, propio). El afecto que vende
-    al público (productor, brewpub) queda sin boleta con ILA: su salida es la factura;
+    rechazo del adicional en el motor es la regla. El afecto que vende al público (productor,
+    brewpub) queda sin boleta con ILA: su salida es la factura;
+  - ⏸️ **ILA en el catálogo del sistema, habilitable por tenant** (owner, 2026-10-14; en pausa por
+    decisión suya): que el ILA lo administremos nosotros como el IVA (sembrado por país, con sus
+    tasas oficiales 10 / 18 / 20,5 / 31,5 %), pero que, a diferencia del IVA, **el tenant decida si
+    lo habilita**. Reemplaza al "aviso al crear un impuesto que parece ILA" que se había propuesto.
+    **Falta la pregunta que lo destraba:** para qué lo habilita un tenant — cobrarlo en la venta (el
+    afecto: productor, importador, brewpub, que hoy no podría emitir boleta con él), registrarlo
+    en las compras como costo (la pregunta abierta de compras), las dos cosas, o solo tenerlo bien
+    definido. Es frente fiscal (va solo) y toca el motor de precios: se diseña con spec;
   - el límite del nombre del ítem en el catálogo: 80 caracteres en ISO-8859-1 (owner,
     2026-10-14: **se valida al crear y al editar**; los que ya existen no se corrigen solos: el
     motor los rechaza al emitir y el subproyecto 4 dice qué producto renombrar).

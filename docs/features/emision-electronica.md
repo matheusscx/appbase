@@ -414,8 +414,8 @@ rangos que empiezan igual.
   lleva adicional y la boleta sale con neto = total / 1,19. El rechazo
   `IMPUESTO_ADICIONAL_NO_SOPORTADO` deja de ser "falta definir" y pasa a ser la regla. Se eligió
   frente a "solo documentarlo" (sin aviso), "consultar al contador primero" y "soportar también al
-  afecto". Lo que trae: un **aviso en la pantalla de impuestos** cuando un tenant crea un impuesto
-  que parece ILA o alcohol (frente propio, en `docs/agent/desarrollo-nuevo.md`). Lo que no cubre:
+  afecto". Lo que viene después está en pausa: el ILA en el catálogo del sistema, habilitable por tenant
+  (`docs/agent/desarrollo-nuevo.md`). Lo que no cubre:
   el contribuyente **afecto** que vende al público (productor, importador, brewpub) no puede emitir
   boleta con ILA; su salida es la factura, que es otro frente.
 
