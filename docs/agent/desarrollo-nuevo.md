@@ -387,14 +387,25 @@ es parte del enunciado y viaja con ella.
         [`features/emision-electronica.md`](../features/emision-electronica.md) § La venta emite la
         boleta. **Antes de prender en producción** el owner carga `DTE_PROVEEDOR_RUT` y
         `DTE_PROVEEDOR_RAZON_SOCIAL` en Railway (sin ellas el interruptor no prende);
-     2. **anular y nota de crédito electrónica (tipo 61)** (abierto): hoy una boleta `emitido` no se
-        anula (400) y la corrección sobre ella queda marcada *NC electrónica pendiente*; la nota
-        ante el SII se hace en el portal. Falta emitir la 61 con su folio, encolarla y enviarla por el
-        canal que corresponda. Es frente fiscal (va solo);
+     2. ⏸️ **anular y nota de crédito electrónica (tipo 61)** (**en pausa**, owner 2026-10-15 por
+        AskUserQuestion, tras la
+        [investigación](investigaciones/2026-10-15-nota-credito-sobre-boleta.md)): hoy una boleta
+        `emitido` no se anula (400) y la corrección sobre ella queda marcada *NC electrónica
+        pendiente*; la nota ante el SII se hace en el portal. La investigación encontró que el SII
+        manda al local que **solo emite boletas** a anular en su portal y al **facturador** a su
+        software, y que ser facturador exige certificar factura + NC + ND (Res. 45/2003): la 61 desde
+        el sistema serviría solo a un local facturador. **Lo destraba** la respuesta del SII o de un
+        contador a las preguntas 1 y 2 de esa investigación (§ "Preguntas para el contador o el SII").
+        Si se retoma, quedó decidido partirlo en dos: 2a, el motor de la 61 y el canal de facturas
+        (SOAP/upload, otro token, otra resolución), probados contra los XSD sin tocar la venta; 2b, la
+        nota del drawer emite la 61. Es frente fiscal (va solo);
      3. **pantalla de atrasadas y rechazadas** (abierto): la lista y el aviso de las boletas del SII
         que no llegaron o volvieron rechazadas, y **qué hacer con una rechazada** (reemitir con otro
         folio, corregir el dato, avisar al dueño). Hoy solo quedan en la base;
-  5. certificación;
+  5. certificación. ⚠️ La guía de certificación de boletas del SII pide ser emisor de DTE
+     previamente o certificarse en paralelo, y la Res. 74/2020 dice que eliminó esa condición: si rige
+     la guía, cada local pasa también por la certificación de factura (pregunta 2 de la
+     [investigación de la NC](investigaciones/2026-10-15-nota-credito-sobre-boleta.md));
   6. intercambio de factura.
 
   Hoy **no hay RUT piloto**, así que la certificación espera a que haya uno. Los frentes que

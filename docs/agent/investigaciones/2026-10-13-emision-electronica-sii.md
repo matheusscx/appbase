@@ -54,6 +54,9 @@ se encontró vencimiento **[?]**. Los folios que no se usan se anulan **[P]**.
 ⚠️ SimpleFactura publica un endpoint `/folios/solicitar`
 ([docs](https://documentacion.simplefactura.cl)) **[S]**: o el SII tiene una vía que el
 instructivo no lista, o el proveedor automatiza el portal. Sin resolver.
+⚠️ **Corregido el 2026-10-15:** la Res. 58/2017 no enumera tipos (dice "documentos que otorgan
+derecho a crédito fiscal"); que la 61 esté dentro lo dicen terceros
+([investigación de la NC](2026-10-15-nota-credito-sobre-boleta.md) § 8).
 
 **Certificación.** Es **por contribuyente, no por software**: "se efectúa una vez por
 contribuyente" **[P]**

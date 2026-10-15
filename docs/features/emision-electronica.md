@@ -1,6 +1,6 @@
 # Feature: Emisión electrónica — el motor de la boleta, el perfil fiscal del emisor, la cola de envío al SII y la venta que emite
 
-**Status**: In Development — el motor, el perfil fiscal, la cola de envío y la venta que emite (subproyecto 4, frente 1) están terminados; con el interruptor del tenant prendido cada venta emite su boleta. **Falta** la nota de crédito electrónica (frente 2), la pantalla de atrasadas y rechazadas (frente 3) y la certificación ante el SII (subproyecto 5): nada de lo emitido tiene validez hasta entonces
+**Status**: In Development — el motor, el perfil fiscal, la cola de envío y la venta que emite (subproyecto 4, frente 1) están terminados; con el interruptor del tenant prendido cada venta emite su boleta. **Falta** la nota de crédito electrónica (frente 2, en pausa hasta consultar al SII), la pantalla de atrasadas y rechazadas (frente 3) y la certificación ante el SII (subproyecto 5): nada de lo emitido tiene validez hasta entonces
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-10-15
 
@@ -935,8 +935,11 @@ mismo año de la venta, y la diferencia aparece recién al emitir después (el b
 
 ### Lo que queda abierto
 
-- **La nota de crédito electrónica (tipo 61)** y su envío por el canal de facturas son el frente 2.
-  Hasta entonces la nota ante el SII se hace en el portal, y el detalle de la venta marca la
+- **La nota de crédito electrónica (tipo 61)** y su envío por el canal de facturas son el frente 2,
+  **en pausa** (owner, 2026-10-15) hasta que el SII o un contador digan si un local que solo emite
+  boletas puede emitirla con software propio: el SII lo manda a su portal y reserva el software al
+  facturador ([investigación](../agent/investigaciones/2026-10-15-nota-credito-sobre-boleta.md)).
+  Mientras tanto la nota ante el SII se hace en el portal, y el detalle de la venta marca la
   corrección con *NC electrónica pendiente*.
 - **Atrasadas y rechazadas**, y qué se hace con una rechazada, son el frente 3 (la pantalla y el
   aviso). Hoy una rechazada solo queda en la base.

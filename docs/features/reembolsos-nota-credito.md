@@ -847,7 +847,8 @@ Response 201: { "id": "<uuid NC>", "totalFinal": "5000.0000",
   sacar plata que esta venta nunca ingresó, y dar billetes por una compra con tarjeta.
   Excederlo → 422.
   **Acota el dinero, no el documento.** La NC puede seguir emitiéndose por el total
-  (tope `total_final − Σ NCs previas`, regla dura del SII): anular una venta cobrada a
+  (tope `total_final − Σ NCs previas`, regla nuestra; que el SII valide la suma no tiene fuente
+  primaria, ver la [investigación de la NC sobre boleta](../agent/investigaciones/2026-10-15-nota-credito-sobre-boleta.md) § 4): anular una venta cobrada a
   medias es legítimo —borra la cuenta por cobrar—, devolver efectivo que nunca entró no.
   La devolución por el medio de pago original (tarjeta vía Transbank) ya existe en el
   módulo `pasarela` y **no pasa por este camino**; componer ambas patas en una sola

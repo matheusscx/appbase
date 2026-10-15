@@ -30,6 +30,8 @@ No todo hallazgo obliga a tocar algo. Tres cosas se verificaron y quedan como es
 - **El tope documental de la NC.** El SII **rechaza** un DTE de nota de crédito cuyo monto
   exceda el documento de referencia — regla dura, no criterio. `total_final − Σ NCs
   previas` es exactamente eso.
+  ⚠️ **Corregido el 2026-10-15:** esta frase no tiene fuente primaria; solo terceros lo dicen, sin
+  aclarar si es por nota o acumulado ([investigación](2026-10-15-nota-credito-sobre-boleta.md) § 4).
 - **La propina fuera de `total_final`.** En Chile la propina sugerida **no es hecho
   gravado** y va en campo separado del DTE. Como `total_final` sale del motor de precios y
   la propina vive en `venta_propina` con su split en `pago_aplicaciones`, la NC ya se acota
