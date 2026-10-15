@@ -59,7 +59,9 @@ Ver el razonamiento completo (alternativas descartadas, base legal) en
 - **NO incluido (futuro)**: CRUD superadmin para administrar el catálogo del
   sistema (agregar un país nuevo = agregar su catálogo al seed); impuestos
   adicionales chilenos concretos (ILA, bebidas analcohólicas, suntuarios) en el
-  seed — el modelo ya los soporta (`tipo='otro'`) pero no se siembran hoy;
+  seed — el modelo ya los soporta (`tipo='otro'`) pero no se siembran hoy. **El ILA no se
+  siembra a propósito** (owner, 2026-10-14): el local que vende al público no lo cobra, lo paga en
+  la compra y es costo (`emision-electronica.md`, "Decidido por el owner");
   indicador "Exento" impreso en boletas/recibos y emisión DTE (diferido por
   ADR-010); nuevas clasificaciones tributarias más allá de afecto/exento.
 

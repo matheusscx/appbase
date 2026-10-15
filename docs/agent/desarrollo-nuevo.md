@@ -386,8 +386,11 @@ es parte del enunciado y viaja con ella.
 
   Hoy **no hay RUT piloto**, así que la certificación espera a que haya uno. Antes del
   subproyecto 4 tienen que estar cerrados dos frentes que dispara el motor (§ 7 y § 9 de su spec):
-  - qué hace el SII con el ILA y los demás impuestos adicionales en la boleta (owner,
-    2026-10-14: **primero una investigación** con fuentes del SII, después decide);
+  - ✅ el ILA en la boleta (owner, 2026-10-14, por AskUserQuestion tras la investigación): para el
+    local que vende al público **es costo**, no un impuesto de venta; la boleta no lo informa y el
+    rechazo del adicional en el motor es la regla. **Falta el aviso** en la pantalla de impuestos
+    cuando un tenant crea uno que parece ILA o alcohol (frente chico, propio). El afecto que vende
+    al público (productor, brewpub) queda sin boleta con ILA: su salida es la factura;
   - el límite del nombre del ítem en el catálogo: 80 caracteres en ISO-8859-1 (owner,
     2026-10-14: **se valida al crear y al editar**; los que ya existen no se corrigen solos: el
     motor los rechaza al emitir y el subproyecto 4 dice qué producto renombrar).

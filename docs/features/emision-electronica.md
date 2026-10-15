@@ -407,7 +407,17 @@ rangos que empiezan igual.
 - **Nombre del ítem:** el catálogo valida al crear y al editar (80 caracteres en ISO-8859-1). Los
   ítems que ya no cumplen no se corrigen solos: el motor los rechaza al emitir (texto inválido), y
   el subproyecto 4 le dice al cajero qué producto renombrar. El seed no tiene ninguno (medido: 12 ítems, máximo 28 caracteres).
-- **ILA y adicionales:** primero una investigación con fuentes del SII; la decisión sale de ahí.
+- **ILA y adicionales (2026-10-14, por AskUserQuestion, después de leer la
+  [investigación](../agent/investigaciones/2026-10-14-ila-en-boleta-electronica.md)):** para el
+  local que vende al público **el ILA es costo, no un impuesto de su venta** (DL 825 art. 43 inciso
+  final; Circular 26/2021 § 12: la boleta del minorista no da cuenta separada del ILA). El ítem no
+  lleva adicional y la boleta sale con neto = total / 1,19. El rechazo
+  `IMPUESTO_ADICIONAL_NO_SOPORTADO` deja de ser "falta definir" y pasa a ser la regla. Se eligió
+  frente a "solo documentarlo" (sin aviso), "consultar al contador primero" y "soportar también al
+  afecto". Lo que trae: un **aviso en la pantalla de impuestos** cuando un tenant crea un impuesto
+  que parece ILA o alcohol (frente propio, en `docs/agent/desarrollo-nuevo.md`). Lo que no cubre:
+  el contribuyente **afecto** que vende al público (productor, importador, brewpub) no puede emitir
+  boleta con ILA; su salida es la factura, que es otro frente.
 
 ### Lo que queda abierto
 
@@ -730,9 +740,11 @@ cd backend && npx jest --config ./test/jest-e2e.json test/dte-cola.e2e-spec.ts
 
 ## Pendiente de decisión
 
-El tratamiento de **ILA y otros impuestos adicionales** en la boleta no está decidido (la
-boleta no tiene campo para ellos); el motor rechaza con `IMPUESTO_ADICIONAL_NO_SOPORTADO`. Es un
-frente aparte (`docs/agent/desarrollo-nuevo.md`).
+Nada del motor. El ILA quedó decidido el 2026-10-14 (ver "Decidido por el owner" arriba): costo
+para el minorista, rechazo del adicional en la boleta como regla. Queda abierto solo el
+contribuyente afecto (factura, otro frente) y las preguntas para el contador de la
+[investigación](../agent/investigaciones/2026-10-14-ila-en-boleta-electronica.md) § 6, que no
+cambian la regla del local típico.
 
 ---
 
