@@ -67,6 +67,7 @@ Jest (unit + e2e de API) · Vitest · Playwright.
 | `paqueteria.module.ts` | Registro |
 
 Modificados: `backend/src/database/typeorm.config.ts` (`ENTIDADES`), `backend/src/app.module.ts`,
+`backend/src/modules/rbac/rbac.service.ts` (solo el comentario, Task 8),
 `backend/src/database/migrations/<ts>-Paqueteria.ts` (generada), `startup-pos.sql`,
 `backend/src/modules/seeder/seeder.service.ts` + `seeder.module.ts`,
 `backend/test/topes-dto.e2e-spec.ts`. Nuevo: `backend/test/paqueteria.e2e-spec.ts`.
@@ -1144,24 +1145,77 @@ Run: `npm run test:e2e -- paqueteria.e2e-spec` → PASS.
 
 ---
 
-### Task 7: Seed demo
+### Task 7: Tenant demo "Demo Gestión de Paquetes" y el módulo como contrato
 
 **Files:**
 - Modify: `backend/src/modules/seeder/seeder.service.ts`, `backend/src/modules/seeder/seeder.module.ts`
+- Modify (si el conteo cambia): los e2e que afirman cuántos tenants hay (ver Step 5)
 
-- [ ] **Step 1: Medir el rango de IDs** con los cuatro pasos de `docs/patterns/backend.md` § 8 (grep de literales **y** de generadores `const uuid = `, contra el código, no contra `docs/`). Anotar el rango elegido en un comentario arriba del método nuevo.
+**Interfaces:**
+- Produces: `modulos_app` **"Paquetería"** con un único permiso `Leer` (es la **marca de contratado**
+  que lee el menú, Task 8; el backend sigue con `TenantAdminGuard` y no lo consulta); tenant
+  **Demo Gestión de Paquetes** que contrata **solo** Paquetería; usuario `admin@paquetes.cl` /
+  `admin`, admin (rol fijo) de ese tenant y de ningún otro, **no superadmin**. *Demo Restaurante*
+  también contrata Paquetería (ahí corren los e2e y el Playwright).
 
-- [ ] **Step 2: `seedPaqueteria()`** idempotente (upsert por ID fijo, como los demás `seed*`), en el tenant **Demo Restaurante** (`…440007`), llamado en `onApplicationBootstrap` después de `seedTerceros`:
+Decisión del owner (2026-10-15): el cliente entra con un admin propio a un tenant que tiene solo
+este módulo; sin permisos por rol.
+
+- [ ] **Step 1: Medir el rango de IDs** con los cuatro pasos de `docs/patterns/backend.md` § 8
+  (grep de literales **y** de generadores `const uuid = `, contra el código, no contra `docs/`).
+  Hacen falta: tenant, provincia no (se usa la de Santiago `…440001`), usuario, rol admin, módulo,
+  su `modulo_app_permiso`, dos `tenant_modulos`, local, caja virtual, fórmula de precio,
+  `tenant_moneda`, configuración, 3 repartidores, ~30 paquetes, 3 hojas y sus líneas. Anotar el
+  rango elegido en un comentario arriba de `seedPaqueteria()`.
+
+- [ ] **Step 2: El tenant y su admin.** El tenant del seed no pasa por `TenantsService.create`
+  (se inserta directo), así que se le siembra **a mano lo mismo que ese `create` le da a todo
+  tenant nuevo** — leer `tenants.service.ts → create()` y replicar cada pieza en el método del
+  seeder donde ya la reciben los otros dos tenants:
+  - `seedTenants`: `{ nombre: 'Demo Gestión de Paquetes', provinciaId: '…440001', correo: 'contacto@paquetes.cl', … }`;
+  - `seedTenantMonedas` (CLP), `seedUbicaciones` (el local), `seedCajasVirtuales`, `seedTenantFormulaPrecio`;
+  - `seedUsuariosAdicionales`: `admin@paquetes.cl`, contraseña `admin` hasheada igual que los demás, `esSuperadmin: false`;
+  - `seedUsuariosTenants`: el par `[ADMIN_PAQUETES, PAQUETES]` — **`admin@sistema.com` no entra** a este tenant (no cambia la cantidad de tenants que ven sus suites);
+  - `seedRolesUsuarios`: rol `Administrador` (`es_fijo`) del tenant y su asignación.
+  Si `create()` siembra algo más que no esté en esa lista, se suma igual; si alguna pieza no
+  aplica a un tenant sin ventas, se deja escrito el porqué al lado.
+
+- [ ] **Step 3: El módulo como contrato.**
+  - `seedModulosApp`: `{ nombre: 'Paquetería', url: '/paquetes', icono: 'mdi-package-variant', tieneConfiguracion: true }`;
+  - `seedModuloAppPermisos`: solo `Leer`;
+  - `seedTenantModulo`: Paquetería para **Demo Gestión de Paquetes** (único módulo) y para **Demo
+    Restaurante**, con el mismo `estado`/`expiraEn` que las filas vecinas. *Demo Bodega* **no**:
+    queda como el tenant donde el menú no lo muestra (lo usa el spec de Task 8).
+
+- [ ] **Step 4: `seedPaqueteria()`** idempotente (upsert por ID fijo), en el tenant **Demo Gestión
+  de Paquetes**, llamado en `onApplicationBootstrap` después de los métodos de arriba:
   - configuración `10000` / `5000`;
   - 3 repartidores ("Juan Pérez", "María Soto", "Pedro Rojas");
-  - 30 paquetes con códigos de 11 dígitos que empiezan con `46`, ~⅓ con cobro en destino, la mitad con dirección y comuna, tres con remitente (un tercero del seed);
-  - dos hojas rendidas en días anteriores (totales congelados **calculados con la misma consulta**: sembrar líneas y llamar a `HojasRutaService.rendir` no se puede desde el seeder sin usuario; en su lugar sembrar las líneas y escribir los totales con un `UPDATE … FROM (<la consulta de totales>)`) y una abierta en el día del negocio de hoy con 5 paquetes en ruta.
-  - El "hoy" sale del mismo cálculo que `GET /tenants/me` usa para `diaNegocioHoy` (`grep -n "diaNegocioHoy" backend/src/modules/tenants/tenants.service.ts`); las fechas anteriores se restan sobre ese string. **Nada de `CURRENT_DATE`** (lo rechaza `dia-negocio.invariant.spec.ts`).
-  - Registrar las cinco entities en `seeder.module.ts` si el seeder usa repos.
+  - 30 paquetes con códigos de 11 dígitos que empiezan con `46`, ~⅓ con cobro en destino, la
+    mitad con dirección y comuna;
+  - dos hojas rendidas en días anteriores y una abierta en el día del negocio de hoy con 5
+    paquetes en ruta. Los totales congelados de las rendidas se escriben con un
+    `UPDATE hojas_ruta … FROM (<la consulta de totales de Task 5>)`, no a mano.
+  - El "hoy" sale del mismo cálculo que `GET /tenants/me` usa para `diaNegocioHoy`
+    (`grep -n "diaNegocioHoy" backend/src/modules/tenants/tenants.service.ts`); las fechas
+    anteriores se restan sobre ese string. **Nada de `CURRENT_DATE`** (lo rechaza
+    `dia-negocio.invariant.spec.ts`).
+  - En *Demo Restaurante* solo la configuración `10000` / `5000` (la que el e2e de Task 3 deja
+    igual): sin paquetes ni repartidores, los specs crean los suyos.
+  - Registrar las entities en `seeder.module.ts` si el seeder usa repos.
 
-- [ ] **Step 3: Verificar**: `./scripts/reset-db.sh` → la base arranca con `Seed complete` una vez; `GET /hojas-ruta?desde=<hace 7 días>&hasta=<hoy>` con el admin del seed devuelve 3 hojas; reiniciar el backend no duplica nada (contar filas antes y después). `npm run test:e2e -- paqueteria.e2e-spec` sigue en verde (el e2e no usa nada del seed salvo la configuración, que tiene los mismos valores).
+- [ ] **Step 5: Lo que el tenant nuevo puede romper.** Buscar los e2e que cuentan tenants o
+  iteran todos (`grep -rn "admin/tenants" backend/test frontend/e2e`, y los que afirman un
+  `toHaveLength` sobre tenants o usuarios). Medir cuáles cambian corriendo esas suites; ajustar el
+  número esperado **con el porqué** al lado (un tenant demo más), nunca relajar la aserción.
 
-- [ ] **Step 4: Stage + revisión + commit**: `feat(paqueteria): datos demo para mostrar el módulo`.
+- [ ] **Step 6: Verificar**: `./scripts/reset-db.sh` → `Seed complete` una vez; login de
+  `admin@paquetes.cl` → `switch-tenant` al tenant nuevo → `GET /rbac/mis-permisos` devuelve
+  **exactamente** `["Paquetería:Leer"]`; `GET /hojas-ruta?desde=<hace 7 días>&hasta=<hoy>`
+  devuelve 3 hojas; reiniciar el backend no duplica filas (contar antes y después). Después
+  `npm run test:e2e` **entero** (el seed toca lo que leen todas las suites).
+
+- [ ] **Step 7: Stage + revisión + commit**: `feat(paqueteria): tenant demo de gestión de paquetes`.
 
 ---
 
@@ -1177,7 +1231,7 @@ Antes de escribir: skill `nuxt-ui`; leer `docs/patterns/frontend.md` § 1, 2, 5,
 - Produces: `usePaqueteria()` → `{ rotuloEstadoPaquete(e: EstadoPaquete): string, colorEstadoPaquete(e): 'neutral'|'info'|'success', rotuloEstadoLinea(e: EstadoLinea): string, colorEstadoLinea(e): 'info'|'success'|'warning', textoNeto(nombre: string, neto: string): string }`. `textoNeto('Juan', '50000')` → `'Juan entrega $50.000'`; con neto negativo → `'Se le pagan $5.000 a Juan'`; con `'0'` → `'Juan no entrega ni recibe plata'`. Formatea con `useCurrency().formatMonto` (oficial) y compara con `Decimal`, nunca `Number`.
 
 - [ ] **Step 1: Failing tests**
-  - `useMenuLateral.nuxt.spec.ts`: el admin ve el grupo **Paquetería** con *Escanear* (`/paquetes/escanear`), *Paquetes* (`/paquetes`) y *Rutas* (`/paquetes/rutas`), en ese orden, después de Compras; un rol con todos los permisos de módulo pero **no admin** no lo ve.
+  - `useMenuLateral.nuxt.spec.ts`: con `permisos: ['Paquetería:Leer']` y `esAdmin: true` el menú es **Inicio + Paquetería** (*Escanear* `/paquetes/escanear`, *Paquetes* `/paquetes`, *Rutas* `/paquetes/rutas`, en ese orden) y nada más; un admin **sin** `Paquetería:Leer` en sus permisos no ve el grupo (ni ningún módulo que no esté en sus permisos: es el caso que cambia); el superadmin ve todo. Ajustar los casos existentes del spec que daban por hecho el cortocircuito de `esAdmin` —cada uno con el porqué—, sin borrar la aserción.
   - `configuracion.nuxt.spec.ts`: grupo **Paquetería** con *Repartidores* y *Valores por defecto*, solo admin.
   - `usePaqueteria.spec.ts`: los tres casos de `textoNeto` con montos en CLP.
 
@@ -1185,16 +1239,41 @@ Run: `cd frontend && npx vitest run app/composables/useMenuLateral.nuxt.spec.ts 
 
 - [ ] **Step 2: Implementación**
 
-`useMenuLateral.ts`, después del grupo de Compras:
+`useMenuLateral.ts` — dos cambios:
 
-```ts
-menu.push(...grupo('paqueteria', 'Paquetería', 'i-lucide-package', [
-  // Todo el módulo es admin-only en el backend (TenantAdminGuard): el gate es esAdmin, no un permiso.
-  permissionsStore.esAdmin && { label: 'Escanear', icon: 'i-lucide-scan-barcode', to: '/paquetes/escanear' },
-  permissionsStore.esAdmin && { label: 'Paquetes', icon: 'i-lucide-package', to: '/paquetes' },
-  permissionsStore.esAdmin && { label: 'Rutas', icon: 'i-lucide-route', to: '/paquetes/rutas' },
-]))
-```
+1. **El admin ve solo los módulos contratados** (decisión del owner, 2026-10-15). Para el admin,
+   `GET /rbac/mis-permisos` ya devuelve todos los permisos de los módulos que el tenant contrató
+   (`rbac.service.ts → getMisPermisos`, rama del rol fijo), así que alcanza con dejar de
+   cortocircuitar por `esAdmin`:
+
+   ```ts
+   function puede(modulo: string, permiso: string) {
+     // El admin ve lo que su tenant contrató: `mis-permisos` ya le trae todos los permisos de esos
+     // módulos. Antes se cortocircuitaba con `esAdmin` y el menú le mostraba módulos que el backend
+     // le contesta con 403 (`userHasPermiso` mira `tenant_modulos` también para el admin).
+     return permissionsStore.can(modulo, permiso)
+   }
+   ```
+
+   El superadmin sigue viendo todo (`can` le da `true`). Antes de cambiarlo, medir qué módulos
+   contrata *Demo Restaurante* (`SELECT ma.nombre FROM tenant_modulos tm JOIN modulos_app ma …`)
+   y listar qué links pierde `admin.paris@paris.cl`: si pierde alguno, es porque hoy lo lleva a un
+   403. Anotarlo en el commit.
+
+2. Grupo nuevo, después de Compras:
+
+   ```ts
+   menu.push(...grupo('paqueteria', 'Paquetería', 'i-lucide-package', [
+     // El backend es admin-only (TenantAdminGuard); `Paquetería:Leer` es solo la marca de que el
+     // tenant lo contrató, y en `mis-permisos` solo la tiene el admin.
+     puede('Paquetería', 'Leer') && { label: 'Escanear', icon: 'i-lucide-scan-barcode', to: '/paquetes/escanear' },
+     puede('Paquetería', 'Leer') && { label: 'Paquetes', icon: 'i-lucide-package', to: '/paquetes' },
+     puede('Paquetería', 'Leer') && { label: 'Rutas', icon: 'i-lucide-route', to: '/paquetes/rutas' },
+   ]))
+   ```
+
+Corregir de paso el comentario de `rbac.service.ts` que afirma que el frontend ya filtraba por
+`getMisPermisos`: con este cambio pasa a ser cierto; dejarlo describiendo el estado real.
 
 `configuracion.vue`, grupo nuevo después de "Restaurante":
 
@@ -1407,6 +1486,7 @@ con texto de la UI.
 ```ts
 import { test, expect } from '../support/sesion'
 import { TENANTS, api, tokenDe } from '../support/api'
+// `entrarComo`: copiar el de `inicio/dashboard.spec.ts` (segunda copia; se extrae a la tercera)
 
 test.describe('Paquetería', () => {
   test('escanear con la pistola, marcar y rendir: el repartidor entrega lo cobrado menos su pago', async ({ page, request }) => {
@@ -1436,6 +1516,18 @@ test.describe('Paquetería', () => {
     await expect(page.getByRole('dialog').getByText(`${nombre} entrega $15.000`)).toBeVisible()
     await page.getByRole('dialog').getByRole('button', { name: 'Rendir' }).click()
     await expect(page.getByText('Rendida el')).toBeVisible()
+  })
+
+  test('el admin del tenant demo ve solo Paquetería en el menú', async ({ browser }) => {
+    // Contexto limpio y login por la app con el usuario del seed (Task 7), como `entrarComo` de
+    // `inicio/dashboard.spec.ts`. No es superadmin: es el caso real que verá el cliente.
+    const page = await entrarComo(browser, 'admin@paquetes.cl')
+    const menu = page.getByRole('navigation')
+    await expect(menu.getByRole('button', { name: 'Paquetería' })).toBeVisible()
+    await expect(menu.getByRole('link', { name: 'Punto de venta' })).toHaveCount(0)
+    await expect(menu.getByRole('link', { name: 'Mi caja' })).toHaveCount(0)
+    await page.goto('/paquetes/rutas')
+    await expect(page.getByText('Juan Pérez').first()).toBeVisible()   // hojas del seed
   })
 })
 ```
@@ -1495,5 +1587,5 @@ cd frontend && npm run e2e            # Playwright entero (el diff toca pantalla
   5. Reescanear en la misma hoja un paquete `no_entregado` reactiva su línea en vez de crear otra.
   6. `fecha` es `date` elegida en pantalla (default: día del negocio); el filtro es comparación directa, sin `rango-fecha.util`.
   7. Sin configuración guardada, escanear un código nuevo o dar de alta sin montos es 400 (no se crean paquetes a $0).
-- **Tenant del seed:** el demo se siembra en *Demo Restaurante*, que es donde entra el admin del e2e. Si para mostrárselo al cliente conviene un tenant propio ("Demo Reparto"), es una tarea aparte.
+- **Tenant demo (owner, 2026-10-15):** *Demo Gestión de Paquetes*, con `admin@paquetes.cl` y Paquetería como único módulo contratado (Task 7). El menú del admin pasa a mostrar solo lo contratado (Task 8). El backend **no** exige el contrato (sigue `TenantAdminGuard`): otro tenant podría usar la API sin haberlo contratado; es un borde comercial, anotado para fase 2.
 - **Pendiente externo:** confirmar con una etiqueta real qué trae el QR (spec § 9); si no es JSON con `id`, cambia solo `codigo-paquete.ts` y su spec.

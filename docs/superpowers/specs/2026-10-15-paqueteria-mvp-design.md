@@ -26,6 +26,7 @@ presentaron con su costo (AskUserQuestion) y las secciones de diseño las aprob�
 | Cobro en destino al escanear | **Interruptor fijo en la pantalla, que vale para los escaneos siguientes; cada fila se puede cambiar** | Todos nacen pagados (o todos con cobro) y se marcan después: un olvido descuadra la rendición |
 | Modelo | **C: hoja de ruta (repartidor + día) con sus paquetes** | A: todo en el paquete (reasignar pisa el intento anterior y cambia reportes ya rendidos); B: intentos sin cabecera ("el día de Juan" no existe como cosa) |
 | Acceso | **Todo con `TenantAdminGuard`** | Sin guard: viola la invariante 6 (un cajero rendiría hojas por API). Los permisos finos van a fase 2 |
+| Tenant demo | **"Demo Gestión de Paquetes" con su admin propio (`admin@paquetes.cl`, no superadmin) y Paquetería como único módulo contratado; el menú del admin muestra solo lo contratado** | Sembrar en *Demo Restaurante* (el cliente vería un POS de restaurante); tenant propio con el menú de hoy (vería módulos que le dan 403) |
 | Total general | **Σ `precio_envio` de todos los entregados, con o sin cobro en destino** | — |
 
 ## 1. Alcance
@@ -37,7 +38,8 @@ por rango de fechas, seed demo.
 **⛔ Fuera (fase 2 o frente propio):** login del repartidor, módulo contratable con permisos
 propios (`tenant_modulos`), precio por comuna o por repartidor, importación CSV, integración
 con la API de Mercado Libre, contrarreembolso del valor del producto, entrada de la rendición a
-una Caja, documento tributario del envío.
+una Caja, documento tributario del envío, y que el backend exija el contrato del módulo (hoy
+basta con ser admin del tenant).
 
 ## 2. Modelo de datos
 
@@ -159,7 +161,10 @@ array `entities`).
 
 ## 5. Pantallas
 
-Grupo **"Paquetería"** en el menú lateral (`useMenuLateral`), visible solo para el admin.
+Grupo **"Paquetería"** en el menú lateral (`useMenuLateral`), visible si el tenant lo contrató
+(`Paquetería:Leer` en `mis-permisos`, que solo trae el admin). El menú del admin pasa a mostrar
+**solo los módulos contratados**: hasta ahora mostraba todos y el backend le daba 403 en los que
+el tenant no pagó.
 
 - **Escanear** (`/paquetes/escanear`), **la pantalla principal del día**: repartidor y fecha
   (por defecto hoy) arriba; el interruptor *Cobro en destino*; un campo que **conserva el
@@ -186,7 +191,10 @@ Montos formateados con los composables existentes de moneda; tokens semánticos 
 
 ## 6. Seed
 
-En el tenant demo: defaults $10.000 / $5.000, 3 repartidores, ~30 paquetes con códigos con
+Tenant **Demo Gestión de Paquetes** (Chile, CLP) con lo mismo que `TenantsService.create` le da a
+todo tenant, su admin `admin@paquetes.cl` y Paquetería —registrada en `modulos_app` con un solo
+permiso `Leer`, que es la marca de contratado que lee el menú— como único módulo. *Demo
+Restaurante* también la contrata (ahí corren los e2e). En el tenant demo: defaults $10.000 / $5.000, 3 repartidores, ~30 paquetes con códigos con
 forma de Mercado Libre (mezcla de pagados y con cobro en destino), dos hojas rendidas en días
 anteriores y una abierta hoy, para que la demo abra con números. IDs fijos con el patrón del
 seeder.
