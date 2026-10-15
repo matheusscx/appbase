@@ -19,8 +19,11 @@ presentaron con su costo (AskUserQuestion) y las secciones de diseño las aprob�
 | Qué cobra en destino | **Solo el envío** | Envío + valor del producto (contrarreembolso con plata de un tercero) |
 | Valores por defecto | **Uno por empresa, override por paquete** | Tarifa por repartidor; precio por comuna (fase 2) |
 | Rendición | **"Rendir" cierra la hoja y congela los totales; no pasa por Caja** | Solo mirar el cálculo; entrar a una Caja (toca cajas: frente aparte) |
-| Datos del paquete | **Código (el de ML), destinatario, dirección, remitente opcional** | Sin remitente |
-| Carga | **Uno a uno + asignación masiva** | Importar CSV/Excel |
+| Datos del paquete | **Código (el de ML) obligatorio; destinatario, dirección y remitente opcionales** | Dirección obligatoria: frena el escaneo, que crea el paquete con solo el código |
+| Carga | **Escanear con pistola y asignar al repartidor en el acto; además, alta uno a uno y asignación masiva** | Importar CSV/Excel |
+| Lector | **Pistola USB/Bluetooth (tipea el código + Enter)** | Cámara del celular: dependencia nueva o API que no anda en iPhone |
+| Código que no existe al escanear | **Se crea el paquete con solo el código y los defaults, y se asigna** | Rechazarlo (obliga a cargar antes); mini-formulario (frena el ritmo) |
+| Cobro en destino al escanear | **Interruptor fijo en la pantalla, que vale para los escaneos siguientes; cada fila se puede cambiar** | Todos nacen pagados (o todos con cobro) y se marcan después: un olvido descuadra la rendición |
 | Modelo | **C: hoja de ruta (repartidor + día) con sus paquetes** | A: todo en el paquete (reasignar pisa el intento anterior y cambia reportes ya rendidos); B: intentos sin cabecera ("el día de Juan" no existe como cosa) |
 | Acceso | **Todo con `TenantAdminGuard`** | Sin guard: viola la invariante 6 (un cajero rendiría hojas por API). Los permisos finos van a fase 2 |
 | Total general | **Σ `precio_envio` de todos los entregados, con o sin cobro en destino** | — |
@@ -28,7 +31,7 @@ presentaron con su costo (AskUserQuestion) y las secciones de diseño las aprob�
 ## 1. Alcance
 
 **Entra:** configuración de los dos defaults, CRUD de repartidores, CRUD de paquetes,
-asignación masiva a una hoja de ruta, marcar entregado / no entregado, rendir la hoja, KPIs
+**escaneo con pistola que crea y asigna**, asignación masiva a una hoja de ruta, marcar entregado / no entregado, rendir la hoja, KPIs
 por rango de fechas, seed demo.
 
 **⛔ Fuera (fase 2 o frente propio):** login del repartidor, módulo contratable con permisos
@@ -46,7 +49,7 @@ Todas las tablas: PK UUID con `type: 'uuid'` explícito, `tenant_id`, `creado_el
 |---|---|---|
 | `paquete_configuracion` | `precio_envio_defecto`, `pago_repartidor_defecto` | única por tenant (calco de `propina_configuracion`) |
 | `repartidores` | `nombre`, `telefono` (nullable), `activo` | — |
-| `paquetes` | `codigo`, `destinatario_nombre`, `destinatario_telefono` (nullable), `direccion`, `comuna`, `nota` (nullable), `remitente_tercero_id` (nullable → `terceros`), `cobro_en_destino` (bool), `precio_envio`, `pago_repartidor` | `codigo` único por tenant entre los vivos |
+| `paquetes` | `codigo`, `destinatario_nombre`, `destinatario_telefono`, `direccion`, `comuna`, `nota` (los cinco nullable: el escaneo crea el paquete con solo el código), `remitente_tercero_id` (nullable → `terceros`), `cobro_en_destino` (bool), `precio_envio`, `pago_repartidor` | `codigo` único por tenant entre los vivos |
 | `hojas_ruta` | `repartidor_id`, `fecha` (`date`, día local del tenant), `estado` (`abierta` \| `rendida`), `rendida_por`, `rendida_el`, totales congelados (`total_asignados`, `total_entregados`, `total_cobro_destino`, `monto_cobrado_destino`, `monto_pago_repartidor`, `neto_a_rendir`) | única por `(tenant, repartidor, fecha)` entre las vivas |
 | `hoja_ruta_paquetes` | `hoja_ruta_id`, `paquete_id`, `estado` (`en_ruta` \| `entregado` \| `no_entregado`) | índice único parcial sobre `paquete_id` donde `estado = 'en_ruta'` y vivo: un paquete está en una sola ruta a la vez |
 
@@ -76,6 +79,20 @@ abierta, se calculan al leer.
 5. **Asignar** (`repartidorId`, `fecha`, `paqueteIds[]`): crea la hoja de ese repartidor ese
    día o suma a la existente. Es 400 si la hoja está rendida, si el repartidor está inactivo
    o si algún paquete no está disponible (todo o nada, con la lista de los que fallaron).
+5b. **Escanear** (`repartidorId`, `fecha`, `codigo`, `cobroEnDestino`) resuelve un código
+   por llamada, no todo o nada: cada escaneo es independiente. El código se normaliza
+   (§ 3.1) y el resultado es uno de:
+   - **asignado, nuevo**: el código no existía → se crea el paquete con solo el código, los
+     dos defaults y el `cobroEnDestino` del interruptor, y se asigna;
+   - **asignado**: existía y estaba disponible → se asigna. Su `cobro_en_destino` **no** se
+     pisa con el del interruptor: ya lo decidió quien lo cargó (se cambia en la fila);
+   - **ya escaneado**: ya está `en_ruta` en esta misma hoja → no hace nada y no es error;
+   - **rechazado**: está en ruta en otra hoja o ya entregado → 409 con el motivo legible
+     (*"está con Pedro"*, *"entregado el 12-10"*).
+
+   Igual que asignar, crea la hoja si no existe y es 400 si está rendida o el repartidor
+   inactivo. Dos escaneos simultáneos del mismo código nuevo: el índice único de `codigo`
+   hace que uno cree y el otro relea y asigne (o diga *ya escaneado*), nunca un 500.
 6. **Rendir** bloquea la fila de la hoja (`FOR UPDATE`), exige que no quede ninguna línea
    `en_ruta`, congela los totales y anota quién y cuándo. Una hoja rendida es de solo
    lectura: no admite asignar, marcar ni quitar.
@@ -87,6 +104,14 @@ abierta, se calculan al leer.
 9. **Desactivar un repartidor** no toca sus hojas: solo lo saca del selector de asignación.
 10. **Plata que entra por la API:** validada en el DTO contra los decimales de la moneda
     oficial (`docs/patterns/backend.md` § 3.1); lo que no cabe es 400. Montos ≥ 0.
+
+### 3.1 Normalizar el código escaneado
+
+La pistola entrega el **contenido del QR** tal cual. Se recorta el espacio de los bordes; si
+el texto es un JSON con campo `id`, el código es ese `id` (la etiqueta de envío de Mercado
+Libre parece traer un JSON así, **sin confirmar**: ver § 9); si no, es el texto entero. La
+misma normalización vale para el alta manual y la búsqueda, para que el código tipeado y el
+escaneado sean el mismo paquete.
 
 ### KPIs (por rango de fechas de la hoja)
 
@@ -110,6 +135,7 @@ GET|PUT  /paquetes/configuracion
 GET|POST /repartidores                     PATCH|DELETE /repartidores/:id
 GET|POST /paquetes                         PATCH|DELETE /paquetes/:id
          GET /paquetes: paginado server-side; filtros estado, cobroEnDestino, búsqueda (código / destinatario)
+POST     /hojas-ruta/escanear              { repartidorId, fecha, codigo, cobroEnDestino } → { resultado, paquete, hoja }
 POST     /hojas-ruta/asignar               { repartidorId, fecha, paqueteIds[] }
 GET      /hojas-ruta?desde&hasta           lista con totales (una query agregada, sin N+1)
 GET      /hojas-ruta/resumen?desde&hasta   KPIs
@@ -127,7 +153,15 @@ array `entities`).
 
 Grupo **"Paquetería"** en el menú lateral (`useMenuLateral`), visible solo para el admin.
 
-- **Paquetes** (`/paquetes`): tabla con búsqueda y filtros; *Nuevo paquete* abre un drawer
+- **Escanear** (`/paquetes/escanear`), **la pantalla principal del día**: repartidor y fecha
+  (por defecto hoy) arriba; el interruptor *Cobro en destino*; un campo que **conserva el
+  foco** (vuelve a él tras cada escaneo y tras cualquier clic), así la pistola tipea y da Enter
+  sin tocar el mouse. Cada Enter llama a `escanear` y pinta el resultado en grande (verde
+  asignado / amarillo ya escaneado / rojo rechazado, con el motivo). Debajo, la lista de lo que
+  tiene la hoja con contador, cobrado en destino y neto a rendir en vivo; cada fila con su
+  interruptor de cobro en destino y *Quitar*. Mientras una llamada está en curso, el próximo
+  Enter se encola en orden, no se pierde (la pistola escanea más rápido que la red).
+- **Paquetes** (`/paquetes`): tabla con búsqueda y filtros (incluido *datos por completar*); *Nuevo paquete* abre un drawer
   con los montos precargados con los defaults; selección múltiple de disponibles →
   *Asignar a repartidor* (repartidor + fecha, por defecto hoy).
 - **Rutas** (`/paquetes/rutas`): `AppRangoFechas` arriba, las cuatro tarjetas de KPI del
@@ -153,10 +187,16 @@ seeder.
 
 - **Unitarios** del cálculo de totales: Decimal, neto negativo, `no_entregado` que no suma,
   pagados que suman al total general y no al cobrado en destino.
+- **Unitarios** de la normalización del código (texto plano, JSON con `id`, JSON sin `id`,
+  espacios).
+- **E2E de API** del escaneo: los cuatro resultados, el código nuevo que nace con el
+  `cobroEnDestino` del interruptor, el existente que no lo pisa, y dos escaneos simultáneos del
+  mismo código nuevo (un paquete, una línea, ningún 500).
 - **E2E de API** del flujo: crear → asignar → marcar → rendir; y los bloqueos (asignar a hoja
   rendida, paquete en dos hojas, rendir con línea en ruta, editar un paquete rendido, un
   usuario no admin recibe 403, aislamiento entre tenants).
-- **Playwright**: recorrer el flujo en el navegador hasta ver el neto rendido.
+- **Playwright**: escanear (la pistola se simula tipeando el código + Enter en el campo),
+  marcar y rendir hasta ver el neto rendido.
 - Gate completo del `CLAUDE.md` y revisión independiente de `verify-feature`.
 
 ## 8. Documentación viva
@@ -164,3 +204,10 @@ seeder.
 `docs/features/paqueteria.md` (desde `TEMPLATE.md`) + link en `docs/README.md` + fila en
 `docs/ESTADO.md`; `docs/reference/modulos-y-configuraciones.md` (menú y configuración); la
 fase 2 (permisos propios y el resto de § 1 Fuera) en `docs/agent/desarrollo-nuevo.md`.
+
+## 9. Pendiente de confirmar
+
+- **Qué trae el QR de la etiqueta de Mercado Libre.** Se supone un JSON con `id` (el número de
+  envío) y se diseña para aceptar también texto plano (§ 3.1). Antes de implementar la
+  normalización: escanear dos o tres etiquetas reales en un editor de texto y pegar lo que sale.
+  Si el formato es otro, cambia solo esa función.
