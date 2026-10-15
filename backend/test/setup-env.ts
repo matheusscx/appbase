@@ -24,3 +24,8 @@ process.env.LIMITES_ESCALA ??= '1000';
 // el mismo de `.env.example`.
 process.env.DTE_ENCRYPTION_KEY ??=
   'JLHn+lnKC1wCp+GmSRpUyuuBf8uwR18F9KyNsn24ews=';
+
+// Los jobs de la cola de envío al SII corren solos cada 30 s. En los e2e los dispara cada test a
+// mano: un tick automático a mitad de un test podría tomar sus boletas, y las URLs por defecto
+// son las del SII de verdad.
+process.env.DTE_COLA_AUTOMATICA ??= 'false';

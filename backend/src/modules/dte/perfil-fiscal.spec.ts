@@ -1,4 +1,5 @@
 import {
+  ahoraChile,
   type CafPerfil,
   DIAS_AVISO_CERTIFICADO,
   type EmisorPerfil,
@@ -386,5 +387,29 @@ describe('evaluarPerfil', () => {
   it('sin ningún CAF del 41 no hay aviso del 41', () => {
     const r = evaluarPerfil(emisor(), EN_SEIS_MESES, [caf(39, 412)], AHORA);
     expect(r).toEqual({ faltantes: [], avisos: [] });
+  });
+});
+
+describe('ahoraChile', () => {
+  it('en horario de verano (UTC-3) resta tres horas', () => {
+    expect(ahoraChile(new Date('2026-10-14T16:07:09Z'))).toBe(
+      '2026-10-14T13:07:09',
+    );
+  });
+
+  it('en horario de invierno (UTC-4) resta cuatro horas', () => {
+    expect(ahoraChile(new Date('2026-07-01T16:07:09Z'))).toBe(
+      '2026-07-01T12:07:09',
+    );
+  });
+
+  it('la medianoche de Chile es 00:00:00 y no 24:00:00, y cambia el día respecto de UTC', () => {
+    expect(ahoraChile(new Date('2026-07-01T04:00:00Z'))).toBe(
+      '2026-07-01T00:00:00',
+    );
+    // 02:30 UTC del 16 es todavía el 15 en Santiago (verano).
+    expect(ahoraChile(new Date('2026-12-16T02:30:00Z'))).toBe(
+      '2026-12-15T23:30:00',
+    );
   });
 });

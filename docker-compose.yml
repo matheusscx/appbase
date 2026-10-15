@@ -73,6 +73,9 @@ services:
       API_PREFIX: ${API_PREFIX:-/api}
       PASARELA_ENCRYPTION_KEY: ${PASARELA_ENCRYPTION_KEY:-MDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWY=}
       DTE_ENCRYPTION_KEY: ${DTE_ENCRYPTION_KEY:-JLHn+lnKC1wCp+GmSRpUyuuBf8uwR18F9KyNsn24ews=}
+      # Los jobs de la cola de envío al SII. En desarrollo apagados: las URLs por defecto son las
+      # del SII de verdad. En producción el default es encendido (no se define la variable).
+      DTE_COLA_AUTOMATICA: ${DTE_COLA_AUTOMATICA:-false}
       QZ_PRIVATE_KEY: ${QZ_PRIVATE_KEY:-}
       QZ_CERTIFICATE: ${QZ_CERTIFICATE:-}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3000}

@@ -1,5 +1,6 @@
 import { Module } from '@nestjs/common';
 import { RepositoriosModule } from '../../common/db/repositorios.module';
+import { CronModule } from '../cron/cron.module';
 import { RazonSocial } from '../tenants/entities/razon-social.entity';
 import { CifradoDteService } from './cifrado-dte.service';
 import { ColaDteService } from './cola-dte.service';
@@ -9,11 +10,13 @@ import { DteCertificado } from './entities/dte-certificado.entity';
 import { DteDocumento } from './entities/dte-documento.entity';
 import { DteEnvio } from './entities/dte-envio.entity';
 import { FoliosService } from './folios.service';
+import { EnviarBoletasJob } from './jobs/enviar-boletas.job';
 import { PerfilFiscalService } from './perfil-fiscal.service';
 import { SiiBoletaCliente } from './sii-boleta.cliente';
 
 @Module({
   imports: [
+    CronModule,
     RepositoriosModule.forFeature([
       DteCertificado,
       DteCaf,
@@ -29,6 +32,7 @@ import { SiiBoletaCliente } from './sii-boleta.cliente';
     FoliosService,
     ColaDteService,
     SiiBoletaCliente,
+    EnviarBoletasJob,
   ],
   exports: [
     PerfilFiscalService,

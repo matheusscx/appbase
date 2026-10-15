@@ -70,7 +70,7 @@ export function emitirBoleta(
  * bytes al SII salen de `aLatin1(sobre)`, nunca de `Buffer.from(sobre)` (UTF-8).
  */
 export function armarEnvioBoleta(
-  boletas: BoletaEmitida[],
+  boletas: Pick<BoletaEmitida, 'xml' | 'rutEmisor' | 'folio' | 'tipo'>[],
   caratula: CaratulaEnvio,
   certificado: CertificadoLeido,
   ahora: string,

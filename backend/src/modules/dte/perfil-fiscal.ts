@@ -67,6 +67,27 @@ export function fechaChile(instante: Date): string {
 }
 
 /**
+ * `AAAA-MM-DDTHH:MM:SS` de la hora de Chile en que cae el instante: el formato de `TmstFirmaEnv`,
+ * `TSTED` y `TmstFirma`. El SII lee la hora de pared de Santiago, no UTC, y la diferencia cambia
+ * dos veces al año (UTC-3 en verano, UTC-4 en invierno). `h23` evita el `24:00:00` que algunos
+ * ICU dan a la medianoche.
+ */
+export function ahoraChile(instante: Date): string {
+  const partes = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Santiago',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  }).formatToParts(instante);
+  const de = (tipo: string) => partes.find((p) => p.type === tipo)?.value;
+  return `${de('year')}-${de('month')}-${de('day')}T${de('hour')}:${de('minute')}:${de('second')}`;
+}
+
+/**
  * Vacío para el perfil: nulo o solo espacios. Lo comparten `evaluarPerfil` y
  * `credencialesParaFirmar`. El predicado solo promete el lado falso (si no es vacío, es un
  * `string`): cuando da `true` el valor puede ser `'  '`, no `null`.

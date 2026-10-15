@@ -11,14 +11,25 @@ import {
   cafDePrueba,
   certificadoDePrueba,
 } from '../src/modules/dte/__fixtures__/credenciales-prueba';
+import {
+  partesMultipart,
+  SiiFalso,
+} from '../src/modules/dte/__fixtures__/sii-falso';
 import { ColaDteService } from '../src/modules/dte/cola-dte.service';
 import { DteError } from '../src/modules/dte/dte.types';
 import { emitirBoleta } from '../src/modules/dte/envio-boleta';
 import { FoliosService } from '../src/modules/dte/folios.service';
+import { EnviarBoletasJob } from '../src/modules/dte/jobs/enviar-boletas.job';
+import { SiiBoletaCliente } from '../src/modules/dte/sii-boleta.cliente';
 
 /**
  * Cola de envío al SII: `encolar` guarda la boleta firmada como `pendiente`, dentro de la
- * transacción de la venta.
+ * transacción de la venta, y `EnviarBoletasJob.enviarLotes` las manda al SII.
+ *
+ * El cliente del SII le pega a un SII falso (`SiiFalso`): las cuatro URLs de configuración se
+ * apuntan a él por `process.env` antes de crear la app (el cliente las lee con `ConfigService`
+ * en cada pedido). Los jobs automáticos están apagados en los e2e (`DTE_COLA_AUTOMATICA=false`,
+ * en `setup-env.ts`): cada test llama a `enviarLotes` a mano.
  *
  * La razón social emisora es propia de este archivo ('Emisor e2e cola'): el spec la crea, la marca
  * preferida y limpia sus CAF, certificados y documentos, de modo que correr dos veces da lo mismo.
@@ -59,7 +70,25 @@ interface FilaDocumento {
   ultimo_error: string | null;
   emitido_el: Date;
   proximo_intento_el: Date;
+  detalle_sii: unknown;
 }
+interface FilaEnvio {
+  envio_id: string;
+  trackid: string | null;
+  estado_sii: string | null;
+  enviado_el: Date | null;
+  consultar_desde: Date | null;
+  reservado_hasta: Date | null;
+  ultimo_error: string | null;
+  eliminado_el: Date | null;
+}
+
+const URLS_SII = [
+  'SII_BOLETA_API_CERTIFICACION',
+  'SII_BOLETA_ENVIO_CERTIFICACION',
+  'SII_BOLETA_API_PRODUCCION',
+  'SII_BOLETA_ENVIO_PRODUCCION',
+] as const;
 
 describe('Cola de envío al SII (e2e)', () => {
   let app: INestApplication<App>;
@@ -69,6 +98,11 @@ describe('Cola de envío al SII (e2e)', () => {
   let cola: ColaDteService;
   let token: string;
   let razonSocialId: string;
+  let desde: Date;
+  let falso: SiiFalso;
+  let job: EnviarBoletasJob;
+  let cliente: SiiBoletaCliente;
+  const urlsAntes: Record<string, string | undefined> = {};
 
   async function loginParis(): Promise<string> {
     const login = await request(app.getHttpServer())
@@ -156,6 +190,12 @@ describe('Cola de envío al SII (e2e)', () => {
   /** Lo que una corrida anterior (o este mismo spec) dejó en la razón social propia. */
   async function limpiar() {
     await ds.query(
+      `UPDATE dte_envios SET eliminado_el = now()
+        WHERE razon_social_id IN (SELECT razon_social_id FROM razones_sociales WHERE nombre = $1)
+          AND eliminado_el IS NULL`,
+      [NOMBRE],
+    );
+    await ds.query(
       `UPDATE dte_documentos SET eliminado_el = now()
         WHERE razon_social_id IN (SELECT razon_social_id FROM razones_sociales WHERE nombre = $1)
           AND eliminado_el IS NULL`,
@@ -180,9 +220,14 @@ describe('Cola de envío al SII (e2e)', () => {
   }
 
   /** Deja un único CAF 39 (4007 a 4031) y sin documentos: cada test parte de cero. */
-  async function reiniciar(): Promise<CafResponse> {
+  async function reiniciar(hasta = 4031): Promise<CafResponse> {
     await limpiar();
-    return subirCaf(token, RUT_SII, 39, 4007, 4031);
+    // `limpiar` da de baja los envíos del test anterior; `envios()` mira solo los de este.
+    const [{ ahora }] = await ds.query<{ ahora: Date }[]>(
+      `SELECT clock_timestamp() AS ahora`,
+    );
+    desde = ahora;
+    return subirCaf(token, RUT_SII, 39, 4007, hasta);
   }
 
   /** Dentro de la transacción de la venta: toma el folio y firma la boleta con él. */
@@ -258,7 +303,61 @@ describe('Cola de envío al SII (e2e)', () => {
       [razonSocialId],
     );
 
+  /** `n` ventas seguidas, cada una con su transacción: n boletas pendientes. */
+  async function vender(n: number) {
+    for (let i = 0; i < n; i++) await venderYEncolar();
+  }
+
+  // Las boletas esperan 5 minutos a juntar un lote. Para no esperarlos se corre `emitido_el`
+  // 6 minutos atrás por SQL: es el reloj de la base, y no hay otra forma de moverlo.
+  const envejecer = () =>
+    ds.query(
+      `UPDATE dte_documentos SET emitido_el = now() - interval '6 minutes'
+        WHERE razon_social_id = $1 AND estado = 'pendiente' AND eliminado_el IS NULL`,
+      [razonSocialId],
+    );
+
+  // Una boleta devuelta a la cola espera su turno (`proximo_intento_el`); para el reintento
+  // inmediato se adelanta el reloj de esa espera.
+  const sinEspera = () =>
+    ds.query(
+      `UPDATE dte_documentos SET proximo_intento_el = now()
+        WHERE razon_social_id = $1 AND estado = 'pendiente' AND eliminado_el IS NULL`,
+      [razonSocialId],
+    );
+
+  /** Los envíos de este test, también los dados de baja: esos son parte de lo que se mide. */
+  const envios = () =>
+    ds.query<FilaEnvio[]>(
+      `SELECT * FROM dte_envios WHERE razon_social_id = $1 AND creado_el >= $2 ORDER BY creado_el`,
+      [razonSocialId, desde],
+    );
+
+  /** Los sobres que el SII falso recibió, como texto (latin1: 1 byte = 1 carácter). */
+  const sobres = () =>
+    falso
+      .pedidosDe('envio')
+      .map((p) => partesMultipart(p).archivo.contenido.toString('latin1'));
+  const foliosDe = (sobre: string) =>
+    [...sobre.matchAll(/<Folio>(\d+)<\/Folio>/g)].map((m) => Number(m[1]));
+  const foliosEnviados = () => sobres().flatMap(foliosDe);
+
+  const ejecucionesDelJob = async () => {
+    const [{ n }] = await ds.query<{ n: number }[]>(
+      `SELECT count(*)::int AS n FROM cron_ejecuciones WHERE job = 'enviar-boletas'`,
+    );
+    return n;
+  };
+
+  /** La pausa por límite del SII es del cliente, que es uno solo en la app: se limpia entre tests. */
+  const levantarPausa = () => Object.assign(cliente, { pausa: 0 });
+
   beforeAll(async () => {
+    falso = await SiiFalso.iniciar();
+    for (const nombre of URLS_SII) {
+      urlsAntes[nombre] = process.env[nombre];
+      process.env[nombre] = `${falso.url}/${nombre.toLowerCase()}`;
+    }
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
     }).compile();
@@ -271,6 +370,8 @@ describe('Cola de envío al SII (e2e)', () => {
     db = app.get(Db);
     folios = app.get(FoliosService);
     cola = app.get(ColaDteService);
+    job = app.get(EnviarBoletasJob);
+    cliente = app.get(SiiBoletaCliente);
 
     token = await loginParis();
     razonSocialId = await emisora(token);
@@ -279,6 +380,12 @@ describe('Cola de envío al SII (e2e)', () => {
     await limpiarCertificados();
     await subirCertificado(token);
   }, 60000);
+
+  beforeEach(() => {
+    falso.reiniciar();
+    levantarPausa();
+  });
+  afterEach(() => jest.restoreAllMocks());
 
   afterAll(async () => {
     // Acumular y afirmar DESPUÉS de `app.close()`: un expect que tira antes de cerrar deja el
@@ -294,12 +401,19 @@ describe('Cola de envío al SII (e2e)', () => {
       );
       const vivos: { n: string }[] = await ds.query(
         `SELECT (SELECT count(*) FROM dte_cafs WHERE razon_social_id = $1 AND eliminado_el IS NULL)
+              + (SELECT count(*) FROM dte_envios WHERE razon_social_id = $1 AND eliminado_el IS NULL)
               + (SELECT count(*) FROM dte_documentos WHERE razon_social_id = $1 AND eliminado_el IS NULL) AS n`,
         [razonSocialId],
       );
-      if (Number(vivos[0].n) !== 0) fallos.push('quedaron CAF o documentos');
+      if (Number(vivos[0].n) !== 0)
+        fallos.push('quedaron CAF, envíos o documentos');
     } finally {
       await app.close();
+      await falso.cerrar();
+      for (const nombre of URLS_SII) {
+        if (urlsAntes[nombre] === undefined) delete process.env[nombre];
+        else process.env[nombre] = urlsAntes[nombre];
+      }
     }
     expect(fallos).toEqual([]);
   });
@@ -417,5 +531,569 @@ describe('Cola de envío al SII (e2e)', () => {
       /dentro de db\.transaccion/,
     );
     expect(await documentos()).toEqual([]);
+  });
+
+  describe('envío al SII (EnviarBoletasJob)', () => {
+    it('la regla del lote: seis boletas recién emitidas esperan; a los 5 minutos salen en un sobre', async () => {
+      await reiniciar();
+      await vender(6);
+
+      const antes = await job.enviarLotes();
+
+      expect(antes).toContain('0 sobres enviados');
+      // Ni siquiera se le pidió un token al SII.
+      expect(falso.pedidos).toEqual([]);
+      expect((await documentos()).map((d) => d.estado)).toEqual(
+        Array(6).fill('pendiente'),
+      );
+
+      await envejecer();
+      const despues = await job.enviarLotes();
+
+      expect(despues).toContain('1 sobres enviados');
+      expect(sobres()).toHaveLength(1);
+      expect(foliosEnviados()).toEqual([4007, 4008, 4009, 4010, 4011, 4012]);
+      expect((await documentos()).map((d) => d.estado)).toEqual(
+        Array(6).fill('enviado'),
+      );
+    });
+
+    it('con 50 boletas recién emitidas sale sin esperar; la 51 queda para el próximo lote', async () => {
+      await reiniciar(4100);
+      await vender(51);
+
+      await job.enviarLotes();
+
+      expect(sobres()).toHaveLength(1);
+      expect(foliosEnviados()).toHaveLength(50);
+      const estados = (await documentos()).map((d) => d.estado);
+      expect(estados.filter((e) => e === 'enviado')).toHaveLength(50);
+      expect(estados.filter((e) => e === 'pendiente')).toHaveLength(1);
+    });
+
+    it('ok: el envío queda con el trackid, la consulta a +10 min y las boletas enviadas', async () => {
+      await reiniciar();
+      const { documentoId } = await venderYEncolar();
+      await venderYEncolar();
+      await envejecer();
+
+      await job.enviarLotes();
+
+      const [envio] = await envios();
+      expect(envio).toMatchObject({
+        trackid: '1014',
+        estado_sii: 'REC',
+        reservado_hasta: null,
+        ultimo_error: null,
+        eliminado_el: null,
+      });
+      const [{ diferencia, lejos }] = await ds.query<
+        { diferencia: number; lejos: number }[]
+      >(
+        `SELECT extract(epoch FROM consultar_desde - enviado_el)::int AS diferencia,
+                abs(extract(epoch FROM now() - enviado_el))::int AS lejos
+           FROM dte_envios WHERE envio_id = $1`,
+        [envio.envio_id],
+      );
+      expect(diferencia).toBe(10 * 60);
+      expect(lejos).toBeLessThan(60);
+      const filas = await documentos();
+      expect(filas.map((d) => [d.estado, d.envio_id, d.intentos])).toEqual([
+        ['enviado', envio.envio_id, 0],
+        ['enviado', envio.envio_id, 0],
+      ]);
+      expect(filas[0].documento_id).toBe(documentoId);
+    });
+
+    it('lo que llega al SII es el sobre con las boletas y lo manda con el RUT de la empresa', async () => {
+      await reiniciar();
+      await vender(2);
+      await envejecer();
+
+      await job.enviarLotes();
+
+      const [pedido] = falso.pedidosDe('envio');
+      const partes = partesMultipart(pedido);
+      expect(partes.rutCompany.contenido.toString()).toBe('76555444');
+      expect(partes.dvCompany.contenido.toString()).toBe('6');
+      const sobre = partes.archivo.contenido.toString('latin1');
+      expect(sobre).toContain('<EnvioBOLETA');
+      expect(sobre.match(/<DTE /g)).toHaveLength(2);
+      expect(sobre).toContain('<RutEmisor>76555444-6</RutEmisor>');
+    });
+
+    it('transitorio (500): las boletas vuelven a pendiente con intentos 1 y +30 s, y el envío se da de baja', async () => {
+      await reiniciar();
+      await vender(3);
+      await envejecer();
+      falso.responder('envio', { status: 500 });
+
+      const mensaje = await job.enviarLotes();
+
+      expect(mensaje).toContain('3 boletas devueltas');
+      const filas = await documentos();
+      expect(filas).toHaveLength(3);
+      for (const f of filas) {
+        expect(f).toMatchObject({
+          estado: 'pendiente',
+          envio_id: null,
+          intentos: 1,
+        });
+        expect(f.ultimo_error).toContain('500');
+      }
+      const [{ espera }] = await ds.query<{ espera: number }[]>(
+        `SELECT DISTINCT round(extract(epoch FROM proximo_intento_el - actualizado_el))::int AS espera
+           FROM dte_documentos WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
+        [razonSocialId],
+      );
+      expect(espera).toBe(30);
+      const todos = await envios();
+      expect(todos).toHaveLength(1);
+      expect(todos[0].trackid).toBeNull();
+      expect(todos[0].reservado_hasta).toBeNull();
+      expect(todos[0].ultimo_error).toContain('500');
+      expect(todos[0].eliminado_el).not.toBeNull();
+
+      // Respeta la espera: un segundo intento inmediato no le pega al SII.
+      await job.enviarLotes();
+      expect(sobres()).toHaveLength(1);
+
+      // Pasada la espera, sale (y el SII ya contesta bien).
+      await sinEspera();
+      await job.enviarLotes();
+      expect(sobres()).toHaveLength(2);
+      expect((await documentos()).map((d) => d.estado)).toEqual([
+        'enviado',
+        'enviado',
+        'enviado',
+      ]);
+    });
+
+    it('la espera es por boleta: con 0, 3 y 4 intentos previos esperan 30 s, 5 min y 10 min', async () => {
+      await reiniciar();
+      await vender(3);
+      await envejecer();
+      await ds.query(
+        `UPDATE dte_documentos SET intentos = CASE folio WHEN 4007 THEN 0 WHEN 4008 THEN 3 ELSE 4 END
+          WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
+        [razonSocialId],
+      );
+      falso.responder('envio', { status: 503 });
+
+      await job.enviarLotes();
+
+      const filas = await ds.query<
+        { folio: number; intentos: number; espera: number }[]
+      >(
+        `SELECT folio, intentos, round(extract(epoch FROM proximo_intento_el - actualizado_el))::int AS espera
+           FROM dte_documentos WHERE razon_social_id = $1 AND eliminado_el IS NULL ORDER BY folio`,
+        [razonSocialId],
+      );
+      expect(filas).toEqual([
+        { folio: 4007, intentos: 1, espera: 30 },
+        { folio: 4008, intentos: 4, espera: 300 },
+        { folio: 4009, intentos: 5, espera: 600 },
+      ]);
+    });
+
+    it('400: las boletas quedan rechazadas con el origen "envio" y no se reintentan', async () => {
+      await reiniciar();
+      await vender(2);
+      await envejecer();
+      falso.responder('envio', { status: 400, cuerpo: 'Sobre mal formado' });
+
+      const mensaje = await job.enviarLotes();
+
+      expect(mensaje).toContain('2 rechazadas');
+      const filas = await documentos();
+      for (const f of filas) {
+        expect(f.estado).toBe('rechazado');
+        expect(f.detalle_sii).toEqual({
+          origen: 'envio',
+          mensaje: 'Sobre mal formado',
+        });
+      }
+      // El sobre sí lo vio el SII: queda vivo, con el error, sin reserva.
+      const [envio] = await envios();
+      expect(envio).toMatchObject({
+        trackid: null,
+        reservado_hasta: null,
+        ultimo_error: 'Sobre mal formado',
+        eliminado_el: null,
+      });
+
+      await sinEspera();
+      await job.enviarLotes();
+      expect(sobres()).toHaveLength(1);
+    });
+
+    it('401 del SII: es un reintento con espera, nunca un rechazo', async () => {
+      await reiniciar();
+      await vender(2);
+      await envejecer();
+      // 401 en el envío, y de nuevo en el reintento con un token nuevo.
+      falso.responder('envio', { status: 401 }, { status: 401 });
+
+      await job.enviarLotes();
+
+      const filas = await documentos();
+      expect(filas.map((d) => [d.estado, d.intentos])).toEqual([
+        ['pendiente', 1],
+        ['pendiente', 1],
+      ]);
+    });
+
+    it('certificado anulado entre la venta y el envío: las boletas no se rechazan, quedan pendientes con el motivo', async () => {
+      await reiniciar();
+      await vender(2);
+      await envejecer();
+      await limpiarCertificados();
+      try {
+        const mensaje = await job.enviarLotes();
+
+        expect(mensaje).toContain('2 boletas devueltas');
+        expect(falso.pedidos).toEqual([]);
+        const filas = await documentos();
+        for (const f of filas) {
+          expect(f).toMatchObject({
+            estado: 'pendiente',
+            envio_id: null,
+            intentos: 1,
+          });
+          expect(f.ultimo_error).toContain('certificado digital');
+        }
+        expect(filas[0].detalle_sii).toBeNull();
+      } finally {
+        await subirCertificado(token);
+      }
+
+      // Con el certificado vigente otra vez, el siguiente lote sale solo.
+      await sinEspera();
+      await job.enviarLotes();
+      expect(foliosEnviados()).toEqual([4007, 4008]);
+    });
+
+    it('certificado vencido a la hora del envío: vuelve a pendiente con el motivo', async () => {
+      await reiniciar();
+      await vender(1);
+      await envejecer();
+
+      // El certificado de prueba vence en 2036: con el reloj en 2040, para el job ya venció.
+      await job.enviarLotes(new Date('2040-01-01T12:00:00Z'));
+
+      const [fila] = await documentos();
+      expect(fila.estado).toBe('pendiente');
+      expect(fila.ultimo_error).toContain('vencido');
+      expect(falso.pedidos).toEqual([]);
+    });
+
+    it('reserva vencida: un proceso caído con el sobre en vuelo no pierde las boletas', async () => {
+      await reiniciar();
+      await vender(3);
+      await envejecer();
+      // El proceso "se cae" justo al llamar al SII: el job propaga el error y no anota nada.
+      jest
+        .spyOn(cliente, 'enviar')
+        .mockRejectedValueOnce(new Error('proceso caído'));
+      await expect(job.enviarLotes()).rejects.toThrow('proceso caído');
+
+      const [reservado] = await envios();
+      expect(reservado.trackid).toBeNull();
+      expect(reservado.reservado_hasta).not.toBeNull();
+      const enVuelo = await documentos();
+      expect(enVuelo.map((d) => d.estado)).toEqual([
+        'enviado',
+        'enviado',
+        'enviado',
+      ]);
+      expect(enVuelo.every((d) => d.envio_id === reservado.envio_id)).toBe(
+        true,
+      );
+
+      // Mientras la reserva vale, nadie más toca esas boletas.
+      await job.enviarLotes();
+      expect(falso.pedidosDe('envio')).toHaveLength(0);
+
+      // Pasan los 5 minutos de la reserva (se corre su reloj, el de la base).
+      await ds.query(
+        `UPDATE dte_envios SET reservado_hasta = now() - interval '1 minute' WHERE envio_id = $1`,
+        [reservado.envio_id],
+      );
+      const mensaje = await job.enviarLotes();
+
+      expect(mensaje).toContain('3 de reservas vencidas');
+      expect(foliosEnviados()).toEqual([4007, 4008, 4009]);
+      const todos = await envios();
+      expect(todos).toHaveLength(2);
+      expect(todos[0].eliminado_el).not.toBeNull();
+      expect(todos[1]).toMatchObject({ trackid: '1014', eliminado_el: null });
+      expect((await documentos()).map((d) => d.envio_id)).toEqual([
+        todos[1].envio_id,
+        todos[1].envio_id,
+        todos[1].envio_id,
+      ]);
+    });
+
+    it('un sobre lento que vuelve tarde no pisa las boletas que otro lote ya reservó y mandó', async () => {
+      await reiniciar();
+      await vender(2);
+      await envejecer();
+      // El lote A llama al SII y tarda: mientras tanto su reserva vence, y el lote B toma las
+      // mismas boletas y las manda bien. Cuando A por fin recibe su error, ya no son suyas.
+      jest.spyOn(cliente, 'enviar').mockImplementationOnce(async () => {
+        await ds.query(
+          `UPDATE dte_envios SET reservado_hasta = now() - interval '1 minute'
+            WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
+          [razonSocialId],
+        );
+        await job.enviarLotes();
+        return { tipo: 'transitorio', mensaje: 'respondió tarde' };
+      });
+
+      await job.enviarLotes();
+
+      const todos = await envios();
+      const vivo = todos.find((e) => e.eliminado_el === null);
+      expect(vivo?.trackid).toBe('1014');
+      const filas = await documentos();
+      expect(filas.map((d) => [d.estado, d.envio_id, d.intentos])).toEqual([
+        ['enviado', vivo?.envio_id, 0],
+        ['enviado', vivo?.envio_id, 0],
+      ]);
+      expect(sobres()).toHaveLength(1);
+    });
+
+    it('un sobre lento que el SII sí recibió, pero cuya reserva ya venció: no se escribe sobre el envío dado de baja', async () => {
+      await reiniciar();
+      await vender(2);
+      await envejecer();
+      jest.spyOn(cliente, 'enviar').mockImplementationOnce(async () => {
+        await ds.query(
+          `UPDATE dte_envios SET reservado_hasta = now() - interval '1 minute'
+            WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
+          [razonSocialId],
+        );
+        await job.enviarLotes();
+        return {
+          tipo: 'ok',
+          datos: { trackid: '999', estado: 'REC' },
+          reintentarEnMs: null,
+        };
+      });
+
+      await expect(job.enviarLotes()).resolves.toContain('sobres enviados');
+
+      const [muerto, vivo] = await envios();
+      // El envío lento ya estaba dado de baja: su trackid no se anota (las boletas ya vuelven
+      // a salir en el otro sobre).
+      expect(muerto.eliminado_el).not.toBeNull();
+      expect(muerto.trackid).toBeNull();
+      expect(vivo).toMatchObject({ trackid: '1014', eliminado_el: null });
+      expect((await documentos()).map((d) => d.envio_id)).toEqual([
+        vivo.envio_id,
+        vivo.envio_id,
+      ]);
+    });
+
+    it('405 del SII: las boletas vuelven y el siguiente lote ni siquiera le pega al SII', async () => {
+      await reiniciar();
+      await vender(2);
+      await envejecer();
+      falso.responder('envio', {
+        status: 405,
+        headers: { 'x-ratelimit-reset': '120' },
+      });
+
+      const primero = await job.enviarLotes();
+
+      expect(primero).toContain('2 boletas devueltas');
+      expect(cliente.pausadoHasta()).toBeGreaterThan(Date.now() + 100_000);
+      // El envío que recibió el 405 cuenta como un intento.
+      expect((await documentos()).map((d) => d.intentos)).toEqual([1, 1]);
+
+      await sinEspera();
+      const segundo = await job.enviarLotes();
+
+      expect(segundo).toContain('espaciar');
+      expect(falso.pedidosDe('envio')).toHaveLength(1);
+      const filas = await documentos();
+      expect(filas.map((d) => [d.estado, d.envio_id, d.intentos])).toEqual([
+        ['pendiente', null, 1],
+        ['pendiente', null, 1],
+      ]);
+      expect(await envios()).toHaveLength(1);
+    });
+
+    describe('dos instancias del backend', () => {
+      it('una instancia que retiene dos boletas no frena a la otra: sale con las libres, y las retenidas salen después', async () => {
+        await reiniciar();
+        await vender(4);
+        await envejecer();
+
+        const qr = ds.createQueryRunner();
+        await qr.connect();
+        await qr.startTransaction();
+        let corrida: Promise<string> | undefined;
+        try {
+          // La otra instancia está reservando las dos más antiguas.
+          const retenidas: unknown[] = await qr.query(
+            `SELECT documento_id FROM dte_documentos
+              WHERE razon_social_id = $1 AND folio IN (4007, 4008) AND eliminado_el IS NULL
+                FOR UPDATE`,
+            [razonSocialId],
+          );
+          expect(retenidas).toHaveLength(2);
+
+          corrida = job.enviarLotes();
+          // Tiene que terminar con la compuerta todavía tomada: no esperarla.
+          let corte: NodeJS.Timeout | undefined;
+          try {
+            await Promise.race([
+              corrida,
+              new Promise<never>((_, no) => {
+                corte = setTimeout(
+                  () =>
+                    no(
+                      new Error(
+                        'enviarLotes se quedó esperando las filas retenidas',
+                      ),
+                    ),
+                  8000,
+                );
+              }),
+            ]);
+          } finally {
+            clearTimeout(corte);
+          }
+
+          expect(foliosEnviados()).toEqual([4009, 4010]);
+          expect(sobres()).toHaveLength(1);
+        } finally {
+          await qr.rollbackTransaction();
+          await qr.release();
+          await corrida?.catch(() => undefined);
+        }
+
+        await job.enviarLotes();
+
+        expect(sobres()).toHaveLength(2);
+        expect(foliosDe(sobres()[1])).toEqual([4007, 4008]);
+        expect([...foliosEnviados()].sort()).toEqual([4007, 4008, 4009, 4010]);
+        const vivos = (await envios()).filter((e) => e.eliminado_el === null);
+        expect(vivos).toHaveLength(2);
+        expect(vivos.every((e) => e.trackid === '1014')).toBe(true);
+        const filas = await documentos();
+        expect(filas.every((d) => d.estado === 'enviado')).toBe(true);
+        expect(new Set(filas.map((d) => d.envio_id)).size).toBe(2);
+      });
+
+      it('dos lotes a la vez sobre las mismas 4 boletas: ninguna sale en dos sobres', async () => {
+        await reiniciar();
+        await vender(4);
+        await envejecer();
+
+        await Promise.all([job.enviarLotes(), job.enviarLotes()]);
+
+        expect([...foliosEnviados()].sort()).toEqual([4007, 4008, 4009, 4010]);
+        const filas = await documentos();
+        expect(filas.every((d) => d.estado === 'enviado')).toBe(true);
+        const vivos = (await envios()).filter((e) => e.eliminado_el === null);
+        expect(vivos).toHaveLength(sobres().length);
+      });
+    });
+
+    describe('el tick', () => {
+      const conAutomatica = async (valor: string, fn: () => Promise<void>) => {
+        const antes = process.env.DTE_COLA_AUTOMATICA;
+        process.env.DTE_COLA_AUTOMATICA = valor;
+        try {
+          await fn();
+        } finally {
+          if (antes === undefined) delete process.env.DTE_COLA_AUTOMATICA;
+          else process.env.DTE_COLA_AUTOMATICA = antes;
+        }
+      };
+
+      it('apagado (DTE_COLA_AUTOMATICA=false): con trabajo pendiente no manda ni escribe en cron_ejecuciones', async () => {
+        await reiniciar();
+        await vender(2);
+        await envejecer();
+        const antes = await ejecucionesDelJob();
+
+        await conAutomatica('false', () => job.tick());
+
+        expect(await ejecucionesDelJob()).toBe(antes);
+        expect(falso.pedidos).toEqual([]);
+        expect((await documentos()).map((d) => d.estado)).toEqual([
+          'pendiente',
+          'pendiente',
+        ]);
+      });
+
+      it('encendido pero sin trabajo, o con boletas que aún esperan su lote: no escribe en cron_ejecuciones', async () => {
+        await reiniciar();
+        const antes = await ejecucionesDelJob();
+
+        await conAutomatica('true', () => job.tick());
+        expect(await ejecucionesDelJob()).toBe(antes);
+
+        await vender(2);
+        await conAutomatica('true', () => job.tick());
+        expect(await ejecucionesDelJob()).toBe(antes);
+        expect(falso.pedidos).toEqual([]);
+      });
+
+      it('encendido y con una reserva vencida (sin lote listo): registra la corrida y devuelve las boletas', async () => {
+        await reiniciar();
+        await vender(2);
+        await envejecer();
+        // Un proceso que se cae con el sobre en vuelo deja la reserva puesta...
+        jest
+          .spyOn(cliente, 'enviar')
+          .mockRejectedValueOnce(new Error('proceso caído'));
+        await expect(job.enviarLotes()).rejects.toThrow('proceso caído');
+        // ...que vence con el reloj de la base. Las boletas se vuelven a "frescas" (recién
+        // emitidas, menos de 50): lo único que le da trabajo al tick es la reserva vencida.
+        await ds.query(
+          `UPDATE dte_envios SET reservado_hasta = now() - interval '1 minute'
+            WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
+          [razonSocialId],
+        );
+        await ds.query(
+          `UPDATE dte_documentos SET emitido_el = now()
+            WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
+          [razonSocialId],
+        );
+        const antes = await ejecucionesDelJob();
+
+        await conAutomatica('true', () => job.tick());
+
+        expect(await ejecucionesDelJob()).toBe(antes + 1);
+        const filas = await documentos();
+        expect(filas.map((d) => [d.estado, d.envio_id])).toEqual([
+          ['pendiente', null],
+          ['pendiente', null],
+        ]);
+        expect(falso.pedidosDe('envio')).toHaveLength(0);
+      });
+
+      it('encendido y con un lote listo: registra la corrida y manda el sobre', async () => {
+        await reiniciar();
+        await vender(2);
+        await envejecer();
+        const antes = await ejecucionesDelJob();
+
+        await conAutomatica('true', () => job.tick());
+
+        expect(await ejecucionesDelJob()).toBe(antes + 1);
+        const [ultima] = await ds.query<{ estado: string; detalle: string }[]>(
+          `SELECT estado, detalle FROM cron_ejecuciones
+            WHERE job = 'enviar-boletas' ORDER BY iniciado_el DESC LIMIT 1`,
+        );
+        expect(ultima.estado).toBe('ok');
+        expect(ultima.detalle).toContain('1 sobres enviados');
+        expect(foliosEnviados()).toEqual([4007, 4008]);
+      });
+    });
   });
 });
