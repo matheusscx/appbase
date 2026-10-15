@@ -1260,7 +1260,7 @@ describe('Cola de envío al SII (e2e)', () => {
           estado: 'EPR',
           detalle_rep_rech: [
             { tipo: '39', folio: '4008', estado: 'RCH' },
-            { tipo: 39, folio: 4009, estado: 'RLV' },
+            { tipo: 39, folio: 4009, estado: 'XYZ' },
           ],
         }),
       );
@@ -1277,7 +1277,7 @@ describe('Cola de envío al SII (e2e)', () => {
       ]);
       const e = await envio();
       expect(e.estado_sii).toBe('EPR');
-      expect(e.ultimo_error).toContain('código desconocido (RLV)');
+      expect(e.ultimo_error).toContain('código desconocido (XYZ)');
     });
 
     it('detalle_rep_rech que no es una lista: ninguna boleta se acepta y el envío lleva el aviso', async () => {

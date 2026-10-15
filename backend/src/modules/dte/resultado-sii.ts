@@ -29,6 +29,9 @@ export const ESTADOS_ENVIO_EN_PROCESO: readonly string[] = [
   'PRD',
 ];
 
+/** Los estados por boleta del OpenAPI de boletas (v1.0.5, `detalle_rep_rech.estado`). */
+const ESTADOS_POR_BOLETA: readonly string[] = ['DOK', 'RPR', 'RLV', 'RCH'];
+
 /** Rechazos del sobre entero: ninguna de sus boletas se pudo ni leer. */
 const RECHAZOS_DEL_SOBRE = ['RCH', 'RCO', 'RFR', 'RSC', 'RCT', 'VOF'];
 
@@ -51,9 +54,9 @@ export interface ResultadoReparto {
   final: boolean;
   cambios: CambioBoleta[];
   /**
-   * Lo que el SII dijo y no se pudo repartir (un código que no es `RCH` ni `RPR`, o una entrada
-   * que no calza con ninguna boleta del sobre), en palabras para el dueño del local. El job lo
-   * deja en `ultimo_error` del envío para que no se pierda en silencio.
+   * Lo que el SII dijo y no se pudo repartir (un código que no es `DOK`, `RPR`, `RLV` ni `RCH`, o
+   * una entrada que no calza con ninguna boleta del sobre), en palabras para el dueño del local.
+   * El job lo deja en `ultimo_error` del envío para que no se pierda en silencio.
    */
   observaciones: string[];
 }
@@ -68,16 +71,18 @@ export interface ResultadoReparto {
  * todas las boletas del sobre. La respuesta del SII llega sin validar, así que `folio` y `tipo`
  * pueden venir ausentes o como texto: se comparan como número.
  *
- * Por boleta: una entrada `RCH` la deja `rechazado` (gana sobre cualquier otra), una `RPR`
- * `reparos`, y ninguna `aceptado`. Una entrada con otro código NO es un reparo (reparos es
+ * Por boleta manda la peor entrada: `RCH` la deja `rechazado`, `RPR` o `RLV` (reparos leves)
+ * `reparos`, y `DOK` `aceptado`. Una entrada con otro código NO es un reparo (reparos es
  * "aceptada con observaciones"): la boleta queda sin cambio, atrasada a la vista, y el código
  * sale en `observaciones` para revisión.
  *
- * `aceptado` por ausencia de entrada solo vale cuando TODAS las entradas calzaron con una
- * boleta y son `RCH` o `RPR`. Si hay cualquier observación (una entrada sin boleta, un código
- * desconocido, un `detalle_rep_rech` que no es una lista), el SII dijo algo que no sabemos
- * leer: callar no es aprobar, así que las boletas sin entrada propia quedan sin cambio. Las que
- * sí tienen una entrada `RCH`/`RPR` se reparten igual.
+ * Un `DOK` propio acepta la boleta aunque haya observaciones en otras entradas: es una
+ * aceptación explícita, no silencio. En cambio, `aceptado` por ausencia de entrada solo vale
+ * cuando TODAS las entradas calzaron con una boleta y son de los cuatro estados conocidos. Si
+ * hay cualquier observación (una entrada sin boleta, un código desconocido, un
+ * `detalle_rep_rech` que no es una lista), el SII dijo algo que no sabemos leer: callar no es
+ * aprobar, así que las boletas sin entrada propia quedan sin cambio. Las que sí tienen una
+ * entrada `DOK`/`RPR`/`RLV`/`RCH` se reparten igual.
  *
  * Un código del sobre que no es ninguno de los que conocemos se sigue consultando, y avisa en
  * `observaciones` para no quedar en silencio.
@@ -144,6 +149,11 @@ export function repartirResultado(
   };
 }
 
+/** Sin convertir el valor: la respuesta llega sin validar y `['RCH']` no es `'RCH'`. */
+function esEstadoPorBoleta(estado: unknown): boolean {
+  return typeof estado === 'string' && ESTADOS_POR_BOLETA.includes(estado);
+}
+
 /** Número, o null si el SII no lo mandó (ausente, null o vacío). Texto numérico vale como número. */
 function numeroDe(valor: unknown): number | null {
   if (valor === null || valor === undefined || valor === '') return null;
@@ -157,7 +167,10 @@ function calza(e: EntradaDetalle, b: BoletaDelSobre): boolean {
   return folio === b.folio && (tipo === null || tipo === b.tipo);
 }
 
-/** `null` deja la boleta como está: las entradas que le tocan no son ni `RCH` ni `RPR`. */
+/**
+ * `null` deja la boleta como está: las entradas que le tocan no son ni `DOK`, ni `RPR`/`RLV`, ni
+ * `RCH`, o hay algo que no se pudo leer y ella no tiene un `DOK` con folio propio.
+ */
 function cambioDe(
   boleta: BoletaDelSobre,
   suyas: EntradaDetalle[],
@@ -165,13 +178,25 @@ function cambioDe(
 ): CambioBoleta | null {
   // Si hay más de una, manda la peor. El detalle completo queda en `respuesta_sii` del envío.
   const rechazo = suyas.find((e) => e.estado === 'RCH');
-  const reparo = suyas.find((e) => e.estado === 'RPR');
+  const reparo = suyas.find((e) => e.estado === 'RPR' || e.estado === 'RLV');
   const entrada = rechazo ?? reparo;
   if (entrada)
     return {
       documentoId: boleta.documentoId,
       estado: rechazo ? 'rechazado' : 'reparos',
       detalleSii: entrada,
+    };
+  // Un `DOK` con folio propio es el SII aceptándola por su nombre: no es silencio, y vale aunque
+  // otra entrada del sobre no se haya entendido. Un `DOK` sin folio es comodín (alcanza a todas
+  // las boletas) y no nombra a esta, y lo desconocido en SUS entradas cuenta como lo peor.
+  if (
+    suyas.some((e) => e.estado === 'DOK' && numeroDe(e.folio) !== null) &&
+    suyas.every((e) => esEstadoPorBoleta(e.estado))
+  )
+    return {
+      documentoId: boleta.documentoId,
+      estado: 'aceptado',
+      detalleSii: null,
     };
   // Sin entrada propia, pero con algo que no se pudo leer en el resto: no se acepta por silencio.
   if (suyas.length > 0 || hayObservaciones) return null;
@@ -189,9 +214,13 @@ function observar(
   const observaciones: string[] = [];
   for (const e of entradas) {
     const de = `tipo ${String(e.tipo)}, folio ${String(e.folio)}`;
-    if (e.estado !== 'RCH' && e.estado !== 'RPR')
+    if (!esEstadoPorBoleta(e.estado))
       observaciones.push(
         `El SII devolvió un código desconocido (${String(e.estado)}) para la boleta ${de}; revisar`,
+      );
+    else if (e.estado === 'DOK' && numeroDe(e.folio) === null)
+      observaciones.push(
+        `El SII aceptó una boleta sin decir cuál (DOK sin folio); revisar`,
       );
     else if (!boletas.some((b) => calza(e, b)))
       observaciones.push(

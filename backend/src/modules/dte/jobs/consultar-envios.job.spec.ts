@@ -307,7 +307,7 @@ describe('ConsultarEnviosJob', () => {
         ok({
           estado: 'EPR',
           detalle_rep_rech: [
-            { tipo: 39, folio: 2053, estado: 'RLV' },
+            { tipo: 39, folio: 2053, estado: 'XYZ' },
             { tipo: 39, folio: 2077, estado: 'RCH' },
           ],
         }),
@@ -316,7 +316,7 @@ describe('ConsultarEnviosJob', () => {
       await job.consultar();
 
       const [final] = con('consultar_desde = NULL, ultimo_error = $4');
-      expect(final.params[3]).toContain('código desconocido (RLV)');
+      expect(final.params[3]).toContain('código desconocido (XYZ)');
       expect(final.params[3]).toContain('folio 2053');
       // Solo la que tiene su RCH se reparte: la 2053 no cambia y la 2041 no se acepta por
       // silencio.

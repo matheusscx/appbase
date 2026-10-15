@@ -182,8 +182,8 @@ describe('repartirResultado', () => {
       expect(r.observaciones).toEqual([]);
     });
 
-    it('un código de entrada que no es RCH ni RPR no deja la boleta en reparos: queda sin cambio, se avisa y nadie se acepta por silencio', () => {
-      const desconocida = { tipo: 39, folio: 2077, estado: 'RLV' };
+    it('un código de entrada desconocido no deja la boleta en reparos: queda sin cambio, se avisa y nadie se acepta por silencio', () => {
+      const desconocida = { tipo: 39, folio: 2077, estado: 'XYZ' };
       const rechazo = { tipo: 39, folio: 2053, estado: 'RCH' };
       const r = repartirResultado(
         { estado: 'EPR', detalle_rep_rech: [desconocida, rechazo] },
@@ -196,7 +196,7 @@ describe('repartirResultado', () => {
         { documentoId: 'doc-2053', estado: 'rechazado', detalleSii: rechazo },
       ]);
       expect(r.observaciones).toHaveLength(1);
-      expect(r.observaciones[0]).toContain('código desconocido (RLV)');
+      expect(r.observaciones[0]).toContain('código desconocido (XYZ)');
       expect(r.observaciones[0]).toContain('folio 2077');
     });
 
@@ -205,7 +205,7 @@ describe('repartirResultado', () => {
       const r = repartirResultado(
         {
           estado: 'EPR',
-          detalle_rep_rech: [{ tipo: 39, folio: 2077, estado: 'RLV' }, rch],
+          detalle_rep_rech: [{ tipo: 39, folio: 2077, estado: 'XYZ' }, rch],
         },
         [B2077],
       );
@@ -285,6 +285,141 @@ describe('repartirResultado', () => {
       const r = repartirResultado({ estado: 'EPR' }, [B2077]);
       expect(r.cambios.map((c) => c.documentoId)).toEqual(['doc-2077']);
       expect(repartirResultado({ estado: 'EPR' }, []).cambios).toEqual([]);
+    });
+
+    it('RLV deja la boleta con reparos y su entrada en detalleSii', () => {
+      const leve = {
+        tipo: 39,
+        folio: 2053,
+        estado: 'RLV',
+        descripcion: 'Dte Aceptado con reparos leves',
+        error: [error(650, 'Fecha atrasada')],
+      };
+      const r = repartirResultado({ estado: 'EPR', detalle_rep_rech: [leve] }, [
+        B2041,
+        B2053,
+      ]);
+      expect(r.observaciones).toEqual([]);
+      expect(r.cambios).toEqual([
+        { documentoId: 'doc-2041', estado: 'aceptado', detalleSii: null },
+        { documentoId: 'doc-2053', estado: 'reparos', detalleSii: leve },
+      ]);
+    });
+
+    it('DOK deja la boleta aceptada, sin detalle, y no es una observación', () => {
+      const ok = {
+        tipo: 39,
+        folio: 2041,
+        estado: 'DOK',
+        descripcion: 'Dte Aceptado',
+      };
+      const r = repartirResultado({ estado: 'EPR', detalle_rep_rech: [ok] }, [
+        B2041,
+        B2053,
+      ]);
+      expect(r.observaciones).toEqual([]);
+      expect(r.cambios).toEqual([
+        { documentoId: 'doc-2041', estado: 'aceptado', detalleSii: null },
+        { documentoId: 'doc-2053', estado: 'aceptado', detalleSii: null },
+      ]);
+    });
+
+    it('con varias entradas manda la peor: RCH sobre RLV, RLV sobre DOK', () => {
+      const r = repartirResultado(
+        {
+          estado: 'EPR',
+          detalle_rep_rech: [
+            { tipo: 39, folio: 2041, estado: 'DOK' },
+            { tipo: 39, folio: 2041, estado: 'RLV' },
+            { tipo: 39, folio: 2053, estado: 'RLV' },
+            { tipo: 39, folio: 2053, estado: 'RCH' },
+          ],
+        },
+        [B2041, B2053],
+      );
+      expect(r.cambios.map((c) => [c.documentoId, c.estado])).toEqual([
+        ['doc-2041', 'reparos'],
+        ['doc-2053', 'rechazado'],
+      ]);
+    });
+
+    it('un DOK propio acepta aunque otra entrada traiga un código desconocido; la boleta sin entrada no', () => {
+      const r = repartirResultado(
+        {
+          estado: 'EPR',
+          detalle_rep_rech: [
+            { tipo: 39, folio: 2041, estado: 'DOK' },
+            { tipo: 39, folio: 2053, estado: 'XYZ' },
+          ],
+        },
+        [B2041, B2053, B2077],
+      );
+      expect(r.cambios).toEqual([
+        { documentoId: 'doc-2041', estado: 'aceptado', detalleSii: null },
+      ]);
+      expect(r.observaciones).toHaveLength(1);
+      expect(r.observaciones[0]).toContain('XYZ');
+    });
+
+    it('un DOK sin folio es comodín: no acepta a la boleta que tiene un código desconocido', () => {
+      const r = repartirResultado(
+        {
+          estado: 'EPR',
+          detalle_rep_rech: [
+            { estado: 'DOK' } as never,
+            { tipo: 39, folio: 2053, estado: 'XYZ' },
+          ],
+        },
+        [B2041, B2053],
+      );
+      expect(r.cambios).toEqual([]);
+      // El DOK sin folio avisa por sí mismo, además del código desconocido de la 2053.
+      expect(r.observaciones).toHaveLength(2);
+      expect(r.observaciones.join(' ')).toContain('XYZ');
+    });
+
+    it('un DOK sin folio que llega solo no acepta a nadie, pero deja el aviso', () => {
+      const r = repartirResultado(
+        {
+          estado: 'EPR',
+          detalle_rep_rech: [{ tipo: 39, estado: 'DOK' } as never],
+        },
+        [B2041],
+      );
+      expect(r.cambios).toEqual([]);
+      expect(r.observaciones).toHaveLength(1);
+      expect(r.observaciones[0]).toContain('DOK sin folio');
+    });
+
+    it('un DOK y un código desconocido en la misma boleta: queda sin cambio', () => {
+      const r = repartirResultado(
+        {
+          estado: 'EPR',
+          detalle_rep_rech: [
+            { tipo: 39, folio: 2041, estado: 'DOK' },
+            { tipo: 39, folio: 2041, estado: 'XYZ' },
+          ],
+        },
+        [B2041, B2053],
+      );
+      expect(r.cambios).toEqual([]);
+      expect(r.observaciones).toHaveLength(1);
+      expect(r.observaciones[0]).toContain('XYZ');
+    });
+
+    it('un estado que no es texto (["RCH"]) es una observación, no un RCH', () => {
+      const r = repartirResultado(
+        {
+          estado: 'EPR',
+          detalle_rep_rech: [
+            { tipo: 39, folio: 2041, estado: ['RCH'] } as never,
+          ],
+        },
+        [B2041, B2053],
+      );
+      expect(r.cambios).toEqual([]);
+      expect(r.observaciones).toHaveLength(1);
+      expect(r.observaciones[0]).toContain('código desconocido');
     });
   });
 
