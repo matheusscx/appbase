@@ -6,6 +6,11 @@ import { ColaDteService } from '../dte/cola-dte.service';
 import { type CodigoDteError, DteError } from '../dte/dte.types';
 import { emitirBoleta } from '../dte/envio-boleta';
 import { FoliosService } from '../dte/folios.service';
+import {
+  COND_ATRASADA,
+  COND_CON_REPAROS,
+  COND_RECHAZADA,
+} from '../dte/problemas-sii';
 import { PerfilFiscalService } from '../dte/perfil-fiscal.service';
 import type { VentaDocumento } from './entities/venta-documento.entity';
 import {
@@ -676,6 +681,8 @@ describe('EmisionBoletaService: emitir después (spec § 5, § 8.1)', () => {
   });
   let lista: ReturnType<typeof pendiente>[];
   let quedan: number;
+  let conProblemas: number;
+  let problemas: Record<'atrasadas' | 'rechazadas' | 'conReparos', unknown[]>;
   let emisionPrendida: boolean;
   let ventaExiste: (ventaId: string) => boolean;
 
@@ -684,6 +691,8 @@ describe('EmisionBoletaService: emitir después (spec § 5, § 8.1)', () => {
     jest.clearAllMocks();
     lista = [1, 2, 3].map(pendiente);
     quedan = 0;
+    conProblemas = 0;
+    problemas = { atrasadas: [], rechazadas: [], conReparos: [] };
     emisionPrendida = true;
     ventaExiste = () => true;
     filas = (sql) => {
@@ -692,7 +701,16 @@ describe('EmisionBoletaService: emitir después (spec § 5, § 8.1)', () => {
         return ventaExiste(ventaId) ? [{ venta_id: ventaId }] : [];
       }
       if (sql.includes('FROM tenants')) return [{ emite: emisionPrendida }];
+      // El conteo del cajero: los dos números en una sola fila.
+      if (sql.includes('con_problemas'))
+        return [{ sin_emitir: quedan, con_problemas: conProblemas }];
       if (sql.includes('count(*)')) return [{ n: quedan }];
+      // Las tres listas de boletas con problemas: cada una se reconoce por su condición.
+      if (sql.includes('FROM dte_documentos d')) {
+        if (sql.includes(COND_ATRASADA)) return problemas.atrasadas;
+        if (sql.includes(COND_RECHAZADA)) return problemas.rechazadas;
+        if (sql.includes(COND_CON_REPAROS)) return problemas.conReparos;
+      }
       if (sql.includes('FROM venta_documentos d')) return lista;
       return [];
     };
@@ -930,7 +948,12 @@ describe('EmisionBoletaService: emitir después (spec § 5, § 8.1)', () => {
 
       const r = await servicio.estadoEmision(TENANT, AHORA);
 
-      expect(r).toEqual({ activa: false, avisos: [], sinEmitir: 0 });
+      expect(r).toEqual({
+        activa: false,
+        avisos: [],
+        sinEmitir: 0,
+        conProblemas: 0,
+      });
       expect(perfil.obtener).not.toHaveBeenCalled();
       expect(sentencias).toHaveLength(1);
       expect(sentencias[0].sql).toMatch(/FROM tenants/);
@@ -946,6 +969,7 @@ describe('EmisionBoletaService: emitir después (spec § 5, § 8.1)', () => {
         avisos: [{ codigo: 'POCOS_FOLIOS', mensaje: 'Quedan 40 folios' }],
       });
       quedan = 4;
+      conProblemas = 2;
 
       const r = await servicio.estadoEmision(TENANT, AHORA);
 
@@ -953,10 +977,126 @@ describe('EmisionBoletaService: emitir después (spec § 5, § 8.1)', () => {
         activa: true,
         avisos: [{ codigo: 'POCOS_FOLIOS', mensaje: 'Quedan 40 folios' }],
         sinEmitir: 4,
+        conProblemas: 2,
       });
-      // El interruptor y el conteo; las del perfil las hace `obtener`.
+      // El interruptor y UNA consulta con los dos números; las del perfil las hace `obtener`.
       expect(sentencias).toHaveLength(2);
+      expect(sentencias[1].sql).toMatch(/sin_emitir/);
+      expect(sentencias[1].sql).toMatch(/con_problemas/);
+      expect(sentencias[1].params).toEqual([TENANT]);
       expect(perfil.obtener).toHaveBeenCalledWith(TENANT, AHORA);
+    });
+  });
+
+  describe('boletasConProblemas', () => {
+    const EMITIDA = new Date('2027-01-05T12:00:00Z');
+    const fila = (n: number, over: Record<string, unknown> = {}) => ({
+      documento_id: `dte-${n.toString()}`,
+      venta_id: `venta-${n.toString()}`,
+      tipo: 39,
+      folio: 5000 + n,
+      emitido_el: EMITIDA,
+      monto: '5000.0000',
+      detalle_sii: null,
+      ultimo_error: null,
+      ...over,
+    });
+
+    it('tres consultas, una por grupo, todas del tenant y sin borrados', async () => {
+      await servicio.boletasConProblemas(TENANT);
+
+      expect(sentencias).toHaveLength(3);
+      for (const s of sentencias) {
+        expect(s.params).toEqual([TENANT]);
+        expect(s.sql).toMatch(/d\.tenant_id = \$1/);
+        expect(s.sql).toMatch(
+          /WHERE d\.tenant_id = \$1 AND d\.eliminado_el IS NULL/,
+        );
+        expect(s.sql).toMatch(/vd\.eliminado_el IS NULL/);
+        expect(s.sql).toMatch(/v\.eliminado_el IS NULL/);
+        expect(s.sql).toMatch(/LIMIT 200/);
+      }
+      // Atrasadas y rechazadas, de la más vieja a la más nueva; con reparos, la más nueva primero.
+      expect(sentencias[0].sql).toContain(COND_ATRASADA);
+      expect(sentencias[0].sql).toMatch(/ORDER BY d\.emitido_el ASC/);
+      expect(sentencias[1].sql).toContain(COND_RECHAZADA);
+      expect(sentencias[1].sql).toMatch(/ORDER BY d\.emitido_el ASC/);
+      expect(sentencias[2].sql).toContain(COND_CON_REPAROS);
+      expect(sentencias[2].sql).toMatch(/ORDER BY d\.emitido_el DESC/);
+    });
+
+    it('arma cada grupo con su motivo y deja el monto como string', async () => {
+      problemas.atrasadas = [fila(1, { ultimo_error: 'El SII no contesta' })];
+      problemas.rechazadas = [
+        fila(2, { detalle_sii: { origen: 'sobre', estado: 'RSC' } }),
+      ];
+      problemas.conReparos = [
+        fila(3, {
+          tipo: 41,
+          monto: '3000.0000',
+          detalle_sii: {
+            estado: 'RLV',
+            error: [{ descripcion: 'Fecha atrasada' }],
+          },
+        }),
+      ];
+
+      const r = await servicio.boletasConProblemas(TENANT);
+
+      expect(r).toEqual({
+        atrasadas: [
+          {
+            documentoId: 'dte-1',
+            ventaId: 'venta-1',
+            tipo: 39,
+            folio: 5001,
+            emitidaEl: EMITIDA,
+            monto: '5000.0000',
+            motivo: 'El SII no contesta',
+          },
+        ],
+        rechazadas: [
+          {
+            documentoId: 'dte-2',
+            ventaId: 'venta-2',
+            tipo: 39,
+            folio: 5002,
+            emitidaEl: EMITIDA,
+            monto: '5000.0000',
+            motivo: 'Error del sistema al enviarla al SII.',
+          },
+        ],
+        conReparos: [
+          {
+            documentoId: 'dte-3',
+            ventaId: 'venta-3',
+            tipo: 41,
+            folio: 5003,
+            emitidaEl: EMITIDA,
+            monto: '3000.0000',
+            motivo: 'El SII avisa: Fecha atrasada.',
+          },
+        ],
+      });
+    });
+
+    it('una boleta sin documento de venta se muestra igual, con ventaId y monto en null', async () => {
+      problemas.rechazadas = [
+        fila(1, {
+          venta_id: null,
+          monto: null,
+          detalle_sii: { origen: 'envio', mensaje: 'x' },
+        }),
+      ];
+
+      const r = await servicio.boletasConProblemas(TENANT);
+
+      expect(r.rechazadas).toHaveLength(1);
+      expect(r.rechazadas[0]).toMatchObject({
+        documentoId: 'dte-1',
+        ventaId: null,
+        monto: null,
+      });
     });
   });
 });

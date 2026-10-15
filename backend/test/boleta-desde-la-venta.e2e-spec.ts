@@ -45,6 +45,9 @@ const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris
 const ADMIN = { email: 'admin.paris@paris.cl', password: 'admin' };
 /** El vendedor/cajero del seed (rol `Vendedor`): vende, no administra el tenant. */
 const CAJERO = { email: 'vendedor@paris.cl', password: 'admin' };
+const FALABELLA_TENANT_ID = '550e8400-e29b-41d4-a716-446655440040';
+// El único miembro sembrado de Falabella es el superadmin, con rol Administrador allá.
+const ADMIN_FALABELLA = { email: 'admin@sistema.com', password: 'admin' };
 const AVISO_NC =
   'La boleta de esta venta ya se emitió: la nota de crédito ante el SII hazla en su portal por ahora.';
 const MOTIVO_ANULAR_EMITIDA =
@@ -146,10 +149,13 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     return res.body as T;
   }
 
-  async function loginComo(usuario: {
-    email: string;
-    password: string;
-  }): Promise<string> {
+  async function loginComo(
+    usuario: {
+      email: string;
+      password: string;
+    },
+    tenantId = TENANT_ID,
+  ): Promise<string> {
     const login = await request(app.getHttpServer())
       .post('/api/auth/login')
       .send(usuario);
@@ -161,7 +167,7 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
         'Authorization',
         `Bearer ${(login.body as TokenResponse).access_token}`,
       )
-      .send({ tenantId: TENANT_ID });
+      .send({ tenantId });
     expect(tenant.status).toBe(200);
     return (tenant.body as TokenResponse).access_token;
   }
@@ -1194,6 +1200,7 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     activa: boolean;
     avisos: { codigo: string; mensaje: string }[];
     sinEmitir: number;
+    conProblemas: number;
   }
   interface DetalleRes {
     documentos: {
@@ -1690,6 +1697,7 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     const estado = sano.body as EstadoEmisionRes;
     expect(estado.activa).toBe(true);
     expect(estado.sinEmitir).toBe(0);
+    expect(estado.conProblemas).toBe(0);
     // También avisa el CAF de exentas (50 folios): se busca el de las afectas.
     expect(estado.avisos).toContainEqual({
       codigo: 'POCOS_FOLIOS',
@@ -1703,6 +1711,8 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     const conPendientes = await getCon(tokenCajero, 'dte/estado-emision');
     expect(conPendientes.status).toBe(200);
     expect((conPendientes.body as EstadoEmisionRes).sinEmitir).toBe(2);
+    // Sin emitir no es "con problemas": todavía no hay nada en el SII.
+    expect((conPendientes.body as EstadoEmisionRes).conProblemas).toBe(0);
     // El admin, que también vende, lo lee igual.
     expect((await getCon(token, 'dte/estado-emision')).status).toBe(200);
   });
@@ -1717,7 +1727,12 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     const res = await getCon(tokenCajero, 'dte/estado-emision');
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ activa: false, avisos: [], sinEmitir: 0 });
+    expect(res.body).toEqual({
+      activa: false,
+      avisos: [],
+      sinEmitir: 0,
+      conProblemas: 0,
+    });
   });
 
   it('el cajero no emite pendientes, no ve la lista y no toca el interruptor: 403', async () => {
@@ -1728,6 +1743,9 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     expect((await getCon(tokenCajero, 'dte/boletas-sin-emitir')).status).toBe(
       403,
     );
+    expect(
+      (await getCon(tokenCajero, 'dte/boletas-con-problemas')).status,
+    ).toBe(403);
     const interruptor = await request(app.getHttpServer())
       .patch('/api/dte/emision')
       .set('Authorization', `Bearer ${tokenCajero}`)
@@ -1739,11 +1757,192 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     });
   });
 
-  it('sin sesión, las tres rutas dan 401', async () => {
+  it('sin sesión, las cuatro rutas dan 401', async () => {
     const sin = (m: 'get' | 'post', ruta: string) =>
       request(app.getHttpServer())[m](`/api/${ruta}`);
     expect((await sin('post', 'dte/emitir-pendientes')).status).toBe(401);
     expect((await sin('get', 'dte/boletas-sin-emitir')).status).toBe(401);
     expect((await sin('get', 'dte/estado-emision')).status).toBe(401);
+    expect((await sin('get', 'dte/boletas-con-problemas')).status).toBe(401);
+  });
+
+  // ---- Boletas con problemas en el SII ---------------------------------------------------
+
+  describe('boletas con problemas', () => {
+    interface FilaProblemaRes {
+      documentoId: string;
+      ventaId: string | null;
+      tipo: number;
+      folio: number;
+      emitidaEl: string;
+      monto: string | null;
+      motivo: string | null;
+    }
+    interface ProblemasRes {
+      atrasadas: FilaProblemaRes[];
+      rechazadas: FilaProblemaRes[];
+      conReparos: FilaProblemaRes[];
+    }
+    interface Sembrada {
+      ventaId: string;
+      documentoId: string; // el de `dte_documentos`
+      monto: string; // el del documento de venta, tal como lo guarda la base
+    }
+
+    // El panel de soporte (/admin/dte) agrega sus `it` DENTRO de este describe y reusa las filas
+    // A y B: por eso se arman una vez en el `beforeAll` y se limpian en el `afterAll`, no al final
+    // de un `it`.
+    let A: Sembrada; // atrasada
+    let B: Sembrada; // rechazada
+    let C: Sembrada; // con reparos reciente
+    let D: Sembrada; // con reparos de hace más de 30 días: no aparece
+    let E: Sembrada; // rechazada pero dada de baja: no aparece
+    let F: Sembrada; // pendiente de hace 10 minutos: no aparece
+
+    /**
+     * Una venta con su boleta recién encolada (`pendiente`). Los estados del SII se dejan por SQL
+     * porque el SII de verdad no existe en el e2e; el camino real del job lo cubre
+     * `dte-cola.e2e-spec.ts`.
+     */
+    async function vender1(): Promise<Sembrada> {
+      const venta = await venderOk({
+        lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+      });
+      const doc = await boletaDelSistema(venta.id);
+      expect(doc.dte_documento_id).not.toBeNull();
+      return {
+        ventaId: venta.id,
+        documentoId: doc.dte_documento_id as string,
+        monto: doc.monto,
+      };
+    }
+
+    const dejar = (
+      b: Sembrada,
+      estado: string,
+      emitidoHace: string,
+      detalle: object | null = null,
+      baja = false,
+    ) =>
+      ds.query(
+        `UPDATE dte_documentos
+            SET estado = $2, emitido_el = now() - $3::interval, detalle_sii = $4::jsonb,
+                eliminado_el = CASE WHEN $5::boolean THEN now() ELSE NULL END
+          WHERE documento_id = $1`,
+        [
+          b.documentoId,
+          estado,
+          emitidoHace,
+          detalle === null ? null : JSON.stringify(detalle),
+          baja,
+        ],
+      );
+
+    const ids = (filas: FilaProblemaRes[]) => filas.map((f) => f.documentoId);
+
+    beforeAll(async () => {
+      await reiniciarLimpio();
+      A = await vender1();
+      B = await vender1();
+      C = await vender1();
+      D = await vender1();
+      E = await vender1();
+      F = await vender1();
+      await dejar(A, 'pendiente', '61 minutes');
+      await dejar(B, 'rechazado', '5 minutes', {
+        origen: 'sobre',
+        estado: 'RSC',
+      });
+      await dejar(C, 'reparos', '2 days', {
+        estado: 'RLV',
+        error: [{ descripcion: 'Fecha atrasada' }],
+      });
+      await dejar(D, 'reparos', '31 days', {
+        estado: 'RLV',
+        error: [{ descripcion: 'Fecha atrasada' }],
+      });
+      await dejar(E, 'rechazado', '5 minutes', { origen: 'sobre' }, true);
+      await dejar(F, 'pendiente', '10 minutes');
+    }, 90000);
+
+    afterAll(async () => {
+      // Las seis filas quedan como `aceptado` y vivas: no molestan a otros tests ni a la franja
+      // del cajero de otras suites (E, la dada de baja, sigue de baja).
+      await ds.query(
+        `UPDATE dte_documentos SET estado = 'aceptado', detalle_sii = NULL
+          WHERE documento_id = ANY($1::uuid[])`,
+        [[A, B, C, D, E, F].map((b) => b.documentoId)],
+      );
+    });
+
+    it('GET /dte/boletas-con-problemas: cada boleta en su grupo, con su venta, su monto y su motivo', async () => {
+      const res = await getCon(token, 'dte/boletas-con-problemas');
+
+      expect(res.status).toBe(200);
+      sinBlobs(res);
+      const r = res.body as ProblemasRes;
+      expect(ids(r.atrasadas)).toEqual([A.documentoId]);
+      expect(r.atrasadas[0]).toMatchObject({
+        ventaId: A.ventaId,
+        tipo: 39,
+        monto: A.monto,
+        motivo: null,
+      });
+      expect(ids(r.rechazadas)).toEqual([B.documentoId]);
+      expect(r.rechazadas[0]).toMatchObject({
+        ventaId: B.ventaId,
+        monto: B.monto,
+        motivo: 'Error del sistema al enviarla al SII.',
+      });
+      expect(typeof r.rechazadas[0].monto).toBe('string');
+      expect(ids(r.conReparos)).toEqual([C.documentoId]);
+      expect(r.conReparos[0]).toMatchObject({
+        ventaId: C.ventaId,
+        motivo: 'El SII avisa: Fecha atrasada.',
+      });
+    });
+
+    it('GET /dte/estado-emision cuenta las atrasadas y las rechazadas (no las con reparos ni las recientes)', async () => {
+      const tokenCajero = await loginComo(CAJERO);
+
+      const res = await getCon(tokenCajero, 'dte/estado-emision');
+
+      expect(res.status).toBe(200);
+      expect((res.body as EstadoEmisionRes).conProblemas).toBe(2);
+    });
+
+    it('con la emisión apagada el conteo es 0 aunque haya boletas con problemas', async () => {
+      const tokenCajero = await loginComo(CAJERO);
+      await emision(false);
+      try {
+        const res = await getCon(tokenCajero, 'dte/estado-emision');
+
+        expect(res.status).toBe(200);
+        expect(res.body).toEqual({
+          activa: false,
+          avisos: [],
+          sinEmitir: 0,
+          conProblemas: 0,
+        });
+      } finally {
+        await emision(true);
+      }
+    });
+
+    it('el admin de otro comercio no ve nada de este: las tres listas vacías', async () => {
+      const tokenFalabella = await loginComo(
+        ADMIN_FALABELLA,
+        FALABELLA_TENANT_ID,
+      );
+
+      const res = await getCon(tokenFalabella, 'dte/boletas-con-problemas');
+
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({
+        atrasadas: [],
+        rechazadas: [],
+        conReparos: [],
+      });
+    });
   });
 });

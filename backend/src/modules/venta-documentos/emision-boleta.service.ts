@@ -12,6 +12,14 @@ import { ColaDteService } from '../dte/cola-dte.service';
 import { emitirBoleta } from '../dte/envio-boleta';
 import { FoliosService } from '../dte/folios.service';
 import {
+  COND_ATRASADA,
+  COND_CON_PROBLEMAS,
+  COND_CON_REPAROS,
+  COND_RECHAZADA,
+  type GrupoProblema,
+  motivoDe,
+} from '../dte/problemas-sii';
+import {
   ahoraChile,
   MENSAJE_SIN_PROVEEDOR_SOFTWARE,
 } from '../dte/perfil-fiscal';
@@ -59,6 +67,28 @@ export interface EstadoEmision {
     mensaje: string;
   }[];
   sinEmitir: number;
+  /** Boletas atrasadas o rechazadas en el SII: lo que el cajero avisa al encargado. */
+  conProblemas: number;
+}
+
+/** Una boleta del SII que quedó atrasada, rechazada o con reparos, con su venta. */
+export interface BoletaConProblema {
+  documentoId: string;
+  /** Null si el documento de venta no se encuentra (no debería pasar; ver `leerProblemas`). */
+  ventaId: string | null;
+  tipo: TipoBoleta;
+  folio: number;
+  emitidaEl: Date;
+  /** El monto del documento de venta, tal como sale de la base: nunca pasa por `number`. */
+  monto: string | null;
+  motivo: string | null;
+}
+
+/** Lo que responde `GET /dte/boletas-con-problemas`. */
+export interface BoletasConProblemas {
+  atrasadas: BoletaConProblema[];
+  rechazadas: BoletaConProblema[];
+  conReparos: BoletaConProblema[];
 }
 
 /** Tope de boletas por llamada del botón: una transacción cada una, no se cuelga una petición. */
@@ -158,6 +188,39 @@ const LEER_INTERRUPTOR = `
    WHERE tenant_id = $1 AND eliminado_el IS NULL`;
 
 const CONTAR_SIN_EMITIR = `SELECT count(*)::int AS n ${SIN_EMITIR_DEL_TENANT}`;
+
+// Lo que lee el cajero tras cada cobro: las dos cuentas en UNA consulta. Las condiciones de
+// "con problemas" son las de `problemas-sii.ts`, las mismas que arman la lista del admin.
+const CONTAR_PARA_EL_CAJERO = `
+  SELECT (SELECT count(*)::int ${SIN_EMITIR_DEL_TENANT}) AS sin_emitir,
+         (SELECT count(*)::int FROM dte_documentos d
+           WHERE d.tenant_id = $1 AND d.eliminado_el IS NULL AND ${COND_CON_PROBLEMAS}) AS con_problemas`;
+
+const LIMITE_PROBLEMAS = 200;
+
+// Las boletas de un grupo con su venta. El LEFT JOIN es a propósito: una boleta del SII sin su
+// documento de venta (no debería pasar) igual se muestra, con `ventaId` y `monto` en null, en vez
+// de desaparecer de la pantalla justo cuando algo anda mal. Cada join filtra `eliminado_el`.
+const leerProblemas = (condicion: string, orden: 'ASC' | 'DESC') => `
+  SELECT d.documento_id, v.venta_id, d.tipo, d.folio, d.emitido_el, vd.monto, d.detalle_sii, d.ultimo_error
+    FROM dte_documentos d
+    LEFT JOIN venta_documentos vd ON vd.dte_documento_id = d.documento_id AND vd.tenant_id = d.tenant_id
+                                 AND vd.eliminado_el IS NULL
+    LEFT JOIN ventas v ON v.venta_id = vd.venta_id AND v.tenant_id = d.tenant_id AND v.eliminado_el IS NULL
+   WHERE d.tenant_id = $1 AND d.eliminado_el IS NULL AND (${condicion})
+   ORDER BY d.emitido_el ${orden}, d.folio
+   LIMIT ${LIMITE_PROBLEMAS.toString()}`;
+
+interface FilaProblema {
+  documento_id: string;
+  venta_id: string | null;
+  tipo: TipoBoleta;
+  folio: number;
+  emitido_el: Date;
+  monto: string | null;
+  detalle_sii: unknown;
+  ultimo_error: string | null;
+}
 
 // El bloqueo de la venta que toma `VentasService.lockVentaOriginal` (anular, la nota de crédito y
 // el PATCH del número). Es un duplicado deliberado de ese SQL: este módulo no puede importar a
@@ -387,23 +450,61 @@ export class EmisionBoletaService {
    * Lo que ve el cajero (spec § 8.1): si el local emite, los avisos del perfil y cuántas boletas
    * siguen sin emitir. El POS lo lee tras cada cobro, así que con la emisión apagada es UNA
    * consulta (el interruptor) y no se arma el perfil. Prendida: el interruptor, el perfil
-   * (cuatro) y un `count`; fijas, sin importar cuántos CAF haya. Solo devuelve los mensajes de
-   * los avisos: nada del emisor ni del certificado.
+   * (cuatro) y una consulta con las dos cuentas; fijas, sin importar cuántos CAF haya. Solo
+   * devuelve los mensajes de los avisos: nada del emisor ni del certificado.
    */
   async estadoEmision(tenantId: string, ahora: Date): Promise<EstadoEmision> {
     const [tenant] = await this.db.query<{ emite: boolean }[]>(
       LEER_INTERRUPTOR,
       [tenantId],
     );
-    if (!tenant?.emite) return { activa: false, avisos: [], sinEmitir: 0 };
+    if (!tenant?.emite)
+      return { activa: false, avisos: [], sinEmitir: 0, conProblemas: 0 };
     const perfil = await this.perfil.obtener(tenantId, ahora);
+    const [cuentas] = await this.db.query<
+      { sin_emitir: number; con_problemas: number }[]
+    >(CONTAR_PARA_EL_CAJERO, [tenantId]);
     return {
       activa: true,
       avisos: perfil.avisos.map((a) => ({
         codigo: a.codigo,
         mensaje: a.mensaje,
       })),
-      sinEmitir: await this.contarSinEmitir(tenantId),
+      sinEmitir: cuentas?.sin_emitir ?? 0,
+      conProblemas: cuentas?.con_problemas ?? 0,
+    };
+  }
+
+  /**
+   * Las boletas atrasadas, rechazadas y con reparos del tenant, cruzadas con su venta, para la
+   * pantalla del admin: tres consultas fijas (una por grupo), hasta 200 cada una. Las atrasadas y
+   * las rechazadas, de la más vieja a la más nueva (lo que más urge, primero); las con reparos,
+   * de la más nueva a la más vieja (solo importan las recientes).
+   */
+  async boletasConProblemas(tenantId: string): Promise<BoletasConProblemas> {
+    const grupo = async (
+      nombre: GrupoProblema,
+      condicion: string,
+      orden: 'ASC' | 'DESC',
+    ): Promise<BoletaConProblema[]> => {
+      const filas = await this.db.query<FilaProblema[]>(
+        leerProblemas(condicion, orden),
+        [tenantId],
+      );
+      return filas.map((f) => ({
+        documentoId: f.documento_id,
+        ventaId: f.venta_id,
+        tipo: f.tipo,
+        folio: f.folio,
+        emitidaEl: f.emitido_el,
+        monto: f.monto,
+        motivo: motivoDe(nombre, f.detalle_sii, f.ultimo_error),
+      }));
+    };
+    return {
+      atrasadas: await grupo('atrasada', COND_ATRASADA, 'ASC'),
+      rechazadas: await grupo('rechazada', COND_RECHAZADA, 'ASC'),
+      conReparos: await grupo('con_reparos', COND_CON_REPAROS, 'DESC'),
     };
   }
 
