@@ -406,6 +406,9 @@ CREATE UNIQUE INDEX "uq_dte_documentos_folio" ON "dte_documentos" ("razon_social
 CREATE INDEX "idx_dte_documentos_cola" ON "dte_documentos" ("razon_social_id", "emitido_el")
   WHERE "estado" = 'pendiente' AND "eliminado_el" IS NULL;
 CREATE INDEX "idx_dte_documentos_envio" ON "dte_documentos" ("envio_id");
+-- La franja del cajero cuenta las atrasadas y rechazadas del tenant después de cada cobro.
+CREATE INDEX "idx_dte_documentos_problemas" ON "dte_documentos" ("tenant_id", "emitido_el")
+  WHERE "estado" IN ('pendiente','enviado','rechazado') AND "eliminado_el" IS NULL;
 
 -- Directorio de entidades externas del tenant: proveedores, empresas, personas naturales
 CREATE TABLE "terceros" (
@@ -2211,6 +2214,9 @@ CREATE INDEX "idx_venta_documentos_corregido" ON "venta_documentos" ("documento_
 -- Las boletas por emitir de un tenant, en el orden en que se armaron (la lista del botón).
 CREATE INDEX "idx_venta_documentos_sin_emitir" ON "venta_documentos" ("tenant_id", "creado_el")
   WHERE "estado_envio" = 'sin_emitir' AND "descarte" IS NULL AND "eliminado_el" IS NULL;
+-- El cruce de una boleta del SII con su documento de venta (la lista de boletas con problemas).
+CREATE INDEX "idx_venta_documentos_dte" ON "venta_documentos" ("dte_documento_id")
+  WHERE "dte_documento_id" IS NOT NULL;
 
 -- Cada vez que alguien con Ventas:Anular borra el número de un documento hecho por
 -- fuera ('externo') queda UNA fila acá: qué decía, quién lo borró y cuándo (creado_el).

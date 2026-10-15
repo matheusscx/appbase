@@ -44,6 +44,10 @@ export type EstadoDocumentoDte =
   where: `"estado" = 'pendiente' AND "eliminado_el" IS NULL`,
 })
 @Index('idx_dte_documentos_envio', ['envioId'])
+// La franja del cajero cuenta las atrasadas y rechazadas del tenant después de cada cobro.
+@Index('idx_dte_documentos_problemas', ['tenantId', 'emitidoEl'], {
+  where: `"estado" IN ('pendiente','enviado','rechazado') AND "eliminado_el" IS NULL`,
+})
 export class DteDocumento {
   @PrimaryGeneratedColumn('uuid', { name: 'documento_id' }) id: string;
   @Column({ name: 'tenant_id', type: 'uuid' }) tenantId: string;

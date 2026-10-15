@@ -44,6 +44,10 @@ export type Descarte = 'armado_sin_enviar' | 'afirmado_no_hecho';
 @Index('idx_venta_documentos_sin_emitir', ['tenantId', 'creadoEl'], {
   where: `"estado_envio" = 'sin_emitir' AND "descarte" IS NULL AND "eliminado_el" IS NULL`,
 })
+// El cruce de una boleta del SII con su documento de venta (la lista de boletas con problemas).
+@Index('idx_venta_documentos_dte', ['dteDocumentoId'], {
+  where: `"dte_documento_id" IS NOT NULL`,
+})
 @Entity('venta_documentos')
 @Check(
   'chk_venta_documentos_emisor',
