@@ -19,6 +19,8 @@ import {
   ValidateNested,
 } from 'class-validator';
 import { Type } from 'class-transformer';
+import { MAX_NOMBRE_ITEM } from '../../dte/dte.types';
+import { TEXTO_SII } from '../../dte/texto';
 import {
   IsDecimalHasta,
   IsDecimalNoNegativo,
@@ -199,9 +201,16 @@ export class ItemGrupoModificadorInputDto {
   opciones?: ItemGrupoOpcionOverrideInputDto[];
 }
 
+// El nombre se congela en la boleta y el SII solo admite `MAX_NOMBRE_ITEM` caracteres en
+// ISO-8859-1 en `NmbItem`: el catálogo lo rechaza al capturar, no la venta al emitir.
+export const MENSAJE_NOMBRE_SII =
+  'El nombre no puede pasar de 80 caracteres ni llevar símbolos fuera del alfabeto latino (lo exige el SII en la boleta)';
+
 export class CreateItemDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(MAX_NOMBRE_ITEM, { message: MENSAJE_NOMBRE_SII })
+  @Matches(TEXTO_SII, { message: MENSAJE_NOMBRE_SII })
   nombre: string;
 
   @IsString()

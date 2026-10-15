@@ -1,5 +1,6 @@
 import { DteError } from './dte.types';
 import {
+  TEXTO_SII,
   aLatin1,
   el,
   escaparXml,
@@ -8,6 +9,57 @@ import {
   validarFechaHora,
   validarTexto,
 } from './texto';
+
+describe('TEXTO_SII', () => {
+  it('acepta tildes, eñes y los signos de apertura del español', () => {
+    expect(TEXTO_SII.test('Pisco sour ñandú ¿5?')).toBe(true);
+  });
+
+  it.each([
+    ['Café €', 'un símbolo fuera de ISO-8859-1'],
+    ['Tab\tx', 'un tab'],
+    ['🍺', 'un emoji'],
+  ])('rechaza %j: %s', (valor) => {
+    expect(TEXTO_SII.test(valor)).toBe(false);
+  });
+
+  // El catálogo (que captura el nombre) y el motor (que lo emite) leen la misma
+  // clase de caracteres: si discreparan, un nombre que el catálogo acepta
+  // dejaría la boleta en `sin_emitir`.
+  it.each(['Pisco sour ñandú ¿5?', 'Café €', 'Tab\tx', '🍺'])(
+    'coincide con validarTexto para %j',
+    (valor) => {
+      let motorAcepta = true;
+      try {
+        validarTexto('NmbItem', valor, 80);
+      } catch (e) {
+        // Solo el rechazo del motor cuenta; cualquier otro error es un bug del test.
+        expect(e).toBeInstanceOf(DteError);
+        motorAcepta = false;
+      }
+      expect(TEXTO_SII.test(valor)).toBe(motorAcepta);
+    },
+  );
+
+  // Los bordes de la clase, con escapes: nada depende de un carácter invisible.
+  it.each([
+    ['\u007F', 'DEL, justo después de ~'],
+    ['\u0085', 'control C1'],
+    ['\u009F', 'último control C1, justo antes del NBSP'],
+    ['\u0100', 'Ā, justo después de ÿ'],
+  ])('rechaza %j: %s', (valor) => {
+    expect(TEXTO_SII.test(valor)).toBe(false);
+  });
+
+  it.each([
+    ['\u0020', 'espacio, el primero'],
+    ['\u00A0', 'NBSP, el primero del tramo alto'],
+    ['\u00FF', 'ÿ, el último'],
+    ['\u007E', '~, el último del tramo bajo'],
+  ])('acepta %j: %s', (valor) => {
+    expect(TEXTO_SII.test(valor)).toBe(true);
+  });
+});
 
 describe('validarTexto', () => {
   it('acepta tildes y eñes, que están en ISO-8859-1', () => {

@@ -11,7 +11,9 @@ import {
   IsOptional,
   IsString,
   IsUUID,
+  Matches,
   Max,
+  MaxLength,
   Min,
   Validate,
   ValidateIf,
@@ -25,7 +27,10 @@ import {
   RecetaIngredienteInputDto,
   ComboComponenteInputDto,
   ItemGrupoModificadorInputDto,
+  MENSAJE_NOMBRE_SII,
 } from './create-item.dto';
+import { MAX_NOMBRE_ITEM } from '../../dte/dte.types';
+import { TEXTO_SII } from '../../dte/texto';
 import {
   IsDecimalNoNegativo,
   IsMontoPersistible,
@@ -67,6 +72,8 @@ export class StockNoEditableConstraint implements ValidatorConstraintInterface {
 export class UpdateItemDto {
   @IsString()
   @IsNotEmpty()
+  @MaxLength(MAX_NOMBRE_ITEM, { message: MENSAJE_NOMBRE_SII })
+  @Matches(TEXTO_SII, { message: MENSAJE_NOMBRE_SII })
   @ValidateIf((_o, v) => v !== undefined)
   nombre?: string;
 

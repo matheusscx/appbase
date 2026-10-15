@@ -490,6 +490,10 @@ function emptyForm() {
 }
 
 const form = ref(emptyForm())
+
+// El nombre se congela en la boleta del SII: 80 caracteres, alfabeto latino (gemelo del DTO).
+const MAX_NOMBRE_ITEM = 80
+const errorNombre = computed(() => textoSiiInvalido(form.value.nombre, MAX_NOMBRE_ITEM))
 const formCostoActual = ref<string | null>(null)
 /**
  * Por qué la unidad de este ítem ya no se puede cambiar —movimientos de stock, o una receta
@@ -1420,6 +1424,8 @@ function onAplicarDesfases(aplicados: AplicarDesfaseItem[]) {
 }
 
 async function guardar() {
+  // El Enter dentro del formulario también llega acá, no solo el botón que se deshabilita.
+  if (errorNombre.value) return
   saving.value = true
   try {
     // `|| undefined` colapsaba todo lo falsy y el campo NO viajaba: el usuario
@@ -2043,12 +2049,13 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
         >
           <!-- Campos base -->
           <div class="grid grid-cols-2 gap-4">
-            <UFormField label="Nombre" class="col-span-2" required>
+            <UFormField label="Nombre" class="col-span-2" required :error="errorNombre ?? undefined">
               <UInput
                 v-model="form.nombre"
                 placeholder="Nombre del item"
                 class="w-full"
                 autofocus
+                :maxlength="MAX_NOMBRE_ITEM"
               />
             </UFormField>
 
@@ -2826,6 +2833,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           type="submit"
           form="item-form"
           :loading="saving"
+          :disabled="!!errorNombre"
         >
           {{ submitLabel }}
         </UButton>

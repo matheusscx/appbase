@@ -4,8 +4,14 @@ import { DteError } from './dte.types';
 /**
  * Lo que cabe en un campo del motor: ISO-8859-1 imprimible (U+0020 a U+007E y U+00A0 a
  * U+00FF). Quedan fuera los de control, también tab y saltos: todos los campos son de una línea.
+ * Una sola clase de caracteres para el motor y para el catálogo: si discreparan, un nombre que el
+ * catálogo acepta dejaría la boleta sin emitir.
  */
-const FUERA_DE_LATIN1 = /[^\u0020-\u007E\u00A0-\u00FF]/u;
+const CARACTERES_SII = '\\u0020-\\u007E\\u00A0-\\u00FF';
+const FUERA_DE_LATIN1 = new RegExp(`[^${CARACTERES_SII}]`, 'u');
+
+/** Un texto que cabe entero en un campo del SII: lo usa el catálogo para validar al capturar. */
+export const TEXTO_SII = new RegExp(`^[${CARACTERES_SII}]*$`, 'u');
 
 /**
  * Devuelve el valor si cabe en el campo del SII. No corrige ni corta (spec § 5):

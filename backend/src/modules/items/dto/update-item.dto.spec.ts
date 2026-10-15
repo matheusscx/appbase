@@ -2,7 +2,7 @@ import 'reflect-metadata';
 import { plainToInstance } from 'class-transformer';
 import { validate } from 'class-validator';
 import { UpdateItemDto } from './update-item.dto';
-import { CreateItemDto } from './create-item.dto';
+import { CreateItemDto, MENSAJE_NOMBRE_SII } from './create-item.dto';
 
 /**
  * `clasificacionTributaria` usaba `@IsOptional()` en los dos DTOs, que saltea
@@ -110,6 +110,23 @@ describe('CreateItemDto — clasificacionTributaria', () => {
     const errores = await validate(dto);
     expect(errores.some((e) => e.property === 'clasificacionTributaria')).toBe(
       true,
+    );
+  });
+});
+
+describe('UpdateItemDto — nombre cabe en la boleta', () => {
+  it('un PATCH sin nombre valida: omitir el campo no lo toca', async () => {
+    const dto = plainToInstance(UpdateItemDto, { descripcion: 'otra' });
+    const errores = await validate(dto);
+    expect(errores.some((e) => e.property === 'nombre')).toBe(false);
+  });
+
+  it('un nombre de 81 caracteres falla con el mensaje del SII', async () => {
+    const dto = plainToInstance(UpdateItemDto, { nombre: 'a'.repeat(81) });
+    const errores = await validate(dto);
+    const delNombre = errores.find((e) => e.property === 'nombre');
+    expect(Object.values(delNombre?.constraints ?? {})).toContain(
+      MENSAJE_NOMBRE_SII,
     );
   });
 });

@@ -185,6 +185,24 @@ Verificación: `grep -rn "pageSize=100\|pageSize: 100" frontend/app --include='*
 
 ---
 
+## El nombre cabe en la boleta
+
+El nombre de un ítem se copia congelado a la boleta electrónica, y el SII solo admite 80
+caracteres en ISO-8859-1 en `NmbItem`. Por eso el catálogo lo rechaza **al capturar**, no la venta
+al emitir: `POST /items` y `PATCH /items/:id` devuelven 400 si el nombre pasa de 80 o lleva un
+símbolo fuera del alfabeto latino (un emoji, `€`, un tab).
+
+- Una sola fuente de la regla: `TEXTO_SII` en `backend/src/modules/dte/texto.ts`, la misma clase
+  de caracteres que usa el motor (`validarTexto`). `MENSAJE_NOMBRE_SII` vive en `create-item.dto.ts`.
+- El formulario de `configuracion/items.vue` avisa antes de enviar (`useTextoSii.ts`, gemelo del
+  patrón del backend), corta el campo a 80 y deshabilita el guardado mientras haya error.
+- Los ítems que ya existían no se migran (no hay datos productivos): un nombre viejo que no cabe
+  se corrige al editar el ítem, y el PATCH que no toca el nombre no lo vuelve a validar.
+- Tests: `texto.spec.ts` (el patrón, igual al del motor), `useTextoSii.spec.ts` y
+  `backend/test/items-nombre-sii.e2e-spec.ts`.
+
+---
+
 ## Testing
 
 - Backend unitario: `catalogo-orden.spec.ts` (el orden, incluido el disponible negativo y el
