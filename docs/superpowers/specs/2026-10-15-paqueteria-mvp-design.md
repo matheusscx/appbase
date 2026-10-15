@@ -50,7 +50,7 @@ Todas las tablas: PK UUID con `type: 'uuid'` explícito, `tenant_id`, `creado_el
 | `paquete_configuracion` | `precio_envio_defecto`, `pago_repartidor_defecto` | única por tenant (calco de `propina_configuracion`) |
 | `repartidores` | `nombre`, `telefono` (nullable), `activo` | — |
 | `paquetes` | `codigo`, `destinatario_nombre`, `destinatario_telefono`, `direccion`, `comuna`, `nota` (los cinco nullable: el escaneo crea el paquete con solo el código), `remitente_tercero_id` (nullable → `terceros`), `cobro_en_destino` (bool), `precio_envio`, `pago_repartidor` | `codigo` único por tenant entre los vivos |
-| `hojas_ruta` | `repartidor_id`, `fecha` (`date`, día local del tenant), `estado` (`abierta` \| `rendida`), `rendida_por`, `rendida_el`, totales congelados (`total_asignados`, `total_entregados`, `total_cobro_destino`, `monto_cobrado_destino`, `monto_pago_repartidor`, `neto_a_rendir`) | única por `(tenant, repartidor, fecha)` entre las vivas |
+| `hojas_ruta` | `repartidor_id`, `fecha` (`date`, día local del tenant), `estado` (`abierta` \| `rendida`), `rendida_por`, `rendida_el`, totales congelados (`total_asignados`, `total_entregados`, `total_cobro_destino`, `monto_cobrado_destino`, `monto_pago_repartidor`, `monto_total_general`, `neto_a_rendir`) | única por `(tenant, repartidor, fecha)` entre las vivas |
 | `hoja_ruta_paquetes` | `hoja_ruta_id`, `paquete_id`, `estado` (`en_ruta` \| `entregado` \| `no_entregado`) | índice único parcial sobre `paquete_id` donde `estado = 'en_ruta'` y vivo: un paquete está en una sola ruta a la vez |
 
 Los totales congelados de `hojas_ruta` son nulos mientras la hoja está abierta; al estar
@@ -87,6 +87,8 @@ abierta, se calculan al leer.
    - **asignado**: existía y estaba disponible → se asigna. Su `cobro_en_destino` **no** se
      pisa con el del interruptor: ya lo decidió quien lo cargó (se cambia en la fila);
    - **ya escaneado**: ya está `en_ruta` en esta misma hoja → no hace nada y no es error;
+   - un `no_entregado` de **esta misma** hoja que se vuelve a escanear reactiva su línea a
+     `en_ruta` (reintento del mismo día), sin crear otra;
    - **rechazado**: está en ruta en otra hoja o ya entregado → 409 con el motivo legible
      (*"está con Pedro"*, *"entregado el 12-10"*).
 
@@ -99,10 +101,15 @@ abierta, se calculan al leer.
 7. **Editar un paquete:** se puede mientras no esté *entregado en una hoja rendida*. A partir
    de ahí, montos y `cobro_en_destino` son de solo lectura (cambiarlos movería una rendición
    cerrada).
-8. **Borrar un paquete** (soft) solo si está disponible y nunca fue entregado.
+8. **Borrar un paquete** (soft) solo si **nunca salió** en una hoja de ruta (un `no_entregado`
+   también es historia de una hoja).
    **Quitar de la hoja** (soft sobre la línea) solo con la línea `en_ruta` y la hoja abierta.
 9. **Desactivar un repartidor** no toca sus hojas: solo lo saca del selector de asignación.
-10. **Plata que entra por la API:** validada en el DTO contra los decimales de la moneda
+   **Borrar** uno que tiene hojas es 400 (se desactiva): así ninguna hoja apunta a un
+   repartidor borrado.
+10. **Sin configuración guardada**, escanear un código nuevo o dar de alta un paquete sin
+    montos es 400: no se crean paquetes a $0.
+11. **Plata que entra por la API:** validada en el DTO contra los decimales de la moneda
     oficial (`docs/patterns/backend.md` § 3.1); lo que no cabe es 400. Montos ≥ 0.
 
 ### 3.1 Normalizar el código escaneado
@@ -122,8 +129,9 @@ escaneado sean el mismo paquete.
 | Total general | Σ `precio_envio` de **todos** los entregados, con o sin cobro en destino |
 | Total a pagar a repartidores | Σ `pago_repartidor` de los entregados |
 
-Se calculan sobre las líneas, en una sola query agregada; el día se arma con
-`rango-fecha.util.ts`.
+Se calculan sobre las líneas, en una sola query agregada (las hojas rendidas aportan sus totales
+congelados). `fecha` es una columna `date` elegida en pantalla —por defecto el día del negocio—,
+así que el rango se compara directo, sin `rango-fecha.util.ts`.
 
 ## 4. API
 
@@ -185,8 +193,9 @@ seeder.
 
 ## 7. Verificación
 
-- **Unitarios** del cálculo de totales: Decimal, neto negativo, `no_entregado` que no suma,
-  pagados que suman al total general y no al cobrado en destino.
+- **E2E de API** del cálculo de totales —sale de **una** consulta SQL, que el mock de `Db` no
+  ve—: neto negativo, `no_entregado` que no suma, pagados que suman al total general y no al
+  cobrado en destino.
 - **Unitarios** de la normalización del código (texto plano, JSON con `id`, JSON sin `id`,
   espacios).
 - **E2E de API** del escaneo: los cuatro resultados, el código nuevo que nace con el
