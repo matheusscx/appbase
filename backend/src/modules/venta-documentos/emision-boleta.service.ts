@@ -1,4 +1,4 @@
-import { Injectable } from '@nestjs/common';
+import { Injectable, Logger } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { Db } from '../../common/db/db.service';
 import { TxContext } from '../../common/db/tx-context';
@@ -284,6 +284,11 @@ interface FilaLinea {
 
 const MEDIOS_PAGO_SII: readonly number[] = [1, 2, 3, 4, 5];
 
+// Lo que se anota en un documento cuando su emisión falla por un error nuestro. Sin jerga: lo lee
+// el local en la lista de boletas por emitir.
+const MENSAJE_ERROR_INTERNO =
+  'Error del sistema al emitirla; escribe a soporte con la venta.';
+
 /**
  * Emite la boleta electrónica de una venta (spec `2026-10-14-boleta-desde-la-venta`, § 4).
  * Una sola función emite: la venta al crearse y el botón "emitir pendientes" la llaman, así que
@@ -291,6 +296,8 @@ const MEDIOS_PAGO_SII: readonly number[] = [1, 2, 3, 4, 5];
  */
 @Injectable()
 export class EmisionBoletaService {
+  private readonly logger = new Logger(EmisionBoletaService.name);
+
   constructor(
     private readonly db: Db,
     private readonly tx: TxContext,
@@ -377,8 +384,12 @@ export class EmisionBoletaService {
    * y la siguiente puede ser de otro (una exenta pide CAF 41, una afecta CAF 39), así que con el
    * CAF de un solo tipo agotado las del otro tipo sí salen. El costo: con ambos agotados el botón
    * hace hasta 200 intentos rápidos que fallan, en vez de 1. Uno de la boleta (un impuesto
-   * adicional, un texto) se anota y sigue. Cualquier error que no sea de la emisión se propaga
-   * (R9 de la cola): las ya emitidas quedaron confirmadas.
+   * adicional, un texto) se anota y sigue. Un error nuestro (que no es un `DteError`: un bug)
+   * deshace la transacción de ESA boleta, se registra en el log, se marca el documento
+   * `ERROR_INTERNO` en una consulta aparte y el botón sigue: si se propagara, esa boleta seguiría
+   * primera en la lista y trabaría el botón en cada clic. Si la marca también falla, ese error
+   * sí se propaga (las demás fallarían igual); las ya emitidas quedaron confirmadas. Desde la
+   * venta (`emitir`) un error nuestro sigue tumbando el cobro (R9 de la cola).
    *
    * Procesar de a una es escritura de N filas, no una lectura N+1: la lista sale de una consulta.
    */
@@ -392,16 +403,21 @@ export class EmisionBoletaService {
     let emitidas = 0;
     const errores: ResultadoEmitirPendientes['errores'] = [];
     for (const pendiente of lista) {
-      const r = await this.db.transaccion(
-        async (): Promise<ResultadoEmision> => {
+      let r: ResultadoEmision;
+      try {
+        r = await this.db.transaccion(async (): Promise<ResultadoEmision> => {
           const venta = await this.db.query<{ venta_id: string }[]>(
             BLOQUEAR_VENTA,
             [pendiente.venta_id, tenantId],
           );
           if (venta.length === 0) return { estado: 'omitido' };
           return this.emitir(tenantId, pendiente.documento_id, ahora);
-        },
-      );
+        });
+      } catch (e) {
+        if (e instanceof DteError) throw e;
+        // La transacción ya se deshizo entera: no consumió folio ni dejó nada escrito.
+        r = await this.anotarErrorInterno(tenantId, pendiente, e);
+      }
       if (r.estado === 'emitido') emitidas++;
       if (r.estado !== 'sin_emitir') continue;
       errores.push({
@@ -416,6 +432,41 @@ export class EmisionBoletaService {
       emitidas,
       pendientes: await this.contarSinEmitir(tenantId),
       errores,
+    };
+  }
+
+  /**
+   * Marca el documento cuya emisión falló por un error nuestro, FUERA de la transacción que se
+   * deshizo (dentro no se podría escribir). Mismo WHERE de guarda que `emitir`: nunca se pisa un
+   * `emitido`. Si esta escritura falla, el error sube y el botón responde 500.
+   */
+  private async anotarErrorInterno(
+    tenantId: string,
+    pendiente: { documento_id: string; venta_id: string },
+    causa: unknown,
+  ): Promise<ResultadoEmision> {
+    const detalle = causa instanceof Error ? causa.message : String(causa);
+    this.logger.error(
+      `Falló la emisión del documento ${pendiente.documento_id} (venta ${pendiente.venta_id}): ${detalle}`,
+      causa instanceof Error ? causa.stack : undefined,
+    );
+    await this.db.query(
+      `UPDATE venta_documentos
+          SET estado_envio = 'sin_emitir', emision_error_codigo = $3,
+              emision_error = $4, actualizado_el = now()
+        WHERE documento_id = $1 AND tenant_id = $2
+          AND estado_envio IN ('armado', 'sin_emitir') AND eliminado_el IS NULL`,
+      [
+        pendiente.documento_id,
+        tenantId,
+        'ERROR_INTERNO',
+        MENSAJE_ERROR_INTERNO,
+      ],
+    );
+    return {
+      estado: 'sin_emitir',
+      codigo: 'ERROR_INTERNO',
+      mensaje: MENSAJE_ERROR_INTERNO,
     };
   }
 

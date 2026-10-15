@@ -201,6 +201,7 @@ cd backend && npm test -- modules/dte
 `DteError.codigo` existe para que la venta (subproyecto 4) diga qué pasó: se guarda en `emision_error_codigo` y `grupoDelError` lo parte entre lo que arregla el admin y lo que es de esa boleta. La fuente de
 verdad es `CodigoDteError` en `dte.types.ts`. Los cinco últimos antes de `LINEA_SIN_NOMBRE` los
 lanza el perfil fiscal y `LINEA_SIN_NOMBRE`, el armado desde la venta; ninguno es del motor.
+`ERROR_INTERNO` tampoco lo lanza nadie: lo anota el botón "emitir pendientes" (ver abajo).
 
 | Código | Cuándo |
 |---|---|
@@ -236,6 +237,7 @@ lanza el perfil fiscal y `LINEA_SIN_NOMBRE`, el armado desde la venta; ninguno e
 | `PERFIL_INCOMPLETO` | Del perfil fiscal: falta giro, comuna, dirección, ambiente o resolución |
 | `AMBIENTE_DISTINTO` | Del perfil fiscal: la razón social cambió de ambiente entre tomar el folio y firmar con su CAF |
 | `LINEA_SIN_NOMBRE` | Del armado desde la venta (no del motor): una línea de la venta no tiene descripción; el motor la emitiría con `NmbItem` vacío y el SII la rechazaría al recibirla |
+| `ERROR_INTERNO` | No lo lanza el motor ni el perfil: lo anota el botón "emitir pendientes" cuando la emisión de una boleta falla por un error nuestro (un bug). Es del grupo `boleta`: no corta el botón |
 
 ---
 
@@ -969,9 +971,18 @@ sale del token, ninguna recibe body). Viven en `EmisionBoletaController`, del m�
   (una exenta pide CAF 41, una afecta CAF 39). **Uno del grupo `boleta` también se anota y sigue**
   (un impuesto adicional, un texto que no cabe).
 - Responde `{ emitidas, pendientes, errores: [{ ventaId, codigo, mensaje }] }`; `pendientes` es un
-  `count` de lo que sigue `sin_emitir` al terminar. Un error que no es un `DteError` se propaga (R9):
-  las que ya salieron quedaron confirmadas. Procesar de a una es escritura de N filas, no una
-  lectura N+1.
+  `count` de lo que sigue `sin_emitir` al terminar. Procesar de a una es escritura de N filas, no
+  una lectura N+1.
+- **Un error que no es un `DteError` (un bug) en UNA pendiente no traba el botón.** Su transacción
+  se deshace entera (no consume folio ni deja nada escrito), el error va al log con el documento y
+  la venta, y en una consulta aparte —con el mismo `WHERE` de guarda que `emitir`— el documento
+  queda `sin_emitir` con `ERROR_INTERNO` y el mensaje «Error del sistema al emitirla; escribe a
+  soporte con la venta.»; entra a `errores` y el botón sigue con la siguiente (`ERROR_INTERNO` es
+  del grupo `boleta`: no corta). Antes se propagaba (500): esa boleta seguía primera de la lista y
+  el botón fallaba igual en cada clic, sin que saliera ninguna. Si la escritura del motivo también
+  falla, ese error sí se propaga (500): las demás fallarían igual. **Desde la venta no cambia:** un
+  error inesperado de `emitir` sigue tumbando el cobro (R9 de la cola). Las que ya salieron
+  quedaron confirmadas.
 - La fecha de cada boleta es la de su venta (`FchEmis`), no la de hoy.
 
 ### El estado para el cajero
@@ -1044,10 +1055,12 @@ mismo año de la venta, y la diferencia aparece recién al emitir después (el b
   local (`zona_horaria`) para el año de la venta; `FchEmis` usa `America/Santiago` fijo. Si no
   coinciden, una venta cerca de la medianoche de fin de año se mide contra el umbral de un año y
   se fecha en otro.
-- **El documento "veneno" del botón.** Un error que no es `DteError` en el primer documento de la
-  lista da 500 en cada clic y frena a los que siguen: no se traga un bug (R9), pero una boleta mala
-  bloquea todas las pendientes hasta que se arregle. Parecido: 200 documentos del grupo `boleta` que
-  fallan siempre cubren a los posteriores, porque la lista es de hasta 200 y ese error no corta.
+- **200 boletas del grupo `boleta` que fallan siempre tapan a las siguientes.** La lista del botón
+  es de hasta 200, de la más vieja a la más nueva, y un error de ese grupo no corta: si las 200 más
+  viejas fallan en cada clic, las posteriores nunca se alcanzan. La salida hoy es anular la venta
+  de las malas. Arreglarlo cambiaría el orden de emisión y con él la numeración de los folios.
+  (El caso de UNA boleta que falla por un error nuestro, el «documento veneno», quedó resuelto el
+  2026-10-15: se anota `ERROR_INTERNO` y el botón sigue; ver "El botón".)
 - **La resolución del ticket se lee al imprimir** (ver "La respuesta y el ticket"): un cambio de
   certificación a producción cambia las reimpresiones de las boletas de certificación.
 - **El emisor del ticket sale de la razón social del CAF**, no de la preferida: si el local cambió de

@@ -478,9 +478,9 @@ es parte del enunciado y viaja con ella.
     descripción de los productos), el plazo del SII para una boleta con fecha pasada (no se
     investigó), la contención del CAF por tenant (en un cierre de mesa el tramo es más largo; se
     mide si aparece), dos fuentes de zona horaria (el umbral usa la de la provincia, `FchEmis`
-    `America/Santiago`), el documento "veneno" del botón (un error que no es `DteError` en el
-    primero de la lista da 500 en cada clic y frena a los siguientes; 200 del grupo `boleta` que
-    fallan siempre cubren a los posteriores), y que la resolución del ticket se lee al imprimir (un
+    `America/Santiago`), las 200 boletas del grupo `boleta` que fallan siempre y tapan a las
+    siguientes en la lista del botón (salida: anular la venta; arreglarlo cambiaría el orden de
+    emisión y con él la numeración de folios), y que la resolución del ticket se lee al imprimir (un
     paso de certificación a producción cambia las reimpresiones de lo emitido en certificación).
 
   **Lo que dejó el motor y solo confirma la certificación (subproyecto 5):**

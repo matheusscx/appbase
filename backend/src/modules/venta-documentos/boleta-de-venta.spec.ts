@@ -667,6 +667,7 @@ describe('grupoDelError', () => {
     'LINEA_NO_CIERRA',
     'IMPUESTO_ADICIONAL_NO_SOPORTADO',
     'LINEA_SIN_NOMBRE',
+    'ERROR_INTERNO',
   ] as CodigoDteError[])('%s es de la boleta', (codigo) => {
     expect(grupoDelError(codigo)).toBe('boleta');
   });

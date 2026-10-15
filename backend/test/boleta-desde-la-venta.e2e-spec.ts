@@ -1447,6 +1447,137 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     });
   });
 
+  it('una boleta que falla por un error nuestro (no un DteError) no traba el botón: se anota ERROR_INTERNO, no consume folio y las demás salen', async () => {
+    await reiniciarLimpio();
+    await agotarCaf39();
+    // La envenenada es la MÁS VIEJA: antes de este arreglo seguía primera en la lista y el botón
+    // daba 500 en cada clic, sin que saliera ninguna.
+    const envenenada = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+    });
+    const sana = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '2' }],
+    });
+    // Un estado que solo un bug produce: una boleta del sistema, por emitir, cuyo tipo de
+    // documento no es una boleta (una factura). El camino real de `emitir` lo detecta como un
+    // error de programación (un `Error`, no un `DteError`), igual que cualquier otro dato que
+    // un bug deje inconsistente.
+    await ds.query(
+      `UPDATE venta_documentos SET tipo_documento_id = $2
+        WHERE venta_id = $1 AND emisor = 'sistema' AND eliminado_el IS NULL`,
+      [envenenada.id, FACTURA_ID],
+    );
+    await subirCafNuevo();
+    const folioAntes = await siguienteFolio();
+
+    const res = await botonCon(token);
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      emitidas: 1,
+      pendientes: 1,
+      errores: [
+        {
+          ventaId: envenenada.id,
+          codigo: 'ERROR_INTERNO',
+          mensaje:
+            'Error del sistema al emitirla; escribe a soporte con la venta.',
+        },
+      ],
+    });
+    // La sana salió con el PRIMER folio: la envenenada no consumió ninguno.
+    expect(await boletaDelSistema(sana.id)).toMatchObject({
+      estado_envio: 'emitido',
+    });
+    expect((await colaDte()).map((d) => d.folio)).toEqual([CAF39.desde]);
+    expect(await siguienteFolio()).toBe(folioAntes + 1);
+    // La envenenada quedó marcada, sin boleta en la cola.
+    expect(await boletaDelSistema(envenenada.id)).toMatchObject({
+      estado_envio: 'sin_emitir',
+      dte_documento_id: null,
+      emision_error_codigo: 'ERROR_INTERNO',
+      emision_error:
+        'Error del sistema al emitirla; escribe a soporte con la venta.',
+    });
+    // Y el admin la ve en su lista, con ese mensaje y en el grupo de la boleta.
+    const lista = (await getCon(token, 'dte/boletas-sin-emitir'))
+      .body as PendienteRes[];
+    expect(lista).toHaveLength(1);
+    expect(lista[0]).toMatchObject({
+      ventaId: envenenada.id,
+      codigo: 'ERROR_INTERNO',
+      mensaje: 'Error del sistema al emitirla; escribe a soporte con la venta.',
+      grupo: 'boleta',
+    });
+
+    // Otro clic no es un 500: vuelve a anotarla y sigue siendo el mismo resultado.
+    const otraVez = await botonCon(token);
+    expect(otraVez.status).toBe(201);
+    expect(otraVez.body).toEqual({
+      emitidas: 0,
+      pendientes: 1,
+      errores: [
+        expect.objectContaining({
+          ventaId: envenenada.id,
+          codigo: 'ERROR_INTERNO',
+        }),
+      ],
+    });
+  });
+
+  it('una boleta que falla DESPUÉS de tomar el folio: el rollback lo devuelve, queda ERROR_INTERNO y la otra sale con ese mismo folio', async () => {
+    await reiniciarLimpio();
+    await agotarCaf39();
+    const vieja = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+    });
+    const nueva = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '2' }],
+    });
+    await subirCafNuevo();
+    expect(await siguienteFolio()).toBe(CAF39.desde);
+    // La falla se inyecta porque ningún dato real hace fallar la emisión DESPUÉS de tomar el
+    // folio (cualquier dato malo falla antes, o es un `DteError`). Lo que se prueba acá no es
+    // la falla sino el rollback contra Postgres: el folio ya tomado y el bloqueo del CAF se
+    // deshacen con la transacción de esa boleta.
+    const encolar = jest
+      .spyOn(app.get(ColaDteService), 'encolar')
+      .mockRejectedValueOnce(new Error('falla inyectada'));
+    let res: request.Response;
+    try {
+      res = await botonCon(token);
+      expect(encolar).toHaveBeenCalledTimes(2);
+    } finally {
+      encolar.mockRestore();
+    }
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      emitidas: 1,
+      pendientes: 1,
+      errores: [
+        {
+          ventaId: vieja.id,
+          codigo: 'ERROR_INTERNO',
+          mensaje: expect.any(String),
+        },
+      ],
+    });
+    // El folio que tomó la vieja volvió: la otra salió con el PRIMERO y el CAF avanzó una vez.
+    expect(await boletaDelSistema(nueva.id)).toMatchObject({
+      estado_envio: 'emitido',
+    });
+    expect((await colaDte()).map((d) => d.folio)).toEqual([CAF39.desde]);
+    expect(await siguienteFolio()).toBe(CAF39.desde + 1);
+    // La vieja no dejó boleta en la cola y quedó marcada.
+    expect(await boletaDelSistema(vieja.id)).toMatchObject({
+      estado_envio: 'sin_emitir',
+      dte_documento_id: null,
+      emision_error_codigo: 'ERROR_INTERNO',
+    });
+    expect(await colaDte()).toHaveLength(1);
+  });
+
   it('el botón sobre una venta que se anuló entre la lista y el bloqueo: la salta, no la emite (Review Focus 5)', async () => {
     await reiniciarLimpio();
     await agotarCaf39();

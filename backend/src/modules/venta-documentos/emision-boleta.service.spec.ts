@@ -1,3 +1,4 @@
+import { Logger } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
 import { DataSource, type EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
@@ -883,12 +884,128 @@ describe('EmisionBoletaService: emitir después (spec § 5, § 8.1)', () => {
       expect(r.emitidas).toBe(2);
     });
 
-    it('un error que no es de la emisión se propaga: no se traga en una lista de errores', async () => {
-      jest.spyOn(servicio, 'emitir').mockRejectedValue(new Error('se cayó'));
+    describe('un error nuestro (que no es un DteError) en UNA pendiente', () => {
+      // Lo que `emitir` lanza cuando el armado falla por un bug: no es un dato que el local
+      // pueda arreglar. El botón no se puede trabar con esa boleta (era la primera de la lista y
+      // fallaba igual en cada clic).
+      const MENSAJE_ERROR_INTERNO =
+        'Error del sistema al emitirla; escribe a soporte con la venta.';
+      const marcas = () =>
+        sentencias.filter(
+          (s) =>
+            s.sql.includes('UPDATE venta_documentos') &&
+            s.sql.includes('emision_error_codigo'),
+        );
+      let logError: jest.SpyInstance;
 
-      await expect(servicio.emitirPendientes(TENANT, AHORA)).rejects.toThrow(
-        'se cayó',
-      );
+      beforeEach(() => {
+        logError = jest
+          .spyOn(Logger.prototype, 'error')
+          .mockImplementation(() => undefined);
+      });
+
+      it('la anota como ERROR_INTERNO, la marca aparte y sigue con la siguiente', async () => {
+        lista = [pendiente(1), pendiente(2)];
+        const emitir = jest
+          .spyOn(servicio, 'emitir')
+          .mockRejectedValueOnce(new Error('bug del armado'))
+          .mockResolvedValueOnce(emitidaCon(7));
+        quedan = 1;
+
+        const r = await servicio.emitirPendientes(TENANT, AHORA);
+
+        expect(emitir).toHaveBeenCalledTimes(2);
+        expect(r).toEqual({
+          emitidas: 1,
+          pendientes: 1,
+          errores: [
+            {
+              ventaId: 'venta-1',
+              codigo: 'ERROR_INTERNO',
+              mensaje: MENSAJE_ERROR_INTERNO,
+            },
+          ],
+        });
+        // La marca va en una consulta APARTE de la transacción que se deshizo, con el mismo
+        // WHERE de guarda que `emitir`.
+        expect(marcas()).toHaveLength(1);
+        const [marca] = marcas();
+        expect(marca.enTx).toBe(false);
+        expect(marca.params).toEqual([
+          'doc-1',
+          TENANT,
+          'ERROR_INTERNO',
+          MENSAJE_ERROR_INTERNO,
+        ]);
+        expect(marca.sql).toMatch(/estado_envio = 'sin_emitir'/);
+        expect(marca.sql).toMatch(
+          /estado_envio IN \('armado', 'sin_emitir'\) AND eliminado_el IS NULL/,
+        );
+        expect(marca.sql).toMatch(/documento_id = \$1 AND tenant_id = \$2/);
+      });
+
+      it('el error queda en el log con el documento, la venta y la traza', async () => {
+        lista = [pendiente(1)];
+        const falla = new Error('bug del armado');
+        jest.spyOn(servicio, 'emitir').mockRejectedValue(falla);
+
+        await servicio.emitirPendientes(TENANT, AHORA);
+
+        expect(logError).toHaveBeenCalledTimes(1);
+        const [mensaje, traza] = logError.mock.calls[0] as [string, string];
+        expect(mensaje).toContain('doc-1');
+        expect(mensaje).toContain('venta-1');
+        expect(mensaje).toContain('bug del armado');
+        expect(traza).toBe(falla.stack);
+      });
+
+      it('no corta aunque sea la primera: ERROR_INTERNO es del grupo de la boleta', async () => {
+        const emitir = jest
+          .spyOn(servicio, 'emitir')
+          .mockRejectedValue(new Error('bug del armado'));
+
+        const r = await servicio.emitirPendientes(TENANT, AHORA);
+
+        expect(emitir).toHaveBeenCalledTimes(3);
+        expect(r.errores.map((e) => e.codigo)).toEqual([
+          'ERROR_INTERNO',
+          'ERROR_INTERNO',
+          'ERROR_INTERNO',
+        ]);
+        expect(marcas()).toHaveLength(3);
+      });
+
+      it('un DteError que salga de la transacción NO es un error nuestro: se propaga y no se escribe ERROR_INTERNO', async () => {
+        // No debería pasar (`emitir` los atrapa), pero si pasa no se disfraza de bug.
+        (dataSource.transaction as jest.Mock).mockRejectedValueOnce(
+          new DteError('SIN_CERTIFICADO', 'No hay certificado'),
+        );
+        const emitir = jest.spyOn(servicio, 'emitir');
+
+        await expect(servicio.emitirPendientes(TENANT, AHORA)).rejects.toThrow(
+          'No hay certificado',
+        );
+
+        expect(emitir).not.toHaveBeenCalled();
+        expect(marcas()).toHaveLength(0);
+        expect(logError).not.toHaveBeenCalled();
+      });
+
+      it('si escribir el motivo también falla, el error se propaga', async () => {
+        jest
+          .spyOn(servicio, 'emitir')
+          .mockRejectedValue(new Error('bug del armado'));
+        const filasBase = filas;
+        filas = (sql) => {
+          if (sql.includes('emision_error_codigo') && sql.includes('UPDATE'))
+            throw new Error('la base no responde');
+          return filasBase(sql);
+        };
+
+        await expect(servicio.emitirPendientes(TENANT, AHORA)).rejects.toThrow(
+          'la base no responde',
+        );
+      });
     });
 
     it('sin pendientes no hace nada más que leer', async () => {

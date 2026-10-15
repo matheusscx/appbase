@@ -114,7 +114,10 @@ export type CodigoDteError =
   | 'PERFIL_INCOMPLETO' // falta algún dato del perfil fiscal para emitir
   | 'AMBIENTE_DISTINTO' // el ambiente cambió entre tomar el folio y firmar con su CAF
   // Lo lanza el armado desde la venta (`datosBoletaDeVenta`), no el motor.
-  | 'LINEA_SIN_NOMBRE'; // una línea de la venta no tiene descripción
+  | 'LINEA_SIN_NOMBRE' // una línea de la venta no tiene descripción
+  // No lo lanza el motor ni el perfil: lo anota el botón "emitir pendientes" cuando la emisión de
+  // una boleta falla por un error nuestro (un bug), para que esa boleta no trabe a las demás.
+  | 'ERROR_INTERNO';
 
 /** Error del motor con un código por motivo, para que el que llama sepa qué pasó. */
 export class DteError extends Error {
