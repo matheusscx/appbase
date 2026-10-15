@@ -688,7 +688,7 @@ manual y la del webhook— resuelve el receptor bajo el lock de la venta:
 
 ## La nota sobre una boleta ya emitida (2026-10-15)
 
-Spec [`boleta-desde-la-venta`](../superpowers/specs/2026-10-14-boleta-desde-la-venta-design.md)
+Spec `2026-10-14-boleta-desde-la-venta` (borrada al terminar; la historia queda en git)
 § 6. Con el interruptor de emisión encendido la boleta de la venta sale ante el SII
 ([`emision-electronica.md`](./emision-electronica.md)); la **nota de crédito electrónica** todavía
 no existe (frente 2). Mientras tanto la nota se registra **como siempre** (stock, caja, totales, su

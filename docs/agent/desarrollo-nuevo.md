@@ -364,28 +364,41 @@ es parte del enunciado y viaja con ella.
   contratar un proveedor). Seis subproyectos, cada uno con su spec, plan y verificación:
   1. ✅ **perfil fiscal** (hecho el 2026-10-14, último commit de código `6fb44592`): datos del
      emisor, certificado cifrado, CAF y folios usados, con su pantalla
-     (`/configuracion/boleta-electronica`, el menú solo para el superadmin). Detalle en
-     [`features/emision-electronica.md`](../features/emision-electronica.md), clave de cifrado en
-     [ADR-033](../adr/033-emisor-dte-propio.md). **Tampoco emite nada al SII**: ninguna venta toma
-     un folio todavía;
+     (`/configuracion/boleta-electronica`, el menú y la ruta de todo admin desde el 2026-10-15).
+     Detalle en [`features/emision-electronica.md`](../features/emision-electronica.md), clave de
+     cifrado en [ADR-033](../adr/033-emisor-dte-propio.md). La venta le toma el folio desde el
+     frente 1 del subproyecto 4;
   2. ✅ **motor de la boleta** (hecho el 2026-10-14, último commit de código `2d92199e`): spec en
      [`2026-10-14-motor-boleta-electronica-design.md`](../superpowers/specs/2026-10-14-motor-boleta-electronica-design.md),
      decisión en [ADR-033](../adr/033-emisor-dte-propio.md), detalle en
-     [`features/emision-electronica.md`](../features/emision-electronica.md). **No emite nada al
-     SII**: son funciones puras que nadie llama todavía para emitir;
+     [`features/emision-electronica.md`](../features/emision-electronica.md). Son funciones puras;
+     las llama la emisión de la venta (frente 1 del subproyecto 4);
   3. ✅ **cliente del SII y cola de envío** (hecho el 2026-10-14: tareas 1 a 7 de la cola de
      envío, más el cierre): `ColaDteService.encolar`, el cliente de la API de boleta y los jobs
      `enviar-boletas` y `consultar-envios`. Detalle en
      [`features/emision-electronica.md`](../features/emision-electronica.md) § Envío al SII.
-     **No emite nada**: nadie llama a `encolar` todavía;
-  4. **conexión con la venta y la nota de crédito** (**sigue**; llama a `tomarFolio` y a `encolar`
-     dentro de la transacción de la venta; abre la pantalla a todos los admin, trae el aviso al
-     cajero, y la pantalla de boletas atrasadas y rechazadas, ver abajo);
+     `encolar` lo llama la venta desde el frente 1 del subproyecto 4;
+  4. **conexión con la venta y la nota de crédito**, en tres frentes (**sigue**):
+     1. ✅ **la venta emite la boleta** (hecho el 2026-10-15, último commit de código `7f9a30e6`):
+        `tomarFolio`, la firma y `encolar` dentro de la transacción de la venta con un savepoint
+        (una boleta que no sale no frena la venta), el interruptor por tenant, el botón de las
+        pendientes, el estado de la emisión para el cajero, el ticket con folio y la pantalla
+        abierta a todo admin. Detalle en
+        [`features/emision-electronica.md`](../features/emision-electronica.md) § La venta emite la
+        boleta. **Antes de prender en producción** el owner carga `DTE_PROVEEDOR_RUT` y
+        `DTE_PROVEEDOR_RAZON_SOCIAL` en Railway (sin ellas el interruptor no prende);
+     2. **anular y nota de crédito electrónica (tipo 61)** (abierto): hoy una boleta `emitido` no se
+        anula (400) y la corrección sobre ella queda marcada *NC electrónica pendiente*; la nota
+        ante el SII se hace en el portal. Falta emitir la 61 con su folio, encolarla y enviarla por el
+        canal que corresponda. Es frente fiscal (va solo);
+     3. **pantalla de atrasadas y rechazadas** (abierto): la lista y el aviso de las boletas del SII
+        que no llegaron o volvieron rechazadas, y **qué hacer con una rechazada** (reemitir con otro
+        folio, corregir el dato, avisar al dueño). Hoy solo quedan en la base;
   5. certificación;
   6. intercambio de factura.
 
-  Hoy **no hay RUT piloto**, así que la certificación espera a que haya uno. Antes del
-  subproyecto 4 tienen que estar cerrados dos frentes que dispara el motor (§ 7 y § 9 de su spec):
+  Hoy **no hay RUT piloto**, así que la certificación espera a que haya uno. Los frentes que
+  disparó el motor (§ 7 y § 9 de su spec) quedaron así:
   - ✅ el ILA en la boleta (owner, 2026-10-14, por AskUserQuestion tras la investigación): para el
     local que vende al público **es costo**, no un impuesto de venta; la boleta no lo informa y el
     rechazo del adicional en el motor es la regla. El afecto que vende al público (productor,
@@ -398,9 +411,10 @@ es parte del enunciado y viaja con ella.
     afecto: productor, importador, brewpub, que hoy no podría emitir boleta con él), registrarlo
     en las compras como costo (la pregunta abierta de compras), las dos cosas, o solo tenerlo bien
     definido. Es frente fiscal (va solo) y toca el motor de precios: se diseña con spec;
-  - el límite del nombre del ítem en el catálogo: 80 caracteres en ISO-8859-1 (owner,
+  - ✅ el límite del nombre del ítem en el catálogo: 80 caracteres en ISO-8859-1 (owner,
     2026-10-14: **se valida al crear y al editar**; los que ya existen no se corrigen solos: el
-    motor los rechaza al emitir y el subproyecto 4 dice qué producto renombrar).
+    motor los rechaza al emitir, la boleta queda `sin_emitir` con el motivo y el cajero y el admin
+    lo ven; hecho el 2026-10-15).
 
   **Decidido por el owner (2026-10-14):** `CdgIntRecep` no se envía sobre 135 UF, y la línea
   gratis sale sin `PrcItem` y con `MontoItem` 0 (`features/emision-electronica.md`).
@@ -413,9 +427,11 @@ es parte del enunciado y viaja con ella.
   - la firma del SII sobre el CAF (`FRMA`) no se verifica;
   - el vencimiento del CAF de boleta, la custodia del certificado y `CdgSIISucur` por local;
   - no hay script de rotación de `DTE_ENCRYPTION_KEY`;
-  - para el subproyecto 4: en qué punto de su transacción pide el folio y las credenciales
-    (orden de bloqueo), y qué pasa si el ambiente o la razón social preferida cambian entre
-    medio.
+  - ✅ resuelto en el frente 1 del subproyecto 4 (2026-10-15): el folio y las credenciales se
+    piden **al final** de la transacción de la venta (orden de bloqueo sin ciclos), y si el
+    ambiente cambia entre medio la boleta queda `sin_emitir` (`AMBIENTE_DISTINTO`); las
+    credenciales salen de la razón social del CAF, así que emisor, CAF y certificado son siempre
+    del mismo RUT.
 
   **Lo que dejó la cola de envío (detalle en `features/emision-electronica.md`, § "Lo que queda
   abierto" de Envío al SII):**
@@ -423,7 +439,7 @@ es parte del enunciado y viaja con ella.
     entendemos (en una boleta de `detalle_rep_rech` o en el sobre) nunca da por aceptada ni
     rechazada una boleta: queda `enviado`, atrasada a la vista, con el aviso en `ultimo_error` del
     envío;
-  - para el subproyecto 4: la **pantalla y el aviso** de las boletas atrasadas y rechazadas
+  - para el frente 3 del subproyecto 4: la **pantalla y el aviso** de las boletas atrasadas y rechazadas
     (`estado IN ('pendiente','enviado') AND emitido_el < now() - 1 hora`, o `rechazado`), incluidas
     las que quedan `enviado` por observaciones o por un 404 de 24 horas y las que se reenviaron tras
     una caída entre el `ok` del SII y anotar el `trackid` (el SII contesta `RPT`); un `DteError` al
@@ -431,6 +447,19 @@ es parte del enunciado y viaja con ella.
     ni el folio contra el CAF (confía en el `cafId` de `tomarFolio`);
   - la consulta de una boleta individual (`/boleta.electronica/{rut}-{dv}-{tipo}-{folio}/estado`)
     resolvería el `RPT` perdido; hoy no existe.
+
+  **Lo que dejó el frente 1 de la venta** (detalle en `features/emision-electronica.md`, § "Lo que
+  queda abierto" de La venta emite la boleta):
+  - para el frente 2: la NC electrónica 61 y su envío;
+  - para el frente 3: que una rechazada o atrasada se vea y se pueda actuar sobre ella;
+  - sin dueño todavía: un documento parcial sobre 135 UF con la línea de saldo (el SII pide la
+    descripción de los productos), el plazo del SII para una boleta con fecha pasada (no se
+    investigó), la contención del CAF por tenant (en un cierre de mesa el tramo es más largo; se
+    mide si aparece), dos fuentes de zona horaria (el umbral usa la de la provincia, `FchEmis`
+    `America/Santiago`), el documento "veneno" del botón (un error que no es `DteError` en el
+    primero de la lista da 500 en cada clic y frena a los siguientes; 200 del grupo `boleta` que
+    fallan siempre cubren a los posteriores), y que la resolución del ticket se lee al imprimir (un
+    paso de certificación a producción cambia las reimpresiones de lo emitido en certificación).
 
   **Lo que dejó el motor y solo confirma la certificación (subproyecto 5):**
   - Riesgos de forma: aplanado del `<DD>`, namespaces del `<DTE>`, ubicación de

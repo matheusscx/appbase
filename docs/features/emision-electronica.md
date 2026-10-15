@@ -1,13 +1,15 @@
-# Feature: Emisión electrónica — el motor de la boleta, el perfil fiscal del emisor y la cola de envío al SII
+# Feature: Emisión electrónica — el motor de la boleta, el perfil fiscal del emisor, la cola de envío al SII y la venta que emite
 
-**Status**: In Development — el motor, el perfil fiscal y la cola de envío están terminados; **todavía no se emite nada al SII**: ninguna venta llama a la cola (subproyecto 4)
+**Status**: In Development — el motor, el perfil fiscal, la cola de envío y la venta que emite (subproyecto 4, frente 1) están terminados; con el interruptor del tenant prendido cada venta emite su boleta. **Falta** la nota de crédito electrónica (frente 2), la pantalla de atrasadas y rechazadas (frente 3) y la certificación ante el SII (subproyecto 5): nada de lo emitido tiene validez hasta entonces
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-10-14
+**Last Updated**: 2026-10-15
 
-Este documento tiene tres partes: **el motor** (subproyecto 2, funciones puras) y, más abajo,
+Este documento tiene cuatro partes: **el motor** (subproyecto 2, funciones puras) y, más abajo,
 [**el perfil fiscal del emisor**](#perfil-fiscal-del-emisor) (subproyecto 1: certificado, CAF y
 folios, con su pantalla) y [**el envío al SII**](#envío-al-sii) (subproyecto 3: la cola, el cliente
-de la API de boleta y los dos jobs).
+de la API de boleta y los dos jobs) y [**la venta emite la boleta**](#la-venta-emite-la-boleta)
+(subproyecto 4, frente 1: el interruptor, la emisión dentro de la venta, el botón de las pendientes y
+el aviso al cajero).
 
 Decisión y razones: [ADR-033](../adr/033-emisor-dte-propio.md). Diseño:
 [`2026-10-14-motor-boleta-electronica-design.md`](../superpowers/specs/2026-10-14-motor-boleta-electronica-design.md).
@@ -25,8 +27,7 @@ boleta (39 afecta, 41 exenta), un CAF y un certificado, y devuelven el `<DTE>` c
 (TED) y su firma, y el sobre `EnvioBOLETA` firmado que agrupa de 1 a 500 boletas. No lee la base,
 el reloj ni la red. Las funciones siguen siendo puras aunque el módulo `dte` ya existe (nació con
 el perfil fiscal): el perfil usa `leerCaf` y `leerCertificado` al subir y al descifrar, y el job de
-envío llama a `armarEnvioBoleta`; nadie llama todavía a `emitirBoleta` (lo hará la venta, en el
-subproyecto 4).
+envío llama a `armarEnvioBoleta`; `emitirBoleta` lo llama `EmisionBoletaService` (la venta, subproyecto 4).
 
 ### Why does it exist?
 
@@ -41,10 +42,9 @@ RUT piloto: se prueba contra los XSD y contra la firma del ejemplo oficial, sin 
   está en el [perfil fiscal](#perfil-fiscal-del-emisor); la cola que lleva las boletas al SII y
   trae su resultado, en [Envío al SII](#envío-al-sii).
 - **No incluido** (cada cosa tiene su dueño):
-  - emitir la boleta desde una venta y guardarla en la transacción de la venta (subproyecto 4; la
-    cuenta de folios ya la lleva el perfil fiscal, y la cola ya la espera: ver
-    [Envío al SII](#envío-al-sii));
-  - leer `venta_documentos` o armar el contrato desde una venta (subproyecto 4);
+  - emitir la boleta desde una venta y armar el contrato desde `venta_documentos`: lo hace el
+    módulo `venta-documentos` ([La venta emite la boleta](#la-venta-emite-la-boleta)), no el motor,
+    que sigue sin leer la base;
   - verificar la firma `FRMA` del SII sobre el CAF (sigue abierto, ver el perfil fiscal);
   - impuestos adicionales (ILA): el motor los rechaza con código (ver más abajo);
   - factura, nota de crédito y nota de débito;
@@ -99,8 +99,10 @@ Lo congelado en la venta manda (ADR-010). Si una igualdad no cierra, no se arma 
    negativo. El `MntTotal` es mayor que cero, **o cero si un descuento lo explica**: la suma de
    los `DescuentoMonto` de línea más los descuentos globales (`D`) tiene que ser mayor que cero
    (Res. Ex. SII 60/2023: la venta que un descuento deja en $0 igual se informa, y el XSD
-   admite `MntTotal` 0). La línea sale a precio de lista con su `DescuentoMonto` y `MontoItem` 0;
-   no es la línea gratis de la regla 8, que sale sin `PrcItem`. Un recargo no explica un $0.
+   admite `MntTotal` 0). Con el **descuento de línea** la línea sale a precio de lista con su
+   `DescuentoMonto` y `MontoItem` 0; con un **descuento global** (`D`) la línea conserva su monto y
+   el `MntTotal` 0 sale de restarle el descuento. Ninguna es la línea gratis de la regla 8, que sale
+   sin `PrcItem`. Un recargo no explica un $0.
 4. **El IVA congelado se manda tal cual. El peso de la góndola no frena la boleta**: con precio
    de góndola $993 el neto es 834 y el IVA 159, pero `0,19 × 834 = 158`; ningún par de enteros
    cumple a la vez el total y la fórmula. El motor devuelve `diferenciaIvaRedondeo` (el IVA
@@ -192,7 +194,7 @@ cd backend && npm test -- modules/dte
 
 ## Códigos de error
 
-`DteError.codigo` existe para que el subproyecto 4 le diga al cajero qué pasó. La fuente de
+`DteError.codigo` existe para que la venta (subproyecto 4) diga qué pasó: se guarda en `emision_error_codigo` y `grupoDelError` lo parte entre lo que arregla el admin y lo que es de esa boleta. La fuente de
 verdad es `CodigoDteError` en `dte.types.ts`. Los cinco últimos antes de `LINEA_SIN_NOMBRE` los
 lanza el perfil fiscal y `LINEA_SIN_NOMBRE`, el armado desde la venta; ninguno es del motor.
 
@@ -254,8 +256,8 @@ certificación; y el ejemplo oficial no es una boleta ni trae `RSR` por defecto.
 
 Subproyecto 1 de 6 (hecho el 2026-10-14). Guarda lo que el motor necesita y no tenía: los datos
 completos del emisor, su certificado digital, sus CAF y la cuenta de los folios. Más una pantalla
-para que el admin lo cargue. **Todavía no se emite nada**: ninguna venta toma un folio (subproyecto
-4). Código: `backend/src/modules/dte/` (`perfil-fiscal.service.ts`, `folios.service.ts`,
+para que el admin lo cargue. Desde el subproyecto 4 la venta toma de aquí su folio, si el
+interruptor del tenant está prendido ([La venta emite la boleta](#la-venta-emite-la-boleta)). Código: `backend/src/modules/dte/` (`perfil-fiscal.service.ts`, `folios.service.ts`,
 `perfil-fiscal.ts`) y `frontend/app/pages/configuracion/boleta-electronica.vue`.
 
 ### Quién emite y dónde viven los datos
@@ -329,9 +331,9 @@ Todo rechazo es un 400 con un mensaje para el dueño del local.
 ### Tomar un folio
 
 `FoliosService.tomarFolio(tenantId, tipo) → { cafId, folio }`. Es un método sin ruta que **corre
-dentro de la transacción de quien lo pide** (falla si no hay una activa): el subproyecto 4 decide en
-qué punto de la suya lo llama, respetando el orden de bloqueo de filas del proyecto
-(`docs/patterns/backend.md`). Este método bloquea una sola fila, la del CAF.
+dentro de la transacción de quien lo pide** (falla si no hay una activa): la venta lo llama **al
+final** de la suya, respetando el orden de bloqueo de filas del proyecto
+(`docs/patterns/backend.md`; ver "Bloqueos" en la sección de la venta). Este método bloquea una sola fila, la del CAF.
 
 - Un `UPDATE … WHERE caf_id = (SELECT … ORDER BY desde LIMIT 1 FOR UPDATE)` toma el CAF de la
   razón social emisora, del tipo y del ambiente de la razón social, con folios y de menor `desde`,
@@ -362,8 +364,8 @@ certificado vigente y arma `EmisorBoleta` y la carátula (el receptor del envío
 ### El estado del perfil
 
 `GET /dte/perfil` devuelve todo lo que la pantalla muestra y el dato que el aviso al cajero va a
-necesitar. La ruta es solo del admin del tenant: un cajero recibe 403, así que ese aviso (subproyecto 4)
-necesita su propia ruta o su propio guard.
+necesitar. La ruta es solo del admin del tenant: un cajero recibe 403, así que ese aviso lo trae
+`GET /dte/estado-emision` (ver "El estado para el cajero"), con su propio guard.
 Son cuatro consultas fijas (emisor, certificado vigente, CAF e interruptor del tenant), sin importar
 cuántos CAF haya.
 
@@ -440,8 +442,8 @@ rangos que empiezan igual.
   ni un CAF usado. Un RUT distinto es otro contribuyente ante el SII: para cambiar de RUT se crea
   otra razón social y se la marca preferida, y lo emitido conserva su rastro.
 - **Nombre del ítem:** el catálogo valida al crear y al editar (80 caracteres en ISO-8859-1). Los
-  ítems que ya no cumplen no se corrigen solos: el motor los rechaza al emitir (texto inválido), y
-  el subproyecto 4 le dice al cajero qué producto renombrar. El seed no tiene ninguno (medido: 12 ítems, máximo 28 caracteres).
+  ítems que ya no cumplen no se corrigen solos: el motor los rechaza al emitir (texto inválido), la boleta queda
+  `sin_emitir` y el motivo (con el producto) lo ve el cajero al cobrar y el admin en "Boletas sin emitir". El seed no tiene ninguno (medido: 12 ítems, máximo 28 caracteres).
 - **ILA y adicionales (2026-10-14, por AskUserQuestion, después de leer la
   [investigación](../agent/investigaciones/2026-10-14-ila-en-boleta-electronica.md)):** para el
   local que vende al público **el ILA es costo, no un impuesto de su venta** (DL 825 art. 43 inciso
@@ -473,9 +475,8 @@ rangos que empiezan igual.
   agrega un bloqueo de la razón social en cada venta; `AMBIENTE_DISTINTO` deja la boleta
   `sin_emitir` y las credenciales salen de la razón social del CAF, así que emisor, CAF y
   certificado son siempre del mismo RUT.
-- **El aviso al cajero** (pocos folios, certificado por vencer) llega con el subproyecto 4. Este
-  deja la pantalla y el dato que ese aviso va a necesitar (la ruta es de admin: el aviso, que lo ve el
-  cajero, tiene que traer la suya).
+- **El aviso al cajero** (pocos folios, certificado por vencer) lo resolvió el subproyecto 4: ruta
+  propia, `GET /dte/estado-emision` ("El estado para el cajero").
 - **Los CAF de una ex emisora no se ven en ninguna parte.** El perfil lista solo los CAF de la
   razón social preferida de hoy. Una razón social que dejó de ser preferida sigue protegida (no
   cambia de RUT ni se borra mientras tenga folios o certificado), pero sus CAF no aparecen en la
@@ -490,17 +491,17 @@ rangos que empiezan igual.
 
 ## Envío al SII
 
-Subproyecto 3 de 6 (hecho el 2026-10-14). Lleva al SII cada boleta que el subproyecto 4 emita,
+Subproyecto 3 de 6 (hecho el 2026-10-14). Lleva al SII cada boleta que la venta emite,
 **sin que la venta espere al SII**, y guarda qué contestó (aceptada, con reparos o rechazada, con
-el motivo). **Todavía no se emite nada**: nadie llama a `encolar` (lo hará la venta, en el
-subproyecto 4), así que las dos tablas están vacías. Código en `backend/src/modules/dte/`:
+el motivo). `encolar` lo llama la venta desde el 2026-10-15 (subproyecto 4); con el interruptor de
+cada tenant apagado, que es el default, las dos tablas siguen vacías. Código en `backend/src/modules/dte/`:
 `cola-dte.service.ts`, `sii-boleta.cliente.ts`, `resultado-sii.ts` y los dos jobs de `jobs/`.
 **Fiscal: frente propio** (ADR-010). La spec y el plan se borraron al terminar (la historia queda
 en git); lo durable está acá.
 
 - **No incluido** (cada cosa tiene su dueño):
-  - quién llama a `encolar`, reemitir una boleta rechazada, avisar al dueño o mostrar una pantalla
-    (subproyecto 4);
+  - reemitir una boleta rechazada, avisar al dueño o mostrar una pantalla de atrasadas y rechazadas
+    (subproyecto 4, frente 3; quién llama a `encolar` ya lo resolvió el frente 1);
   - la consulta de una boleta individual (`/boleta.electronica/{rut}-{dv}-{tipo}-{folio}/estado`);
   - el envío al cliente por correo o QR;
   - la certificación ante el SII (subproyecto 5).
@@ -509,9 +510,9 @@ en git); lo durable está acá.
 
 ### Decidido por el owner (2026-10-14, por AskUserQuestion)
 
-- **Quién se entera de un rechazo:** queda registrado en la boleta; la pantalla y el aviso llegan
-  con el subproyecto 4. Se descartó una lista desde ya: hoy estaría siempre vacía, porque nadie
-  emite.
+- **Quién se entera de un rechazo:** queda registrado en la boleta; la pantalla y el aviso son del
+  frente 3 del subproyecto 4 (hoy el frente 1 solo muestra lo que no llegó a emitirse). Se descartó
+  una lista desde ya: estaría siempre vacía, porque nadie emitía.
 - **Boleta con más de 1 hora sin llegar:** se sigue reintentando **sin tope** y queda "atrasada"
   (ver más abajo). Se descartó frenar las ventas: un SII caído dejaría al local sin vender.
 
@@ -548,14 +549,14 @@ Los estados de `dte_documentos` (CHECK en la base):
 
 **"Atrasada" no es una columna**: se calcula al leer, y es
 `estado IN ('pendiente','enviado') AND emitido_el < now() - interval '1 hour'` (con
-`eliminado_el IS NULL`). Un test e2e fija esa consulta para el subproyecto 4. Incluye a la boleta
+`eliminado_el IS NULL`). Un test e2e fija esa consulta para la pantalla de atrasadas (frente 3). Incluye a la boleta
 que quedó `enviado` sin resultado (un 404 de 24 horas, un código que no se entendió, una caída entre
 el `ok` y el trackid): se ve atrasada y alguien la revisa.
 
 ### Encolar
 
 `ColaDteService.encolar(tenantId, boleta, cafId) → { documentoId }` es lo único que el módulo
-expone para el subproyecto 4. **Exige una transacción activa** (`TxContext.managerActivo()`), igual
+expone para la venta. **Exige una transacción activa** (`TxContext.managerActivo()`), igual
 que `tomarFolio`: si la venta hace rollback, la boleta no queda en la cola, y el folio, la boleta y
 la venta se confirman juntos o ninguno (una boleta sin venta es un folio perdido ante el SII). Fuera
 de una transacción tira un `Error` de programación.
@@ -754,11 +755,11 @@ cd backend && npx jest --config ./test/jest-e2e.json test/dte-cola.e2e-spec.ts
   individual, que queda fuera de este subproyecto.
 - **Boletas que quedan `enviado` por observaciones (la decisión del owner de arriba) o por un 404 de 24 horas requieren
   revisión de una persona.** Hoy el motivo está en `ultimo_error` del envío y en `respuesta_sii`; la
-  pantalla y el aviso son del subproyecto 4.
+  pantalla y el aviso son del frente 3 del subproyecto 4.
 - **Un código de sobre desconocido se consulta sin plazo**, con el aviso en `ultimo_error`. Si el
   SII nunca lo cambia, el envío se consulta cada 5 minutos para siempre.
 - **Un `DteError` al armar el sobre** (por ejemplo un XML que el motor ya no acepta) reintenta cada
-  10 minutos sin alerta. La pantalla del subproyecto 4 es la que lo muestra.
+  10 minutos sin alerta. La pantalla del frente 3 es la que lo va a mostrar.
 - **`encolar` no verifica el tipo ni el folio de la boleta contra el tipo y el rango del CAF**:
   depende de que quien llama pase el `cafId` que le dio `tomarFolio`.
 - **`X-RateLimit-Reset`: la unidad no está confirmada.** Se lee como segundos (o epoch si pasa de
@@ -776,7 +777,7 @@ cd backend && npx jest --config ./test/jest-e2e.json test/dte-cola.e2e-spec.ts
 
 ## La venta emite la boleta
 
-Subproyecto 4, frente 1 (spec [`2026-10-14-boleta-desde-la-venta`](../superpowers/specs/2026-10-14-boleta-desde-la-venta-design.md)).
+Subproyecto 4, frente 1 (spec `2026-10-14-boleta-desde-la-venta`, borrada al terminar; la historia queda en git).
 Con el interruptor del tenant encendido (`PATCH /dte/emision`), cada venta cuyo documento del
 sistema es una boleta sale con folio, timbrada, firmada y en la cola de envío. Con el interruptor
 apagado (el default) no cambia nada.
@@ -797,8 +798,11 @@ Los pasos, todos en la transacción de la venta y detrás de `Db.conSavepoint('e
 1. Lee en consultas fijas (ninguna por línea ni por pago): el documento (`FOR UPDATE`), la venta
    con el umbral de identidad **del año de la venta**, las líneas con su tasa de IVA, los
    adicionales, el receptor y los pagos que cubre ese documento (`pagos.documento_id`) con su
-   `medio_pago_sii`. Si el documento ya no está `armado`/`sin_emitir`, tiene descarte o no es una
-   boleta del sistema, devuelve `{ estado: 'omitido' }` y no toca nada (lo usa el botón).
+   `medio_pago_sii`. Si el documento no existe, ya no está `armado`/`sin_emitir` o tiene descarte,
+   devuelve `{ estado: 'omitido' }` y no toca nada (lo usa el botón): `omitido` es solo "ya no
+   está por emitir". Que el documento sí esté por emitir pero no sea una boleta del sistema, o
+   le falte la venta, el comercio o el país, **lanza `Error`** (un bug de quien lo pidió, no un dato
+   del local): disfrazarlo de `omitido` haría que el botón lo diera por "ya emitida".
 2. `tomarFolio` → `credencialesParaFirmar` → `emitirBoleta` (con `datosBoletaDeVenta`, que arma los
    datos desde lo congelado) → `encolar`. La fecha de la boleta es la de la venta en la hora de
    Chile, aunque se emita después; el `ahora` de la firma es el del momento.
@@ -821,7 +825,7 @@ Los pasos, todos en la transacción de la venta y detrás de `Db.conSavepoint('e
 El bloqueo del CAF que toma `tomarFolio` dura hasta el commit. Por eso la emisión va **al final**:
 ningún camino bloquea el CAF y después otra fila, así que no se forma un ciclo con el orden de
 filas de la venta ni con el de las tablas del catálogo. Las ventas con boleta de un mismo local se
-serializan en ese último tramo. Un deadlock (`40P01`) lo reintenta `crear`, y el folio volvió con
+serializan en ese último tramo (ver "Lo que queda abierto"). Un deadlock (`40P01`) lo reintenta `crear`, y el folio volvió con
 el rollback.
 
 ### La respuesta y el ticket
@@ -837,7 +841,15 @@ suma, leídos de la base por `armarBoleta` en **una** consulta:
 - `boletaSinEmitir`: `{ mensaje }` si debía emitirse y no se pudo, o `null`.
 
 La respuesta se guarda con la `Idempotency-Key` **después** de emitir: el reintento devuelve el
-mismo folio. Que el ticket la dibuje es de otra tarea.
+mismo folio.
+
+**El ticket** (detalle en [`impresion-termica.md`](./impresion-termica.md)) imprime `BOLETA
+ELECTRÓNICA N° folio`, el emisor de la boleta y `Res. N° X de AAAA`; en certificación agrega
+`CERTIFICACIÓN - SIN VALIDEZ`. Dos lecturas que conviene saber: el **emisor** es la razón social del
+CAF con que se tomó el folio (no la preferida de hoy), y la **resolución** se lee de esa razón
+social **al imprimir**, no se congela en la boleta. Si la empresa pasa de certificación a producción,
+reimprimir una boleta de certificación mostraría la resolución nueva: se acepta, esas boletas no
+tienen validez.
 
 ### Emitir después: el botón
 
@@ -903,6 +915,10 @@ runner retiene la fila de la venta, el botón queda esperando según `pg_blockin
 anulación gana y el botón no emite: se usa SQL y no la ruta de anular porque esa pide el mismo
 bloqueo desde otra conexión), anular una `sin_emitir` y una `emitido`, la nota de crédito sobre
 una venta emitida y sobre una que no, el aviso del cajero (200, `POCOS_FOLIOS`, apagado) y los 403.
+Playwright: `frontend/e2e/configuracion/emision-boletas.spec.ts` (el interruptor, la lista y el
+botón, como admin de un local) y `frontend/e2e/ventas/boleta-electronica-pos.spec.ts` (el cobro del
+POS con la emisión prendida, el folio en la boleta y la franja); el papel se verifica en los
+unitarios porque QZ Tray no corre en CI.
 Antes de cada caso del botón se descartan por SQL las `sin_emitir` que dejaron otros tests: el
 botón emite todas las del tenant.
 Mutantes (revertidos con `cp` y `cmp`): sin savepoint, atrapar cualquier error, el umbral con
@@ -910,6 +926,38 @@ Mutantes (revertidos con `cp` y `cmp`): sin savepoint, atrapar cualquier error, 
 emitida como boleta; del botón: sin el `FOR UPDATE` de la venta, cortar también con el grupo
 `boleta`, no cortar con `SIN_FOLIOS` y `estado-emision` con `TenantAdminGuard` (los cuatro caen). El umbral del año de la venta solo lo ve un test unitario: el e2e emite en el
 mismo año de la venta, y la diferencia aparece recién al emitir después (el botón).
+
+### Lo que queda abierto
+
+- **La nota de crédito electrónica (tipo 61)** y su envío por el canal de facturas son el frente 2.
+  Hasta entonces la nota ante el SII se hace en el portal, y el detalle de la venta marca la
+  corrección con *NC electrónica pendiente*.
+- **Atrasadas y rechazadas**, y qué se hace con una rechazada, son el frente 3 (la pantalla y el
+  aviso). Hoy una rechazada solo queda en la base.
+- **Documento parcial sobre 135 UF** (pago mixto con la máquina): sale con la línea de saldo, y el
+  SII pide ahí la descripción de los productos. No se resolvió.
+- **El plazo del SII para recibir una boleta con fecha pasada** no se investigó. La que se emite
+  después (el botón) lleva la fecha de su venta, por decisión del owner.
+- **Contención del CAF por tenant.** El bloqueo del CAF dura hasta el commit, así que las ventas con
+  boleta de un mismo local se serializan en el último tramo de la transacción. En un cierre de
+  mesa el tramo es más largo (cierra el tramo vigente y guarda después de emitir). Se mide si
+  aparece en producción.
+- **Dos fuentes de zona horaria.** El umbral de identidad de 135 UF usa la zona de la provincia del
+  local (`zona_horaria`) para el año de la venta; `FchEmis` usa `America/Santiago` fijo. Si no
+  coinciden, una venta cerca de la medianoche de fin de año se mide contra el umbral de un año y
+  se fecha en otro.
+- **El documento "veneno" del botón.** Un error que no es `DteError` en el primer documento de la
+  lista da 500 en cada clic y frena a los que siguen: no se traga un bug (R9), pero una boleta mala
+  bloquea todas las pendientes hasta que se arregle. Parecido: 200 documentos del grupo `boleta` que
+  fallan siempre cubren a los posteriores, porque la lista es de hasta 200 y ese error no corta.
+- **La resolución del ticket se lee al imprimir** (ver "La respuesta y el ticket"): un cambio de
+  certificación a producción cambia las reimpresiones de las boletas de certificación.
+- **El emisor del ticket sale de la razón social del CAF**, no de la preferida: si el local cambió de
+  razón social, las reimpresiones siguen mostrando la del folio, que es la correcta ante el SII.
+- **Prender/apagar no deja quién lo hizo** (ninguna ruta de `/dte` audita) ni bloquea la fila
+  mientras valida; la emisión revalida el perfil al emitir, así que no emite sin lo necesario.
+- **Certificación (subproyecto 5):** hasta que el SII reciba boletas de verdad, nada de lo emitido
+  tiene validez.
 
 ---
 

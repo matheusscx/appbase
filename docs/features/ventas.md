@@ -863,7 +863,7 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 6. `db.transaccion`: **reclamar la `Idempotency-Key`** (primera sentencia; si ya estaba, reproducir y cortar acá) → guardar cabecera → detalles → trazas de reglas → customer → lo apartado por las mesas (solo la venta directa) → inventario (`salida/venta` por producto, ingrediente, componente u opción, cada una con su línea: `venta_detalle_id`) → pagos → movimientos de caja (efectivo) → **documentos de la venta** (`VentaDocumentosService.documentarVenta`) → **la boleta electrónica** (`EmisionBoletaService.emitir`, solo con `tenants.emite_boleta_electronica`; va al final porque toma el bloqueo del CAF y lo suelta con el commit) → armar la boleta de la respuesta (`armarBoleta`) → guardar la respuesta junto a la clave
 
 **La boleta electrónica en la transacción (2026-10-15,** spec
-[`2026-10-14-boleta-desde-la-venta`](../superpowers/specs/2026-10-14-boleta-desde-la-venta-design.md)**).**
+`2026-10-14-boleta-desde-la-venta`, borrada al terminar**).**
 Con el interruptor del tenant encendido, `crearEnTransaccion` emite la boleta del documento del
 sistema **detrás de un savepoint** (`Db.conSavepoint`, ver `patterns/backend.md` § 9). Un
 `DteError` (sin folios, certificado vencido, un dato que el motor rechaza) deshace la emisión,

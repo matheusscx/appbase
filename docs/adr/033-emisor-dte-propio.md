@@ -106,9 +106,11 @@ Operación:
 
 ### Neutral
 
-- **Todavía no se emite nada al SII.** Falta conectar con la venta (subproyecto 4). El
-  subproyecto 1 ya lleva la cuenta de los folios usados y el 3 ya tiene la cola y el cliente del
-  web service del SII, que nadie alimenta todavía.
+- **La venta ya emite la boleta (2026-10-15, subproyecto 4, frente 1), pero nada de lo emitido tiene
+  validez ante el SII** hasta la certificación (subproyecto 5). Con el interruptor del tenant
+  prendido, la venta toma el folio del perfil (1), arma y firma con el motor (2) y encola para la
+  cola y el cliente del web service del SII (3). Faltan la nota de crédito electrónica y la
+  pantalla de atrasadas y rechazadas (frentes 2 y 3).
 - Siguen diferidos de ADR-010: los impuestos adicionales (ILA) en la boleta, que el motor rechaza con
   código hasta saber qué hace el SII con ellos.
 - Dependencias nuevas, aprobadas por el owner: `node-forge`, `xml-crypto` y `@xmldom/xmldom` en
