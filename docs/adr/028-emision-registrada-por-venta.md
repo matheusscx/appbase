@@ -157,7 +157,10 @@ para que el aviso de la pantalla y lo que el abono después escribe no puedan de
   `ventas_impuestos` a prorrata**: no están congelados en el documento.
 - **Folio ≠ PK** (ADR-010): el folio del sistema no existe y no se inventa. `numero` es un dato
   externo —el de la máquina o el del otro facturador— y nace nulo hasta que se tipea.
-- **`estado_envio`** es `'armado'` para el sistema; `'enviado'` queda reservado a la emisión.
+- **`estado_envio`** es `'armado'` para el sistema mientras nadie lo emite. Con la boleta electrónica
+  por venta (spec `2026-10-14-boleta-desde-la-venta`) el `'enviado'` que este ADR reservaba se
+  reemplazó por `'sin_emitir'` (debía emitirse y falló; se reintenta) y `'emitido'` (la boleta
+  existe: `dte_documento_id`). Un CHECK ata `emitido` a su `dte_documento_id`.
 - **Una corrección se reconoce por `venta_referencia_id`**, no por el tipo de documento (E7): la
   devolución interna no es un documento tributario y no lleva el tipo NC. La tabla guarda
   `documento_corregido_id` para qué documento corrige cada una; lo escribe
@@ -186,7 +189,7 @@ para que el aviso de la pantalla y lo que el abono después escribe no puedan de
   `VentaDocumentosService.evaluarAnulacion` (devuelve `anulable` con los descartes, `bloqueada`
   con su motivo, o `pregunta_externo`), y `descartarAlAnular` las aplica dentro de la transacción
   de `cancelarUnaVez`, después del lock de la venta. Solo cuentan los documentos vigentes
-  (`descarte IS NULL`): una `maquina` o un `sistema` `enviado` bloquean, y un `externo` con
+  (`descarte IS NULL`): una `maquina` o un `sistema` `emitido` bloquean (un `sin_emitir` no: nunca salió), y un `externo` con
   número bloquea sin preguntar (el número salió del otro facturador, así que el documento
   existe). `externoHecho` ausente y `false` son dos conductas distintas, por eso el DTO y el
   controller no le ponen default. Lo previo a mirar los documentos —que la venta esté

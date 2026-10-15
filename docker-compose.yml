@@ -76,6 +76,9 @@ services:
       # Los jobs de la cola de envío al SII. En desarrollo apagados: las URLs por defecto son las
       # del SII de verdad. En producción el default es encendido (no se define la variable).
       DTE_COLA_AUTOMATICA: ${DTE_COLA_AUTOMATICA:-false}
+      # El proveedor de software de las boletas (valores de prueba; en producción, Railway).
+      DTE_PROVEEDOR_RUT: ${DTE_PROVEEDOR_RUT:-76222333-3}
+      DTE_PROVEEDOR_RAZON_SOCIAL: ${DTE_PROVEEDOR_RAZON_SOCIAL:-Proveedor de prueba SpA}
       QZ_PRIVATE_KEY: ${QZ_PRIVATE_KEY:-}
       QZ_CERTIFICATE: ${QZ_CERTIFICATE:-}
       API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost:3000}

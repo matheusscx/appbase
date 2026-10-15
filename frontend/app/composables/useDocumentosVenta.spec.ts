@@ -71,6 +71,14 @@ describe('estado del documento', () => {
     expect(estadoDocumento(doc())).toBe('Armado, sin enviar al SII')
   })
 
+  it('uno emitido dice que la boleta electrónica salió', () => {
+    expect(estadoDocumento(doc({ estadoEnvio: 'emitido' }))).toBe('Boleta electrónica emitida')
+  })
+
+  it('uno que debía emitirse y falló dice que está sin emitir', () => {
+    expect(estadoDocumento(doc({ estadoEnvio: 'sin_emitir' }))).toBe('Boleta electrónica sin emitir')
+  })
+
   it('un descartado manda sobre cualquier otro estado', () => {
     expect(estadoDocumento(doc({ descarte: 'armado_sin_enviar' }))).toBe('Descartado al anular')
     expect(estadoDocumento(doc({ emisor: 'externo', descarte: 'afirmado_no_hecho' }))).toBe('Descartado al anular')

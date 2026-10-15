@@ -1,5 +1,5 @@
 import { rutValido } from '../../common/utils/rut.util';
-import { DteError, type TipoBoleta } from './dte.types';
+import { DteError, type ProveedorSoftware, type TipoBoleta } from './dte.types';
 import type { AmbienteSii } from './entities/dte-caf.entity';
 import { validarTexto } from './texto';
 
@@ -19,7 +19,8 @@ export type CodigoFaltante =
   | 'TEXTO_INVALIDO'
   | 'SIN_CERTIFICADO'
   | 'CERTIFICADO_VENCIDO'
-  | 'SIN_FOLIOS_39';
+  | 'SIN_FOLIOS_39'
+  | 'SIN_PROVEEDOR_SOFTWARE';
 export type CodigoAviso = 'POCOS_FOLIOS' | 'CERTIFICADO_POR_VENCER';
 
 export interface EmisorPerfil {
@@ -98,13 +99,15 @@ export const vacio = (valor: string | null): valor is null =>
 /**
  * Qué le falta al emisor para poder emitir boletas (`faltantes`) y qué conviene mirar ya
  * (`avisos`). Pura: sin base y sin reloj, `ahora` viene de afuera. Los mensajes son para el
- * dueño del local.
+ * dueño del local. `proveedor` es la empresa dueña del software (configuración del sistema, no
+ * del tenant): sin ella no se puede armar la boleta, y es el dueño del sistema quien la carga.
  */
 export function evaluarPerfil(
   emisor: EmisorPerfil | null,
   certificado: { venceEl: Date } | null,
   cafs: CafPerfil[],
   ahora: Date,
+  proveedor: ProveedorSoftware | null,
 ): {
   faltantes: Observacion<CodigoFaltante>[];
   avisos: Observacion<CodigoAviso>[];
@@ -179,6 +182,24 @@ export function evaluarPerfil(
 
   if ((folios.get(39) ?? 0) === 0)
     falta('SIN_FOLIOS_39', 'No hay folios de boleta (39) cargados');
+
+  // La razón social del proveedor va en `RznSocProvSW` (máx. 100, ISO-8859-1): se valida como el
+  // nombre del emisor, para que una mal cargada frene el interruptor y no la firma de cada boleta.
+  const proveedorUsable = (p: ProveedorSoftware | null): boolean => {
+    if (p === null || !rutValido(p.rut) || vacio(p.razonSocial)) return false;
+    try {
+      validarTexto('La razón social del proveedor', p.razonSocial, 100);
+      return true;
+    } catch (e) {
+      if (!(e instanceof DteError)) throw e;
+      return false;
+    }
+  };
+  if (!proveedorUsable(proveedor))
+    falta(
+      'SIN_PROVEEDOR_SOFTWARE',
+      'Falta el proveedor de software en la configuración del sistema',
+    );
 
   for (const [tipo, restantes] of folios) {
     // El 39 sin folios ya salió como faltante: no se repite como aviso.

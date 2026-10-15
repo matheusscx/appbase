@@ -1222,10 +1222,24 @@ describe('VentaDocumentosService.evaluarAnulacion (E8, E10)', () => {
     expect((r as { motivo: string }).motivo).toMatch(/nota de crédito/);
   });
 
-  it('un documento del sistema ya enviado bloquea (hoy ninguno: no hay envío)', async () => {
-    const { r } = await evaluar([fila('sistema', { estado_envio: 'enviado' })]);
-    expect(r).toMatchObject({ resultado: 'bloqueada' });
-    expect((r as { motivo: string }).motivo).toMatch(/enviado/);
+  it('una boleta del sistema ya emitida bloquea: se revierte con nota de crédito', async () => {
+    const { r } = await evaluar([fila('sistema', { estado_envio: 'emitido' })]);
+    expect(r).toEqual({
+      resultado: 'bloqueada',
+      motivo:
+        'La boleta ya se emitió: se revierte con una nota de crédito, no se anula.',
+    });
+  });
+
+  it('una boleta del sistema sin_emitir no bloquea: se descarta como la armada', async () => {
+    const doc = fila('sistema', { estado_envio: 'sin_emitir' });
+    const { r } = await evaluar([doc]);
+    expect(r).toEqual({
+      resultado: 'anulable',
+      descartes: [
+        { documentoId: doc.documento_id, descarte: 'armado_sin_enviar' },
+      ],
+    });
   });
 
   describe('documento hecho por fuera (externo)', () => {

@@ -36,7 +36,7 @@ export interface DocumentoVenta {
   tipoDocumento: { id: string, codigo: string | null, nombre: string } | null
   claseMaquina: ClaseDocumentoMaquina | null
   numero: string | null
-  estadoEnvio: 'armado' | 'enviado' | null
+  estadoEnvio: 'armado' | 'sin_emitir' | 'emitido' | null
   monto: string
   pagoId: string | null
   documentoCorregidoId: string | null
@@ -108,7 +108,9 @@ export function llevaNumero(doc: DocumentoVenta): boolean {
 export function estadoDocumento(doc: DocumentoVenta): string | null {
   if (doc.descarte) return 'Descartado al anular'
   if (doc.emisor === 'sistema') {
-    return doc.estadoEnvio === 'enviado' ? 'Enviado al SII' : 'Armado, sin enviar al SII'
+    if (doc.estadoEnvio === 'emitido') return 'Boleta electrónica emitida'
+    if (doc.estadoEnvio === 'sin_emitir') return 'Boleta electrónica sin emitir'
+    return 'Armado, sin enviar al SII'
   }
   return null
 }

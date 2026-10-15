@@ -24,6 +24,13 @@ export class MetodoPago {
   @Column({ name: 'es_efectivo', default: false })
   esEfectivo: boolean;
 
+  /**
+   * Cómo se declara este método en la boleta electrónica (campo 10 del formato del SII):
+   * 1 efectivo, 2 electrónico (tarjetas), 3 transferencia. Nulo = sin equivalencia cargada.
+   */
+  @Column({ name: 'medio_pago_sii', type: 'smallint', nullable: true })
+  medioPagoSii: number | null;
+
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 

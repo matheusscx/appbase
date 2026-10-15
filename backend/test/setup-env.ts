@@ -29,3 +29,9 @@ process.env.DTE_ENCRYPTION_KEY ??=
 // mano: un tick automático a mitad de un test podría tomar sus boletas, y las URLs por defecto
 // son las del SII de verdad.
 process.env.DTE_COLA_AUTOMATICA ??= 'false';
+
+// El proveedor de software que firma RutProvSW/RznSocProvSW en cada boleta: configuración del
+// sistema, no del tenant. Sin estas dos el perfil fiscal trae SIN_PROVEEDOR_SOFTWARE y no se
+// puede encender la emisión. Valores de prueba (el RUT es válido).
+process.env.DTE_PROVEEDOR_RUT ??= '76222333-3';
+process.env.DTE_PROVEEDOR_RAZON_SOCIAL ??= 'Proveedor de prueba SpA';

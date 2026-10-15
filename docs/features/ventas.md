@@ -359,8 +359,9 @@ replica la regla:
 
 | Documento vigente | Qué pasa |
 |---|---|
-| `sistema` en `armado` | No bloquea. Se anula y queda descartado con `armado_sin_enviar` (E8): todavía no salió al SII |
-| `sistema` en `enviado` | 400, va por nota de crédito (hoy ninguno: no hay envío) |
+| `sistema` en `armado` | No bloquea. Se anula y queda descartado con `armado_sin_enviar` (E8): nadie lo emite |
+| `sistema` en `sin_emitir` | No bloquea, igual que `armado`: debía emitirse y falló, la boleta nunca salió. Queda descartado con `armado_sin_enviar` |
+| `sistema` en `emitido` | 400 (*"La boleta ya se emitió: se revierte con una nota de crédito, no se anula."*): la boleta existe en el SII |
 | `maquina` | 400, va por nota de crédito: la máquina ya emitió |
 | `externo` con número | 400 (*"Ya está hecho: se revierte con una nota de crédito, hecha por fuera y anotada con su número."*), sin preguntar: el número salió del otro facturador, el documento existe |
 | `externo` sin número y sin `externoHecho` | 400 (*"Esta venta tiene un documento hecho por fuera: falta decir si ya lo hiciste en tu facturador."*) |
@@ -430,7 +431,7 @@ Lo calcula el backend a propósito: el navegador no replica la cuantización del
   órdenes distintos volverían a hacer posible el cruce que el orden fijo evita.
 
 **Errores:** `400` motivo corto · `400` estado distinto de `pendiente` · `400` con pagos ·
-`400` con un documento emitido por la máquina o ya enviado · `400` con un documento hecho por
+`400` con un documento emitido por la máquina o una boleta ya emitida · `400` con un documento hecho por
 fuera (sin respuesta, o ya hecho) · `400` reponer stock de serie/lote · `403` sin permiso.
 
 **El default del checkbox de reposición lo decide la cocina, no la API** (decisión del

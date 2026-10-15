@@ -1,4 +1,5 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { Test } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { Db } from '../../common/db/db.service';
@@ -32,6 +33,7 @@ describe('PerfilFiscalService', () => {
   let db: { query: jest.Mock; transaccion: jest.Mock };
   let cifrado: { cifrar: jest.Mock };
   let razonSocialRepo: { update: jest.Mock };
+  let configValores: Record<string, string | undefined>;
 
   beforeEach(async () => {
     db = {
@@ -40,11 +42,19 @@ describe('PerfilFiscalService', () => {
     };
     cifrado = { cifrar: jest.fn((t: string) => `cifrado:${t.length}`) };
     razonSocialRepo = { update: jest.fn().mockResolvedValue({ affected: 1 }) };
+    configValores = {
+      DTE_PROVEEDOR_RUT: '76.222.333-3',
+      DTE_PROVEEDOR_RAZON_SOCIAL: 'Proveedor de prueba SpA',
+    };
     const modulo = await Test.createTestingModule({
       providers: [
         PerfilFiscalService,
         { provide: Db, useValue: db },
         { provide: CifradoDteService, useValue: cifrado },
+        {
+          provide: ConfigService,
+          useValue: { get: (k: string) => configValores[k] },
+        },
         { provide: getRepositoryToken(RazonSocial), useValue: razonSocialRepo },
       ],
     }).compile();
@@ -53,6 +63,11 @@ describe('PerfilFiscalService', () => {
 
   const sinEmisora = () => db.query.mockResolvedValueOnce([]);
   const conEmisora = () => db.query.mockResolvedValueOnce([FILA_EMISORA]);
+  /** La consulta del interruptor de emisión del tenant (`tenants.emite_boleta_electronica`). */
+  const sinInterruptor = () =>
+    db.query.mockResolvedValueOnce([{ emite_boleta_electronica: false }]);
+  const conInterruptor = () =>
+    db.query.mockResolvedValueOnce([{ emite_boleta_electronica: true }]);
 
   describe('emisora', () => {
     it('es la razón social preferida, habilitada y no borrada del tenant', async () => {
@@ -85,18 +100,19 @@ describe('PerfilFiscalService', () => {
   });
 
   describe('obtener', () => {
-    it('sin emisora: una sola consulta, todo vacío y SIN_EMISOR como faltante', async () => {
+    it('sin emisora: dos consultas (emisora e interruptor), todo vacío y SIN_EMISOR como faltante', async () => {
       sinEmisora();
+      sinInterruptor();
       const perfil = await service.obtener(TENANT, AHORA);
 
-      expect(db.query).toHaveBeenCalledTimes(1);
+      expect(db.query).toHaveBeenCalledTimes(2);
       expect(perfil.emisor).toBeNull();
       expect(perfil.certificado).toBeNull();
       expect(perfil.cafs).toEqual([]);
       expect(perfil.faltantes.map((f) => f.codigo)).toContain('SIN_EMISOR');
     });
 
-    it('con emisora: tres consultas fijas, sin importar cuántos CAF haya', async () => {
+    it('con emisora: cuatro consultas fijas, sin importar cuántos CAF haya', async () => {
       conEmisora();
       db.query.mockResolvedValueOnce([
         {
@@ -139,9 +155,11 @@ describe('PerfilFiscalService', () => {
         },
       ]);
 
+      sinInterruptor();
+
       const perfil = await service.obtener(TENANT, AHORA);
 
-      expect(db.query).toHaveBeenCalledTimes(3);
+      expect(db.query).toHaveBeenCalledTimes(4);
       for (const [sql, params] of db.query.mock.calls as [string, unknown[]][])
         assertSinHuecos(sql, params);
       expect(perfil.certificado).toEqual({
@@ -190,10 +208,44 @@ describe('PerfilFiscalService', () => {
       ]);
     });
 
+    it('emisionActiva sale de tenants.emite_boleta_electronica, del tenant del token y no borrado', async () => {
+      sinEmisora();
+      conInterruptor();
+      const perfil = await service.obtener(TENANT, AHORA);
+
+      expect(perfil.emisionActiva).toBe(true);
+      const [sql, params] = db.query.mock.calls[1] as [string, unknown[]];
+      expect(sql).toMatch(/emite_boleta_electronica/);
+      expect(sql).toMatch(/FROM tenants/);
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+      expect(params).toEqual([TENANT]);
+      assertSinHuecos(sql, params);
+    });
+
+    it('sin proveedor en la configuración, falta SIN_PROVEEDOR_SOFTWARE', async () => {
+      configValores = {};
+      sinEmisora();
+      sinInterruptor();
+      const perfil = await service.obtener(TENANT, AHORA);
+      expect(perfil.faltantes.map((f) => f.codigo)).toContain(
+        'SIN_PROVEEDOR_SOFTWARE',
+      );
+    });
+
+    it('con proveedor en la configuración, no falta', async () => {
+      sinEmisora();
+      sinInterruptor();
+      const perfil = await service.obtener(TENANT, AHORA);
+      expect(perfil.faltantes.map((f) => f.codigo)).not.toContain(
+        'SIN_PROVEEDOR_SOFTWARE',
+      );
+    });
+
     it('las consultas del certificado y de los CAF filtran lo reemplazado y lo borrado', async () => {
       conEmisora();
       db.query.mockResolvedValueOnce([]);
       db.query.mockResolvedValueOnce([]);
+      sinInterruptor();
       await service.obtener(TENANT, AHORA);
 
       const [, sqlCert] = (db.query.mock.calls as [string][]).map((c) => c[0]);
@@ -202,6 +254,121 @@ describe('PerfilFiscalService', () => {
       expect(sqlCert).toMatch(/eliminado_el IS NULL/);
       expect(sqlCaf).toMatch(/eliminado_el IS NULL/);
       expect(sqlCaf).toMatch(/ORDER BY tipo, desde/);
+    });
+  });
+
+  describe('proveedorSoftware', () => {
+    it('lee el RUT y la razón social de la configuración, con el RUT normalizado', () => {
+      expect(service.proveedorSoftware()).toEqual({
+        rut: '76222333-3',
+        razonSocial: 'Proveedor de prueba SpA',
+      });
+    });
+
+    it.each([
+      ['sin RUT', { DTE_PROVEEDOR_RUT: undefined }],
+      ['con el RUT en blanco', { DTE_PROVEEDOR_RUT: '   ' }],
+      ['sin razón social', { DTE_PROVEEDOR_RAZON_SOCIAL: undefined }],
+      ['con la razón social en blanco', { DTE_PROVEEDOR_RAZON_SOCIAL: ' ' }],
+      ['con un RUT que no es válido', { DTE_PROVEEDOR_RUT: '76222333-4' }],
+    ])('%s: null', (_caso, cambios) => {
+      configValores = { ...configValores, ...cambios };
+      expect(service.proveedorSoftware()).toBeNull();
+    });
+
+    it('lo lee en cada llamada: cambiar la configuración se nota sin reiniciar el servicio', () => {
+      expect(service.proveedorSoftware()).not.toBeNull();
+      configValores = {};
+      expect(service.proveedorSoftware()).toBeNull();
+    });
+  });
+
+  describe('cambiarEmision', () => {
+    /** Un perfil al que no le falta nada (la razón social del test + certificado vigente + folios). */
+    const perfilCompleto = () => {
+      db.query.mockResolvedValueOnce([
+        {
+          ...FILA_EMISORA,
+          giro: 'Restaurante',
+          comuna: 'Ñuñoa',
+          ambiente_sii: 'certificacion',
+          fecha_resolucion: '2026-09-30',
+          numero_resolucion: 0,
+        },
+      ]);
+      db.query.mockResolvedValueOnce([
+        {
+          certificado_id: 'c1',
+          rut_firmante: '11111111-1',
+          nombre_firmante: 'Ana Pérez',
+          vence_el: new Date('2036-01-01T00:00:00Z'),
+        },
+      ]);
+      db.query.mockResolvedValueOnce([
+        {
+          caf_id: 'f1',
+          tipo: 39,
+          ambiente: 'certificacion',
+          desde: 1,
+          hasta: 500,
+          siguiente_folio: 1,
+          fecha_autorizacion: '2026-10-01',
+          idk: 100,
+        },
+      ]);
+      sinInterruptor();
+    };
+
+    it('encender con faltantes: 400 que los nombra, y no escribe', async () => {
+      sinEmisora();
+      sinInterruptor();
+      const error = await service
+        .cambiarEmision(TENANT, true, AHORA)
+        .catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(BadRequestException);
+      const cuerpo = (error as BadRequestException).getResponse() as {
+        message: string;
+        faltantes: { codigo: string; mensaje: string }[];
+      };
+      expect(cuerpo.message).toMatch(/^Para emitir falta: /);
+      expect(cuerpo.message).toContain(
+        'Falta cargar los datos de la empresa que emite',
+      );
+      expect(cuerpo.faltantes.map((f) => f.codigo)).toContain('SIN_EMISOR');
+      // Solo las lecturas del perfil: ningún UPDATE.
+      expect(
+        (db.query.mock.calls as [string][]).some(([sql]) =>
+          /UPDATE tenants/.test(sql),
+        ),
+      ).toBe(false);
+    });
+
+    it('encender con el perfil completo: UPDATE del tenant del token, sin borrados', async () => {
+      perfilCompleto();
+      db.query.mockResolvedValueOnce([]);
+      const r = await service.cambiarEmision(TENANT, true, AHORA);
+
+      expect(r).toEqual({ emisionActiva: true });
+      const [sql, params] = db.query.mock.calls.at(-1) as [string, unknown[]];
+      expect(sql).toMatch(/UPDATE tenants/);
+      expect(sql).toMatch(/emite_boleta_electronica = \$2/);
+      expect(sql).toMatch(/actualizado_el = now\(\)/);
+      expect(sql).toMatch(/tenant_id = \$1/);
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+      expect(params).toEqual([TENANT, true]);
+      assertSinHuecos(sql, params);
+    });
+
+    it('apagar no valida el perfil: una sola consulta, el UPDATE', async () => {
+      db.query.mockResolvedValueOnce([]);
+      const r = await service.cambiarEmision(TENANT, false, AHORA);
+
+      expect(r).toEqual({ emisionActiva: false });
+      expect(db.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = db.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toMatch(/UPDATE tenants/);
+      expect(params).toEqual([TENANT, false]);
     });
   });
 

@@ -6,6 +6,7 @@ import {
   evaluarPerfil,
   UMBRAL_FOLIOS,
 } from './perfil-fiscal';
+import type { ProveedorSoftware } from './dte.types';
 
 const AHORA = new Date('2026-10-14T15:37:00Z');
 const MS_DIA = 24 * 60 * 60 * 1000;
@@ -32,18 +33,60 @@ const caf = (
 
 const FOLIOS_OK = [caf(39, 412), caf(41, 288)];
 
+const PROVEEDOR: ProveedorSoftware = {
+  rut: '76222333-3',
+  razonSocial: 'Proveedor de prueba SpA',
+};
+
 const codigos = (r: { codigo: string }[]) => r.map((o) => o.codigo);
 
 describe('evaluarPerfil', () => {
   it('un perfil completo no tiene faltantes ni avisos', () => {
-    expect(evaluarPerfil(emisor(), EN_SEIS_MESES, FOLIOS_OK, AHORA)).toEqual({
+    expect(
+      evaluarPerfil(emisor(), EN_SEIS_MESES, FOLIOS_OK, AHORA, PROVEEDOR),
+    ).toEqual({
       faltantes: [],
       avisos: [],
     });
   });
 
+  it('sin proveedor de software en la configuración del sistema: SIN_PROVEEDOR_SOFTWARE', () => {
+    const r = evaluarPerfil(emisor(), EN_SEIS_MESES, FOLIOS_OK, AHORA, null);
+    expect(r.faltantes).toEqual([
+      {
+        codigo: 'SIN_PROVEEDOR_SOFTWARE',
+        mensaje:
+          'Falta el proveedor de software en la configuración del sistema',
+      },
+    ]);
+  });
+
+  it('un proveedor con RUT que no es válido también falta', () => {
+    const r = evaluarPerfil(emisor(), EN_SEIS_MESES, FOLIOS_OK, AHORA, {
+      ...PROVEEDOR,
+      rut: '76222333-4',
+    });
+    expect(codigos(r.faltantes)).toEqual(['SIN_PROVEEDOR_SOFTWARE']);
+  });
+
+  it.each([
+    ['de 101 caracteres', 'x'.repeat(101), true],
+    ['con un carácter fuera de ISO-8859-1 (€)', 'Proveedor € SpA', true],
+    ['con un salto de línea', 'Proveedor\nSpA', true],
+    ['en blanco', '   ', true],
+    ['de exactamente 100 caracteres', 'x'.repeat(100), false],
+  ])('la razón social del proveedor %s', (_caso, razonSocial, falta) => {
+    const r = evaluarPerfil(emisor(), EN_SEIS_MESES, FOLIOS_OK, AHORA, {
+      ...PROVEEDOR,
+      razonSocial,
+    });
+    expect(codigos(r.faltantes)).toEqual(
+      falta ? ['SIN_PROVEEDOR_SOFTWARE'] : [],
+    );
+  });
+
   it('sin emisor sale solo SIN_EMISOR, y certificado y folios se evalúan igual', () => {
-    const r = evaluarPerfil(null, null, [], AHORA);
+    const r = evaluarPerfil(null, null, [], AHORA, PROVEEDOR);
     expect(codigos(r.faltantes)).toEqual([
       'SIN_EMISOR',
       'SIN_CERTIFICADO',
@@ -60,6 +103,7 @@ describe('evaluarPerfil', () => {
       { venceEl: new Date('2026-09-02T09:14:00Z') },
       [],
       AHORA,
+      PROVEEDOR,
     );
     expect(codigos(r.faltantes)).toContain('CERTIFICADO_VENCIDO');
   });
@@ -70,6 +114,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       FOLIOS_OK,
       AHORA,
+      PROVEEDOR,
     );
     expect(r.faltantes).toEqual([
       { codigo: 'RUT_INVALIDO', mensaje: 'El RUT de la empresa no es válido' },
@@ -89,6 +134,7 @@ describe('evaluarPerfil', () => {
           EN_SEIS_MESES,
           FOLIOS_OK,
           AHORA,
+          PROVEEDOR,
         );
         expect(r.faltantes).toEqual([{ codigo, mensaje }]);
       }
@@ -108,6 +154,7 @@ describe('evaluarPerfil', () => {
         EN_SEIS_MESES,
         FOLIOS_OK,
         AHORA,
+        PROVEEDOR,
       );
       expect(codigos(r.faltantes)).toEqual(['TEXTO_INVALIDO']);
       expect(r.faltantes[0].mensaje).toContain('admite');
@@ -125,6 +172,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       FOLIOS_OK,
       AHORA,
+      PROVEEDOR,
     );
     expect(r.faltantes).toEqual([]);
   });
@@ -135,6 +183,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       FOLIOS_OK,
       AHORA,
+      PROVEEDOR,
     );
     expect(r.faltantes).toHaveLength(1);
     expect(r.faltantes[0].codigo).toBe('TEXTO_INVALIDO');
@@ -147,6 +196,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       FOLIOS_OK,
       AHORA,
+      PROVEEDOR,
     );
     expect(codigos(r.faltantes)).toEqual(['SIN_GIRO']);
   });
@@ -157,6 +207,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       FOLIOS_OK,
       AHORA,
+      PROVEEDOR,
     );
     expect(codigos(r.faltantes)).toEqual(['TEXTO_INVALIDO', 'TEXTO_INVALIDO']);
   });
@@ -167,6 +218,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       FOLIOS_OK,
       AHORA,
+      PROVEEDOR,
     );
     expect(codigos(r.faltantes)).toEqual(['SIN_AMBIENTE', 'SIN_FOLIOS_39']);
     expect(r.avisos).toEqual([]);
@@ -178,7 +230,13 @@ describe('evaluarPerfil', () => {
       { numeroResolucion: null },
       { fechaResolucion: null, numeroResolucion: null },
     ]) {
-      const r = evaluarPerfil(emisor(cambios), EN_SEIS_MESES, FOLIOS_OK, AHORA);
+      const r = evaluarPerfil(
+        emisor(cambios),
+        EN_SEIS_MESES,
+        FOLIOS_OK,
+        AHORA,
+        PROVEEDOR,
+      );
       expect(r.faltantes).toEqual([
         {
           codigo: 'SIN_RESOLUCION',
@@ -194,12 +252,13 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       [caf(39, 412, 'certificacion')],
       AHORA,
+      PROVEEDOR,
     );
     expect(r.faltantes).toEqual([]);
   });
 
   it('sin certificado es SIN_CERTIFICADO', () => {
-    const r = evaluarPerfil(emisor(), null, FOLIOS_OK, AHORA);
+    const r = evaluarPerfil(emisor(), null, FOLIOS_OK, AHORA, PROVEEDOR);
     expect(r.faltantes).toEqual([
       {
         codigo: 'SIN_CERTIFICADO',
@@ -215,6 +274,7 @@ describe('evaluarPerfil', () => {
       { venceEl: new Date('2026-09-03T02:48:00Z') },
       FOLIOS_OK,
       AHORA,
+      PROVEEDOR,
     );
     expect(r.faltantes).toEqual([
       {
@@ -225,7 +285,13 @@ describe('evaluarPerfil', () => {
   });
 
   it('un certificado que vence justo ahora ya está vencido', () => {
-    const r = evaluarPerfil(emisor(), { venceEl: AHORA }, FOLIOS_OK, AHORA);
+    const r = evaluarPerfil(
+      emisor(),
+      { venceEl: AHORA },
+      FOLIOS_OK,
+      AHORA,
+      PROVEEDOR,
+    );
     expect(codigos(r.faltantes)).toEqual(['CERTIFICADO_VENCIDO']);
   });
 
@@ -235,6 +301,7 @@ describe('evaluarPerfil', () => {
       { venceEl: new Date(AHORA.getTime() + 1000) },
       FOLIOS_OK,
       AHORA,
+      PROVEEDOR,
     );
     expect(r.faltantes).toEqual([]);
     expect(codigos(r.avisos)).toEqual(['CERTIFICADO_POR_VENCER']);
@@ -247,6 +314,7 @@ describe('evaluarPerfil', () => {
       { venceEl: new Date(limite) },
       FOLIOS_OK,
       AHORA,
+      PROVEEDOR,
     );
     expect(exacto.avisos).toEqual([]);
     const antes = evaluarPerfil(
@@ -254,6 +322,7 @@ describe('evaluarPerfil', () => {
       { venceEl: new Date(limite - 1000) },
       FOLIOS_OK,
       AHORA,
+      PROVEEDOR,
     );
     expect(antes.avisos).toEqual([
       {
@@ -270,6 +339,7 @@ describe('evaluarPerfil', () => {
       { venceEl: new Date('2027-03-16T01:42:00Z') },
       FOLIOS_OK,
       new Date('2027-03-01T12:00:00Z'),
+      PROVEEDOR,
     );
     expect(r.avisos[0].mensaje).toBe(
       'El certificado digital vence el 15-03-2027',
@@ -283,6 +353,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       [caf(39, 412), caf(41, 100)],
       AHORA,
+      PROVEEDOR,
     );
     expect(cien.avisos).toEqual([]);
     const noventaYNueve = evaluarPerfil(
@@ -290,6 +361,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       [caf(39, 412), caf(41, 99)],
       AHORA,
+      PROVEEDOR,
     );
     expect(noventaYNueve.avisos).toEqual([
       {
@@ -305,6 +377,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       [caf(39, 62), caf(39, 58), caf(41, 288)],
       AHORA,
+      PROVEEDOR,
     );
     expect(r.avisos).toEqual([]);
     const pocos = evaluarPerfil(
@@ -312,6 +385,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       [caf(39, 37), caf(39, 23), caf(41, 288)],
       AHORA,
+      PROVEEDOR,
     );
     expect(pocos.avisos).toEqual([
       {
@@ -322,7 +396,13 @@ describe('evaluarPerfil', () => {
   });
 
   it('sin CAF de boleta 39 es SIN_FOLIOS_39', () => {
-    const r = evaluarPerfil(emisor(), EN_SEIS_MESES, [caf(41, 288)], AHORA);
+    const r = evaluarPerfil(
+      emisor(),
+      EN_SEIS_MESES,
+      [caf(41, 288)],
+      AHORA,
+      PROVEEDOR,
+    );
     expect(r.faltantes).toEqual([
       {
         codigo: 'SIN_FOLIOS_39',
@@ -338,6 +418,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       [caf(39, 500, 'certificacion')],
       AHORA,
+      PROVEEDOR,
     );
     expect(codigos(r.faltantes)).toEqual(['SIN_FOLIOS_39']);
   });
@@ -348,6 +429,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       [caf(39, 412), caf(41, 64), caf(41, 500, 'certificacion')],
       AHORA,
+      PROVEEDOR,
     );
     expect(r.avisos).toEqual([
       {
@@ -363,6 +445,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       [caf(39, 0), caf(41, 288)],
       AHORA,
+      PROVEEDOR,
     );
     expect(codigos(r.faltantes)).toEqual(['SIN_FOLIOS_39']);
     expect(r.avisos).toEqual([]);
@@ -374,6 +457,7 @@ describe('evaluarPerfil', () => {
       EN_SEIS_MESES,
       [caf(39, 412), caf(41, 0)],
       AHORA,
+      PROVEEDOR,
     );
     expect(r.faltantes).toEqual([]);
     expect(r.avisos).toEqual([
@@ -385,7 +469,13 @@ describe('evaluarPerfil', () => {
   });
 
   it('sin ningún CAF del 41 no hay aviso del 41', () => {
-    const r = evaluarPerfil(emisor(), EN_SEIS_MESES, [caf(39, 412)], AHORA);
+    const r = evaluarPerfil(
+      emisor(),
+      EN_SEIS_MESES,
+      [caf(39, 412)],
+      AHORA,
+      PROVEEDOR,
+    );
     expect(r).toEqual({ faltantes: [], avisos: [] });
   });
 });

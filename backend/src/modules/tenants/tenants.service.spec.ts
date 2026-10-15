@@ -44,6 +44,7 @@ const mockTenant: Tenant = {
   promosAcumulanDescuentos: false,
   horaCorte: 0,
   facturador: 'sistema',
+  emiteBoletaElectronica: false,
   creadoEl: new Date(),
   actualizadoEl: new Date(),
   eliminadoEl: null,

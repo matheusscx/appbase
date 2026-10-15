@@ -229,7 +229,7 @@ export type EvaluacionAnulacion =
 export const MOTIVO_ANULAR_CON_MAQUINA =
   'La venta tiene un documento emitido por la máquina de tarjeta: se revierte con una nota de crédito, no se anula.';
 export const MOTIVO_ANULAR_CON_ENVIADO =
-  'La venta tiene un documento ya enviado al SII: se revierte con una nota de crédito, no se anula.';
+  'La boleta ya se emitió: se revierte con una nota de crédito, no se anula.';
 export const MOTIVO_EXTERNO_SIN_RESPUESTA =
   'Esta venta tiene un documento hecho por fuera: falta decir si ya lo hiciste en tu facturador.';
 export const MOTIVO_EXTERNO_YA_HECHO =
@@ -636,12 +636,13 @@ export class VentaDocumentosService {
    * venta, así que los documentos no cambian entre esta lectura y el descarte.
    *
    * 1. Bloquea un documento de la `maquina` (la máquina ya emitió) o uno del
-   *    `sistema` ya `enviado`. Hoy ningún `sistema` está enviado: no hay envío.
+   *    `sistema` ya `emitido` (la boleta existe en el SII). Un `sistema` `sin_emitir`
+   *    nunca salió: no bloquea y se descarta como el armado.
    * 2. Bloquea un `externo` que ya tiene número: salió del otro facturador, el
    *    documento existe y va por nota de crédito, sin preguntar.
    * 3. Un `externo` sin número se pregunta: sin respuesta, 400 que la pide;
    *    `true`, 400 (va por NC); `false`, anula.
-   * Lo que queda son documentos `sistema` solo armados (se descartan), filas
+   * Lo que queda son documentos `sistema` armados o sin emitir (se descartan), filas
    * `nadie` (se dejan) y los `externo` contestados con "no" (se descartan).
    */
   async evaluarAnulacion(
@@ -667,7 +668,7 @@ export class VentaDocumentosService {
     if (docs.some((d) => d.emisor === 'maquina'))
       return { resultado: 'bloqueada', motivo: MOTIVO_ANULAR_CON_MAQUINA };
     if (
-      docs.some((d) => d.emisor === 'sistema' && d.estado_envio === 'enviado')
+      docs.some((d) => d.emisor === 'sistema' && d.estado_envio === 'emitido')
     )
       return { resultado: 'bloqueada', motivo: MOTIVO_ANULAR_CON_ENVIADO };
 

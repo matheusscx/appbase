@@ -27,6 +27,8 @@ import { loginSegundoTenant } from './helpers/segundo-tenant';
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
 const ADMIN = { email: 'admin.paris@paris.cl', pass: 'admin' };
 const ENCARGADO = { email: 'encargado.salon@paris.cl', pass: 'admin' };
+/** El vendedor/cajero del seed (rol `Vendedor`): opera la caja, no administra el tenant. */
+const CAJERO = { email: 'vendedor@paris.cl', pass: 'admin' };
 const NOMBRE_EMISORA = 'Emisor e2e perfil fiscal';
 const RUT_EMISORA = '77.777.777-7';
 const NOMBRE_SIN_CARGAS = 'Sin cargas e2e perfil fiscal';
@@ -72,8 +74,13 @@ interface PerfilResponse {
     venceEl: string;
   } | null;
   cafs: CafResponse[];
-  faltantes: { codigo: string }[];
+  faltantes: { codigo: string; mensaje: string }[];
   avisos: { codigo: string }[];
+  emisionActiva: boolean;
+}
+interface EmisionError {
+  message: string;
+  faltantes: { codigo: string; mensaje: string }[];
 }
 
 describe('Perfil fiscal del emisor (e2e)', () => {
@@ -140,6 +147,21 @@ describe('Perfil fiscal del emisor (e2e)', () => {
           SET credencial_cifrada = NULL, reemplazado_el = COALESCE(reemplazado_el, now())
         WHERE razon_social_id = $1 AND (credencial_cifrada IS NOT NULL OR reemplazado_el IS NULL)`,
       [razonSocialId],
+    );
+  }
+
+  /** `GET /dte/perfil` como admin, ya con el status mirado. */
+  async function perfilActual(): Promise<PerfilResponse> {
+    const res = await llamar('get', '/api/dte/perfil', token);
+    expect(res.status).toBe(200);
+    return res.body as PerfilResponse;
+  }
+
+  /** El interruptor del tenant vuelve a apagado: otras suites no esperan una emisión encendida. */
+  async function apagarEmision() {
+    await ds.query(
+      `UPDATE tenants SET emite_boleta_electronica = false WHERE tenant_id = $1`,
+      [PARIS_TENANT_ID],
     );
   }
 
@@ -210,6 +232,7 @@ describe('Perfil fiscal del emisor (e2e)', () => {
     try {
       await limpiarCargas();
       await bajarSinCargas();
+      await apagarEmision();
       // No hay una ruta que des-marque la preferida (`PATCH …/preferida` solo marca), y las
       // otras suites no esperan que el tenant tenga una.
       await ds.query(
@@ -247,6 +270,42 @@ describe('Perfil fiscal del emisor (e2e)', () => {
       'SIN_CERTIFICADO',
       'SIN_FOLIOS_39',
     ]);
+  });
+
+  it('PATCH /dte/emision {activa:true} con el perfil incompleto: 400 con la lista de lo que falta, y sigue apagada', async () => {
+    const res = await llamar('patch', '/api/dte/emision', token, {
+      activa: true,
+    });
+    expect(res.status).toBe(400);
+    const cuerpo = res.body as EmisionError;
+    expect(cuerpo.faltantes.map((f) => f.codigo)).toEqual([
+      'SIN_GIRO',
+      'SIN_COMUNA',
+      'SIN_AMBIENTE',
+      'SIN_RESOLUCION',
+      'SIN_CERTIFICADO',
+      'SIN_FOLIOS_39',
+    ]);
+    expect(cuerpo.message).toBe(
+      'Para emitir falta: ' + cuerpo.faltantes.map((f) => f.mensaje).join('; '),
+    );
+
+    expect((await perfilActual()).emisionActiva).toBe(false);
+  });
+
+  it('PATCH /dte/emision rechaza lo que no es un booleano', async () => {
+    for (const malo of [{ activa: 'si' }, { activa: 1 }, {}]) {
+      const res = await llamar('patch', '/api/dte/emision', token, malo);
+      expect({ malo, status: res.status }).toEqual({ malo, status: 400 });
+    }
+  });
+
+  it('PATCH /dte/emision: un cajero recibe 403', async () => {
+    const tokenCajero = await loginComo(CAJERO, PARIS_TENANT_ID);
+    const res = await llamar('patch', '/api/dte/emision', tokenCajero, {
+      activa: false,
+    });
+    expect(res.status).toBe(403);
   });
 
   it('PATCH /dte/perfil: guarda los datos y el GET ya no los pide', async () => {
@@ -716,6 +775,72 @@ describe('Perfil fiscal del emisor (e2e)', () => {
     expect(perfil.status).toBe(200);
     const caf = (perfil.body as PerfilResponse).cafs.find((c) => c.id === id)!;
     expect(caf).toMatchObject({ usados: 1, restantes: 49, borrable: false });
+  });
+
+  describe('el interruptor de la emisión (PATCH /dte/emision)', () => {
+    // Acá el perfil está completo: emisora con giro, comuna, ambiente y resolución, el
+    // certificado vigente y los CAF de los casos de arriba, y el proveedor de `setup-env.ts`.
+    afterEach(apagarEmision);
+
+    it('con el perfil completo: enciende, el GET lo dice, y apagar también anda', async () => {
+      const antes = await perfilActual();
+      expect(antes.faltantes).toEqual([]);
+      expect(antes.emisionActiva).toBe(false);
+
+      const enciende = await llamar('patch', '/api/dte/emision', token, {
+        activa: true,
+      });
+      expect(enciende.status).toBe(200);
+      expect(enciende.body).toEqual({ emisionActiva: true });
+      expect((await perfilActual()).emisionActiva).toBe(true);
+      const [fila]: { emite_boleta_electronica: boolean }[] = await ds.query(
+        `SELECT emite_boleta_electronica FROM tenants WHERE tenant_id = $1`,
+        [PARIS_TENANT_ID],
+      );
+      expect(fila.emite_boleta_electronica).toBe(true);
+
+      const apaga = await llamar('patch', '/api/dte/emision', token, {
+        activa: false,
+      });
+      expect(apaga.status).toBe(200);
+      expect(apaga.body).toEqual({ emisionActiva: false });
+      expect((await perfilActual()).emisionActiva).toBe(false);
+    });
+
+    it('sin el proveedor de software en la configuración: el perfil lo pide y no deja encender, pero sí apagar', async () => {
+      // El `ConfigService` no cachea (`ConfigModule.forRoot` sin `cache`): lee `process.env`
+      // en cada llamada, así que el test puede quitar la variable y devolverla.
+      const rut = process.env.DTE_PROVEEDOR_RUT;
+      delete process.env.DTE_PROVEEDOR_RUT;
+      try {
+        const cuerpo = await perfilActual();
+        expect(cuerpo.faltantes).toEqual([
+          {
+            codigo: 'SIN_PROVEEDOR_SOFTWARE',
+            mensaje:
+              'Falta el proveedor de software en la configuración del sistema',
+          },
+        ]);
+
+        const enciende = await llamar('patch', '/api/dte/emision', token, {
+          activa: true,
+        });
+        expect(enciende.status).toBe(400);
+        expect((enciende.body as EmisionError).message).toBe(
+          'Para emitir falta: Falta el proveedor de software en la configuración del sistema',
+        );
+
+        // Apagar no pregunta nada: siempre se puede parar.
+        const apaga = await llamar('patch', '/api/dte/emision', token, {
+          activa: false,
+        });
+        expect(apaga.status).toBe(200);
+      } finally {
+        if (rut === undefined) delete process.env.DTE_PROVEEDOR_RUT;
+        else process.env.DTE_PROVEEDOR_RUT = rut;
+      }
+      expect((await perfilActual()).faltantes).toEqual([]);
+    });
   });
 
   describe('una razón social con folios o certificado no cambia de RUT ni se borra', () => {

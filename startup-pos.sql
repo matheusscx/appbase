@@ -176,6 +176,9 @@ CREATE TABLE "metodos_pago" (
   -- la línea de efectivo del arqueo (fondo + manuales + vueltos). Ver caja_arqueo_medio
   -- y docs/features/gestion-cajas.md § Arqueo de caja multi-medio.
   "es_efectivo"    BOOLEAN     NOT NULL DEFAULT false,
+  -- Cómo se declara en la boleta electrónica (campo 10 del SII): 1 efectivo, 2 electrónico
+  -- (tarjetas), 3 transferencia. Nulo = sin equivalencia cargada.
+  "medio_pago_sii" SMALLINT,
   "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ,
   "eliminado_el"   TIMESTAMPTZ
@@ -260,6 +263,9 @@ CREATE TABLE "tenants" (
   -- facturador (el del SII, su software contable). Es la otra mitad de
   -- "tenant_metodo_pago"."emisor".
   "facturador"         TEXT        NOT NULL DEFAULT 'sistema',
+  -- Interruptor de la boleta electrónica por venta: encendido, cada venta con documento del
+  -- sistema emite su boleta al SII. Se enciende por PATCH /dte/emision, con el perfil completo.
+  "emite_boleta_electronica" BOOLEAN NOT NULL DEFAULT false,
   "creado_el"          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   "actualizado_el"     TIMESTAMPTZ,
   "eliminado_el"       TIMESTAMPTZ,
@@ -2173,7 +2179,13 @@ CREATE TABLE "venta_documentos" (
   "tipo_documento_id"         UUID          REFERENCES "tipos_documento_tributario" ("tipo_documento_id"),
   "clase_maquina"             TEXT,
   "numero"                    TEXT,
+  -- Con 'sistema': 'armado' (nadie lo emite), 'sin_emitir' (debía emitirse y falló; se reintenta)
+  -- o 'emitido' (la boleta existe: "dte_documento_id").
   "estado_envio"              TEXT,
+  -- La boleta electrónica emitida ("dte_documentos"; sin FK declarada, como "pago_id" de arriba).
+  "dte_documento_id"          UUID,
+  "emision_error_codigo"      TEXT,
+  "emision_error"             TEXT,
   "monto"                     NUMERIC(18,4) NOT NULL,
   "monto_afecto"              NUMERIC(18,4),
   "monto_exento"              NUMERIC(18,4),
@@ -2189,12 +2201,16 @@ CREATE TABLE "venta_documentos" (
   "eliminado_el"              TIMESTAMPTZ,
   CONSTRAINT chk_venta_documentos_emisor CHECK ("emisor" IN ('sistema','maquina','nadie','externo')),
   CONSTRAINT chk_venta_documentos_clase_maquina CHECK ("clase_maquina" IN ('voucher','boleta')),
-  CONSTRAINT chk_venta_documentos_estado_envio CHECK ("estado_envio" IN ('armado','enviado')),
+  CONSTRAINT chk_venta_documentos_estado_envio CHECK ("estado_envio" IN ('armado','sin_emitir','emitido')),
+  CONSTRAINT chk_venta_documentos_emitido CHECK (("estado_envio" IS NOT DISTINCT FROM 'emitido') = ("dte_documento_id" IS NOT NULL)),
   CONSTRAINT chk_venta_documentos_descarte CHECK ("descarte" IN ('armado_sin_enviar','afirmado_no_hecho'))
 );
 
 CREATE INDEX "idx_venta_documentos_venta" ON "venta_documentos" ("venta_id");
 CREATE INDEX "idx_venta_documentos_corregido" ON "venta_documentos" ("documento_corregido_id");
+-- Las boletas por emitir de un tenant, en el orden en que se armaron (la lista del botón).
+CREATE INDEX "idx_venta_documentos_sin_emitir" ON "venta_documentos" ("tenant_id", "creado_el")
+  WHERE "estado_envio" = 'sin_emitir' AND "descarte" IS NULL AND "eliminado_el" IS NULL;
 
 -- Cada vez que alguien con Ventas:Anular borra el número de un documento hecho por
 -- fuera ('externo') queda UNA fila acá: qué decía, quién lo borró y cuándo (creado_el).

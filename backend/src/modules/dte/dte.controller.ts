@@ -15,6 +15,7 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { TenantGuard } from '../../common/guards/tenant.guard';
 import { TenantAdminGuard } from '../../common/guards/tenant-admin.guard';
 import { ActualizarPerfilDto } from './dto/actualizar-perfil.dto';
+import { CambiarEmisionDto } from './dto/cambiar-emision.dto';
 import { SubirCafDto } from './dto/subir-caf.dto';
 import { SubirCertificadoDto } from './dto/subir-certificado.dto';
 import { PerfilFiscalService } from './perfil-fiscal.service';
@@ -38,6 +39,12 @@ export class DteController {
   actualizar(@Req() req: Request, @Body() dto: ActualizarPerfilDto) {
     const user = req.user as { tenantId: string };
     return this.perfil.actualizar(user.tenantId, dto);
+  }
+
+  @Patch('emision')
+  cambiarEmision(@Req() req: Request, @Body() dto: CambiarEmisionDto) {
+    const user = req.user as { tenantId: string };
+    return this.perfil.cambiarEmision(user.tenantId, dto.activa, new Date());
   }
 
   @Post('certificado')

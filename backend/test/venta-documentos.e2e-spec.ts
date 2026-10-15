@@ -1340,8 +1340,8 @@ describe('Documentos de la venta (e2e)', () => {
     describe('lo que ya emitió alguien bloquea', () => {
       // Hoy no hay forma de llegar a esto por la API: una venta con un documento
       // de la máquina tiene pagos, y los pagos ya impiden anular, y ningún
-      // documento del sistema está enviado porque no hay envío (llegará con la
-      // emisión, ADR-010). Se arma el dato por SQL para fijar que la regla lee la
+      // documento del sistema está emitido en este flujo de prueba (la emisión corre
+      // aparte de la venta). Se arma el dato por SQL para fijar que la regla lee la
       // tabla real. El `PATCH /documentos/:id` no lo produce: solo anota el número
       // de un documento que ya existe.
       const insertar = async (
@@ -1371,16 +1371,54 @@ describe('Documentos de la venta (e2e)', () => {
         ).toBe(true);
       });
 
-      it('un documento del sistema ya enviado: 400, y no se anula', async () => {
+      describe('el CHECK chk_venta_documentos_emitido ata `emitido` a su boleta', () => {
+        // INSERT directo sobre una venta que el spec ya crea: si la base lo rechaza (lo que se
+        // espera) no queda ninguna fila. Se mira también el nombre de la restricción: un 23514
+        // de otro CHECK no probaría nada.
+        const rechazado = async (
+          estadoEnvio: string | null,
+          dteDocumentoId: string | null,
+        ) => {
+          const venta = await vender({ lineas: lineas100k() });
+          await expect(
+            ds.query(
+              `INSERT INTO venta_documentos
+                 (tenant_id, venta_id, emisor, estado_envio, dte_documento_id, monto)
+               VALUES ($1, $2, 'sistema', $3, $4, 1000)`,
+              [TENANT_ID, venta.id, estadoEnvio, dteDocumentoId],
+            ),
+          ).rejects.toMatchObject({
+            code: '23514',
+            constraint: 'chk_venta_documentos_emitido',
+          });
+        };
+
+        it('`emitido` sin boleta: rechazado', async () => {
+          await rechazado('emitido', null);
+        });
+
+        it('`armado` con una boleta: rechazado', async () => {
+          await rechazado('armado', '00000000-0000-4000-8000-000000000001');
+        });
+
+        it('sin estado pero con una boleta: rechazado (un `=` en vez de `IS NOT DISTINCT FROM` lo dejaría pasar)', async () => {
+          await rechazado(null, '00000000-0000-4000-8000-000000000001');
+        });
+      });
+
+      it('una boleta del sistema ya emitida: 400, y no se anula', async () => {
         const venta = await vender({ lineas: lineas100k() });
+        // `emitido` exige su boleta (CHECK `chk_venta_documentos_emitido`): un uuid cualquiera.
         await ds.query(
-          `UPDATE venta_documentos SET estado_envio = 'enviado' WHERE venta_id = $1`,
+          `UPDATE venta_documentos
+              SET estado_envio = 'emitido', dte_documento_id = gen_random_uuid()
+            WHERE venta_id = $1`,
           [venta.id],
         );
         const res = await anular(venta.id);
         expect(res.status).toBe(400);
         expect((res.body as { message: string }).message).toMatch(
-          /enviado al SII.*nota de crédito/,
+          /La boleta ya se emitió.*nota de crédito/,
         );
         expect(await estadoDe(venta.id)).toBe('pendiente');
       });

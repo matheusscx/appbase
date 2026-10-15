@@ -14,8 +14,12 @@ import type { EmisorMedio } from '../../metodos-pago/entities/tenant-metodo-pago
 export type EmisorDocumento = EmisorMedio | 'externo';
 /** Lo que la máquina de tarjeta emitió: el voucher o su propia boleta. */
 export type ClaseDocumentoMaquina = 'voucher' | 'boleta';
-/** `'armado'` es lo único que escribe hoy el sistema; `'enviado'` queda para la emisión (ADR-010). */
-export type EstadoEnvio = 'armado' | 'enviado';
+/**
+ * `'armado'`: el sistema armó el documento y nadie lo emite (interruptor apagado).
+ * `'sin_emitir'`: debía emitirse y falló; queda en la lista para reintentar.
+ * `'emitido'`: la boleta electrónica existe (`dte_documento_id`).
+ */
+export type EstadoEnvio = 'armado' | 'sin_emitir' | 'emitido';
 /** Por qué un documento dejó de valer al anular la venta (E8, E10). */
 export type Descarte = 'armado_sin_enviar' | 'afirmado_no_hecho';
 
@@ -36,6 +40,10 @@ export type Descarte = 'armado_sin_enviar' | 'afirmado_no_hecho';
  */
 @Index('idx_venta_documentos_venta', ['ventaId'])
 @Index('idx_venta_documentos_corregido', ['documentoCorregidoId'])
+// Las boletas por emitir de un tenant, en el orden en que se armaron: la lista del botón.
+@Index('idx_venta_documentos_sin_emitir', ['tenantId', 'creadoEl'], {
+  where: `"estado_envio" = 'sin_emitir' AND "descarte" IS NULL AND "eliminado_el" IS NULL`,
+})
 @Entity('venta_documentos')
 @Check(
   'chk_venta_documentos_emisor',
@@ -47,7 +55,13 @@ export type Descarte = 'armado_sin_enviar' | 'afirmado_no_hecho';
 )
 @Check(
   'chk_venta_documentos_estado_envio',
-  `"estado_envio" IN ('armado','enviado')`,
+  `"estado_envio" IN ('armado','sin_emitir','emitido')`,
+)
+// Emitido si y solo si apunta a su boleta. `IS NOT DISTINCT FROM`: con `estado_envio` nulo
+// (los documentos que no son del sistema) un `=` daría NULL y el CHECK lo dejaría pasar sin mirar.
+@Check(
+  'chk_venta_documentos_emitido',
+  `("estado_envio" IS NOT DISTINCT FROM 'emitido') = ("dte_documento_id" IS NOT NULL)`,
 )
 @Check(
   'chk_venta_documentos_descarte',
@@ -78,9 +92,21 @@ export class VentaDocumento {
   @Column({ type: 'text', nullable: true })
   numero: string | null;
 
-  /** Con `sistema`: `'armado'`. */
+  /** Con `sistema`: `'armado'`, `'sin_emitir'` o `'emitido'`. */
   @Column({ name: 'estado_envio', type: 'text', nullable: true })
   estadoEnvio: EstadoEnvio | null;
+
+  /** La boleta electrónica emitida (`dte_documentos`). Solo con `estado_envio = 'emitido'`. */
+  @Column({ name: 'dte_documento_id', type: 'uuid', nullable: true })
+  dteDocumentoId: string | null;
+
+  /** Por qué no se pudo emitir (código de máquina). Solo con `'sin_emitir'`. */
+  @Column({ name: 'emision_error_codigo', type: 'text', nullable: true })
+  emisionErrorCodigo: string | null;
+
+  /** Por qué no se pudo emitir, en palabras para el local. Solo con `'sin_emitir'`. */
+  @Column({ name: 'emision_error', type: 'text', nullable: true })
+  emisionError: string | null;
 
   /** Lo que cubre, en moneda oficial, sin propina ni vuelto. */
   @Column({ type: 'numeric', precision: 18, scale: 4 })

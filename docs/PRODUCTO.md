@@ -1244,7 +1244,7 @@ salones y online; sin boleta sembrada, sin tipo y sin documentos). Pendiente:
 - `cancelada` — anulada. **Solo desde `pendiente`, sin pagos, sin ninguna nota de crédito y
   mirando lo emitido, no la etiqueta** (`POST /ventas/:id/anular`, permiso propio `Ventas/Anular`, motivo obligatorio):
   una boleta del sistema solo armada no bloquea y queda descartada; un documento de la máquina o
-  uno ya enviado al SII bloquean; uno hecho por fuera se pregunta ("¿ya lo hiciste en tu
+  una boleta ya emitida bloquean; uno hecho por fuera se pregunta ("¿ya lo hiciste en tu
   facturador?"). Una venta cobrada no se anula: se revierte con nota de crédito, y lo que ya se
   emitió tampoco, porque el SII no permite anular un DTE aceptado (una pendiente con el
   documento ya hecho se revierte con la nota "no vuelve plata"). Una venta que **ya tiene una nota**

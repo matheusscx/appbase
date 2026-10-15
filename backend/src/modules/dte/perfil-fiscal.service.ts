@@ -3,17 +3,18 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { unwrap } from '../../common/utils/pg-returning.util';
-import { normalizarRut } from '../../common/utils/rut.util';
+import { normalizarRut, rutValido } from '../../common/utils/rut.util';
 import { RazonSocial } from '../tenants/entities/razon-social.entity';
 import type { ActualizarPerfilDto } from './dto/actualizar-perfil.dto';
 import type { SubirCafDto } from './dto/subir-caf.dto';
 import type { SubirCertificadoDto } from './dto/subir-certificado.dto';
 import { CifradoDteService } from './cifrado-dte.service';
-import { DteError, type TipoBoleta } from './dte.types';
+import { DteError, type ProveedorSoftware, type TipoBoleta } from './dte.types';
 import { leerCaf, type CafLeido } from './caf';
 import type { AmbienteSii } from './entities/dte-caf.entity';
 import { leerCertificado, type CertificadoLeido } from './firma';
@@ -54,6 +55,8 @@ export interface PerfilFiscal {
   cafs: CafListado[];
   faltantes: Observacion<CodigoFaltante>[];
   avisos: Observacion<CodigoAviso>[];
+  /** El interruptor del tenant: ¿cada venta emite su boleta? Se enciende con `cambiarEmision`. */
+  emisionActiva: boolean;
 }
 
 interface FilaEmisora {
@@ -102,6 +105,7 @@ export class PerfilFiscalService {
   constructor(
     private readonly db: Db,
     private readonly cifrado: CifradoDteService,
+    private readonly config: ConfigService,
     @InjectRepository(RazonSocial)
     private readonly razonSocialRepo: Repository<RazonSocial>,
   ) {}
@@ -141,7 +145,25 @@ export class PerfilFiscalService {
     };
   }
 
-  /** Tres consultas fijas (emisora, certificado vigente, CAF), sin importar cuántos CAF haya. */
+  /**
+   * La empresa dueña del software que firma `RutProvSW`/`RznSocProvSW` en cada boleta: es una sola
+   * para todo el sistema (la que mantiene el SaaS), no del tenant, y vive en la configuración. Null
+   * si falta alguno de los dos datos o el RUT no es válido. Se lee en cada llamada: el
+   * `ConfigService` sin caché consulta `process.env` en el momento.
+   */
+  proveedorSoftware(): ProveedorSoftware | null {
+    const rut = this.config.get<string>('DTE_PROVEEDOR_RUT')?.trim();
+    const razonSocial = this.config
+      .get<string>('DTE_PROVEEDOR_RAZON_SOCIAL')
+      ?.trim();
+    if (!rut || !razonSocial || !rutValido(rut)) return null;
+    return { rut: normalizarRut(rut), razonSocial };
+  }
+
+  /**
+   * Cuatro consultas fijas (emisora, certificado vigente, CAF e interruptor del tenant), sin
+   * importar cuántos CAF haya. Sin emisora son dos: la emisora y el interruptor.
+   */
   async obtener(tenantId: string, ahora: Date): Promise<PerfilFiscal> {
     const emisor = await this.emisora(tenantId);
 
@@ -185,6 +207,14 @@ export class PerfilFiscalService {
       certificado,
       cafs,
       ahora,
+      this.proveedorSoftware(),
+    );
+    const [tenant] = await this.db.query<
+      { emite_boleta_electronica: boolean }[]
+    >(
+      `SELECT emite_boleta_electronica FROM tenants
+        WHERE tenant_id = $1 AND eliminado_el IS NULL`,
+      [tenantId],
     );
     return {
       emisor,
@@ -195,7 +225,35 @@ export class PerfilFiscalService {
       cafs,
       faltantes,
       avisos,
+      emisionActiva: tenant?.emite_boleta_electronica ?? false,
     };
+  }
+
+  /**
+   * Enciende o apaga la emisión de boletas por venta. Encender exige un perfil sin faltantes
+   * (emisor, certificado, folios y proveedor): un interruptor prendido sobre un perfil incompleto
+   * solo llenaría la lista de boletas sin emitir. Apagar no pregunta nada: siempre se puede parar.
+   */
+  async cambiarEmision(
+    tenantId: string,
+    activa: boolean,
+    ahora: Date,
+  ): Promise<{ emisionActiva: boolean }> {
+    if (activa) {
+      const { faltantes } = await this.obtener(tenantId, ahora);
+      if (faltantes.length > 0)
+        throw new BadRequestException({
+          message:
+            'Para emitir falta: ' + faltantes.map((f) => f.mensaje).join('; '),
+          faltantes,
+        });
+    }
+    await this.db.query(
+      `UPDATE tenants SET emite_boleta_electronica = $2, actualizado_el = now()
+        WHERE tenant_id = $1 AND eliminado_el IS NULL`,
+      [tenantId, activa],
+    );
+    return { emisionActiva: activa };
   }
 
   /** Escribe en la razón social emisora solo lo que vino; devuelve eso mismo (sin releer). */

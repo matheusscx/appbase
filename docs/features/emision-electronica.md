@@ -363,14 +363,16 @@ certificado vigente y arma `EmisorBoleta` y la carátula (el receptor del envío
 `GET /dte/perfil` devuelve todo lo que la pantalla muestra y el dato que el aviso al cajero va a
 necesitar. La ruta es solo del admin del tenant: un cajero recibe 403, así que ese aviso (subproyecto 4)
 necesita su propia ruta o su propio guard.
-Son tres consultas fijas (emisor, certificado vigente, CAF), sin importar cuántos CAF haya.
+Son cuatro consultas fijas (emisor, certificado vigente, CAF e interruptor del tenant), sin importar
+cuántos CAF haya.
 
 - **Emisor** (`null` si no hay una preferida y habilitada), **certificado vigente** (firmante, RUT,
   `venceEl`) y **CAF** (tipo, rango, usados, restantes, ambiente, fecha, y `borrable`).
 - `faltantes`, lo que impide emitir (`evaluarPerfil`, pura): sin emisor, RUT inválido, sin giro,
   comuna, dirección, ambiente o resolución, texto fuera de ISO-8859-1 o más largo de lo que admite
   el SII (nombre 100, giro 80, comuna 20, dirección 70), sin certificado o vencido, y sin folios
-  de boleta (39) **del ambiente vigente**. Esos límites se validan acá y no en el CRUD de razones
+  de boleta (39) **del ambiente vigente**, y sin **proveedor de software** (`SIN_PROVEEDOR_SOFTWARE`,
+  abajo). Esos límites se validan acá y no en el CRUD de razones
   sociales: una que no emite sigue aceptando 255.
 - `avisos`, lo que conviene mirar ya: menos de **100** folios de un tipo (se suman todos sus CAF
   del ambiente vigente) o certificado que vence en menos de **30** días. Son constantes del
@@ -379,6 +381,21 @@ Son tres consultas fijas (emisor, certificado vigente, CAF), sin importar cuánt
 - **Cambiar de ambiente** con CAF cargados no los borra: dejan de servir (el `tomarFolio` los
   ignora) y la pantalla los muestra como de otro ambiente. Es el paso normal al terminar la
   certificación.
+
+### El interruptor y el proveedor de software
+
+- **`emisionActiva`** (en `GET /dte/perfil`) es `tenants.emite_boleta_electronica`: con él encendido,
+  cada venta con documento del sistema emite su boleta. `PATCH /dte/emision { activa }`
+  (`TenantAdminGuard`) lo cambia; **encender** exige un perfil sin faltantes (400 con *"Para emitir
+  falta: …"* y la lista `faltantes`), **apagar** no pregunta nada. Nace apagado.
+- **El proveedor de software** (`RutProvSW` / `RznSocProvSW` de cada boleta) es la empresa dueña del
+  SaaS, una sola para todos los tenants: no está en la base sino en `DTE_PROVEEDOR_RUT` y
+  `DTE_PROVEEDOR_RAZON_SOCIAL`. `PerfilFiscalService.proveedorSoftware()` las lee en cada llamada
+  (el RUT normalizado) y devuelve `null` si falta alguna o el RUT no es válido; entonces el perfil
+  trae `SIN_PROVEEDOR_SOFTWARE`. En `.env.example`, compose y e2e valen datos de prueba; **en
+  producción el dueño carga los reales en Railway**.
+- **Medio de pago:** `metodos_pago.medio_pago_sii` (campo 10 del formato: efectivo 1, tarjetas 2,
+  transferencia 3) lo siembra el seeder, también en las bases que ya tenían los métodos.
 
 ### Permisos y pantalla
 

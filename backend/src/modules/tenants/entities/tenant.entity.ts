@@ -94,6 +94,14 @@ export class Tenant {
   @Column({ type: 'text', default: 'sistema' })
   facturador: Facturador;
 
+  /**
+   * Interruptor de la boleta electrónica por venta: encendido, cada venta con documento del
+   * sistema emite su boleta al SII. Lo enciende el admin (`PATCH /dte/emision`) y solo si el
+   * perfil fiscal está completo; apagado, el sistema arma el documento y nada más.
+   */
+  @Column({ name: 'emite_boleta_electronica', type: 'boolean', default: false })
+  emiteBoletaElectronica: boolean;
+
   @Column({ name: 'arqueo_ciego', type: 'boolean', default: false })
   arqueoCiego: boolean;
 

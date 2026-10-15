@@ -3210,21 +3210,25 @@ export class SeederService implements OnApplicationBootstrap {
         nombre: 'Efectivo',
         abreviatura: 'EFE',
         esEfectivo: true,
+        medioPagoSii: 1,
       },
       {
         metodoPagoId: '550e8400-e29b-41d4-a716-446655440106',
         nombre: 'Tarjeta de débito',
         abreviatura: 'TDB',
+        medioPagoSii: 2,
       },
       {
         metodoPagoId: '550e8400-e29b-41d4-a716-446655440107',
         nombre: 'Tarjeta de crédito',
         abreviatura: 'TDC',
+        medioPagoSii: 2,
       },
       {
         metodoPagoId: '550e8400-e29b-41d4-a716-446655440108',
         nombre: 'Transferencia bancaria',
         abreviatura: 'TRF',
+        medioPagoSii: 3,
       },
     ];
 
@@ -3234,6 +3238,13 @@ export class SeederService implements OnApplicationBootstrap {
       });
       if (!exists) {
         await this.metodoPagoRepo.save(this.metodoPagoRepo.create(data));
+      } else {
+        // Las bases que ya tenían el método no recibieron la columna nueva (boleta electrónica):
+        // se completa acá, idempotente.
+        await this.metodoPagoRepo.update(
+          { metodoPagoId: data.metodoPagoId },
+          { medioPagoSii: data.medioPagoSii },
+        );
       }
     }
 
