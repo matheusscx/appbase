@@ -25,10 +25,12 @@ AskUserQuestion con el costo de cada opción, y las tres secciones de diseño la
 | Quién emite las pendientes | **El admin, con un botón** | Automático al arreglarse el perfil: un reintento que nadie ve (la app avisa y el usuario reintenta) |
 | Nombres de ítem fuera de norma | **Se validan al crear y al editar**; no hay datos productivos, así que no hace falta otra guarda | Que el interruptor no prenda con nombres malos; usar el nombre de hoy del catálogo al emitir |
 | Dónde se emite | **Al final de la transacción de la venta, detrás de un savepoint** (enfoque A) | B: emitir en una segunda transacción (cuatro caminos que deben acordarse, y una ventana entre las dos); C: siempre con un job (el ticket nunca lleva el folio) |
+| La boleta de una venta que un descuento deja en $0 (decidida después de escribir la spec, mientras se armaba el plan) | **Se emite por $0, con el descuento**: el motor acepta `MntTotal` 0 solo si un descuento lo explica (Res. Ex. SII 60/2023; decisión del 2026-10-04 en ADR-028). El XSD lo admite (`MontoType` es `nonNegativeInteger`) | No emitirla y dejarla como documento interno: contradice la Res. 60/2023 |
 
-### Para confirmar en la revisión de esta spec
+### Confirmado en la revisión de esta spec
 
-Dos puntos que el diseño necesitaba y no se preguntaron; los decidió el agente y van marcados:
+Dos puntos que el diseño necesitaba y no se preguntaron. Los decidió el agente y el owner los
+aprobó con la spec:
 
 - **El medio de pago de una boleta de más de 135 UF con varios pagos** (§ 4.3): el SII admite uno
   solo, y va el del pago de mayor monto de esa boleta.
@@ -155,26 +157,39 @@ Corre siempre dentro de una transacción (falla si no hay una activa, como `toma
 - **Fecha (`FchEmis`):** la fecha de la venta (`ventas.creado_el`) en la hora de Chile, **también
   cuando se emite después**. El `ahora` de la firma es el del momento de firmar.
 - **El documento cubre la venta entera** (`monto = total_final`): una línea por `venta_detalles`,
-  con su `descripcion` congelada, cantidad, precio unitario y total; las reglas de nivel venta
-  (`ventas_descuentos` / `ventas_recargos` con `detalle_id` nulo) como `DscRcgGlobal`, **salvo que
-  `venta_detalles` ya las traiga repartidas en sus totales**: la tarea de `datosBoletaDeVenta` lo
-  mide primero contra una venta real, y el motor lo verifica igual (`TOTALES_NO_CIERRAN`). Los montos
-  (`neto`, `exento`, `iva`, `total`) son los baldes congelados del documento.
+  con su `descripcion` congelada. Los descuentos y recargos de nivel venta **ya vienen repartidos en
+  cada línea** (`venta_detalles.ajuste_venta`, con la identidad `subtotal − descuento_aplicado +
+  recargo_aplicado + ajuste_venta + impuesto_aplicado = total_linea`), así que la boleta no lleva
+  `DscRcgGlobal`. Por línea, con IVA incluido:
+  - `MontoItem` = `total_linea`;
+  - `QtyItem` = `cantidad`, y `PrcItem` = `subtotal / cantidad × (1 + tasa)`, a 6 decimales, donde la
+    tasa es la suma de los `porcentaje_aplicado` de los `ventas_impuestos` de esa línea con impuesto
+    de tipo `iva` (0 en una exenta);
+  - la diferencia `PrcItem × QtyItem − MontoItem`, redondeada a pesos, va como `DescuentoMonto` si es
+    positiva o como `RecargoMonto` si es negativa. Así la igualdad de la regla 2 del motor se cumple
+    por construcción, con menos de un peso de diferencia;
+  - una línea con `subtotal` 0 sale como la línea gratis del motor (sin `PrcItem`).
+
+  Los montos (`neto`, `exento`, `iva`, `total`) son los baldes congelados del documento.
+- **La venta que un descuento deja en $0** sale con la línea a precio de lista y su descuento, y
+  `MntTotal` 0. El motor la acepta solo si la suma de los `DescuentoMonto` y de los descuentos
+  globales es mayor que cero; un total 0 sin descuento sigue siendo `TOTAL_NO_POSITIVO`.
 - **El documento cubre una parte** (pago mixto con la máquina): **una línea "Saldo de la venta"**
   por `monto_afecto + monto_impuestos` (afecta), y otra "Saldo de la venta (exento)" por
   `monto_exento` si es mayor que cero. Sin cantidad ni precio, que es lo que el motor admite
   (regla 2: una línea con solo el monto no se verifica). Los montos son los baldes que el documento
-  ya congeló a prorrata (ADR-028). *(El texto, a confirmar: § 0.)*
+  ya congeló a prorrata (ADR-028). *(El texto, confirmado: § 0.)*
 - **Receptor:** el `venta_customer` si tiene RUT; si no, el genérico (lo pone el motor).
-- **Impuestos adicionales:** la suma congelada va en `montos.adicionales`; mayor que cero da
-  `IMPUESTO_ADICIONAL_NO_SOPORTADO` (decidido: el ILA es costo).
+- **Impuestos adicionales:** la suma de los `ventas_impuestos` de la venta cuyo impuesto no es de tipo
+  `iva` va en `montos.adicionales`. Mayor que cero da `IMPUESTO_ADICIONAL_NO_SOPORTADO` (decidido: el
+  ILA es costo).
 
 ### 4.3 Más de 135 UF
 
 `superaUmbralIdentificacion` sale de comparar `total_final` contra el umbral que ya usa la venta
-(`umbral_identidad_pagador`, misma regla y mismo año). La venta ya exige nombre y RUT; la boleta
+(`umbral_identidad_pagador`, misma regla, con el año **de la venta** y no el de hoy: una boleta emitida en enero por una venta de diciembre usa el umbral de diciembre). La venta ya exige nombre y RUT; la boleta
 lleva además `MedioPago`: **el `medio_pago_sii` del pago de mayor monto aplicado a esa boleta**
-(empate: el primero registrado). *(A confirmar: § 0.)*
+(empate: el primero registrado). *(Confirmado: § 0.)*
 
 Un documento parcial sobre 135 UF sale con la línea de saldo, y el SII pide ahí la descripción de
 los productos. Hoy eso es una venta de más de ~$5,3 millones pagada en parte con la máquina; se
@@ -268,9 +283,15 @@ nuevo y salta.
 
 ## 7. El ticket
 
-`BoletaVenta` suma `boletaElectronica: { tipo, folio, ambiente, resolucion: { numero, fecha } } | null`
-y `boletaSinEmitir: boolean`. Lo arma el servidor (`armarBoleta`), así que el cobro y la
-reimpresión salen iguales.
+`BoletaVenta` suma `boletaElectronica: { tipo, folio, monto, cubreTodo, ambiente, resolucion:
+{ numero, fecha }, emisor: { rut, razonSocial, giro, direccion, comuna } } | null` y
+`boletaSinEmitir: { mensaje } | null`. Lo arma el servidor (`armarBoleta`), así que el cobro y la
+reimpresión salen iguales. El emisor del papel es el de la boleta (la razón social de su CAF), no
+la preferida de hoy.
+
+- **Pago mixto** (`cubreTodo: false`): el papel sigue listando la venta entera, como hoy, porque es
+  lo que el cliente consumió. Pero el bloque de la boleta dice *"BOLETA ELECTRÓNICA N° 1234 por
+  $60.000 (saldo de la venta)"*, para que no se lea como una boleta por el total.
 
 - **Emitida:** se enciende la rama `BOLETA ELECTRÓNICA` que ya existe, apagada, en
   `buildBoletaTicket`: arriba *"BOLETA ELECTRÓNICA N° 1234"* (o *"BOLETA EXENTA ELECTRÓNICA"*), y al
@@ -337,6 +358,7 @@ es de admin y el cajero recibe 403). Devuelve:
 - `buildBoletaTicket`: emitida (39 y 41), certificación y sin emitir.
 
 **e2e contra Postgres:**
+- Una venta que un descuento deja en $0: sale la boleta por $0 con la línea y su descuento.
 - Interruptor prendido: la venta del POS sale con folio; `dte_documentos` queda `pendiente`; el
   documento `emitido` con `dte_documento_id`; la respuesta trae el folio.
 - Interruptor apagado: `armado`, `dte_documentos` vacío.
