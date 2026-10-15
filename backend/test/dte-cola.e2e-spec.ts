@@ -19,6 +19,7 @@ import { ColaDteService } from '../src/modules/dte/cola-dte.service';
 import { DteError } from '../src/modules/dte/dte.types';
 import { emitirBoleta } from '../src/modules/dte/envio-boleta';
 import { FoliosService } from '../src/modules/dte/folios.service';
+import { ConsultarEnviosJob } from '../src/modules/dte/jobs/consultar-envios.job';
 import { EnviarBoletasJob } from '../src/modules/dte/jobs/enviar-boletas.job';
 import { SiiBoletaCliente } from '../src/modules/dte/sii-boleta.cliente';
 
@@ -101,6 +102,7 @@ describe('Cola de envío al SII (e2e)', () => {
   let desde: Date;
   let falso: SiiFalso;
   let job: EnviarBoletasJob;
+  let consulta: ConsultarEnviosJob;
   let cliente: SiiBoletaCliente;
   const urlsAntes: Record<string, string | undefined> = {};
 
@@ -342,11 +344,24 @@ describe('Cola de envío al SII (e2e)', () => {
     [...sobre.matchAll(/<Folio>(\d+)<\/Folio>/g)].map((m) => Number(m[1]));
   const foliosEnviados = () => sobres().flatMap(foliosDe);
 
-  const ejecucionesDelJob = async () => {
+  const ejecucionesDelJob = async (nombre = 'enviar-boletas') => {
     const [{ n }] = await ds.query<{ n: number }[]>(
-      `SELECT count(*)::int AS n FROM cron_ejecuciones WHERE job = 'enviar-boletas'`,
+      `SELECT count(*)::int AS n FROM cron_ejecuciones WHERE job = $1`,
+      [nombre],
     );
     return n;
+  };
+
+  /** Corre `fn` con los jobs automáticos encendidos o apagados, y deja el valor como estaba. */
+  const conAutomatica = async (valor: string, fn: () => Promise<void>) => {
+    const antes = process.env.DTE_COLA_AUTOMATICA;
+    process.env.DTE_COLA_AUTOMATICA = valor;
+    try {
+      await fn();
+    } finally {
+      if (antes === undefined) delete process.env.DTE_COLA_AUTOMATICA;
+      else process.env.DTE_COLA_AUTOMATICA = antes;
+    }
   };
 
   /** La pausa por límite del SII es del cliente, que es uno solo en la app: se limpia entre tests. */
@@ -371,6 +386,7 @@ describe('Cola de envío al SII (e2e)', () => {
     folios = app.get(FoliosService);
     cola = app.get(ColaDteService);
     job = app.get(EnviarBoletasJob);
+    consulta = app.get(ConsultarEnviosJob);
     cliente = app.get(SiiBoletaCliente);
 
     token = await loginParis();
@@ -1003,17 +1019,6 @@ describe('Cola de envío al SII (e2e)', () => {
     });
 
     describe('el tick', () => {
-      const conAutomatica = async (valor: string, fn: () => Promise<void>) => {
-        const antes = process.env.DTE_COLA_AUTOMATICA;
-        process.env.DTE_COLA_AUTOMATICA = valor;
-        try {
-          await fn();
-        } finally {
-          if (antes === undefined) delete process.env.DTE_COLA_AUTOMATICA;
-          else process.env.DTE_COLA_AUTOMATICA = antes;
-        }
-      };
-
       it('apagado (DTE_COLA_AUTOMATICA=false): con trabajo pendiente no manda ni escribe en cron_ejecuciones', async () => {
         await reiniciar();
         await vender(2);
@@ -1093,6 +1098,531 @@ describe('Cola de envío al SII (e2e)', () => {
         expect(ultima.estado).toBe('ok');
         expect(ultima.detalle).toContain('1 sobres enviados');
         expect(foliosEnviados()).toEqual([4007, 4008]);
+      });
+    });
+  });
+
+  describe('consulta al SII (ConsultarEnviosJob)', () => {
+    /** La respuesta de la consulta del envío, con la forma del OpenAPI. */
+    const respuestaConsulta = (datos: Record<string, unknown>) => ({
+      headers: { 'content-type': 'application/json' },
+      cuerpo: JSON.stringify({
+        rut_emisor: RUT_SII,
+        rut_envia: '11111111-1',
+        trackid: 1014,
+        fecha_recepcion: '2026-10-14 10:00:00',
+        ...datos,
+      }),
+    });
+
+    /** Vende `n` boletas, las manda (trackid 1014) y deja la consulta del sobre vencida. */
+    async function enviadas(n: number) {
+      await reiniciar();
+      await vender(n);
+      await envejecer();
+      await job.enviarLotes();
+      await consultaVencida();
+      return (await envios())[0];
+    }
+
+    // El SII pide esperar 10 minutos tras el envío: para no esperarlos se corre
+    // `consultar_desde` al pasado por SQL (es el reloj de la base, y no hay otra forma).
+    const consultaVencida = () =>
+      ds.query(
+        `UPDATE dte_envios SET consultar_desde = now() - interval '1 minute'
+          WHERE razon_social_id = $1 AND trackid IS NOT NULL AND eliminado_el IS NULL`,
+        [razonSocialId],
+      );
+
+    const envio = async () => (await envios())[0];
+
+    /** Segundos entre ahora y `consultar_desde`, para medir el "+5 minutos". */
+    const segundosHastaLaConsulta = async () => {
+      const [{ s }] = await ds.query<{ s: number }[]>(
+        `SELECT extract(epoch FROM consultar_desde - now())::int AS s
+           FROM dte_envios WHERE envio_id = $1`,
+        [(await envio()).envio_id],
+      );
+      return s;
+    };
+
+    it('de punta a punta: un sobre con una rechazada, una con reparos y dos aceptadas deja a cada boleta en su estado', async () => {
+      const sobre = await enviadas(4);
+      falso.responder(
+        'consulta',
+        respuestaConsulta({
+          estado: 'EPR',
+          detalle_rep_rech: [
+            {
+              tipo: 39,
+              folio: 4008,
+              estado: 'RCH',
+              descripcion: 'Boleta rechazada',
+              error: [
+                { seccion: 'Detalle', linea: 12, nivel: 1, codigo: 301 },
+                { seccion: 'Totales', linea: 20, nivel: 1, codigo: 305 },
+              ],
+            },
+            {
+              tipo: 39,
+              folio: 4009,
+              estado: 'RPR',
+              descripcion: 'Boleta con reparos',
+              error: [{ seccion: 'Emisor', linea: 5, nivel: 2, codigo: 120 }],
+            },
+          ],
+        }),
+      );
+
+      const mensaje = await consulta.consultar();
+
+      expect(mensaje).toContain('1 envíos con resultado final');
+      // Le preguntó por este sobre, con el RUT de la empresa.
+      const [pedido] = falso.pedidosDe('consulta');
+      expect(pedido.ruta).toBe(
+        `/sii_boleta_api_certificacion/boleta.electronica.envio/${RUT_SII}-${sobre.trackid ?? ''}`,
+      );
+      const filas = await documentos();
+      expect(filas.map((d) => [d.folio, d.estado])).toEqual([
+        [4007, 'aceptado'],
+        [4008, 'rechazado'],
+        [4009, 'reparos'],
+        [4010, 'aceptado'],
+      ]);
+      expect(filas[0].detalle_sii).toBeNull();
+      expect(filas[3].detalle_sii).toBeNull();
+      expect(filas[1].detalle_sii).toMatchObject({
+        folio: 4008,
+        estado: 'RCH',
+        error: [{ codigo: 301 }, { codigo: 305 }],
+      });
+      expect(filas[2].detalle_sii).toMatchObject({
+        folio: 4009,
+        estado: 'RPR',
+        error: [{ codigo: 120 }],
+      });
+      const final = await envio();
+      expect(final).toMatchObject({
+        estado_sii: 'EPR',
+        consultar_desde: null,
+        ultimo_error: null,
+      });
+      const [{ respuesta, intentos }] = await ds.query<
+        { respuesta: { estado: string }; intentos: number }[]
+      >(
+        `SELECT respuesta_sii AS respuesta, intentos_consulta AS intentos FROM dte_envios WHERE envio_id = $1`,
+        [sobre.envio_id],
+      );
+      expect(respuesta.estado).toBe('EPR');
+      expect(intentos).toBe(1);
+
+      // Ya es final: otra corrida no le vuelve a preguntar al SII.
+      await consulta.consultar();
+      expect(falso.pedidosDe('consulta')).toHaveLength(1);
+    });
+
+    it('un error del SII con folio null (de esquema o de firma) alcanza a todas las boletas del sobre', async () => {
+      await enviadas(3);
+      falso.responder(
+        'consulta',
+        respuestaConsulta({
+          estado: 'EPR',
+          detalle_rep_rech: [
+            {
+              tipo: null,
+              folio: null,
+              estado: 'RCH',
+              descripcion: 'Error de firma',
+            },
+          ],
+        }),
+      );
+
+      await consulta.consultar();
+
+      const filas = await documentos();
+      expect(filas.map((d) => d.estado)).toEqual([
+        'rechazado',
+        'rechazado',
+        'rechazado',
+      ]);
+      expect(filas[1].detalle_sii).toMatchObject({
+        folio: null,
+        descripcion: 'Error de firma',
+      });
+    });
+
+    it('la respuesta del SII llega sin validar: folio y tipo como texto calzan, y un código desconocido no acepta ni rechaza', async () => {
+      await enviadas(3);
+      falso.responder(
+        'consulta',
+        respuestaConsulta({
+          estado: 'EPR',
+          detalle_rep_rech: [
+            { tipo: '39', folio: '4008', estado: 'RCH' },
+            { tipo: 39, folio: 4009, estado: 'RLV' },
+          ],
+        }),
+      );
+
+      await consulta.consultar();
+
+      const filas = await documentos();
+      // La 4009 no cambia (queda enviada, atrasada a la vista, hasta que alguien la revise) y
+      // la 4007, sin entrada propia, tampoco se acepta por silencio: el SII dijo algo ilegible.
+      expect(filas.map((d) => [d.folio, d.estado])).toEqual([
+        [4007, 'enviado'],
+        [4008, 'rechazado'],
+        [4009, 'enviado'],
+      ]);
+      const e = await envio();
+      expect(e.estado_sii).toBe('EPR');
+      expect(e.ultimo_error).toContain('código desconocido (RLV)');
+    });
+
+    it('detalle_rep_rech que no es una lista: ninguna boleta se acepta y el envío lleva el aviso', async () => {
+      await enviadas(2);
+      falso.responder(
+        'consulta',
+        respuestaConsulta({
+          estado: 'EPR',
+          detalle_rep_rech: { folio: 4007, estado: 'RCH' },
+        }),
+      );
+
+      await consulta.consultar();
+
+      expect((await documentos()).map((d) => d.estado)).toEqual([
+        'enviado',
+        'enviado',
+      ]);
+      expect(await envio()).toMatchObject({
+        estado_sii: 'EPR',
+        consultar_desde: null,
+      });
+      expect((await envio()).ultimo_error).toContain(
+        'formato que no se entiende',
+      );
+    });
+
+    it('un código del sobre desconocido: se sigue consultando cada 5 minutos, con el aviso hasta que el SII diga algo conocido', async () => {
+      await enviadas(1);
+      falso.responder('consulta', respuestaConsulta({ estado: 'XYZ' }));
+
+      await consulta.consultar();
+
+      expect(await envio()).toMatchObject({
+        estado_sii: 'XYZ',
+        ultimo_error: 'El SII devolvió el código XYZ; se sigue consultando',
+      });
+      const segundos = await segundosHastaLaConsulta();
+      expect(segundos).toBeGreaterThan(290);
+      expect(segundos).toBeLessThanOrEqual(300);
+      expect((await documentos())[0].estado).toBe('enviado');
+
+      // Un estado conocido que sigue en proceso limpia el aviso.
+      await consultaVencida();
+      falso.responder('consulta', respuestaConsulta({ estado: 'PRD' }));
+      await consulta.consultar();
+      expect(await envio()).toMatchObject({
+        estado_sii: 'PRD',
+        ultimo_error: null,
+      });
+    });
+
+    it('el SII rechaza el sobre entero (RSC): todas rechazadas con el origen "sobre"', async () => {
+      await enviadas(2);
+      falso.responder('consulta', respuestaConsulta({ estado: 'RSC' }));
+
+      await consulta.consultar();
+
+      const filas = await documentos();
+      expect(filas.map((d) => d.estado)).toEqual(['rechazado', 'rechazado']);
+      expect(filas[0].detalle_sii).toEqual({
+        origen: 'sobre',
+        estado: 'RSC',
+        descripcion: null,
+      });
+      expect((await envio()).estado_sii).toBe('RSC');
+    });
+
+    it('un envío con estado final no se consulta aunque su consultar_desde haya vencido', async () => {
+      await enviadas(1);
+      // Estado que la propia corrida no produce (un resultado final deja `consultar_desde` en
+      // NULL): se arma por SQL para fijar que la cola mira también el estado del SII.
+      await ds.query(
+        `UPDATE dte_envios SET estado_sii = 'EPR'
+          WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
+        [razonSocialId],
+      );
+
+      await expect(consulta.consultar()).resolves.toContain('Sin envíos');
+
+      expect(falso.pedidosDe('consulta')).toHaveLength(0);
+    });
+
+    it('una boleta que ya tiene estado final no se toca', async () => {
+      await enviadas(2);
+      // Alguien la dejó aceptada antes de que llegara el resultado del sobre.
+      await ds.query(
+        `UPDATE dte_documentos SET estado = 'aceptado'
+          WHERE razon_social_id = $1 AND folio = 4007 AND eliminado_el IS NULL`,
+        [razonSocialId],
+      );
+      falso.responder('consulta', respuestaConsulta({ estado: 'RSC' }));
+
+      await consulta.consultar();
+
+      const filas = await documentos();
+      expect(filas.map((d) => [d.folio, d.estado])).toEqual([
+        [4007, 'aceptado'],
+        [4008, 'rechazado'],
+      ]);
+      expect(filas[0].detalle_sii).toBeNull();
+    });
+
+    it('RPT: el envío termina con el aviso y las boletas siguen enviadas', async () => {
+      await enviadas(2);
+      falso.responder('consulta', respuestaConsulta({ estado: 'RPT' }));
+
+      await consulta.consultar();
+
+      expect(await envio()).toMatchObject({
+        estado_sii: 'RPT',
+        consultar_desde: null,
+        ultimo_error: 'El SII ya tenía este envío (RPT)',
+      });
+      expect((await documentos()).map((d) => d.estado)).toEqual([
+        'enviado',
+        'enviado',
+      ]);
+      await consulta.consultar();
+      expect(falso.pedidosDe('consulta')).toHaveLength(1);
+    });
+
+    it('PRD (en proceso): las boletas siguen enviadas y se vuelve a consultar en 5 minutos', async () => {
+      await enviadas(2);
+      falso.responder('consulta', respuestaConsulta({ estado: 'PRD' }));
+
+      const mensaje = await consulta.consultar();
+
+      expect(mensaje).toContain('1 siguen en proceso');
+      expect(await envio()).toMatchObject({
+        estado_sii: 'PRD',
+        ultimo_error: null,
+      });
+      const segundos = await segundosHastaLaConsulta();
+      expect(segundos).toBeGreaterThan(290);
+      expect(segundos).toBeLessThanOrEqual(300);
+      expect((await documentos()).map((d) => d.estado)).toEqual([
+        'enviado',
+        'enviado',
+      ]);
+      // Todavía no vence: ahora no le pregunta.
+      await consulta.consultar();
+      expect(falso.pedidosDe('consulta')).toHaveLength(1);
+    });
+
+    it('si el SII pide esperar más (X-Retry-After), se espera eso', async () => {
+      await enviadas(1);
+      falso.responder('consulta', {
+        ...respuestaConsulta({ estado: 'PRD' }),
+        headers: {
+          'content-type': 'application/json',
+          'x-retry-after': '900',
+        },
+      });
+
+      await consulta.consultar();
+
+      const segundos = await segundosHastaLaConsulta();
+      expect(segundos).toBeGreaterThan(890);
+      expect(segundos).toBeLessThanOrEqual(900);
+    });
+
+    it('404 antes de las 24 h: se vuelve a consultar en 5 minutos', async () => {
+      await enviadas(1);
+      falso.responder('consulta', { status: 404 });
+
+      await consulta.consultar();
+
+      expect((await envio()).trackid).not.toBeNull();
+      const segundos = await segundosHastaLaConsulta();
+      expect(segundos).toBeGreaterThan(290);
+      expect(segundos).toBeLessThanOrEqual(300);
+      expect((await documentos())[0].estado).toBe('enviado');
+    });
+
+    it('404 a las 25 h del envío: queda con el error, sale de la consulta y la boleta sigue enviada', async () => {
+      await enviadas(1);
+      await ds.query(
+        `UPDATE dte_envios SET enviado_el = now() - interval '25 hours'
+          WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
+        [razonSocialId],
+      );
+      falso.responder('consulta', { status: 404 });
+
+      await consulta.consultar();
+
+      expect(await envio()).toMatchObject({
+        consultar_desde: null,
+        ultimo_error: 'El SII no encuentra el envío',
+      });
+      expect((await documentos())[0].estado).toBe('enviado');
+      // Fuera de la consulta: no hay nada que tomar.
+      await expect(consulta.consultar()).resolves.toContain('Sin envíos');
+      expect(falso.pedidosDe('consulta')).toHaveLength(1);
+    });
+
+    it('500 del SII: anota el error y reintenta en 5 minutos sin tocar el estado', async () => {
+      await enviadas(1);
+      falso.responder('consulta', { status: 500 });
+
+      await consulta.consultar();
+
+      const e = await envio();
+      expect(e.ultimo_error).toEqual(expect.any(String));
+      expect(e.estado_sii).toBe('REC');
+      expect((await segundosHastaLaConsulta()) > 290).toBe(true);
+      expect((await documentos())[0].estado).toBe('enviado');
+    });
+
+    it('certificado anulado: el envío queda con el motivo y no le pega al SII', async () => {
+      await enviadas(1);
+      await limpiarCertificados();
+      try {
+        await consulta.consultar();
+
+        expect(falso.pedidosDe('consulta')).toHaveLength(0);
+        expect((await envio()).ultimo_error).toContain('certificado digital');
+        expect((await segundosHastaLaConsulta()) > 290).toBe(true);
+        expect((await documentos())[0].estado).toBe('enviado');
+      } finally {
+        await subirCertificado(token);
+      }
+      // Con el certificado vigente otra vez, la siguiente corrida consulta y limpia el aviso.
+      await consultaVencida();
+      await consulta.consultar();
+      expect((await envio()).estado_sii).toBe('EPR');
+      expect((await envio()).ultimo_error).toBeNull();
+    });
+
+    it('un envío en consulta está reservado: otra instancia no lo consulta mientras tanto', async () => {
+      await enviadas(1);
+      let soltar: (() => void) | undefined;
+      const original = cliente.consultarEnvio.bind(cliente);
+      jest
+        .spyOn(cliente, 'consultarEnvio')
+        .mockImplementationOnce(async (...a) => {
+          await new Promise<void>((ok) => (soltar = ok));
+          return original(...a);
+        });
+
+      // La instancia A reservó el envío y está esperando al SII.
+      const lenta = consulta.consultar();
+      while (!soltar) await new Promise((r) => setTimeout(r, 20));
+      // La instancia B corre ahora: no hay nada que tomar.
+      await expect(consulta.consultar()).resolves.toContain('Sin envíos');
+      expect(falso.pedidosDe('consulta')).toHaveLength(0);
+
+      soltar();
+      await lenta;
+      expect(falso.pedidosDe('consulta')).toHaveLength(1);
+      expect((await envio()).estado_sii).toBe('EPR');
+    });
+
+    it('405 del SII: pausa la consulta, y la siguiente corrida ni reserva ni le pega', async () => {
+      await enviadas(1);
+      falso.responder('consulta', {
+        status: 405,
+        headers: { 'x-ratelimit-reset': '120' },
+      });
+
+      await consulta.consultar();
+
+      expect(cliente.pausadoHasta()).toBeGreaterThan(Date.now() + 100_000);
+      await consultaVencida();
+      const segundo = await consulta.consultar();
+
+      expect(segundo).toContain('espaciar');
+      expect(falso.pedidosDe('consulta')).toHaveLength(1);
+      // No reservó: la consulta sigue vencida.
+      expect((await segundosHastaLaConsulta()) < 0).toBe(true);
+    });
+
+    it('una boleta enviada hace 61 minutos se lee atrasada; la de 59, la aceptada y la dada de baja, no', async () => {
+      await reiniciar();
+      await vender(4);
+      await envejecer();
+      await job.enviarLotes();
+      const poner = (folio: number, minutos: number, estado = 'enviado') =>
+        ds.query(
+          `UPDATE dte_documentos SET emitido_el = now() - ($3::int * interval '1 minute'), estado = $4
+            WHERE razon_social_id = $1 AND folio = $2 AND eliminado_el IS NULL`,
+          [razonSocialId, folio, minutos, estado],
+        );
+      await poner(4007, 61);
+      await poner(4008, 59);
+      await poner(4009, 90, 'aceptado');
+      await poner(4010, 90);
+      await ds.query(
+        `UPDATE dte_documentos SET eliminado_el = now()
+          WHERE razon_social_id = $1 AND folio = 4010 AND eliminado_el IS NULL`,
+        [razonSocialId],
+      );
+
+      // La definición de "atrasada" (spec § 3): no es una columna, se calcula al leer. Esta
+      // consulta la fija para el subproyecto 4.
+      const atrasadas = await ds.query<{ folio: number }[]>(
+        `SELECT folio FROM dte_documentos
+          WHERE razon_social_id = $1 AND eliminado_el IS NULL
+            AND estado IN ('pendiente','enviado') AND emitido_el < now() - interval '1 hour'
+          ORDER BY folio`,
+        [razonSocialId],
+      );
+      expect(atrasadas.map((d) => d.folio)).toEqual([4007]);
+    });
+
+    describe('el tick', () => {
+      it('apagado (DTE_COLA_AUTOMATICA=false): con un envío listo no consulta ni escribe en cron_ejecuciones', async () => {
+        await enviadas(1);
+        const antes = await ejecucionesDelJob('consultar-envios');
+
+        await conAutomatica('false', () => consulta.tick());
+
+        expect(await ejecucionesDelJob('consultar-envios')).toBe(antes);
+        expect(falso.pedidosDe('consulta')).toHaveLength(0);
+      });
+
+      it('encendido pero con la consulta todavía sin vencer: no escribe en cron_ejecuciones', async () => {
+        await enviadas(1);
+        await ds.query(
+          `UPDATE dte_envios SET consultar_desde = now() + interval '5 minutes'
+            WHERE razon_social_id = $1 AND eliminado_el IS NULL`,
+          [razonSocialId],
+        );
+        const antes = await ejecucionesDelJob('consultar-envios');
+
+        await conAutomatica('true', () => consulta.tick());
+
+        expect(await ejecucionesDelJob('consultar-envios')).toBe(antes);
+        expect(falso.pedidosDe('consulta')).toHaveLength(0);
+      });
+
+      it('encendido y con un envío con la consulta vencida: registra la corrida y consulta', async () => {
+        await enviadas(1);
+        const antes = await ejecucionesDelJob('consultar-envios');
+
+        await conAutomatica('true', () => consulta.tick());
+
+        expect(await ejecucionesDelJob('consultar-envios')).toBe(antes + 1);
+        const [ultima] = await ds.query<{ estado: string; detalle: string }[]>(
+          `SELECT estado, detalle FROM cron_ejecuciones
+            WHERE job = 'consultar-envios' ORDER BY iniciado_el DESC LIMIT 1`,
+        );
+        expect(ultima.estado).toBe('ok');
+        expect(ultima.detalle).toContain('1 envíos con resultado final');
+        expect((await envio()).estado_sii).toBe('EPR');
       });
     });
   });

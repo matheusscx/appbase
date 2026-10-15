@@ -10,6 +10,7 @@ import { DteCertificado } from './entities/dte-certificado.entity';
 import { DteDocumento } from './entities/dte-documento.entity';
 import { DteEnvio } from './entities/dte-envio.entity';
 import { FoliosService } from './folios.service';
+import { ConsultarEnviosJob } from './jobs/consultar-envios.job';
 import { EnviarBoletasJob } from './jobs/enviar-boletas.job';
 import { PerfilFiscalService } from './perfil-fiscal.service';
 import { SiiBoletaCliente } from './sii-boleta.cliente';
@@ -33,6 +34,7 @@ import { SiiBoletaCliente } from './sii-boleta.cliente';
     ColaDteService,
     SiiBoletaCliente,
     EnviarBoletasJob,
+    ConsultarEnviosJob,
   ],
   exports: [
     PerfilFiscalService,
