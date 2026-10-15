@@ -82,6 +82,27 @@ function noNegativo(campo: string, v: Decimal): Decimal {
   return v;
 }
 
+/** ¿Hay algún descuento (de línea o global `D`) mayor que cero? Un recargo no cuenta. */
+function hayDescuento(datos: DatosBoleta): boolean {
+  const deLineas = datos.lineas.reduce(
+    (suma, l, i) =>
+      suma.plus(
+        aDecimal(
+          `DescuentoMonto de la línea ${(i + 1).toString()}`,
+          l.descuentoMonto,
+        ),
+      ),
+    new Decimal(0),
+  );
+  const globales = datos.ajustesGlobales
+    .filter((a) => a.tipo === 'D')
+    .reduce(
+      (suma, a) => suma.plus(aDecimal(`ValorDR "${a.glosa}"`, a.monto)),
+      new Decimal(0),
+    );
+  return deLineas.plus(globales).gt(0);
+}
+
 /**
  * Verifica las igualdades del Formato Boletas v4.2 (campos 32–35 y 21–26) sobre lo
  * congelado. No recalcula: el IVA congelado manda (ADR-010), y lo que se aparta de
@@ -119,10 +140,16 @@ export function verificarMontos(datos: DatosBoleta): {
   );
   const iva = noNegativo('IVA', entero('IVA', aDecimal('IVA', m.iva)));
   const total = entero('MntTotal', aDecimal('MntTotal', m.total));
-  if (!total.gt(0))
+  // Res. Ex. SII 60/2023: la boleta de $0 se emite si un descuento (de línea o global) la dejó en
+  // cero, y el XSD la admite (`MntTotal` es un entero no negativo). Sin descuento que lo
+  // explique, un total en cero es una venta que no existe. Los descuentos se leen aquí con
+  // `aDecimal`; su forma (entero, no negativo) la valida más abajo el recorrido de siempre.
+  if (total.isNegative() || (total.isZero() && !hayDescuento(datos)))
     throw new DteError(
       'TOTAL_NO_POSITIVO',
-      `MntTotal tiene que ser mayor que cero y vale ${total.toString()}`,
+      total.isNegative()
+        ? `MntTotal no puede ser negativo y vale ${total.toString()}`
+        : 'MntTotal vale 0 y no hay un descuento que lo explique',
     );
 
   let afectas = new Decimal(0);

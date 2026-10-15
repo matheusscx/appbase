@@ -243,6 +243,95 @@ describe('verificarMontos', () => {
     expect(codigo(() => verificarMontos(d))).toBe('TOTAL_NO_POSITIVO');
   });
 
+  describe('total $0 (Res. Ex. SII 60/2023: la boleta de $0 se emite si un descuento la dejó en cero)', () => {
+    const cero = {
+      neto: '0',
+      exento: '0',
+      iva: '0',
+      total: '0',
+      adicionales: '0',
+    };
+
+    it('un descuento de línea que lo explica → no tira', () => {
+      const d = boleta({
+        lineas: [
+          linea({
+            cantidad: '1',
+            precioUnitario: '12000',
+            descuentoMonto: '12000',
+            monto: '0',
+          }),
+        ],
+        montos: cero,
+      });
+      expect(verificarMontos(d)).toEqual({ diferenciaIvaRedondeo: '0' });
+    });
+
+    it('un descuento global que lo explica → no tira', () => {
+      const d = boleta({
+        lineas: [
+          linea({ cantidad: '1', precioUnitario: '12000', monto: '12000' }),
+        ],
+        ajustesGlobales: [
+          { tipo: 'D', glosa: 'Descuento', monto: '12000', exento: false },
+        ],
+        montos: cero,
+      });
+      expect(verificarMontos(d)).toEqual({ diferenciaIvaRedondeo: '0' });
+    });
+
+    it('un recargo global no explica el $0 → TOTAL_NO_POSITIVO', () => {
+      const d = boleta({
+        lineas: [
+          linea({ monto: '0', cantidad: undefined, precioUnitario: undefined }),
+        ],
+        ajustesGlobales: [
+          { tipo: 'R', glosa: 'Recargo', monto: '1000', exento: false },
+        ],
+        montos: cero,
+      });
+      expect(codigo(() => verificarMontos(d))).toBe('TOTAL_NO_POSITIVO');
+    });
+
+    it('una línea gratis sola (sin ningún descuento) → TOTAL_NO_POSITIVO', () => {
+      const d = boleta({
+        lineas: [linea({ cantidad: '1', precioUnitario: '0', monto: '0' })],
+        montos: cero,
+      });
+      expect(codigo(() => verificarMontos(d))).toBe('TOTAL_NO_POSITIVO');
+    });
+
+    it('total negativo → TOTAL_NO_POSITIVO, descuento o no', () => {
+      const d = boleta({
+        lineas: [
+          linea({
+            cantidad: '1',
+            precioUnitario: '12000',
+            descuentoMonto: '12000',
+            monto: '0',
+          }),
+        ],
+        montos: { ...cero, total: '-1' },
+      });
+      expect(codigo(() => verificarMontos(d))).toBe('TOTAL_NO_POSITIVO');
+    });
+
+    it('un descuento que lo explica no salva a una línea que no cierra', () => {
+      const d = boleta({
+        lineas: [
+          linea({
+            cantidad: '1',
+            precioUnitario: '12000',
+            descuentoMonto: '5000',
+            monto: '0',
+          }),
+        ],
+        montos: cero,
+      });
+      expect(codigo(() => verificarMontos(d))).toBe('LINEA_NO_CIERRA');
+    });
+  });
+
   it('línea negativa → MONTO_NEGATIVO', () => {
     const d = boleta({
       lineas: [

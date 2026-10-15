@@ -95,8 +95,12 @@ Lo congelado en la venta manda (ADR-010). Si una igualdad no cierra, no se arma 
    un peso**: la venta a granel (0,375 kg × $2.990 = 1.121,25) congela 1.121 y tiene que salir.
    Una línea con solo cantidad o solo precio no se verifica.
 3. **Suma de líneas afectas − descuentos globales + recargos globales = `MntNeto + IVA`**; la de
-   las exentas = `MntExe`; `MntTotal = MntNeto + IVA + MntExe`. El `MntTotal` tiene que ser
-   mayor que cero y ningún monto puede ser negativo.
+   las exentas = `MntExe`; `MntTotal = MntNeto + IVA + MntExe`. Ningún monto puede ser
+   negativo. El `MntTotal` es mayor que cero, **o cero si un descuento lo explica**: la suma de
+   los `DescuentoMonto` de línea más los descuentos globales (`D`) tiene que ser mayor que cero
+   (Res. Ex. SII 60/2023: la venta que un descuento deja en $0 igual se informa, y el XSD
+   admite `MntTotal` 0). La línea sale a precio de lista con su `DescuentoMonto` y `MontoItem` 0;
+   no es la línea gratis de la regla 8, que sale sin `PrcItem`. Un recargo no explica un $0.
 4. **El IVA congelado se manda tal cual. El peso de la góndola no frena la boleta**: con precio
    de góndola $993 el neto es 834 y el IVA 159, pero `0,19 × 834 = 158`; ningún par de enteros
    cumple a la vez el total y la fórmula. El motor devuelve `diferenciaIvaRedondeo` (el IVA
@@ -198,7 +202,7 @@ motor.
 | `LINEA_NO_CIERRA` | `precio × cantidad − descuento + recargo` se aparta del `MontoItem` en un peso o más |
 | `MONTO_NO_ENTERO` | Un monto en pesos trae decimales |
 | `MONTO_NEGATIVO` | Neto, exento, IVA o `MontoItem` negativo |
-| `TOTAL_NO_POSITIVO` | `MntTotal` ≤ 0 (venta de $0 o descuento del 100 %) |
+| `TOTAL_NO_POSITIVO` | `MntTotal` negativo, o 0 sin un descuento (de línea o global) que lo explique (una cortesía sola) |
 | `SIN_LINEAS` | La boleta no tiene líneas de detalle |
 | `BOLETA_EXENTA_CON_AFECTO` | La 41 trae líneas afectas, neto o IVA |
 | `FOLIO_FUERA_DE_RANGO` | El folio no es entero o cae fuera de `RNG` del CAF (los dos bordes son válidos) |

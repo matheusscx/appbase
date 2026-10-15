@@ -119,6 +119,37 @@ const mixta = (): DatosBoleta =>
     },
   });
 
+/** Res. Ex. SII 60/2023: un descuento que deja la venta en $0 no la saca del SII; sale por $0. */
+const cero = {
+  neto: '0',
+  exento: '0',
+  iva: '0',
+  total: '0',
+  adicionales: '0',
+};
+const ceroPorDescuentoDeLinea = (): DatosBoleta =>
+  boleta({
+    folio: 104,
+    lineas: [
+      linea({
+        cantidad: '1',
+        precioUnitario: '12000',
+        descuentoMonto: '12000',
+        monto: '0',
+      }),
+    ],
+    montos: cero,
+  });
+const ceroPorDescuentoGlobal = (): DatosBoleta =>
+  boleta({
+    folio: 105,
+    lineas: [linea({ cantidad: '1', precioUnitario: '12000', monto: '12000' })],
+    ajustesGlobales: [
+      { tipo: 'D', glosa: 'Promo del día', monto: '12000', exento: false },
+    ],
+    montos: cero,
+  });
+
 const gondola = (): DatosBoleta =>
   boleta({
     folio: 103,
@@ -201,6 +232,8 @@ describe('emitirBoleta + armarEnvioBoleta, de punta a punta', () => {
     ['afecta', boleta()],
     ['exenta (41)', exenta()],
     ['mixta con descuento global y receptor', mixta()],
+    ['de $0 por un descuento de línea', ceroPorDescuentoDeLinea()],
+    ['de $0 por un descuento global', ceroPorDescuentoGlobal()],
   ])(
     'boleta %s: XSD, firmas del Documento (suelto y en el sobre) y del SetDTE, y FRMT',
     async (_nombre, datos) => {
@@ -234,6 +267,14 @@ describe('emitirBoleta + armarEnvioBoleta, de punta a punta', () => {
       expect(frmtVerifica(releido, cafDe(datos))).toBe(true);
     },
   );
+
+  it('la boleta de $0 por descuento informa MntTotal 0 y la línea a precio de lista con su DescuentoMonto', () => {
+    const xml = emitir(ceroPorDescuentoDeLinea()).xml;
+    expect(xml).toContain('<MntTotal>0</MntTotal>');
+    expect(xml).toContain('<PrcItem>12000</PrcItem>');
+    expect(xml).toContain('<DescuentoMonto>12000</DescuentoMonto>');
+    expect(xml).toContain('<MontoItem>0</MontoItem>');
+  });
 
   it('sin el xmlns:xsi en el <DTE>, la firma del Documento verifica suelta pero cae dentro del sobre', () => {
     const datos = boleta();
