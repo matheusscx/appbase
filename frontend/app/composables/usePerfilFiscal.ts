@@ -55,6 +55,57 @@ export interface PerfilFiscal {
   cafs: CafPerfil[]
   faltantes: Observacion[]
   avisos: Observacion[]
+  /** El interruptor del tenant: ¿cada venta emite su boleta ante el SII? */
+  emisionActiva: boolean
+}
+
+/** Quién arregla un error de emisión: el perfil de la empresa o esa boleta en particular. */
+export type GrupoErrorEmision = 'perfil' | 'boleta'
+
+/** Una fila de `GET /dte/boletas-sin-emitir`; `fecha` es un instante ISO y `monto` un string. */
+export interface BoletaSinEmitir {
+  ventaId: string
+  fecha: string
+  monto: string
+  codigo: string
+  mensaje: string
+  grupo: GrupoErrorEmision
+}
+
+/** Lo que responde `POST /dte/emitir-pendientes`. */
+export interface ResultadoEmitirPendientes {
+  emitidas: number
+  /** Cuántas siguen sin emitir al terminar, también las que esta llamada no alcanzó. */
+  pendientes: number
+  errores: { ventaId: string, codigo: string, mensaje: string }[]
+}
+
+/**
+ * Lo que dice el interruptor cuando falta algo: el mismo texto que el servidor pone en el 400 al
+ * prender con faltantes (`cambiarEmision`), para que la pantalla y el error no se contradigan.
+ */
+export function textoParaEmitir(faltantes: Observacion[]): string {
+  return 'Para emitir falta: ' + faltantes.map(f => f.mensaje).join('; ')
+}
+
+/** Qué puede hacer el admin con una boleta sin emitir, según quién arregla el error. */
+export function pistaDelGrupo(grupo: GrupoErrorEmision): string {
+  return grupo === 'perfil'
+    ? 'Se arregla en esta pantalla; después se emite con el botón.'
+    : 'No se puede emitir.'
+}
+
+/** El aviso tras "Emitir pendientes": cuántas salieron y, si quedan, cuántas siguen sin emitir. */
+export function resumenEmision(r: ResultadoEmitirPendientes): {
+  titulo: string
+  detalle: string | null
+  color: 'success' | 'warning'
+} {
+  return {
+    titulo: `${r.emitidas} ${r.emitidas === 1 ? 'emitida' : 'emitidas'}`,
+    detalle: r.pendientes > 0 ? `Siguen sin emitir: ${r.pendientes}` : null,
+    color: r.errores.length > 0 || r.pendientes > 0 ? 'warning' : 'success',
+  }
 }
 
 const ETIQUETA_TIPO: Record<TipoBoleta, string> = {

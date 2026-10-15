@@ -400,16 +400,27 @@ cuántos CAF haya.
 
 ### Permisos y pantalla
 
-- Las cinco rutas llevan `TenantAdminGuard` (configuración del tenant, no un módulo RBAC) y el
-  `tenant_id` sale del token.
-- `/configuracion/boleta-electronica`: arriba lo que falta para emitir, y tres tarjetas: emisor
-  (giro, comuna, ambiente y resolución se editan acá; nombre, RUT y dirección, de solo lectura con
-  link a Razones sociales), certificado (firmante, vencimiento, subir o reemplazar; nunca muestra
-  la clave) y folios (tabla de CAF, subir, y borrar solo en los sin folios usados).
-- **El menú de Configuración la muestra solo al superadmin** (owner, 2026-10-14): un comercio no ve
-  una pantalla que promete boletas que todavía no salen. La **ruta** sigue siendo del admin del
-  tenant; abrirla a todos es quitar `auth.isSuperadmin` de `configuracion.vue`, y toca decidirlo
-  con el subproyecto 4.
+- Las rutas de `/dte` que usa la pantalla (`perfil`, `emision`, `certificado`, `cafs`,
+  `boletas-sin-emitir`, `emitir-pendientes`) llevan `TenantAdminGuard` (configuración del tenant, no
+  un módulo RBAC) y el `tenant_id` sale del token.
+- **La ve todo admin del tenant**, en el menú de Configuración y en la ruta (spec `2026-10-14-boleta-desde-la-venta` § 8.3):
+  desde que la venta emite su boleta, prender la emisión y emitir las pendientes es del dueño del
+  local. Hasta entonces el ítem era solo del superadmin.
+- `/configuracion/boleta-electronica`, de arriba abajo:
+  - **Interruptor "Emitir boletas electrónicas"** (`PATCH /dte/emision`). Con faltantes y apagado
+    queda deshabilitado, con el texto `Para emitir falta: …` (el mismo del 400 del servidor); ya
+    prendido se puede apagar siempre, aunque falte algo. Prender confirma (*"Desde ahora cada venta
+    emite una boleta ante el SII."*); apagar no. El 400 del servidor se muestra tal cual.
+  - Lo que falta para emitir, y tres tarjetas: emisor (giro, comuna, ambiente y resolución se editan
+    acá; nombre, RUT y dirección, de solo lectura con link a Razones sociales), certificado (firmante,
+    vencimiento, subir o reemplazar; nunca muestra la clave) y folios (tabla de CAF, subir, y borrar
+    solo en los sin folios usados).
+  - **"Boletas sin emitir"**: fecha, monto, el motivo tal como lo manda el servidor (con una pista:
+    *"Se arregla en esta pantalla…"* si es del perfil, *"No se puede emitir."* si es de esa boleta) y
+    link a la venta (`/ventas?venta=…`). El botón **"Emitir pendientes"** (`POST /dte/emitir-pendientes`)
+    corre una sola tanda a la vez —queda deshabilitado mientras corre—, muestra `N emitidas`, cuántas
+    siguen sin emitir y los errores con link a su venta, y vuelve a pedir la lista y el perfil.
+    Con la lista vacía: *"No hay boletas sin emitir."*
 
 ### Pruebas
 
@@ -417,7 +428,9 @@ Unitarias (`perfil-fiscal.spec.ts`, `perfil-fiscal.service.spec.ts`, `folios.ser
 `cifrado-dte.service.spec.ts`), e2e contra Postgres real (`backend/test/dte-perfil.e2e-spec.ts`,
 `dte-folios.e2e-spec.ts`: 20 `tomarFolio` en paralelo dan 20 folios distintos y consecutivos,
 rollback que devuelve el folio, paso al CAF siguiente, ambientes y tenants cruzados, ninguna
-respuesta con un blob) y Playwright de la pantalla (`frontend/e2e/configuracion/boleta-electronica.spec.ts`).
+respuesta con un blob) y Playwright de la pantalla (`frontend/e2e/configuracion/boleta-electronica.spec.ts`,
+y `emision-boletas.spec.ts` para el interruptor y la lista, como `admin.paris`: admin del tenant,
+no superadmin).
 Las reglas de subida y de `evaluarPerfil` se revisaron con mutantes: los fixtures evitan el 1 y los
 rangos que empiezan igual.
 

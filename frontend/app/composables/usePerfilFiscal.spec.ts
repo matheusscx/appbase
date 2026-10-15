@@ -1,5 +1,7 @@
 import { describe, it, expect } from 'vitest'
-import { archivoABase64, etiquetaAmbiente, etiquetaTipoBoleta, formatoFecha } from './usePerfilFiscal'
+import {
+  archivoABase64, etiquetaAmbiente, etiquetaTipoBoleta, formatoFecha, pistaDelGrupo, resumenEmision, textoParaEmitir,
+} from './usePerfilFiscal'
 
 describe('archivoABase64', () => {
   it('codifica los bytes tal cual, sin pasar por un decodificador de texto', async () => {
@@ -43,5 +45,37 @@ describe('formatoFecha', () => {
     expect(formatoFecha('2027-03-15T12:00:00.000Z')).toBe('15-03-2027')
     // 02:00 UTC del 16 es todavía el 15 en Santiago (UTC-3 en marzo).
     expect(formatoFecha('2027-03-16T02:00:00.000Z')).toBe('15-03-2027')
+  })
+})
+
+describe('textoParaEmitir', () => {
+  it('une los faltantes con el mismo texto que el 400 del servidor', () => {
+    expect(textoParaEmitir([
+      { codigo: 'SIN_GIRO', mensaje: 'Falta el giro de la empresa' },
+      { codigo: 'SIN_CERTIFICADO', mensaje: 'Falta cargar el certificado digital' },
+    ])).toBe('Para emitir falta: Falta el giro de la empresa; Falta cargar el certificado digital')
+  })
+})
+
+describe('pistaDelGrupo', () => {
+  it('lo del perfil se arregla en esta pantalla y lo de la boleta no se puede emitir', () => {
+    expect(pistaDelGrupo('perfil')).toBe('Se arregla en esta pantalla; después se emite con el botón.')
+    expect(pistaDelGrupo('boleta')).toBe('No se puede emitir.')
+  })
+})
+
+describe('resumenEmision', () => {
+  it('todas emitidas: en singular y plural, sin avisos', () => {
+    expect(resumenEmision({ emitidas: 1, pendientes: 0, errores: [] }))
+      .toEqual({ titulo: '1 emitida', detalle: null, color: 'success' })
+    expect(resumenEmision({ emitidas: 3, pendientes: 0, errores: [] }))
+      .toEqual({ titulo: '3 emitidas', detalle: null, color: 'success' })
+  })
+
+  it('con errores o con pendientes que no se alcanzaron avisa cuántas siguen sin emitir', () => {
+    const error = { ventaId: 'v-1', codigo: 'SIN_FOLIOS', mensaje: 'No quedan folios' }
+    expect(resumenEmision({ emitidas: 0, pendientes: 4, errores: [error] }))
+      .toEqual({ titulo: '0 emitidas', detalle: 'Siguen sin emitir: 4', color: 'warning' })
+    expect(resumenEmision({ emitidas: 2, pendientes: 0, errores: [error] }).color).toBe('warning')
   })
 })

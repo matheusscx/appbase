@@ -24,8 +24,8 @@ test('el admin ve los ocho grupos en orden y ninguna etiqueta se corta', async (
   await expect(menu.locator('[data-slot="label"]')).toHaveText([
     'Mi cuenta', 'Organización', 'Catálogo', 'Precios', 'Cobros', 'Caja', 'Inventario', 'Restaurante',
   ])
-  // 27 de siempre + Boleta electrónica, que ve el superadmin (el admin del e2e lo es) y no el
-  // admin de un comercio: `configuracion.nuxt.spec.ts` fija las dos mitades.
+  // 27 de siempre + Boleta electrónica, que ve todo admin del tenant (el del e2e lo es; el que no
+  // es superadmin, en el test de más abajo): `configuracion.nuxt.spec.ts` fija el árbol.
   await expect(menu.getByRole('link')).toHaveCount(28)
 
   // `truncate` corta con elipsis sin avisar: el texto completo sigue en el DOM, así que
@@ -56,5 +56,25 @@ test.describe('rol del tenant con permisos parciales', () => {
     await expect(menu.locator('[data-slot="label"]')).toHaveText(['Mi cuenta', 'Catálogo', 'Restaurante'])
     await expect(menu.getByRole('link')).toHaveText(['Perfil', 'Items', 'Salones', 'Garzones', 'Turnos'])
     await expect(menu.locator('[data-slot="separator"]')).toHaveCount(2)
+  })
+})
+
+test.describe('admin de un comercio, sin ser superadmin', () => {
+  test.use({ storageState: { cookies: [], origins: [] } })
+
+  // Hasta la boleta desde la venta la entrada era solo del superadmin. El admin del e2e lo es, así que la
+  // mitad que importa —el dueño de un local— solo se prueba con `admin.paris`, que es
+  // Administrador de Paris y no superadmin.
+  test('ve Boleta electrónica en Organización y abre la pantalla', async ({ page }) => {
+    await entrarComo(page, 'admin.paris@paris.cl')
+
+    await page.goto('/configuracion/perfil')
+    const menu = menuConfiguracion(page)
+    await expect(menu.getByRole('link')).toHaveCount(28)
+
+    await menu.getByRole('link', { name: 'Boleta electrónica', exact: true }).click()
+    await page.waitForURL('**/configuracion/boleta-electronica')
+    await expect(page.getByRole('heading', { name: 'Boleta electrónica' })).toBeVisible()
+    await expect(page.getByText('Emitir boletas electrónicas', { exact: true })).toBeVisible()
   })
 })

@@ -1,10 +1,11 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import type { AmbienteSii, CafPerfil, PerfilFiscal } from '~/composables/usePerfilFiscal'
+import type {
+  AmbienteSii, BoletaSinEmitir, CafPerfil, PerfilFiscal, ResultadoEmitirPendientes,
+} from '~/composables/usePerfilFiscal'
 
-// Configuración del tenant, no una operación de un módulo: los cuatro endpoints de `/dte` van
-// con `TenantAdminGuard`. El menú la muestra solo al superadmin hasta que el sistema emita
-// (`configuracion.vue`); la ruta sigue siendo del admin del tenant.
+// Configuración del tenant, no una operación de un módulo: los endpoints de `/dte` que usa van
+// con `TenantAdminGuard`. La ve todo admin del tenant, en el menú (`configuracion.vue`) y en la ruta.
 definePageMeta({ middleware: 'admin' })
 
 // Un certificado pesa unos pocos kB y un CAF 2 a 3 kB; el body de la API acepta 100 kB. Un
@@ -15,6 +16,7 @@ const MAX_BYTES_CAF = 37_000
 
 const config = useRuntimeConfig()
 const toast = useToast()
+const { formatMonto } = useFormatters()
 const apiUrl = config.public.apiUrl
 
 const perfil = ref<PerfilFiscal | null>(null)
@@ -94,6 +96,97 @@ async function guardar() {
     guardando.value = false
   }
 }
+
+// ── Emisión: interruptor, boletas sin emitir y botón ─────────────────────────
+
+const cambiandoEmision = ref(false)
+const confirmarEmisionOpen = ref(false)
+
+/** Con faltantes el interruptor no se puede prender; si ya estaba prendido, apagarlo siempre se puede. */
+const interruptorBloqueado = computed(() =>
+  cambiandoEmision.value || (!!perfil.value && !perfil.value.emisionActiva && perfil.value.faltantes.length > 0),
+)
+const descripcionEmision = computed(() => {
+  const p = perfil.value
+  if (p?.faltantes.length) return textoParaEmitir(p.faltantes)
+  return p?.emisionActiva
+    ? 'Cada venta emite su boleta ante el SII.'
+    : 'Apagado: las ventas no emiten boleta electrónica.'
+})
+
+/** Prender confirma (cada venta pasa a emitir ante el SII); apagar no. */
+function alternarEmision(prender: boolean) {
+  if (prender) confirmarEmisionOpen.value = true
+  else void cambiarEmision(false)
+}
+
+async function cambiarEmision(activa: boolean) {
+  cambiandoEmision.value = true
+  try {
+    await useApiFetch(`${apiUrl}/dte/emision`, { method: 'PATCH', body: { activa } })
+    confirmarEmisionOpen.value = false
+    await cargar()
+  }
+  catch (e: unknown) {
+    // El 400 de "Para emitir falta: …" llega con su mensaje; se muestra tal cual. Se vuelve a
+    // pedir el perfil: lo que faltaba pudo cambiar desde que se abrió la pantalla.
+    confirmarEmisionOpen.value = false
+    toast.add({ title: apiErrorMsg(e, 'No se pudo cambiar la emisión'), color: 'error' })
+    await cargar()
+  }
+  finally {
+    cambiandoEmision.value = false
+  }
+}
+
+const sinEmitir = ref<BoletaSinEmitir[]>([])
+const cargandoLista = ref(true)
+const emitiendo = ref(false)
+const resultado = ref<ResultadoEmitirPendientes | null>(null)
+const resumen = computed(() => (resultado.value ? resumenEmision(resultado.value) : null))
+
+async function cargarSinEmitir() {
+  try {
+    sinEmitir.value = await useApiFetch<BoletaSinEmitir[]>(`${apiUrl}/dte/boletas-sin-emitir`)
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar las boletas sin emitir'), color: 'error' })
+  }
+  finally {
+    cargandoLista.value = false
+  }
+}
+
+/**
+ * Una sola corrida a la vez: el servidor emite de a una boleta por transacción y la tanda puede
+ * tardar; un segundo click (o el botón habilitado mientras corre) lanzaría otra que espera los
+ * mismos bloqueos. Al terminar se vuelve a pedir la lista y el perfil (los folios restantes).
+ */
+async function emitirPendientes() {
+  if (emitiendo.value) return
+  emitiendo.value = true
+  resultado.value = null
+  try {
+    resultado.value = await useApiFetch<ResultadoEmitirPendientes>(`${apiUrl}/dte/emitir-pendientes`, { method: 'POST' })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudieron emitir las boletas pendientes'), color: 'error' })
+  }
+  finally {
+    emitiendo.value = false
+  }
+  await Promise.all([cargarSinEmitir(), cargar()])
+}
+
+const columnasSinEmitir: TableColumn<BoletaSinEmitir>[] = [
+  { id: 'fecha', header: 'Fecha' },
+  { id: 'monto', header: 'Monto', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'motivo', header: 'Motivo' },
+  { id: 'venta', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
+
+/** El link a la venta: el detalle de una venta se abre en el cajón del listado. */
+const rutaVenta = (ventaId: string) => ({ path: '/ventas', query: { venta: ventaId } })
 
 // ── Certificado ──────────────────────────────────────────────────────────────
 
@@ -234,7 +327,10 @@ const columns: TableColumn<CafPerfil>[] = [
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 
-onMounted(cargar)
+onMounted(() => {
+  void cargar()
+  void cargarSinEmitir()
+})
 </script>
 
 <template>
@@ -252,6 +348,17 @@ onMounted(cargar)
     </div>
 
     <template v-else-if="perfil">
+      <UCard data-qa="emision">
+        <USwitch
+          :model-value="perfil.emisionActiva"
+          :disabled="interruptorBloqueado"
+          :loading="cambiandoEmision"
+          label="Emitir boletas electrónicas"
+          :description="descripcionEmision"
+          @update:model-value="alternarEmision"
+        />
+      </UCard>
+
       <UAlert
         v-if="perfil.faltantes.length"
         color="warning"
@@ -427,7 +534,7 @@ onMounted(cargar)
         </div>
       </UCard>
 
-      <UCard>
+      <UCard data-qa="folios">
         <template #header>
           <div class="flex items-center justify-between gap-4">
             <h3 class="font-semibold text-default">
@@ -490,6 +597,82 @@ onMounted(cargar)
             <template #empty>
               <div class="py-6 text-center text-sm text-muted">
                 No hay folios cargados.
+              </div>
+            </template>
+          </UTable>
+        </div>
+      </UCard>
+
+      <UCard data-qa="boletas-sin-emitir">
+        <template #header>
+          <div class="flex items-center justify-between gap-4">
+            <h3 class="font-semibold text-default">
+              Boletas sin emitir
+            </h3>
+            <UButton
+              icon="i-lucide-send"
+              :loading="emitiendo"
+              :disabled="emitiendo || !sinEmitir.length"
+              @click="emitirPendientes"
+            >
+              Emitir pendientes
+            </UButton>
+          </div>
+        </template>
+
+        <div class="space-y-3">
+          <UAlert
+            v-if="resumen && resultado"
+            :color="resumen.color"
+            variant="subtle"
+            :icon="resumen.color === 'success' ? 'i-lucide-circle-check' : 'i-lucide-triangle-alert'"
+            :title="resumen.titulo"
+            data-qa="resultado-emision"
+          >
+            <template v-if="resumen.detalle || resultado.errores.length" #description>
+              <p v-if="resumen.detalle">
+                {{ resumen.detalle }}
+              </p>
+              <ul v-if="resultado.errores.length" class="list-disc pl-5 space-y-1">
+                <li v-for="er in resultado.errores" :key="er.ventaId">
+                  {{ er.mensaje }}
+                  <ULink :to="rutaVenta(er.ventaId)" class="underline">
+                    Ver venta
+                  </ULink>
+                </li>
+              </ul>
+            </template>
+          </UAlert>
+
+          <UTable :data="sinEmitir" :columns="columnasSinEmitir" :loading="cargandoLista">
+            <template #fecha-cell="{ row }">
+              {{ formatoFecha(row.original.fecha) }}
+            </template>
+            <template #monto-cell="{ row }">
+              {{ formatMonto(row.original.monto) }}
+            </template>
+            <template #motivo-cell="{ row }">
+              <p class="text-default whitespace-normal">
+                {{ row.original.mensaje }}
+              </p>
+              <p class="text-xs text-muted whitespace-normal">
+                {{ pistaDelGrupo(row.original.grupo) }}
+              </p>
+            </template>
+            <template #venta-cell="{ row }">
+              <UButton
+                :to="rutaVenta(row.original.ventaId)"
+                color="neutral"
+                variant="ghost"
+                size="sm"
+                icon="i-lucide-external-link"
+              >
+                Ver venta
+              </UButton>
+            </template>
+            <template #empty>
+              <div class="py-6 text-center text-sm text-muted">
+                No hay boletas sin emitir.
               </div>
             </template>
           </UTable>
@@ -572,6 +755,16 @@ onMounted(cargar)
         </AppModalFooter>
       </template>
     </UModal>
+
+    <CrudModal
+      v-model:open="confirmarEmisionOpen"
+      title="Emitir boletas electrónicas"
+      message="Desde ahora cada venta emite una boleta ante el SII."
+      confirm-label="Emitir boletas"
+      confirm-color="primary"
+      :loading="cambiandoEmision"
+      @confirm="cambiarEmision(true)"
+    />
 
     <CrudModal
       v-model:open="borrarOpen"

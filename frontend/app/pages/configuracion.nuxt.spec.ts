@@ -9,14 +9,7 @@ import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Configuracion from './configuracion.vue'
 
 let esAdmin = false
-let esSuperadmin = false
 let permisos: string[] = []
-
-mockNuxtImport('useAuthStore', () => {
-  return () => ({
-    get isSuperadmin() { return esSuperadmin },
-  })
-})
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -37,6 +30,7 @@ const ARBOL_ADMIN: Arbol = {
   'Organización': [
     '/configuracion/empresa',
     '/configuracion/razones-sociales',
+    '/configuracion/boleta-electronica',
     '/configuracion/usuarios',
     '/configuracion/roles',
   ],
@@ -95,7 +89,6 @@ async function arbolMontado() {
 
 beforeEach(() => {
   esAdmin = false
-  esSuperadmin = false
   permisos = []
 })
 
@@ -109,19 +102,16 @@ describe('menú de configuración agrupado', () => {
     // `toEqual` no mira el orden de las claves; el de los grupos es decisión.
     expect(Object.keys(arbol)).toEqual(Object.keys(ARBOL_ADMIN))
     const rutas = Object.values(arbol).flat()
-    expect(rutas).toHaveLength(27)
-    expect(new Set(rutas).size).toBe(27)
+    expect(rutas).toHaveLength(28)
+    expect(new Set(rutas).size).toBe(28)
     expect(separadores).toBe(7)
   })
 
-  // Hasta que el sistema emita, la pantalla de boletas es solo del superadmin (owner,
-  // 2026-10-14): el admin de un comercio no ve una pantalla que promete lo que todavía no sale.
-  it('Boleta electrónica la ve el superadmin y no el admin de un comercio', async () => {
+  // La ve todo admin del tenant (spec `2026-10-14-boleta-desde-la-venta` § 8.3): el interruptor de la emisión y el botón de las
+  // pendientes son del dueño del local. Sin ser admin, ni el link ni la ruta.
+  it('Boleta electrónica la ve el admin del tenant, entre Razones sociales y Usuarios', async () => {
     esAdmin = true
-    const comercio = await arbolMontado()
-    expect(Object.values(comercio.arbol).flat()).not.toContain('/configuracion/boleta-electronica')
 
-    esSuperadmin = true
     const { arbol } = await arbolMontado()
 
     expect(arbol['Organización']).toEqual([
@@ -131,15 +121,14 @@ describe('menú de configuración agrupado', () => {
       '/configuracion/usuarios',
       '/configuracion/roles',
     ])
-    expect(Object.values(arbol).flat()).toHaveLength(28)
   })
 
-  it('un superadmin que no es admin del tenant no la ve: la ruta lo mandaría al índice', async () => {
-    esSuperadmin = true
+  it('quien no es admin no la ve, aunque tenga otros permisos', async () => {
+    permisos = ['Items:Leer']
 
     const { arbol } = await arbolMontado()
 
-    expect(arbol).toEqual(PERFIL)
+    expect(Object.values(arbol).flat()).not.toContain('/configuracion/boleta-electronica')
   })
 
   it('sin permisos queda solo Perfil, sin encabezados de grupos vacíos', async () => {
