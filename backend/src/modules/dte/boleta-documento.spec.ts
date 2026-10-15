@@ -1,5 +1,5 @@
 import { envolverParaXsd, tedParaXsd } from './__fixtures__/envio-boleta';
-import { validarContraXsd } from './__fixtures__/xsd';
+import { validarContraXsd } from './esquema-sii';
 import { armarDocumento } from './boleta-documento';
 import type { DatosBoleta, LineaBoleta } from './dte.types';
 
@@ -585,7 +585,7 @@ describe('XSD con el formato v4.2', () => {
 
   it('con Ñ el validador no da falso verde ni falso rojo (xmllint sobre latin1)', async () => {
     // CmnaOrigen admite 20: 20 Ñ pasan y 21 no. Medido: sin declarar UTF-8 en el validador
-    // (`comoUtf8` de __fixtures__/xsd.ts) las 20 Ñ daban "largo 40" y fallaban.
+    // (`comoUtf8` de esquema-sii.ts) las 20 Ñ daban "largo 40" y fallaban.
     const { xml } = armar(boleta());
     const con = (n: number) =>
       xml.replace(

@@ -5,7 +5,7 @@ import {
   cafDePrueba,
   certificadoDePrueba,
 } from './__fixtures__/credenciales-prueba';
-import { validarContraXsd } from './__fixtures__/xsd';
+import { validarContraXsd } from './esquema-sii';
 import { armarDocumento } from './boleta-documento';
 import { type CafLeido, leerCaf } from './caf';
 import { DteError } from './dte.types';

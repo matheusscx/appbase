@@ -3,7 +3,7 @@ import { createVerify } from 'crypto';
 import { C14nCanonicalization } from 'xml-crypto';
 import { cafDePrueba } from './__fixtures__/credenciales-prueba';
 import { envolverParaXsd } from './__fixtures__/envio-boleta';
-import { validarContraXsd } from './__fixtures__/xsd';
+import { validarContraXsd } from './esquema-sii';
 import { armarDocumento } from './boleta-documento';
 import { type CafLeido, leerCaf } from './caf';
 import type { DatosBoleta, LineaBoleta } from './dte.types';

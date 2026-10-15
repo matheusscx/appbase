@@ -9,7 +9,7 @@ import { readFileSync } from 'fs';
 import { join } from 'path';
 import { DOMParser } from '@xmldom/xmldom';
 import { SignedXml } from 'xml-crypto';
-import { validarContraXsd } from './__fixtures__/xsd';
+import { validarContraXsd } from './esquema-sii';
 
 const EJEMPLO = readFileSync(
   join(__dirname, '__fixtures__', 'sii', 'F60T33-ejemplo.xml'),
