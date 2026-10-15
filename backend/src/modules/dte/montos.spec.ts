@@ -361,7 +361,7 @@ describe('verificarMontos', () => {
     expect(() =>
       verificarMontos({ ...d, montos: { ...d.montos, adicionales: '250' } }),
     ).toThrow(
-      /son costo y no se cobran en la venta.*Quita el impuesto adicional/,
+      /son costo, ya incluido en el precio, y la boleta no los informa por separado\. Quita el impuesto adicional/,
     );
   });
 
