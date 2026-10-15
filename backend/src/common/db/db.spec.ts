@@ -111,6 +111,128 @@ describe('TxContext + Db', () => {
   });
 });
 
+describe('Db.conSavepoint', () => {
+  // Un manager que anota las sentencias en el orden en que llegan.
+  const sentencias: string[] = [];
+  // La sentencia que debe fallar en este test (por prefijo), o nada.
+  let fallaEn: string | null = null;
+  const managerTx = {
+    query: jest.fn((sql: string) => {
+      sentencias.push(sql);
+      return fallaEn && sql.startsWith(fallaEn)
+        ? Promise.reject(new Error(`falló ${fallaEn}`))
+        : Promise.resolve([]);
+    }),
+  } as unknown as EntityManager;
+  const dataSource = {
+    transaction: jest.fn((cb: (m: EntityManager) => Promise<unknown>) =>
+      cb(managerTx),
+    ),
+  } as unknown as DataSource;
+  let db: Db;
+
+  beforeEach(async () => {
+    fallaEn = null;
+    sentencias.length = 0;
+    jest.clearAllMocks();
+    const module = await Test.createTestingModule({
+      providers: [TxContext, Db, { provide: DataSource, useValue: dataSource }],
+    }).compile();
+    db = module.get(Db);
+  });
+
+  it('en el éxito abre, corre y libera el savepoint, y devuelve el resultado', async () => {
+    const r = await db.transaccion(() =>
+      db.conSavepoint('emision_boleta', () => {
+        sentencias.push('fn');
+        return Promise.resolve('listo');
+      }),
+    );
+
+    expect(r).toBe('listo');
+    expect(sentencias).toEqual([
+      'SAVEPOINT emision_boleta',
+      'fn',
+      'RELEASE SAVEPOINT emision_boleta',
+    ]);
+  });
+
+  it('en el error vuelve al savepoint y re-lanza el MISMO error', async () => {
+    const error = new Error('falla de prueba');
+
+    const intento = db.transaccion(() =>
+      db.conSavepoint('emision_boleta', () => {
+        sentencias.push('fn');
+        return Promise.reject(error);
+      }),
+    );
+
+    await expect(intento).rejects.toBe(error);
+    expect(sentencias).toEqual([
+      'SAVEPOINT emision_boleta',
+      'fn',
+      'ROLLBACK TO SAVEPOINT emision_boleta',
+    ]);
+  });
+
+  it('si el RELEASE falla no corre ROLLBACK TO y el error del RELEASE sale', async () => {
+    // fn ya terminó bien: volver al savepoint por un fallo del RELEASE desharía lo que fn
+    // escribió con éxito, y taparía el error real con otra sentencia sobre una transacción rota.
+    fallaEn = 'RELEASE';
+
+    const intento = db.transaccion(() =>
+      db.conSavepoint('emision_boleta', () => {
+        sentencias.push('fn');
+        return Promise.resolve('listo');
+      }),
+    );
+
+    await expect(intento).rejects.toThrow('falló RELEASE');
+    expect(sentencias).toEqual([
+      'SAVEPOINT emision_boleta',
+      'fn',
+      'RELEASE SAVEPOINT emision_boleta',
+    ]);
+  });
+
+  it('lo que falla fuera de fn no se confunde con el rollback: la transacción sigue su curso', async () => {
+    const r = await db.transaccion(async () => {
+      await db
+        .conSavepoint('emision_boleta', () => Promise.reject(new Error('x')))
+        .catch(() => undefined);
+      await db.query('SELECT 1');
+      return 'siguió';
+    });
+
+    expect(r).toBe('siguió');
+    expect(sentencias.at(-1)).toBe('SELECT 1');
+  });
+
+  it.each(['Emision', 'emision-boleta', 'emision boleta', 'a;DROP', '', 'n1'])(
+    'un nombre inválido (%j) tira antes de tocar la base',
+    async (nombre) => {
+      const fn = jest.fn();
+
+      await expect(
+        db.transaccion(() => db.conSavepoint(nombre, fn)),
+      ).rejects.toThrow('nombre de savepoint');
+
+      expect(sentencias).toEqual([]);
+      expect(fn).not.toHaveBeenCalled();
+    },
+  );
+
+  it('sin transacción activa tira y no corre fn', async () => {
+    const fn = jest.fn();
+
+    await expect(db.conSavepoint('emision_boleta', fn)).rejects.toThrow(
+      'transacción activa',
+    );
+
+    expect(fn).not.toHaveBeenCalled();
+  });
+});
+
 describe('RepositoriosModule.forFeature (proxy context-aware)', () => {
   const managerDelPool = { query: jest.fn() } as unknown as EntityManager;
   const repoBase = {

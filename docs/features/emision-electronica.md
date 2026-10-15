@@ -456,9 +456,10 @@ rangos que empiezan igual.
 - **`CdgSIISucur` por local:** los locales (`ubicaciones`) no tienen dirección ni código SII; la
   boleta sale con la dirección de la razón social.
 - **Cambio de ambiente o de razón social preferida después de `credencialesParaFirmar`:** esa
-  lectura no bloquea nada, así que el subproyecto 4 tiene que decidir en qué punto de su
-  transacción la hace para que no se cruce con un `PATCH` (hoy solo `AMBIENTE_DISTINTO` lo cubre,
-  y solo entre `tomarFolio` y ella).
+  lectura no bloquea nada. Lo decidió el subproyecto 4 (ver "La venta emite la boleta"): no se
+  agrega un bloqueo de la razón social en cada venta; `AMBIENTE_DISTINTO` deja la boleta
+  `sin_emitir` y las credenciales salen de la razón social del CAF, así que emisor, CAF y
+  certificado son siempre del mismo RUT.
 - **El aviso al cajero** (pocos folios, certificado por vencer) llega con el subproyecto 4. Este
   deja la pantalla y el dato que ese aviso va a necesitar (la ruta es de admin: el aviso, que lo ve el
   cajero, tiene que traer la suya).
@@ -760,6 +761,88 @@ cd backend && npx jest --config ./test/jest-e2e.json test/dte-cola.e2e-spec.ts
 
 ---
 
+## La venta emite la boleta
+
+Subproyecto 4, frente 1 (spec [`2026-10-14-boleta-desde-la-venta`](../superpowers/specs/2026-10-14-boleta-desde-la-venta-design.md)).
+Con el interruptor del tenant encendido (`PATCH /dte/emision`), cada venta cuyo documento del
+sistema es una boleta sale con folio, timbrada, firmada y en la cola de envío. Con el interruptor
+apagado (el default) no cambia nada.
+
+### Quién emite y cuándo
+
+`EmisionBoletaService.emitir(tenantId, ventaDocumentoId, ahora)` (módulo `venta-documentos`, que
+ahora importa `DteModule`; `dte` no importa nada de ventas, así que no hay ciclo). Una sola función
+emite: la venta al crearse y, más adelante, el botón de las pendientes. La llama
+`crearEnTransaccion` **al final**, después de stock, caja, pagos y `documentarVenta`, si
+`tenants.emite_boleta_electronica` y `documentoAEmitir(docs, tipoEsBoleta)` devuelve un documento
+(el del emisor `sistema`, de tipo boleta, vigente y que no sea un duplicado; a lo sumo uno, ADR-028).
+Como todos los caminos que crean ventas pasan por `crearEnTransaccion`, un solo lugar cubre el POS,
+el cierre de mesa, el callback de la tienda y el alta de suscripción.
+
+Los pasos, todos en la transacción de la venta y detrás de `Db.conSavepoint('emision_boleta', …)`:
+
+1. Lee en consultas fijas (ninguna por línea ni por pago): el documento (`FOR UPDATE`), la venta
+   con el umbral de identidad **del año de la venta**, las líneas con su tasa de IVA, los
+   adicionales, el receptor y los pagos que cubre ese documento (`pagos.documento_id`) con su
+   `medio_pago_sii`. Si el documento ya no está `armado`/`sin_emitir`, tiene descarte o no es una
+   boleta del sistema, devuelve `{ estado: 'omitido' }` y no toca nada (lo usa el botón).
+2. `tomarFolio` → `credencialesParaFirmar` → `emitirBoleta` (con `datosBoletaDeVenta`, que arma los
+   datos desde lo congelado) → `encolar`. La fecha de la boleta es la de la venta en la hora de
+   Chile, aunque se emita después; el `ahora` de la firma es el del momento.
+3. Marca el documento `emitido` con su `dte_documento_id`.
+
+### Qué hace un error
+
+- **Un `DteError`** (sin folios, sin certificado, certificado vencido, un dato que el motor
+  rechaza) vuelve al savepoint —el folio que ya se había tomado vuelve— y **recién después** marca
+  el documento `sin_emitir` con `emision_error_codigo` y `emision_error`. La venta entra igual
+  (decisión del owner). Se escribe fuera del savepoint porque lo escrito dentro se deshace con él.
+- **Cualquier otro error se propaga** y la venta se cae con su folio (regla R9 de la cola): un
+  fallo de la base o de la cola no es un dato de la boleta, y tragarlo dejaría una venta sin
+  boleta que nadie ve.
+- **Una venta que se cae después de emitir** (cualquier cosa posterior en la misma transacción)
+  deshace también el folio y la fila de la cola: nunca queda un hueco que anular ante el SII.
+
+### Bloqueos
+
+El bloqueo del CAF que toma `tomarFolio` dura hasta el commit. Por eso la emisión va **al final**:
+ningún camino bloquea el CAF y después otra fila, así que no se forma un ciclo con el orden de
+filas de la venta ni con el de las tablas del catálogo. Las ventas con boleta de un mismo local se
+serializan en ese último tramo. Un deadlock (`40P01`) lo reintenta `crear`, y el folio volvió con
+el rollback.
+
+### La respuesta y el ticket
+
+`BoletaVenta` (la respuesta de `POST /ventas`, del cierre de mesa y de `GET /ventas/:id/boleta`)
+suma, leídos de la base por `armarBoleta` en **una** consulta:
+
+- `boletaElectronica`: `{ tipo, folio, monto, cubreTodo, ambiente, resolucion: { numero, fecha },
+  emisor: { rut, razonSocial, giro, direccion, comuna } }`, o `null`. El emisor es el de la
+  boleta (la razón social de su CAF), no la preferida de hoy, y se lee aunque esa razón social se
+  haya dado de baja después. `monto` es el del documento: con `cubreTodo = false` (pago mixto con
+  la máquina) es el saldo.
+- `boletaSinEmitir`: `{ mensaje }` si debía emitirse y no se pudo, o `null`.
+
+La respuesta se guarda con la `Idempotency-Key` **después** de emitir: el reintento devuelve el
+mismo folio. Que el ticket la dibuje es de otra tarea.
+
+### Pruebas
+
+Unitarias: `Db.conSavepoint` (`db.spec.ts`), `documentoAEmitir` y `emitir` con las sentencias
+reales del savepoint (`emision-boleta.service.spec.ts`), y el cableado en la venta
+(`ventas.service.spec.ts`: interruptor, orden, `armarBoleta`). e2e contra Postgres
+(`backend/test/boleta-desde-la-venta.e2e-spec.ts`): POS, idempotencia, interruptor apagado, factura
+y facturador externo, exenta (41), sin folios, sin certificado (el folio tomado vuelve), la cola
+que se cae, una venta que se cae después de emitir, 10 en paralelo, la venta de $0 por descuento,
+descuento de línea + de venta + granel, pago mixto con la máquina, cierre de mesa (con folios, con
+el CAF agotado y con deuda), callback de la tienda, alta de suscripción y la reimpresión.
+Mutantes (revertidos con `cp` y `cmp`): sin savepoint, atrapar cualquier error, el umbral con
+`now()`, el IVA mal leído de `ventas_impuestos`, `conSavepoint` sin `ROLLBACK TO` y la factura
+emitida como boleta. El umbral del año de la venta solo lo ve un test unitario: el e2e emite en el
+mismo año de la venta, y la diferencia aparece recién al emitir después (el botón).
+
+---
+
 ## Pendiente de decisión
 
 Nada del motor. El ILA quedó decidido el 2026-10-14 (ver "Decidido por el owner" arriba): costo
@@ -777,7 +860,7 @@ cambian la regla del local típico.
 - [`tenants-razones-sociales.md`](./tenants-razones-sociales.md) — las columnas del emisor y la
   protección del RUT.
 - [`impuestos.md`](./impuestos.md) — el IVA congelado y la deuda del peso de la góndola.
-- [`ventas.md`](./ventas.md) — `venta_documentos` (lo que el subproyecto 4 traducirá al contrato)
-  y la identidad sobre 135 UF.
+- [`ventas.md`](./ventas.md) — `venta_documentos` (de donde sale la boleta de cada venta) y la
+  identidad sobre 135 UF.
 - [`reembolsos-nota-credito.md`](./reembolsos-nota-credito.md) — la nota de crédito, fuera del
   alcance de este motor.

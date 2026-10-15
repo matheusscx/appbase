@@ -37,7 +37,10 @@ export interface DocumentoParaBoleta {
 }
 
 export interface VentaParaBoleta {
-  /** AAAA-MM-DD en la hora de Chile (`fechaChile(ventas.creado_el)`). */
+  /**
+   * AAAA-MM-DD del día de Chile en que cayó la venta: `ahoraChile(ventas.creado_el).slice(0, 10)`.
+   * No sale de `fechaChile`, que devuelve DD-MM-AAAA (el formato del aviso al dueño del local).
+   */
   fechaVenta: string;
   lineas: LineaParaBoleta[];
   documento: DocumentoParaBoleta;

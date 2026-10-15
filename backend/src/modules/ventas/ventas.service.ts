@@ -49,6 +49,7 @@ import {
   type DocumentoDetalle,
   type ViaCorreccion,
 } from '../venta-documentos/venta-documentos.service';
+import { EmisionBoletaService } from '../venta-documentos/emision-boleta.service';
 import type {
   ClaseDocumentoMaquina,
   EmisorDocumento,
@@ -505,6 +506,30 @@ export interface BoletaVenta {
   propina: { monto: string } | null;
   pagos: { nombre: string; monto: string }[];
   vuelto: string | null;
+  /**
+   * La boleta electrónica que emitió el sistema para esta venta, o `null` si no hay
+   * (interruptor apagado, otro emisor, o quedó sin emitir). El emisor es el de la boleta
+   * —la razón social de su CAF—, no la preferida de hoy. Spec
+   * `2026-10-14-boleta-desde-la-venta` § 7.
+   */
+  boletaElectronica: {
+    tipo: 39 | 41;
+    folio: number;
+    /** `venta_documentos.monto`: con `cubreTodo = false` es el saldo, no el total. */
+    monto: string;
+    cubreTodo: boolean;
+    ambiente: 'certificacion' | 'produccion';
+    resolucion: { numero: number; fecha: string };
+    emisor: {
+      rut: string;
+      razonSocial: string;
+      giro: string;
+      direccion: string;
+      comuna: string;
+    };
+  } | null;
+  /** La boleta debía emitirse y no se pudo: el motivo, para el cajero. */
+  boletaSinEmitir: { mensaje: string } | null;
 }
 
 @Injectable()
@@ -519,6 +544,7 @@ export class VentasService {
     private readonly itemsService: ItemsService,
     private readonly pagosService: PagosService,
     private readonly ventaDocumentosService: VentaDocumentosService,
+    private readonly emisionBoleta: EmisionBoletaService,
     private readonly ventaPropinaService: VentaPropinaService,
     private readonly catalogService: CatalogService,
     private readonly garzonesService: GarzonesService,
@@ -906,11 +932,13 @@ export class VentasService {
       es_oficial: boolean;
       decimales: number | string;
       facturador: Facturador;
+      emite_boleta_electronica: boolean;
     }[] = await this.db.query(
-      // `t.facturador` viaja en esta misma consulta (que ya arranca en
-      // `tenants`) para que la emisión no cueste una lectura más. Es del
-      // tenant: sale repetido en cada fila de moneda.
+      // `t.facturador` y `t.emite_boleta_electronica` viajan en esta misma
+      // consulta (que ya arranca en `tenants`) para que la emisión no cueste
+      // una lectura más. Son del tenant: salen repetidos en cada fila de moneda.
       `SELECT m.moneda_id, tm.valor_del_dia, m.decimales, t.facturador,
+              t.emite_boleta_electronica,
               (m.moneda_id = p.moneda_oficial_id) AS es_oficial
          FROM tenants t
          JOIN provincia prov ON prov.provincia_id = t.provincia_id
@@ -1684,7 +1712,7 @@ export class VentasService {
         impuesto: acum.impuesto.plus(d.impuestoAplicado),
       });
     }
-    await this.ventaDocumentosService.documentarVenta(manager, {
+    const docs = await this.ventaDocumentosService.documentarVenta(manager, {
       tenantId,
       venta: {
         id: venta.id,
@@ -1712,6 +1740,21 @@ export class VentasService {
         claseDocumento: pagosDto[i].claseDocumento,
       })),
     });
+
+    // 7k. La boleta electrónica, con el interruptor del tenant prendido: va AL FINAL, después
+    //     de stock, caja, pagos y documentos. Toma el bloqueo del CAF (el folio) y lo suelta
+    //     con el commit, así que nada que se bloquee después puede formar un ciclo con él
+    //     (spec `2026-10-14-boleta-desde-la-venta`, § 4.6). Detrás de un savepoint: un
+    //     `DteError` deja el documento `sin_emitir` y la venta entra igual; cualquier otro
+    //     error se propaga y la venta se cae con su folio.
+    if (monedaOficial.emite_boleta_electronica) {
+      const aEmitir = this.emisionBoleta.documentoAEmitir(
+        docs,
+        tipoDocumento.esBoleta,
+      );
+      if (aEmitir)
+        await this.emisionBoleta.emitir(tenantId, aEmitir.id, new Date());
+    }
 
     // Detalle priceado de la personalización, con cada extra YA convertido a
     // moneda oficial. Es el ÚNICO productor: el POS lo imprime desde acá en vez
@@ -5673,6 +5716,75 @@ export class VentasService {
         .join(' ')
         .trim() || null;
 
+    // La boleta electrónica del sistema, en UNA consulta (nunca por línea). Solo el documento
+    // vigente y no una corrección: la nota de crédito cuelga de la venta que corrige.
+    const [documentoBoleta]: {
+      estado_envio: string;
+      emision_error: string | null;
+      monto: string;
+      cubre_todo: boolean;
+      tipo: number | null;
+      folio: number | null;
+      ambiente: 'certificacion' | 'produccion' | null;
+      rut_emisor: string | null;
+      razon_social: string | null;
+      giro: string | null;
+      direccion: string | null;
+      comuna: string | null;
+      numero_resolucion: number | null;
+      fecha_resolucion: string | null;
+    }[] = await runner.query(
+      `SELECT vd.estado_envio, vd.emision_error, vd.monto,
+              (vd.monto = v.total_final) AS cubre_todo,
+              dd.tipo, dd.folio, dd.ambiente, dd.rut_emisor,
+              rs.nombre AS razon_social, rs.giro, rs.direccion, rs.comuna,
+              rs.numero_resolucion,
+              to_char(rs.fecha_resolucion, 'YYYY-MM-DD') AS fecha_resolucion
+         FROM venta_documentos vd
+         JOIN ventas v ON v.venta_id = vd.venta_id AND v.tenant_id = vd.tenant_id
+              AND v.eliminado_el IS NULL
+         LEFT JOIN dte_documentos dd ON dd.documento_id = vd.dte_documento_id
+                AND dd.tenant_id = vd.tenant_id AND dd.eliminado_el IS NULL
+         -- Sin \`eliminado_el\` de la razón social: la boleta ya emitida conserva su
+         -- emisor aunque la empresa se dé de baja después. El papel lleva el de la boleta.
+         LEFT JOIN razones_sociales rs ON rs.razon_social_id = dd.razon_social_id
+        WHERE vd.venta_id = $1 AND vd.tenant_id = $2
+          AND vd.emisor = 'sistema' AND vd.documento_corregido_id IS NULL
+          AND vd.estado_envio IN ('sin_emitir', 'emitido')
+          AND vd.descarte IS NULL AND vd.eliminado_el IS NULL
+        ORDER BY vd.creado_el
+        LIMIT 1`,
+      [ventaId, tenantId],
+    );
+    const boletaElectronica =
+      documentoBoleta?.estado_envio === 'emitido' &&
+      documentoBoleta.tipo !== null &&
+      documentoBoleta.folio !== null &&
+      documentoBoleta.ambiente !== null
+        ? {
+            tipo: documentoBoleta.tipo as 39 | 41,
+            folio: documentoBoleta.folio,
+            monto: documentoBoleta.monto,
+            cubreTodo: documentoBoleta.cubre_todo,
+            ambiente: documentoBoleta.ambiente,
+            resolucion: {
+              numero: documentoBoleta.numero_resolucion ?? 0,
+              fecha: documentoBoleta.fecha_resolucion ?? '',
+            },
+            emisor: {
+              rut: documentoBoleta.rut_emisor ?? '',
+              razonSocial: documentoBoleta.razon_social ?? '',
+              giro: documentoBoleta.giro ?? '',
+              direccion: documentoBoleta.direccion ?? '',
+              comuna: documentoBoleta.comuna ?? '',
+            },
+          }
+        : null;
+    const boletaSinEmitir =
+      documentoBoleta?.estado_envio === 'sin_emitir'
+        ? { mensaje: documentoBoleta.emision_error ?? '' }
+        : null;
+
     return {
       ventaId: cabecera.venta_id,
       fecha: cabecera.fecha,
@@ -5695,6 +5807,8 @@ export class VentasService {
       propina,
       pagos,
       vuelto,
+      boletaElectronica,
+      boletaSinEmitir,
     };
   }
 }

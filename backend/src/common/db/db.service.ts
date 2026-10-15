@@ -30,6 +30,39 @@ export class Db {
     );
   }
 
+  /**
+   * Corre `fn` detrás de un savepoint de la transacción activa: si `fn` falla, vuelve al punto
+   * de antes (todo lo que `fn` escribió y bloqueó se deshace) y relanza el MISMO error; la
+   * transacción de afuera sigue viva y quien llama decide qué hacer. Sin esto, una sentencia que
+   * falla dentro de una transacción de Postgres la deja abortada (`25P02`) y nada más se puede
+   * escribir.
+   *
+   * Exige una transacción activa: un savepoint fuera de una no existe. `nombre` es una
+   * constante del llamador, nunca un valor de entrada: se interpola en el SQL (`SAVEPOINT` no
+   * admite parámetros), por eso se valida.
+   */
+  async conSavepoint<T>(nombre: string, fn: () => Promise<T>): Promise<T> {
+    if (!/^[a-z_]+$/.test(nombre))
+      throw new Error(
+        `conSavepoint: nombre de savepoint inválido (${JSON.stringify(nombre)}); solo minúsculas y guion bajo`,
+      );
+    const manager = this.tx.managerActivo();
+    if (!manager)
+      throw new Error(
+        'conSavepoint corre dentro de db.transaccion: fuera de una transacción activa no hay savepoint al que volver',
+      );
+    await manager.query(`SAVEPOINT ${nombre}`);
+    let resultado: T;
+    try {
+      resultado = await fn();
+    } catch (error) {
+      await manager.query(`ROLLBACK TO SAVEPOINT ${nombre}`);
+      throw error;
+    }
+    await manager.query(`RELEASE SAVEPOINT ${nombre}`);
+    return resultado;
+  }
+
   /** Manager del contexto si hay transacción en curso; pool si no. */
   query<T = any>(sql: string, params?: unknown[]): Promise<T> {
     const manager = this.tx.managerActivo();

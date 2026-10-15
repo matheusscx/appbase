@@ -21,6 +21,7 @@ import { InventarioService } from '../inventario/inventario.service';
 import { ItemsService } from '../items/items.service';
 import { PagosService } from '../pagos/pagos.service';
 import { VentaDocumentosService } from '../venta-documentos/venta-documentos.service';
+import { EmisionBoletaService } from '../venta-documentos/emision-boleta.service';
 import { VentaPropinaService } from '../propinas/venta-propina.service';
 import { CatalogService } from '../catalog/catalog.service';
 import { GarzonesService } from '../garzones/garzones.service';
@@ -275,6 +276,7 @@ describe('VentasService', () => {
     opcionesDevolucion: jest.Mock;
     devolvibleDelPagoUnico: jest.Mock;
   };
+  let emisionBoletaMock: { documentoAEmitir: jest.Mock; emitir: jest.Mock };
   let ventaPropinaServiceMock: { crearEnTransaccion: jest.Mock };
   let garzonesServiceMock: {
     asegurarMostrador: jest.Mock;
@@ -349,6 +351,11 @@ describe('VentasService', () => {
           registro: 'nota_credito_sistema',
         },
       ]),
+    };
+    // Por defecto no hay nada que emitir (el interruptor del tenant está apagado).
+    emisionBoletaMock = {
+      documentoAEmitir: jest.fn().mockReturnValue(null),
+      emitir: jest.fn().mockResolvedValue({ estado: 'omitido' }),
     };
     ventaPropinaServiceMock = {
       crearEnTransaccion: jest.fn().mockResolvedValue({
@@ -483,6 +490,10 @@ describe('VentasService', () => {
         {
           provide: VentaDocumentosService,
           useValue: ventaDocumentosMock,
+        },
+        {
+          provide: EmisionBoletaService,
+          useValue: emisionBoletaMock,
         },
         {
           provide: VentaPropinaService,
@@ -2614,6 +2625,101 @@ describe('VentasService', () => {
       await expect(
         service.crear(TENANT_ID, USUARIO_ID, baseDto),
       ).rejects.toThrow('documento roto');
+    });
+
+    describe('la boleta electrónica (interruptor del tenant)', () => {
+      const DOC_BOLETA = { id: 'doc-sistema-1', emisor: 'sistema' };
+      const conInterruptor = (prendido: boolean) =>
+        dataSourceMock.query.mockImplementation((sql: string) =>
+          typeof sql === 'string' && sql.includes('es_nota_credito')
+            ? Promise.resolve([{ tipo_documento_id: 'tipo-nc' }])
+            : Promise.resolve(
+                MONEDA_ROWS.map((r) => ({
+                  ...r,
+                  emite_boleta_electronica: prendido,
+                })),
+              ),
+        );
+
+      beforeEach(() => {
+        ventaDocumentosMock.documentarVenta.mockResolvedValue([DOC_BOLETA]);
+        emisionBoletaMock.documentoAEmitir.mockReturnValue(DOC_BOLETA);
+      });
+
+      it('con el interruptor prendido emite el documento que eligió documentoAEmitir, con el tenant y la hora de ahora', async () => {
+        conInterruptor(true);
+        const antes = Date.now();
+
+        await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+        expect(emisionBoletaMock.documentoAEmitir).toHaveBeenCalledWith(
+          [DOC_BOLETA],
+          true,
+        );
+        expect(emisionBoletaMock.emitir).toHaveBeenCalledTimes(1);
+        const [tenant, documentoId, ahora] =
+          emisionBoletaMock.emitir.mock.calls[0];
+        expect(tenant).toBe(TENANT_ID);
+        expect(documentoId).toBe('doc-sistema-1');
+        expect((ahora as Date).getTime()).toBeGreaterThanOrEqual(antes);
+      });
+
+      it('con el interruptor apagado no pregunta ni emite: todo queda como antes', async () => {
+        conInterruptor(false);
+
+        await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+        expect(emisionBoletaMock.documentoAEmitir).not.toHaveBeenCalled();
+        expect(emisionBoletaMock.emitir).not.toHaveBeenCalled();
+      });
+
+      it('una factura llega a documentoAEmitir como no-boleta', async () => {
+        conInterruptor(true);
+
+        await service.crear(TENANT_ID, USUARIO_ID, {
+          ...baseDto,
+          tipoDocumentoId: FACTURA,
+        });
+
+        expect(emisionBoletaMock.documentoAEmitir).toHaveBeenCalledWith(
+          [DOC_BOLETA],
+          false,
+        );
+      });
+
+      it('sin documento por emitir no llama a emitir', async () => {
+        conInterruptor(true);
+        emisionBoletaMock.documentoAEmitir.mockReturnValue(null);
+
+        await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+        expect(emisionBoletaMock.emitir).not.toHaveBeenCalled();
+      });
+
+      it('emite AL FINAL: después de documentar la venta', async () => {
+        conInterruptor(true);
+
+        await service.crear(TENANT_ID, USUARIO_ID, baseDto);
+
+        const orden = (m: jest.Mock) => m.mock.invocationCallOrder[0];
+        expect(orden(emisionBoletaMock.emitir)).toBeGreaterThan(
+          orden(ventaDocumentosMock.documentarVenta),
+        );
+        expect(orden(emisionBoletaMock.emitir)).toBeGreaterThan(
+          orden(pagosServiceMock.registrar),
+        );
+      });
+
+      it('un error que no es de la emisión tumba la venta (no se traga)', async () => {
+        conInterruptor(true);
+        emisionBoletaMock.emitir.mockRejectedValueOnce(
+          new Error('se cayó la cola'),
+        );
+
+        await expect(
+          service.crear(TENANT_ID, USUARIO_ID, baseDto),
+        ).rejects.toThrow('se cayó la cola');
+      });
     });
   });
 
@@ -6828,6 +6934,7 @@ describe('VentasService', () => {
       metodosPago?: Record<string, unknown>[];
       propina?: Record<string, unknown>[];
       customer?: Record<string, unknown>[];
+      documentoBoleta?: Record<string, unknown>[];
     };
 
     /** Cabecera con todos los campos en blanco: cada test pisa lo que necesita. */
@@ -6869,9 +6976,114 @@ describe('VentasService', () => {
           return Promise.resolve(fixture.propina ?? []);
         if (sql.includes('FROM venta_customer'))
           return Promise.resolve(fixture.customer ?? []);
+        if (sql.includes('FROM venta_documentos'))
+          return Promise.resolve(fixture.documentoBoleta ?? []);
         return Promise.resolve([]);
       });
     };
+
+    describe('la boleta electrónica del sistema', () => {
+      const FILA_EMITIDA = {
+        estado_envio: 'emitido',
+        emision_error: null,
+        monto: '5950.0000',
+        cubre_todo: true,
+        tipo: 39,
+        folio: 1234,
+        ambiente: 'certificacion',
+        rut_emisor: '76543210-3',
+        razon_social: 'Panadería Ñuñoa SpA',
+        giro: 'Panadería',
+        direccion: 'Irarrázaval 2401',
+        comuna: 'Ñuñoa',
+        numero_resolucion: 0,
+        fecha_resolucion: '2026-09-30',
+      };
+      const armar = (documentoBoleta: Record<string, unknown>[]) => {
+        mockArmarBoleta({ cabecera: cabeceraBase(), documentoBoleta });
+        return service.armarBoleta(
+          dbService,
+          TENANT_ID,
+          VENTA_ID,
+          USUARIO_ID,
+          true,
+        );
+      };
+
+      it('emitida: el folio, el tipo, el monto y el emisor de la boleta', async () => {
+        const boleta = await armar([FILA_EMITIDA]);
+
+        expect(boleta.boletaElectronica).toEqual({
+          tipo: 39,
+          folio: 1234,
+          monto: '5950.0000',
+          cubreTodo: true,
+          ambiente: 'certificacion',
+          // Resolución 0 es la de certificación: no es "falta".
+          resolucion: { numero: 0, fecha: '2026-09-30' },
+          emisor: {
+            rut: '76543210-3',
+            razonSocial: 'Panadería Ñuñoa SpA',
+            giro: 'Panadería',
+            direccion: 'Irarrázaval 2401',
+            comuna: 'Ñuñoa',
+          },
+        });
+        expect(boleta.boletaSinEmitir).toBeNull();
+      });
+
+      it('de un documento que cubre una parte dice que no cubre todo', async () => {
+        const boleta = await armar([
+          { ...FILA_EMITIDA, monto: '2975.0000', cubre_todo: false },
+        ]);
+
+        expect(boleta.boletaElectronica).toMatchObject({
+          monto: '2975.0000',
+          cubreTodo: false,
+        });
+      });
+
+      it('sin emitir: el motivo para el cajero y ninguna boleta', async () => {
+        const boleta = await armar([
+          {
+            ...FILA_EMITIDA,
+            estado_envio: 'sin_emitir',
+            emision_error: 'No quedan folios de tipo 39 cargados',
+            tipo: null,
+            folio: null,
+            ambiente: null,
+          },
+        ]);
+
+        expect(boleta.boletaElectronica).toBeNull();
+        expect(boleta.boletaSinEmitir).toEqual({
+          mensaje: 'No quedan folios de tipo 39 cargados',
+        });
+      });
+
+      it('sin documento por emitir (interruptor apagado, otro emisor): las dos en null', async () => {
+        const boleta = await armar([]);
+
+        expect(boleta.boletaElectronica).toBeNull();
+        expect(boleta.boletaSinEmitir).toBeNull();
+      });
+
+      it('la lee en UNA consulta, del documento del sistema vigente y no de una corrección', async () => {
+        await armar([FILA_EMITIDA]);
+
+        const consultas = dataSourceMock.query.mock.calls
+          .map((c) => c[0] as string)
+          .filter((q) => q.includes('FROM venta_documentos'));
+        expect(consultas).toHaveLength(1);
+        const sql = consultas[0];
+        expect(sql).toContain("vd.emisor = 'sistema'");
+        expect(sql).toContain('vd.documento_corregido_id IS NULL');
+        expect(sql).toContain('vd.descarte IS NULL');
+        expect(sql).toContain('vd.eliminado_el IS NULL');
+        // La boleta emitida conserva su emisor: la razón social no se filtra por baja.
+        expect(sql).not.toMatch(/rs\.eliminado_el/);
+      });
+    });
 
     it('una venta de dos líneas devuelve items en el orden persistido', async () => {
       mockArmarBoleta({

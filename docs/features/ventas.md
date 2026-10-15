@@ -860,7 +860,24 @@ detalle necesita para mostrar "2,5 kg" en vez de "2,5". Ver también el congelad
 3. Convertir precios a moneda oficial (`precioOrigen × tasa_cambio`)
 4. Llamar `calculoPreciosService.calcular` → importes autoritativos
 5. Calcular excedente; validar `permite_vuelto` si hay excedente; determinar estado
-6. `db.transaccion`: **reclamar la `Idempotency-Key`** (primera sentencia; si ya estaba, reproducir y cortar acá) → guardar cabecera → detalles → trazas de reglas → customer → lo apartado por las mesas (solo la venta directa) → inventario (`salida/venta` por producto, ingrediente, componente u opción, cada una con su línea: `venta_detalle_id`) → pagos → movimientos de caja (efectivo) → **documentos de la venta** (`VentaDocumentosService.documentarVenta`) → guardar la respuesta junto a la clave
+6. `db.transaccion`: **reclamar la `Idempotency-Key`** (primera sentencia; si ya estaba, reproducir y cortar acá) → guardar cabecera → detalles → trazas de reglas → customer → lo apartado por las mesas (solo la venta directa) → inventario (`salida/venta` por producto, ingrediente, componente u opción, cada una con su línea: `venta_detalle_id`) → pagos → movimientos de caja (efectivo) → **documentos de la venta** (`VentaDocumentosService.documentarVenta`) → **la boleta electrónica** (`EmisionBoletaService.emitir`, solo con `tenants.emite_boleta_electronica`; va al final porque toma el bloqueo del CAF y lo suelta con el commit) → armar la boleta de la respuesta (`armarBoleta`) → guardar la respuesta junto a la clave
+
+**La boleta electrónica en la transacción (2026-10-15,** spec
+[`2026-10-14-boleta-desde-la-venta`](../superpowers/specs/2026-10-14-boleta-desde-la-venta-design.md)**).**
+Con el interruptor del tenant encendido, `crearEnTransaccion` emite la boleta del documento del
+sistema **detrás de un savepoint** (`Db.conSavepoint`, ver `patterns/backend.md` § 9). Un
+`DteError` (sin folios, certificado vencido, un dato que el motor rechaza) deshace la emisión,
+deja el documento `sin_emitir` con su motivo y **la venta entra igual**; cualquier otro error
+tumba la venta. Un solo lugar cubre los cuatro caminos que crean ventas (POS, cierre de mesa,
+callback de la tienda, alta de suscripción). Si la venta se cae después de emitir, el folio y la
+fila de la cola vuelven con el rollback. Detalle en
+[`emision-electronica.md`](./emision-electronica.md#la-venta-emite-la-boleta).
+
+La respuesta de `POST /ventas`, `POST /cuentas/:id/cerrar` y `GET /ventas/:id/boleta`
+(`BoletaVenta`) suma `boletaElectronica` (`{ tipo, folio, monto, cubreTodo, ambiente, resolucion,
+emisor }` o `null`) y `boletaSinEmitir` (`{ mensaje }` o `null`). Con `cubreTodo = false` (pago
+mixto con la máquina) `monto` es el saldo que cubre la boleta del sistema, no el total de la venta.
+El reintento con la misma `Idempotency-Key` devuelve el mismo folio.
 
 ### La venta online no recalcula: `ventaCongelada` (2026-10-11)
 

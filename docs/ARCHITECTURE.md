@@ -68,7 +68,7 @@ startup-app/
 │   │       ├── ventas/           # Procesamiento de ventas transaccional + tipos de documento
 │   │       ├── pagos/            # Abonos a ventas pendientes y ledger de pagos
 │   │       ├── dte/              # Boleta electrónica (ADR-033): motor puro + perfil fiscal del emisor (rutas /dte/*, PerfilFiscalService, FoliosService, CifradoDteService) + cola de envío al SII (ColaDteService, SiiBoletaCliente y dos jobs: enviar-boletas cada 30 s, consultar-envios cada minuto)
-│   │       ├── venta-documentos/ # Qué documentos tiene cada venta y quién los emitió (módulo hoja, ADR-028)
+│   │       ├── venta-documentos/ # Qué documentos tiene cada venta y quién los emitió (ADR-028) + EmisionBoletaService, que emite la boleta de la venta (importa dte; ventas y pagos lo importan a él, sin ciclo)
 │   │       ├── idempotencia/     # Un cobro por intento: Idempotency-Key → respuesta (ADR-026)
 │   │       ├── caja/             # Gestión de cajas (física/virtual, movimientos, cierre)
 │   │       ├── propinas/         # Registro, distribución, liquidación y reportes agregados

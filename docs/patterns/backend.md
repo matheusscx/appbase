@@ -901,6 +901,31 @@ con el deadlock que motivó esto y las alternativas descartadas, está en
   transacción retiene con `FOR UPDATE`. El FK pide `FOR KEY SHARE` sobre ella; se
   esperan mutuamente. `caja_intentos_rechazados` no declara relaciones a `cajas`
   ni a `usuarios` por esto.
+- **`db.conSavepoint(nombre, fn)` — un paso de la transacción que puede fallar sin tumbarla
+  (2026-10-15).** Abre `SAVEPOINT nombre`, corre `fn` y, si sale bien, `RELEASE SAVEPOINT`; si
+  `fn` lanza, hace `ROLLBACK TO SAVEPOINT` y **relanza el mismo error**, con la transacción de
+  afuera sana. Exige una transacción activa (lanza si no hay) y valida `nombre` contra
+  `/^[a-z_]+$/`: `SAVEPOINT` no admite parámetros, así que el nombre se interpola en el SQL y es
+  **una constante del llamador**, nunca un valor de entrada. Primer uso: la emisión de la boleta
+  electrónica dentro de la venta (`EmisionBoletaService.emitir`).
+  ```ts
+  try {
+    return await this.db.conSavepoint('emision_boleta', () => this.emitirDentro(…));
+  } catch (e) {
+    if (!(e instanceof DteError)) throw e;      // solo el error que sabemos tragar
+    await this.db.query(`UPDATE … sin_emitir …`);  // DESPUÉS de volver: lo escrito adentro se deshace
+  }
+  ```
+  - **Sin savepoint, atrapar el error no alcanza.** Una sentencia SQL que falla deja la
+    transacción abortada (`25P02`) y nada más se puede escribir; y un error de negocio lanzado
+    *después* de un `UPDATE` (el folio que ya se tomó) deja ese `UPDATE` en el commit. El savepoint
+    deshace lo que `fn` escribió **y libera lo que bloqueó**.
+  - **Lo que se escribe como consecuencia del fallo va fuera de `fn`,** en el `catch`, ya vuelto
+    al savepoint. Si va adentro, el rollback se lo lleva.
+  - **Atrapar solo el error de dominio** (`DteError`): cualquier otro se propaga y tumba la
+    transacción entera, como antes.
+  - No es la salida de `sinTransaccion`: el savepoint sigue **en la misma conexión y la misma
+    transacción**; si la transacción de afuera se cae, también se va lo que el savepoint liberó.
 - **El `manager: EntityManager` explícito en una firma preexistente sigue
   siendo válido — no migrar por migrar.** Donde ya se enhebra a mano
   (`calcularEsperadoEfectivo(cajaId, manager)` y similares) es correcto y el
