@@ -1,4 +1,8 @@
+import { execFileSync } from 'node:child_process'
 import { generateKeyPairSync } from 'node:crypto'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 
 /**
  * Un archivo de folios (CAF) como lo descarga el dueño del local, para subirlo por la pantalla.
@@ -40,4 +44,41 @@ export function cafDePrueba(opts: {
     '</AUTORIZACION>',
   ].join('\r\n')
   return Buffer.from(`${xml}\r\n`, 'latin1')
+}
+
+/**
+ * Un certificado del firmante (.pfx) autofirmado, para subirlo por la API. El RUT va en el
+ * `serialNumber` del sujeto, que es donde el backend lo lee (`leerCertificado`).
+ *
+ * Lo arma el `openssl` del sistema y no `node-forge`: Playwright no lo tiene entre sus
+ * dependencias, y sumarlo sería una dependencia nueva solo para un fixture. Las opciones
+ * `-certpbe`/`-keypbe` 3DES y `-macalg sha1` son las que el backend sabe abrir (`node-forge`
+ * no lee el AES-256 que OpenSSL 3 usa por defecto); LibreSSL (macOS) y OpenSSL 3 (CI) las
+ * aceptan igual. La llave nunca se escribe fuera de un directorio temporal que se borra.
+ */
+export function certificadoPfxDePrueba(opts: { rut: string, clave?: string }): { pfx: Buffer, clave: string } {
+  const clave = opts.clave ?? 'clave-e2e'
+  const dir = mkdtempSync(join(tmpdir(), 'cert-e2e-'))
+  try {
+    const llave = join(dir, 'llave.pem')
+    const cert = join(dir, 'cert.pem')
+    const pfx = join(dir, 'cert.pfx')
+    execFileSync('openssl', [
+      'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '3650',
+      '-keyout', llave, '-out', cert,
+      '-subj', `/CN=Firmante e2e/serialNumber=${opts.rut}`,
+    ], { stdio: 'pipe' })
+    // La clave viaja por un archivo y no por la línea de comandos (`ps` la mostraría).
+    const archivoClave = join(dir, 'clave.txt')
+    writeFileSync(archivoClave, clave)
+    execFileSync('openssl', [
+      'pkcs12', '-export', '-inkey', llave, '-in', cert, '-out', pfx,
+      '-passout', `file:${archivoClave}`,
+      '-certpbe', 'PBE-SHA1-3DES', '-keypbe', 'PBE-SHA1-3DES', '-macalg', 'sha1',
+    ], { stdio: 'pipe' })
+    return { pfx: readFileSync(pfx), clave }
+  }
+  finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
 }

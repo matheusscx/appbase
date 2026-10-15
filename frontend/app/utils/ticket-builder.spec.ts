@@ -209,7 +209,6 @@ describe('buildBoletaTicket', () => {
   function boleta(over: Partial<Parameters<typeof buildBoletaTicket>[0]> = {}) {
     return buildBoletaTicket({
       emisor: EMISOR,
-      facturacionElectronica: false,
       meta: { cajero: 'Juan Pérez' },
       items: [ITEM],
       totales: TOTALES_BASE,
@@ -242,12 +241,148 @@ describe('buildBoletaTicket', () => {
     expect(lines.some(l => l.includes('BOLETA ELECTRÓNICA'))).toBe(false)
   })
 
-  it('en modo electrónico imprime BOLETA ELECTRÓNICA + folio + timbre SII, nunca SIN VALIDEZ', () => {
-    const lines = boleta({ facturacionElectronica: true, folio: '00000123' })
-    expect(lines.some(l => l.includes('BOLETA ELECTRÓNICA'))).toBe(true)
-    expect(lines.some(l => l.includes('00000123'))).toBe(true)
-    expect(lines.some(l => l.includes('Timbre Electrónico SII'))).toBe(true)
-    expect(lines.some(l => l.includes('SIN VALIDEZ FISCAL'))).toBe(false)
+  // Regresión: ni electrónica ni pendiente = el ticket de hoy, línea por línea.
+  // El snapshot es el que el builder producía antes de la boleta desde la venta.
+  it('sin electrónica ni pendiente el ticket sale exactamente igual que el de hoy', () => {
+    const lines = boleta({ meta: { cajero: 'Juan Pérez', mesa: 'MESA-1' }, propina: { monto: '1000' }, vuelto: '500' }).map(l => l.replace(FECHA.toLocaleString('es-CL'), '<fecha>'))
+    expect(lines).toMatchInlineSnapshot(`
+      [
+        "              Comercial Paris SpA",
+        "               RUT: 76.123.456-7",
+        "              Av. Providencia 1234",
+        "              Tel: +56 2 2345 6789",
+        "------------------------------------------------",
+        "               DOCUMENTO INTERNO",
+        "------------------------------------------------",
+        "Fecha : <fecha>",
+        "Cajero: Juan Pérez",
+        "Mesa  : MESA-1",
+        "------------------------------------------------",
+        "CANT  DESCRIPCIÓN               P.UNIT     TOTAL",
+        "------------------------------------------------",
+        "1     Pisco Sour                 $5000     $5000",
+        "------------------------------------------------",
+        "Subtotal                                  $37000",
+        "Neto                                      $31092",
+        "IVA (19%)                                  $5908",
+        "------------------------------------------------",
+        "TOTAL BOLETA                              $37000",
+        "------------------------------------------------",
+        "Propina                                    $1000",
+        "------------------------------------------------",
+        "TOTAL A PAGAR                             $38000",
+        "------------------------------------------------",
+        "Efectivo                                  $37000",
+        "------------------------------------------------",
+        "Vuelto                                      $500",
+        "",
+        "           *** SIN VALIDEZ FISCAL ***",
+        "       No constituye documento tributario",
+        "",
+        "",
+      ]
+    `)
+  })
+
+  describe('con boleta electrónica', () => {
+    const ELECTRONICA = {
+      tipo: 39 as const,
+      folio: 1234,
+      monto: '37000',
+      cubreTodo: true,
+      certificacion: false,
+      resolucion: { numero: 80, fecha: '2014-08-22' },
+    }
+    const EMISOR_BOLETA = { nombre: 'Comercial Paris SpA', rut: '76123456-7', giro: 'Restaurante', direccion: 'Calle 1, Providencia' }
+
+    it('39: BOLETA ELECTRÓNICA, N° del folio, y al pie timbre, resolución y verificación; sin SIN VALIDEZ', () => {
+      const lines = boleta({ emisor: EMISOR_BOLETA, electronica: ELECTRONICA })
+      const tipo = lines.findIndex(l => l.trim() === 'BOLETA ELECTRÓNICA')
+      expect(tipo).toBeGreaterThan(-1)
+      expect(lines[tipo + 1]!.trim()).toBe('N° 1234')
+      expect(lines.some(l => l.includes('DOCUMENTO INTERNO'))).toBe(false)
+      expect(lines.some(l => l.includes('SIN VALIDEZ'))).toBe(false)
+      const pie = lines.slice(lines.findIndex(l => l.includes('Timbre Electrónico SII'))).map(l => l.trim())
+      expect(pie).toEqual([
+        'Timbre Electrónico SII',
+        'Res. N° 80 de 2014',
+        'Verifique documento en www.sii.cl',
+        '',
+        '',
+      ])
+      expect(lines.some(l => l.includes('Verifique en www.sii.cl'))).toBe(false)
+      expect(lines.some(l => l.includes('TODO'))).toBe(false)
+    })
+
+    it('el emisor del papel es el de la boleta, con su giro', () => {
+      const lines = boleta({ emisor: EMISOR_BOLETA, electronica: ELECTRONICA })
+      expect(lines.some(l => l.includes('RUT: 76123456-7'))).toBe(true)
+      expect(lines.some(l => l.includes('Giro: Restaurante'))).toBe(true)
+      expect(lines.some(l => l.includes('Calle 1, Providencia'))).toBe(true)
+    })
+
+    it('41: BOLETA EXENTA ELECTRÓNICA', () => {
+      const lines = boleta({ electronica: { ...ELECTRONICA, tipo: 41 } })
+      expect(lines.some(l => l.trim() === 'BOLETA EXENTA ELECTRÓNICA')).toBe(true)
+      expect(lines.some(l => l.trim() === 'BOLETA ELECTRÓNICA')).toBe(false)
+    })
+
+    it('pago mixto: debajo del folio dice por cuánto es la boleta, y el papel sigue listando la venta entera', () => {
+      const lines = boleta({
+        electronica: { ...ELECTRONICA, monto: '60000', cubreTodo: false },
+        totales: { ...TOTALES_BASE, totalFinal: '100000' },
+        formatMonto: v => `$${v}`,
+      })
+      const folio = lines.findIndex(l => l.trim() === 'N° 1234')
+      expect(lines[folio + 1]!.trim()).toBe('por $60000 (saldo de la venta)')
+      expect(lines.some(l => l.startsWith('TOTAL BOLETA') && l.includes('$100000'))).toBe(true)
+    })
+
+    it('con cubreTodo no hay línea de saldo', () => {
+      expect(boleta({ electronica: ELECTRONICA }).some(l => l.includes('saldo de la venta'))).toBe(false)
+    })
+
+    it('certificación: CERTIFICACIÓN - SIN VALIDEZ debajo del tipo, y solo en certificación', () => {
+      const cert = boleta({ electronica: { ...ELECTRONICA, certificacion: true } })
+      const tipo = cert.findIndex(l => l.trim() === 'BOLETA ELECTRÓNICA')
+      const marca = cert.findIndex(l => l.includes('CERTIFICACIÓN - SIN VALIDEZ'))
+      expect(marca).toBeGreaterThan(tipo)
+      expect(marca).toBeLessThan(cert.findIndex(l => l.startsWith('Fecha')))
+      expect(boleta({ electronica: ELECTRONICA }).some(l => l.includes('CERTIFICACIÓN'))).toBe(false)
+    })
+
+    it('todo el papel cabe en CP850: sin el guion largo ni la elipsis', () => {
+      const lines = boleta({ electronica: { ...ELECTRONICA, certificacion: true, cubreTodo: false } })
+      expect(lines.some(l => /[\u2013\u2014\u2026]/.test(l))).toBe(false)
+    })
+
+    it('la copia de una electrónica mantiene el folio y suma COPIA', () => {
+      const lines = boleta({ electronica: ELECTRONICA, copia: { impresaEl: new Date('2026-09-17T15:45:00') } })
+      expect(lines.some(l => l.trim() === 'N° 1234')).toBe(true)
+      expect(lines.some(l => l.includes('COPIA'))).toBe(true)
+    })
+
+    it('si la fecha de la resolución no viene, la línea sale sin año', () => {
+      const lines = boleta({ electronica: { ...ELECTRONICA, resolucion: { numero: 80, fecha: '' } } })
+      expect(lines.some(l => l.trim() === 'Res. N° 80')).toBe(true)
+    })
+  })
+
+  describe('boleta electrónica pendiente de emisión', () => {
+    it('es el ticket de hoy más la línea al pie', () => {
+      const base = boleta()
+      const pendiente = boleta({ pendienteDeEmision: true })
+      expect(pendiente.some(l => l.includes('DOCUMENTO INTERNO'))).toBe(true)
+      expect(pendiente.some(l => l.includes('SIN VALIDEZ FISCAL'))).toBe(true)
+      const i = pendiente.findIndex(l => l.trim() === 'Boleta electrónica pendiente de emisión')
+      expect(i).toBeGreaterThan(pendiente.findIndex(l => l.includes('No constituye documento tributario')))
+      // Lo único que agrega es esa línea: el resto es carácter por carácter el de hoy.
+      expect(pendiente.filter(l => !l.includes('pendiente de emisión'))).toEqual(base)
+    })
+
+    it('sin pendiente no hay línea', () => {
+      expect(boleta().some(l => l.includes('pendiente de emisión'))).toBe(false)
+    })
   })
 
   it('con copia imprime COPIA y la fecha/hora de la reimpresión, después del tipo de documento', () => {

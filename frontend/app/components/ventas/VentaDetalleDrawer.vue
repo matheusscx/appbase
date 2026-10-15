@@ -13,6 +13,7 @@ import type { DevolucionStock } from '~/composables/useDevolucionInventario'
 import {
   NUMERO_DOCUMENTO_MAX,
   cuerpoCompletarNumero,
+  AVISO_NC_ELECTRONICA_PENDIENTE,
   estadoDocumento,
   etiquetaEmisor,
   etiquetaTipo,
@@ -271,6 +272,7 @@ const unidadesStore = useUnidadesMedidaStore()
 const { formatMonto, formatFecha, formatPorcentaje } = useFormatters()
 const apiUrl = config.public.apiUrl
 const impresorasApi = useImpresoras()
+const { paraTicket } = useBoletaElectronica()
 const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
 const venta = ref<VentaDetalle | null>(null)
@@ -952,7 +954,8 @@ async function reimprimirBoleta() {
     ])
     await impresorasApi.imprimirBoleta({
       emisor: emisor.value,
-      facturacionElectronica: false,
+      // Después de emitirla, la reimpresión sale con el folio.
+      ...paraTicket(boleta),
       meta: {
         cajero: boleta.cajero ?? undefined,
         mesa: boleta.mesa ?? undefined,
@@ -1455,6 +1458,12 @@ function onNcOtrosDatos() {
               <p v-if="estadoDocumento(doc)" class="text-xs text-muted">
                 {{ estadoDocumento(doc) }}
               </p>
+              <div v-if="doc.ncElectronicaPendiente" class="flex flex-col items-start gap-1" data-qa="nc-electronica-pendiente">
+                <UBadge color="warning" variant="subtle" size="xs" label="NC electrónica pendiente" />
+                <p class="text-xs text-muted">
+                  {{ AVISO_NC_ELECTRONICA_PENDIENTE }}
+                </p>
+              </div>
               <p v-if="leyendaDescarte(doc, formatFecha(doc.descartadoEl))" class="text-xs text-muted">
                 {{ leyendaDescarte(doc, formatFecha(doc.descartadoEl)) }}
               </p>

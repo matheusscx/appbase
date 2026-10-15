@@ -44,6 +44,9 @@ const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 const { lineas, resultado, loadingCalculo, vigente, errorCalculo, asegurarVigente, add, quitar, cambiarCantidadPresentacion, cambiarUnidades, limpiar } = useVenta()
 const unidadesStore = useUnidadesMedidaStore()
 const impresorasApi = useImpresoras()
+const { paraTicket, avisoSinEmitir } = useBoletaElectronica()
+// La franja de avisos de la boleta electrónica: se vuelve a leer después de cada cobro.
+const franjaEmision = useTemplateRef('franjaEmision')
 const { formatMonto } = useFormatters()
 // Frente de bodegas y traslados: el 400 de "no hay stock" al cobrar ofrece el
 // traslado precargado solo a quien de verdad puede crearlo — el mismo permiso
@@ -327,6 +330,12 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     for (const advertencia of venta.advertencias ?? []) {
       toast.add({ title: advertencia, color: 'warning' })
     }
+    // La venta entró y el ticket sale igual; lo que falta es la boleta ante el SII.
+    const sinEmitir = avisoSinEmitir(venta.boleta)
+    if (sinEmitir) {
+      toast.add({ title: 'La boleta no se emitió. Avisa al encargado.', description: sinEmitir, color: 'warning' })
+    }
+    void franjaEmision.value?.recargar()
     cobroOpen.value = false
     propinaMonto.value = '0'
 
@@ -338,7 +347,8 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     try {
       await impresorasApi.imprimirBoleta({
         emisor: emisor.value,
-        facturacionElectronica: false,
+        // Si la boleta salió: su folio y su emisor; si no salió: la línea de pendiente.
+        ...paraTicket(venta.boleta),
         meta: {
           cajero: venta.boleta.cajero ?? undefined,
         },
@@ -407,6 +417,8 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     </template>
 
     <template #body>
+      <VentasFranjaEmision v-if="tieneCaja" ref="franjaEmision" />
+
       <div v-if="cajaStore.loadingActiva" class="flex items-center justify-center h-full">
         <UIcon name="i-lucide-loader" class="w-8 h-8 text-muted animate-spin" />
       </div>

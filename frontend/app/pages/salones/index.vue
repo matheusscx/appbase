@@ -84,6 +84,9 @@ const sesionesApi = useSesionesGarzon()
 const unidadesStore = useUnidadesMedidaStore()
 const { formatMonto, formatFecha } = useFormatters()
 const impresorasApi = useImpresoras()
+const { paraTicket, avisoSinEmitir } = useBoletaElectronica()
+// La franja de avisos de la boleta electrónica: se vuelve a leer después de cada cobro.
+const franjaEmision = useTemplateRef('franjaEmision')
 const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
 const enviandoComanda = ref(false)
@@ -410,6 +413,8 @@ const { puedeActualizar: puedeTransferirAdmin } = usePermisosCrud('Salones')
 // `Inventario/Crear` — mismo permiso que ya exige `POST /traslados` y que ya
 // usa `inventario/traslados.vue`—, así que ve el mensaje y nada más.
 const { puedeCrear: puedeTrasladar } = usePermisosCrud('Inventario')
+// La franja de la boleta electrónica la lee quien puede vender (`Ventas:Crear`, como el POS).
+const { puedeCrear: puedeVender } = usePermisosCrud('Ventas')
 const { mostrarRechazoPorStock } = useRechazoPorStock()
 const { etiquetaCondicion, colorCondicion } = useUnidadesSerie()
 
@@ -2931,11 +2936,17 @@ async function cerrarCuentaConPin(
       color: 'success',
     })
     intentoCobro.avisarSiRepetido({ repetida })
+    // La venta entró y el ticket sale igual; lo que falta es la boleta ante el SII.
+    const sinEmitir = avisoSinEmitir(boleta)
+    if (sinEmitir) {
+      toast.add({ title: 'La boleta no se emitió. Avisa al encargado.', description: sinEmitir, color: 'warning' })
+    }
+    void franjaEmision.value?.recargar()
 
     try {
       await impresorasApi.imprimirBoleta({
         emisor: emisor.value,
-        facturacionElectronica: false,
+        ...paraTicket(boleta),
         meta: {
           cajero: boleta.cajero ?? undefined,
           mesa: boleta.mesa ?? undefined,
@@ -3029,6 +3040,8 @@ async function cerrarCuentaConPin(
     </template>
 
     <template #body>
+      <VentasFranjaEmision v-if="puedeVender" ref="franjaEmision" />
+
       <div class="space-y-4 p-4">
         <!-- Solo modo personal: un tótem compartido no tiene "mi PIN". Fuera
              del `v-else` de abajo a propósito: no depende de que haya salones

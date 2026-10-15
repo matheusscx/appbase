@@ -5,6 +5,7 @@ import {
   buildBoletaTicket,
   type TicketTotales,
   type TicketPago,
+  type BoletaElectronicaTicket,
   type BoletaEmisor,
   type BoletaMetaOperativa,
   type BoletaCliente,
@@ -340,8 +341,9 @@ export function useImpresoras() {
 
   async function imprimirBoleta(input: {
     emisor: BoletaEmisor
-    facturacionElectronica: boolean
-    folio?: string | null
+    /** De `useBoletaElectronica().paraTicket(boleta)`. Ver `buildBoletaTicket`. */
+    electronica?: BoletaElectronicaTicket
+    pendienteDeEmision?: boolean
     meta: BoletaMetaOperativa
     cliente?: BoletaCliente
     items: BoletaItem[]

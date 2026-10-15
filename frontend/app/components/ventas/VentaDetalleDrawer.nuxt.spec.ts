@@ -815,6 +815,10 @@ function documento(parcial: Record<string, unknown> = {}) {
     descarte: null,
     descartadoEl: null,
     descartadoPorNombre: null,
+    folio: null,
+    estadoSii: null,
+    emisionError: null,
+    ncElectronicaPendiente: false,
     numerosBorrados: [],
     ...parcial,
   }
@@ -962,6 +966,29 @@ describe('VentaDetalleDrawer — documentos', () => {
     const wrapper = await montarCon([documento({ id: 'doc-s' })])
 
     expect(fila(wrapper, 'doc-s').text()).toContain('Armado, sin enviar al SII')
+  })
+
+  it('la boleta electrónica emitida dice su folio', async () => {
+    const wrapper = await montarCon([documento({ id: 'doc-s', estadoEnvio: 'emitido', folio: 1234, estadoSii: 'enviado' })])
+
+    expect(fila(wrapper, 'doc-s').text()).toContain('Boleta electrónica N° 1234')
+  })
+
+  it('una corrección sobre una boleta electrónica dice que su NC está pendiente y qué hacer por ahora', async () => {
+    const wrapper = await montarCon([
+      documento({ id: 'doc-nc', ventaId: 'nc-1', documentoCorregidoId: 'doc-s', ncElectronicaPendiente: true }),
+    ])
+
+    const nc = fila(wrapper, 'doc-nc').find('[data-qa="nc-electronica-pendiente"]')
+    expect(nc.exists()).toBe(true)
+    expect(nc.text()).toContain('NC electrónica pendiente')
+    expect(nc.text()).toContain('Hazla en el portal del SII por ahora; el sistema la emitirá cuando esté disponible.')
+  })
+
+  it('un documento sin NC pendiente no muestra el aviso', async () => {
+    const wrapper = await montarCon([documento({ id: 'doc-s' })])
+
+    expect(fila(wrapper, 'doc-s').find('[data-qa="nc-electronica-pendiente"]').exists()).toBe(false)
   })
 
   it('el voucher duplicado lleva la marca para el contador', async () => {
@@ -1538,6 +1565,39 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
     expect(texto, 'una venta pagada no sale ANULADA').not.toContain('ANULADA')
     expect(texto).toContain('Pizza grande')
     expect(texto).toContain('Ana Torres')
+  })
+
+  /** La reimpresión de una boleta ya emitida sale con su folio, marcada COPIA (spec § 7). */
+  it('una boleta electrónica emitida se reimprime con su folio y su resolución, como COPIA', async () => {
+    impresionesQz.length = 0
+    boletaActual = {
+      ...BOLETA_REIMPRESION,
+      boletaElectronica: {
+        tipo: 39,
+        folio: 1234,
+        monto: '7500',
+        cubreTodo: true,
+        ambiente: 'produccion',
+        resolucion: { numero: 80, fecha: '2014-08-22' },
+        emisor: { rut: '76123456-7', razonSocial: 'Comercial Paris SpA', giro: 'Restaurante', direccion: 'Calle 1 123', comuna: 'Providencia' },
+      },
+    }
+    try {
+      const wrapper = await montar()
+      await botonReimprimir(wrapper)!.trigger('click')
+      await new Promise(r => setTimeout(r, 50))
+
+      expect(impresionesQz, 'la boleta se imprimió').toHaveLength(1)
+      const texto = impresionesQz[0]!.join('')
+      expect(texto).toContain('COPIA')
+      expect(texto).toContain('BOLETA ELECTRÓNICA')
+      expect(texto).toContain('N° 1234')
+      expect(texto).toContain('Res. N° 80 de 2014')
+      expect(texto).not.toContain('SIN VALIDEZ FISCAL')
+    }
+    finally {
+      boletaActual = BOLETA_REIMPRESION
+    }
   })
 
   /**

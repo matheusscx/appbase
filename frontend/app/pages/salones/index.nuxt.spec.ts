@@ -208,6 +208,10 @@ let lineasQuitadas: string[] = []
  * afuera lo apartado por una cuenta, y con el mock respondiendo 200 a todo no se vería si se borra.
  */
 let urlsUnidades: string[] = []
+/** Lo que devuelve `GET /dte/estado-emision` (la franja de la boleta electrónica). */
+let estadoEmisionMock: unknown = { activa: false, avisos: [], sinEmitir: 0 }
+/** Cada lectura de `GET /dte/estado-emision`: una al entrar y otra después de cada cobro. */
+let lecturasEstadoEmision = 0
 /** Lo que devuelve ese `GET`: las unidades vendibles del ítem en el local. */
 let unidadesVendiblesMock: unknown[] = []
 /** Cada `PATCH` de una línea con serie: el body COMPLETO, para ver que no viaja una `cantidad`. */
@@ -899,6 +903,10 @@ mockNuxtImport('useApiFetch', () => {
       }
       return cierreRetenido ? cierreRetenido.then(() => cerrado) : Promise.resolve(cerrado)
     }
+    if (ruta.endsWith('/dte/estado-emision')) {
+      lecturasEstadoEmision++
+      return Promise.resolve(estadoEmisionMock)
+    }
     if (ruta.endsWith('/impresoras/operacion')) {
       // La URL **entera**, como en `/items`: `listarOperativas()` manda el rol
       // por query y `obtenerImpresoraBoleta()` NO vuelve a filtrarlo del lado
@@ -991,6 +999,8 @@ function reiniciarMock() {
   cierreRetenido = null
   cierreFallaSesion = false
   cierreBoletaOverride = null
+  estadoEmisionMock = { activa: false, avisos: [], sinEmitir: 0 }
+  lecturasEstadoEmision = 0
   tiposDocumentoMock = [{ id: 'tipo-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true }]
   agregarLineaRetenido = null
   quitarLineaRetenido = null
@@ -5104,6 +5114,116 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     // el entero redondeado.
     expect(filaItem, 'muestra la fracción, no el entero redondeado').toContain('0,3')
     expect(filaItem.slice(0, 5).trim(), 'la columna CANT no quedó en "0"').not.toBe('0')
+  })
+
+  /**
+   * Spec `2026-10-14-boleta-desde-la-venta` § 7 y § 8.2: el cierre de la cuenta también emite la
+   * boleta electrónica. Si salió, el papel lleva su folio; si no salió, el ticket de hoy más la
+   * línea de pendiente, y el garzón/cajero lo sabe con un toast (la venta ya entró).
+   */
+  it('con la boleta electrónica emitida en el cierre, el ticket lleva su folio y no avisa nada', async () => {
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+    cierreBoletaOverride = {
+      ...boletaCierreDefault(),
+      boletaElectronica: {
+        tipo: 39,
+        folio: 1234,
+        monto: '5000',
+        cubreTodo: true,
+        ambiente: 'produccion',
+        resolucion: { numero: 80, fecha: '2014-08-22' },
+        emisor: { rut: '76123456-7', razonSocial: 'Comercial Paris SpA', giro: 'Restaurante', direccion: 'Calle 1 123', comuna: 'Providencia' },
+      },
+      boletaSinEmitir: null,
+    }
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+
+    expect(impresionesQz, 'la boleta salió').toHaveLength(1)
+    const texto = impresionesQz[0]!.join('\n')
+    expect(texto).toContain('BOLETA ELECTRÓNICA')
+    expect(texto).toContain('N° 1234')
+    expect(texto).not.toContain('SIN VALIDEZ FISCAL')
+    expect(toasts.some(t => t.title === 'La boleta no se emitió. Avisa al encargado.')).toBe(false)
+  })
+
+  it('la franja de la boleta electrónica se ve arriba y se vuelve a leer después de cobrar la cuenta', async () => {
+    // Quien vende (`Ventas:Crear`): sin el permiso la franja ni se monta.
+    usePermissionsStore().esAdmin = true
+    estadoEmisionMock = {
+      activa: true,
+      avisos: [{ codigo: 'POCOS_FOLIOS', mensaje: 'Quedan 40 folios de boleta (39)' }],
+      sinEmitir: 0,
+    }
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    const franja = wrapper.find('[data-qa="franja-emision"]')
+    expect(franja.exists(), 'la franja está arriba').toBe(true)
+    expect(franja.text()).toContain('Quedan 40 folios de boleta (39): avisa al encargado')
+    expect(lecturasEstadoEmision, 'se lee al entrar').toBe(1)
+
+    // Lo que cambió mientras se cobraba: ahora hay una boleta sin emitir.
+    estadoEmisionMock = { activa: true, avisos: [], sinEmitir: 2 }
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+
+    expect(cierresDeCuenta, 'la cuenta se cobró').toHaveLength(1)
+    expect(lecturasEstadoEmision, 'se vuelve a leer después del cobro').toBe(2)
+    expect(wrapper.find('[data-qa="franja-emision"]').text()).toContain('Hay 2 boletas sin emitir: avisa al encargado')
+  })
+
+  it('sin Ventas:Crear la franja de la boleta electrónica no se monta ni se lee', async () => {
+    estadoEmisionMock = { activa: true, avisos: [{ codigo: 'POCOS_FOLIOS', mensaje: 'Quedan 40 folios de boleta (39)' }], sinEmitir: 0 }
+    const wrapper = await montar()
+    await esperar(100)
+
+    expect(wrapper.find('[data-qa="franja-emision"]').exists()).toBe(false)
+    expect(lecturasEstadoEmision).toBe(0)
+  })
+
+  it('con la boleta sin emitir en el cierre, avisa con el motivo y el ticket lleva la línea de pendiente', async () => {
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+    cierreBoletaOverride = {
+      ...boletaCierreDefault(),
+      boletaElectronica: null,
+      boletaSinEmitir: { mensaje: 'El SII no respondió.' },
+    }
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+
+    expect(toasts).toContainEqual({
+      title: 'La boleta no se emitió. Avisa al encargado.',
+      description: 'El SII no respondió.',
+      color: 'warning',
+    })
+    expect(impresionesQz, 'el ticket sale igual').toHaveLength(1)
+    const texto = impresionesQz[0]!.join('\n')
+    expect(texto).toContain('DOCUMENTO INTERNO')
+    expect(texto).toContain('Boleta electrónica pendiente de emisión')
   })
 
   /**

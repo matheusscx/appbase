@@ -44,6 +44,17 @@ export interface DocumentoVenta {
   descarte: DescarteDocumento | null
   descartadoEl: string | null
   descartadoPorNombre: string | null
+  /** Con la boleta electrónica emitida: su folio. */
+  folio: number | null
+  /** Con la boleta emitida: dónde va ante el SII (pendiente, enviado, aceptado…). */
+  estadoSii: string | null
+  /** Con `sin_emitir`: por qué no salió, en palabras para el local. */
+  emisionError: string | null
+  /**
+   * Una corrección del sistema sobre una boleta ya emitida: su nota de crédito ante el SII
+   * todavía no existe. Lo deriva el servidor.
+   */
+  ncElectronicaPendiente: boolean
   /** Cada borrado del número, el más nuevo primero; vacío si nunca se borró. */
   numerosBorrados: NumeroBorradoVenta[]
 }
@@ -108,12 +119,19 @@ export function llevaNumero(doc: DocumentoVenta): boolean {
 export function estadoDocumento(doc: DocumentoVenta): string | null {
   if (doc.descarte) return 'Descartado al anular'
   if (doc.emisor === 'sistema') {
-    if (doc.estadoEnvio === 'emitido') return 'Boleta electrónica emitida'
+    if (doc.estadoEnvio === 'emitido') return doc.folio ? `Boleta electrónica N° ${doc.folio}` : 'Boleta electrónica emitida'
     if (doc.estadoEnvio === 'sin_emitir') return 'Boleta electrónica sin emitir'
     return 'Armado, sin enviar al SII'
   }
   return null
 }
+
+/**
+ * Qué hacer con una nota de crédito que corrige una boleta electrónica ya emitida: el
+ * sistema todavía no la emite ante el SII (spec `2026-10-14-boleta-desde-la-venta` § 8.2).
+ */
+export const AVISO_NC_ELECTRONICA_PENDIENTE
+  = 'Hazla en el portal del SII por ahora; el sistema la emitirá cuando esté disponible.'
 
 /**
  * Quién afirmó que no estaba hecho (E10): el único registro de esa respuesta.

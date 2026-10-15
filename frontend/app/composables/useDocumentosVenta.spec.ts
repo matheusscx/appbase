@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
+  AVISO_NC_ELECTRONICA_PENDIENTE,
   avisoNotaRepetida,
   avisoSinConfirmar,
   claveOpcion,
@@ -39,6 +40,10 @@ function doc(parcial: Partial<DocumentoVenta> = {}): DocumentoVenta {
     descarte: null,
     descartadoEl: null,
     descartadoPorNombre: null,
+    folio: null,
+    estadoSii: null,
+    emisionError: null,
+    ncElectronicaPendiente: false,
     numerosBorrados: [],
     ...parcial,
   }
@@ -71,12 +76,20 @@ describe('estado del documento', () => {
     expect(estadoDocumento(doc())).toBe('Armado, sin enviar al SII')
   })
 
-  it('uno emitido dice que la boleta electrónica salió', () => {
+  it('uno emitido dice que la boleta electrónica salió, con su folio', () => {
+    expect(estadoDocumento(doc({ estadoEnvio: 'emitido', folio: 1234 }))).toBe('Boleta electrónica N° 1234')
+  })
+
+  it('uno emitido sin folio (respuesta antigua) no inventa uno', () => {
     expect(estadoDocumento(doc({ estadoEnvio: 'emitido' }))).toBe('Boleta electrónica emitida')
   })
 
   it('uno que debía emitirse y falló dice que está sin emitir', () => {
     expect(estadoDocumento(doc({ estadoEnvio: 'sin_emitir' }))).toBe('Boleta electrónica sin emitir')
+  })
+
+  it('el aviso de la NC pendiente dice qué hacer por ahora', () => {
+    expect(AVISO_NC_ELECTRONICA_PENDIENTE).toBe('Hazla en el portal del SII por ahora; el sistema la emitirá cuando esté disponible.')
   })
 
   it('un descartado manda sobre cualquier otro estado', () => {

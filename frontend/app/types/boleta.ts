@@ -45,4 +45,21 @@ export interface BoletaVenta {
   propina: { monto: string } | null
   pagos: { nombre: string, monto: string }[]
   vuelto: string | null
+  /**
+   * La boleta electrónica que emitió el sistema para esta venta, o `null` si no hay
+   * (emisión apagada, otro emisor, o quedó sin emitir). El emisor es el de la boleta, no
+   * la razón social preferida. Spec `2026-10-14-boleta-desde-la-venta` § 7.
+   */
+  boletaElectronica: {
+    tipo: 39 | 41
+    folio: number
+    /** Con `cubreTodo = false` es el saldo, no el total de la venta. */
+    monto: string
+    cubreTodo: boolean
+    ambiente: 'certificacion' | 'produccion'
+    resolucion: { numero: number, fecha: string }
+    emisor: { rut: string, razonSocial: string, giro: string, direccion: string, comuna: string }
+  } | null
+  /** La boleta debía emitirse y no se pudo: el motivo, para el cajero. */
+  boletaSinEmitir: { mensaje: string } | null
 }

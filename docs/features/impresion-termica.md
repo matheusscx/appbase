@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-13
+**Last Updated**: 2026-10-15
 
 ---
 
@@ -119,14 +119,15 @@ ticket no depende de que nadie lo use.
   `buildPrecuentaTicket`, `buildBoletaTicket` (sin Nuxt/Vue, 100% Vitest).
   - `buildBoletaTicket`: reescrito con cabecera emisor (razón social preferida con
     RUT y dirección/teléfono vía nuevo composable `useRazonSocialEmisor`), tipo de
-    documento condicional (`DOCUMENTO INTERNO` siempre hoy; rama
-    `BOLETA ELECTRÓNICA` codificada pero dormante sin folio/PDF417/timbre reales),
+    documento condicional (`DOCUMENTO INTERNO`, o la boleta electrónica emitida por el
+    sistema: ver "La boleta electrónica en el papel" abajo),
     metadata operativa condicional (cajero, caja, mesa, garzón, cliente), desglose
     `Neto` + impuestos con nombre y tasa reales del tenant vía nuevo helper
     `agregarImpuestosVenta` y `formatTasaPorcentaje`, bloque de propina opcional
     (`Propina` + `TOTAL A PAGAR`, solo si monto > 0), línea `Vuelto` opcional tras
     los pagos (solo si `vuelto > 0` — se omite en pagos con tarjeta/transferencia,
-    calculado por `resumenCobro` en `useVenta.ts`), pie `SIN VALIDEZ FISCAL`.
+    calculado por `resumenCobro` en `useVenta.ts`), pie `SIN VALIDEZ FISCAL` (salvo en la
+    boleta electrónica emitida).
     Ítems en tabla de columnas fijas (`CANT`/`DESCRIPCIÓN`/`P.UNIT`/`TOTAL`) con
     header, a **48 caracteres** (papel térmico 80mm, ESC/POS Font A) — la comanda se
     mantiene a 32 (papel/necesidad distinta, sin columnas de precio).
@@ -193,6 +194,38 @@ ticket no depende de que nadie lo use.
 - **Composable `useRazonSocialEmisor`**: nueva utilidad en
   `app/composables/useRazonSocialEmisor.ts` — selecciona la razón social preferida
   del tenant como emisor; fallback a primera habilitada, luego nombre del tenant.
+
+### La boleta electrónica en el papel (2026-10-15)
+
+`BoletaVenta` trae `boletaElectronica` (la que el sistema emitió para la venta: tipo 39/41, folio,
+monto, `cubreTodo`, ambiente, resolución y el emisor **de la boleta**, es decir la razón social de
+su CAF, no la preferida de hoy) y `boletaSinEmitir` (`{ mensaje }` si debía emitirse y no se pudo).
+Lo arma el servidor en el cobro, el cierre de cuenta y la reimpresión, así que los tres papeles
+salen iguales. `useBoletaElectronica().paraTicket(boleta)` lo traduce a lo que consume
+`buildBoletaTicket`, y `pos.vue`, `salones/index.vue` y `VentaDetalleDrawer.vue` lo esparcen sobre
+`imprimirBoleta`.
+
+Tres papeles, y ninguno rompe el de antes:
+
+| Caso | Papel |
+|---|---|
+| Emitida | `BOLETA ELECTRÓNICA` (o `BOLETA EXENTA ELECTRÓNICA`, tipo 41) y `N° <folio>`; con pago mixto (`cubreTodo: false`) debajo `por $X (saldo de la venta)`, porque el papel sigue listando la venta entera. Al pie `Timbre Electrónico SII`, `Res. N° X de AAAA` (año de la resolución) y `Verifique documento en www.sii.cl`. Sin `SIN VALIDEZ FISCAL`. El emisor lleva además su giro. |
+| Emitida en certificación | Lo anterior más `CERTIFICACIÓN - SIN VALIDEZ` debajo del tipo (guion simple: el largo no existe en CP850 y la térmica lo imprimiría como `?`). |
+| Sin emitir | El de hoy (`DOCUMENTO INTERNO`, `SIN VALIDEZ FISCAL`) más `Boleta electrónica pendiente de emisión` al pie. |
+| Ni una ni otra | Exactamente el de hoy (hay un test de regresión con el papel entero). |
+
+El "Timbre Electrónico SII" es hoy la leyenda: el PDF417 del timbre no se dibuja todavía.
+
+**El aviso al cajero.** Si la boleta quedó sin emitir, el cobro (POS y cierre de cuenta) muestra el
+toast `La boleta no se emitió. Avisa al encargado.` con el motivo del servidor como descripción; la
+venta ya entró y el ticket sale igual. Además `VentasFranjaEmision` (arriba del POS y de Salones,
+para quien tiene `Ventas:Crear`) lee `GET /dte/estado-emision` al entrar y después de cada cobro, y
+muestra los avisos de folios o certificado (el texto del servidor más `: avisa al encargado`) y `Hay N boletas sin emitir: avisa al encargado`; con la
+emisión apagada no pinta nada, y si la lectura falla se queda como estaba (es un aviso, no una
+condición del cobro). El detalle de la venta suma el folio a la etiqueta del documento emitido
+(`Boleta electrónica N° 1234`) y, en una corrección sobre una boleta emitida, el badge `NC
+electrónica pendiente`: la nota de crédito ante el SII todavía no existe y se hace en el portal del
+SII. Spec: `docs/superpowers/specs/2026-10-14-boleta-desde-la-venta-design.md` § 7 y § 8.2.
 
 ### QZ Tray
 
@@ -276,8 +309,16 @@ cd backend && npx jest impresoras categorias salones personalizacion-receta
 ### Unit (frontend)
 
 ```bash
-cd frontend && npx vitest run app/utils/ticket-builder.spec.ts app/composables/useImpresoras.spec.ts app/composables/useRazonSocialEmisor.spec.ts app/composables/useVenta.spec.ts app/composables/useRecetaPersonalizacion.spec.ts
+cd frontend && npx vitest run app/utils/ticket-builder.spec.ts app/composables/useBoletaElectronica.spec.ts app/composables/useImpresoras.spec.ts app/composables/useRazonSocialEmisor.spec.ts app/composables/useVenta.spec.ts app/composables/useRecetaPersonalizacion.spec.ts
 ```
+
+### E2E de navegador
+
+`frontend/e2e/ventas/boleta-electronica-pos.spec.ts`: la cajera cobra en el POS con la boleta
+electrónica prendida (perfil fiscal completo montado por API) y no ve ningún error, la boleta sale
+con su folio y la franja avisa los folios. El papel no se verifica ahí (QZ Tray no corre en CI): se
+verifica en los unitarios de arriba y en `pos.nuxt.spec.ts`, `salones/index.nuxt.spec.ts` y
+`VentaDetalleDrawer.nuxt.spec.ts`.
 
 ### Manual
 
@@ -298,8 +339,8 @@ cd frontend && npx vitest run app/utils/ticket-builder.spec.ts app/composables/u
   comanda manual, dos fases preview/confirmar: ver
   `docs/superpowers/specs/2026-07-13-impresion-termica-design.md`. El confirmar de esas dos fases
   se reemplazó por el claim atómico y se retiró el 2026-10-08 (owner).
-- Plantilla unificada de boleta (emisor con RUT, DOCUMENTO INTERNO / slot electrónico
-  dormante, Neto+impuestos reales, propina → TOTAL A PAGAR) + precuenta con propina
+- Plantilla unificada de boleta (emisor con RUT, DOCUMENTO INTERNO / boleta electrónica
+  emitida desde 2026-10-15, Neto+impuestos reales, propina → TOTAL A PAGAR) + precuenta con propina
   sugerida: ver `docs/superpowers/specs/2026-07-18-boleta-pos-plantilla-unificada-design.md`.
 
 ## Related Features

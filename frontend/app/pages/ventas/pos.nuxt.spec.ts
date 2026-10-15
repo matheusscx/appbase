@@ -139,6 +139,10 @@ let itemsCatalogoMock: unknown[] = []
 let unidadesVendiblesMock: unknown[] = []
 /** Cada URL pedida a `GET /items/:id/unidades`, con su query string. */
 let urlsUnidades: string[] = []
+/** Lo que devuelve `GET /dte/estado-emision` (la franja de la boleta electrónica). */
+let estadoEmisionMock: unknown = { activa: false, avisos: [], sinEmitir: 0 }
+/** Cada lectura de `GET /dte/estado-emision`: una al entrar y otra después de cada cobro. */
+let lecturasEstadoEmision = 0
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: unknown, headers?: Record<string, string> }) => {
@@ -147,6 +151,10 @@ mockNuxtImport('useApiFetch', () => {
 
     if (ruta.endsWith('/caja/activa')) {
       return Promise.resolve(cajaActivaMock)
+    }
+    if (ruta.endsWith('/dte/estado-emision')) {
+      lecturasEstadoEmision++
+      return Promise.resolve(estadoEmisionMock)
     }
     if (ruta.endsWith('/unidades')) {
       urlsUnidades.push(url)
@@ -234,6 +242,8 @@ beforeEach(() => {
   itemsCatalogoMock = []
   unidadesVendiblesMock = []
   urlsUnidades = []
+  estadoEmisionMock = { activa: false, avisos: [], sinEmitir: 0 }
+  lecturasEstadoEmision = 0
   toasts = []
   // La clave vive a nivel de módulo (sobrevive a cerrar y reabrir un modal):
   // cada test arranca sin intento abierto.
@@ -525,6 +535,152 @@ describe('ventas/pos — la boleta se imprime desde la respuesta de POST /ventas
     expect(texto, 'imprime el RUT que devolvió el servidor').toContain('99.999.999-9')
     expect(texto, 'NO imprime el nombre del formulario').not.toContain('Cliente Formulario')
     expect(texto, 'NO imprime el RUT del formulario').not.toContain('11.111.111-1')
+  })
+})
+
+describe('ventas/pos — la boleta electrónica de la venta (spec 2026-10-14-boleta-desde-la-venta § 7 y § 8.2)', () => {
+  /** La boleta mínima de un cobro de $4.000 en efectivo; cada caso le suma lo electrónico. */
+  function boletaBase(extra: Record<string, unknown> = {}) {
+    return {
+      ventaId: 'venta-1',
+      cajero: 'Ana Torres',
+      items: [{
+        descripcion: 'Palta',
+        cantidad: '1',
+        cantidadPresentacion: null,
+        unidadCodigoPresentacion: null,
+        unidadCodigoBase: 'unidad',
+        precioUnitario: '4000',
+        totalLinea: '4000',
+      }],
+      totales: { subtotalNeto: '4000', totalDescuentos: '0', totalRecargos: '0', totalImpuestos: '0', totalFinal: '4000' },
+      impuestos: [],
+      promociones: [],
+      propina: null,
+      pagos: [{ nombre: 'Efectivo', monto: '4000' }],
+      vuelto: null,
+      customer: null,
+      boletaElectronica: null,
+      boletaSinEmitir: null,
+      ...extra,
+    }
+  }
+
+  async function cobrar() {
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    impresorasBoleta = [impresoraDeBoleta()]
+    const wrapper = await montar()
+    wrapper.findComponent({ name: 'VentasCobroModal' }).vm.$emit('confirmar', [{ metodoPagoId: 'mp-efectivo', monto: '4000' }], '0')
+    await esperar(50)
+    expect(bodiesDeVenta, 'el POST de venta salió').toHaveLength(1)
+    expect(impresionesQz, 'la boleta salió').toHaveLength(1)
+    return impresionesQz[0]!.join('')
+  }
+
+  it('la boleta emitida sale con su folio, su resolución y el emisor de la boleta, y no avisa nada', async () => {
+    ventaBoletaMock = boletaBase({
+      boletaElectronica: {
+        tipo: 39,
+        folio: 1234,
+        monto: '4000',
+        cubreTodo: true,
+        ambiente: 'produccion',
+        resolucion: { numero: 80, fecha: '2014-08-22' },
+        emisor: { rut: '76123456-7', razonSocial: 'Comercial Paris SpA', giro: 'Restaurante', direccion: 'Calle 1 123', comuna: 'Providencia' },
+      },
+    })
+    const texto = await cobrar()
+
+    expect(texto).toContain('BOLETA ELECTRÓNICA')
+    expect(texto).toContain('N° 1234')
+    expect(texto).toContain('Res. N° 80 de 2014')
+    expect(texto).toContain('Comercial Paris SpA')
+    expect(texto).not.toContain('SIN VALIDEZ FISCAL')
+    expect(toasts.some(t => t.color === 'warning')).toBe(false)
+  })
+
+  it('la que no se emitió imprime el ticket de hoy con la línea de pendiente y avisa al cajero', async () => {
+    ventaBoletaMock = boletaBase({ boletaSinEmitir: { mensaje: 'El SII no respondió.' } })
+    const texto = await cobrar()
+
+    expect(texto).toContain('DOCUMENTO INTERNO')
+    expect(texto).toContain('Boleta electrónica pendiente de emisión')
+    expect(toasts).toContainEqual({
+      title: 'La boleta no se emitió. Avisa al encargado.',
+      description: 'El SII no respondió.',
+      color: 'warning',
+    })
+  })
+
+  it('la franja avisa lo del estado y se vuelve a leer después del cobro', async () => {
+    estadoEmisionMock = {
+      activa: true,
+      avisos: [{ codigo: 'POCOS_FOLIOS', mensaje: 'Quedan 40 folios de boleta (39)' }],
+      sinEmitir: 3,
+    }
+    ventaBoletaMock = boletaBase()
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    impresorasBoleta = [impresoraDeBoleta()]
+    const wrapper = await montar()
+    await esperar(20)
+
+    const franja = wrapper.find('[data-qa="franja-emision"]')
+    expect(franja.exists(), 'la franja está arriba').toBe(true)
+    expect(franja.text()).toContain('Quedan 40 folios de boleta (39): avisa al encargado')
+    expect(franja.text()).toContain('Hay 3 boletas sin emitir: avisa al encargado')
+    expect(lecturasEstadoEmision, 'se lee al entrar').toBe(1)
+
+    estadoEmisionMock = { activa: true, avisos: [], sinEmitir: 4 }
+    wrapper.findComponent({ name: 'VentasCobroModal' }).vm.$emit('confirmar', [{ metodoPagoId: 'mp-efectivo', monto: '4000' }], '0')
+    await esperar(50)
+
+    expect(lecturasEstadoEmision, 'se vuelve a leer después del cobro').toBe(2)
+    expect(wrapper.find('[data-qa="franja-emision"]').text()).toContain('Hay 4 boletas sin emitir')
+  })
+
+  it('dos avisos del mismo código (un POCOS_FOLIOS por tipo) se pintan los dos, con claves distintas', async () => {
+    estadoEmisionMock = {
+      activa: true,
+      avisos: [
+        { codigo: 'POCOS_FOLIOS', mensaje: 'Quedan 40 folios de boleta (39)' },
+        { codigo: 'POCOS_FOLIOS', mensaje: 'Quedan 10 folios de boleta exenta (41)' },
+        { codigo: 'CERTIFICADO_POR_VENCER', mensaje: 'El certificado vence en 12 días' },
+      ],
+      sinEmitir: 0,
+    }
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    const avisoDeClave = vi.spyOn(console, 'warn')
+    const wrapper = await montar()
+    await esperar(20)
+
+    const avisos = wrapper.findAll('[data-qa^="aviso-emision-"]')
+    expect(avisos).toHaveLength(3)
+    expect(new Set(avisos.map(a => a.attributes('data-qa'))).size, 'data-qa únicos').toBe(3)
+    const texto = wrapper.find('[data-qa="franja-emision"]').text()
+    expect(texto).toContain('Quedan 40 folios de boleta (39): avisa al encargado')
+    expect(texto).toContain('Quedan 10 folios de boleta exenta (41): avisa al encargado')
+    expect(texto).toContain('El certificado vence en 12 días: avisa al encargado')
+    expect(avisoDeClave.mock.calls.some(c => String(c[0]).includes('Duplicate keys')), 'sin warning de clave duplicada').toBe(false)
+    avisoDeClave.mockRestore()
+  })
+
+  it('con la emisión apagada no hay franja', async () => {
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    const wrapper = await montar()
+    await esperar(20)
+
+    expect(wrapper.find('[data-qa="franja-emision"]').exists()).toBe(false)
+  })
+
+  it('sin boleta electrónica ni pendiente, el ticket y los avisos son los de siempre', async () => {
+    ventaBoletaMock = boletaBase()
+    const texto = await cobrar()
+
+    expect(texto).toContain('DOCUMENTO INTERNO')
+    expect(texto).not.toContain('pendiente de emisión')
+    expect(toasts.some(t => t.title?.includes('La boleta no se emitió'))).toBe(false)
   })
 })
 

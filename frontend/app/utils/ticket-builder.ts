@@ -212,6 +212,8 @@ function filaColumnas(cols: Columna[]): string {
 export interface BoletaEmisor {
   nombre: string
   rut?: string
+  /** Solo el papel de una boleta electrónica lo trae (el SII lo exige); el resto no lo imprime. */
+  giro?: string
   direccion?: string
   telefono?: string
 }
@@ -293,6 +295,7 @@ function lineasEmisor(emisor: BoletaEmisor, width: number): string[] {
   const out: string[] = []
   out.push(center(emisor.nombre, width))
   if (emisor.rut) out.push(center(`RUT: ${emisor.rut}`, width))
+  if (emisor.giro) out.push(center(`Giro: ${emisor.giro}`, width))
   if (emisor.direccion) out.push(center(emisor.direccion, width))
   if (emisor.telefono) out.push(center(`Tel: ${emisor.telefono}`, width))
   return out
@@ -492,11 +495,33 @@ export interface BoletaCliente {
   direccion?: string
 }
 
-/** Comprobante de venta (mesa o mostrador) — plantilla unificada interna/electrónica. */
+/**
+ * La boleta electrónica que el sistema emitió para la venta, tal como la imprime el papel
+ * (`useBoletaElectronica.paraTicket` la arma desde `BoletaVenta.boletaElectronica`).
+ */
+export interface BoletaElectronicaTicket {
+  tipo: 39 | 41
+  folio: number
+  /** Lo que la boleta cubre; con `cubreTodo = false` es el saldo y no el total de la venta. */
+  monto: string
+  cubreTodo: boolean
+  /** En certificación el papel no vale: lo dice debajo del tipo. */
+  certificacion: boolean
+  resolucion: { numero: number, fecha: string }
+}
+
+/**
+ * Comprobante de venta (mesa o mostrador). Tres papeles, según lo que el servidor
+ * armó (spec `2026-10-14-boleta-desde-la-venta` § 7):
+ * - `electronica`: la boleta emitida, con su folio, timbre y resolución.
+ * - `pendienteDeEmision`: el de hoy (`DOCUMENTO INTERNO`) más una línea al pie; la boleta
+ *   debía emitirse y no salió.
+ * - ninguno: exactamente el de hoy.
+ */
 export function buildBoletaTicket(input: {
   emisor: BoletaEmisor
-  facturacionElectronica: boolean
-  folio?: string | null
+  electronica?: BoletaElectronicaTicket
+  pendienteDeEmision?: boolean
   meta: BoletaMetaOperativa
   cliente?: BoletaCliente
   items: BoletaItem[]
@@ -530,9 +555,17 @@ export function buildBoletaTicket(input: {
   out.push(separador(BOLETA_WIDTH))
 
   // Tipo de documento
-  if (input.facturacionElectronica) {
-    out.push(center('BOLETA ELECTRÓNICA', BOLETA_WIDTH))
-    if (input.folio) out.push(center(`N° ${input.folio}`, BOLETA_WIDTH))
+  const { electronica } = input
+  if (electronica) {
+    out.push(center(electronica.tipo === 41 ? 'BOLETA EXENTA ELECTRÓNICA' : 'BOLETA ELECTRÓNICA', BOLETA_WIDTH))
+    out.push(center(`N° ${electronica.folio}`, BOLETA_WIDTH))
+    // El papel lista la venta entera (es lo que el cliente consumió): con pago mixto la
+    // boleta cubre solo el saldo, y sin esta línea se leería como una boleta por el total.
+    if (!electronica.cubreTodo) {
+      out.push(center(`por ${formatMonto(electronica.monto)} (saldo de la venta)`, BOLETA_WIDTH))
+    }
+    // Guion simple: el guion largo no existe en CP850 y la térmica lo imprimiría como '?'.
+    if (electronica.certificacion) out.push(center('CERTIFICACIÓN - SIN VALIDEZ', BOLETA_WIDTH))
   }
   else {
     out.push(center('DOCUMENTO INTERNO', BOLETA_WIDTH))
@@ -605,14 +638,16 @@ export function buildBoletaTicket(input: {
 
   // Pie condicional
   out.push('')
-  if (input.facturacionElectronica) {
+  if (electronica) {
     out.push(center('Timbre Electrónico SII', BOLETA_WIDTH))
-    // TODO(SII futuro): renderizar el PDF417 real aquí cuando exista integración.
-    out.push(center('Verifique en www.sii.cl', BOLETA_WIDTH))
+    const anio = electronica.resolucion.fecha.slice(0, 4)
+    out.push(center(`Res. N° ${electronica.resolucion.numero}${anio ? ` de ${anio}` : ''}`, BOLETA_WIDTH))
+    out.push(center('Verifique documento en www.sii.cl', BOLETA_WIDTH))
   }
   else {
     out.push(center('*** SIN VALIDEZ FISCAL ***', BOLETA_WIDTH))
     out.push(center('No constituye documento tributario', BOLETA_WIDTH))
+    if (input.pendienteDeEmision) out.push(center('Boleta electrónica pendiente de emisión', BOLETA_WIDTH))
   }
   out.push('')
   out.push('')
