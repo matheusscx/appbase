@@ -58,6 +58,7 @@ import { ComprasModule } from './modules/compras/compras.module';
 // los reportes solo LEEN tablas que ya registran sus módulos dueños.
 import { ReportesModule } from './modules/reportes/reportes.module';
 import { DteModule } from './modules/dte/dte.module';
+import { PaqueteriaModule } from './modules/paqueteria/paqueteria.module';
 
 @Module({
   imports: [
@@ -131,6 +132,7 @@ import { DteModule } from './modules/dte/dte.module';
     ComprasModule,
     ReportesModule,
     DteModule,
+    PaqueteriaModule,
   ],
   controllers: [AppController],
   providers: [AppService],

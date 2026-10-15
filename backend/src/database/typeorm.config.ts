@@ -86,6 +86,11 @@ import { LiquidacionPropinasEvento } from '../modules/propinas/entities/liquidac
 import { TipoDocumentoTributario } from '../modules/ventas/entities/tipo-documento-tributario.entity';
 import { UmbralIdentidadPagador } from '../modules/ventas/entities/umbral-identidad-pagador.entity';
 import { Tercero } from '../modules/terceros/entities/tercero.entity';
+import { PaqueteConfiguracion } from '../modules/paqueteria/entities/paquete-configuracion.entity';
+import { Repartidor } from '../modules/paqueteria/entities/repartidor.entity';
+import { Paquete } from '../modules/paqueteria/entities/paquete.entity';
+import { HojaRuta } from '../modules/paqueteria/entities/hoja-ruta.entity';
+import { HojaRutaPaquete } from '../modules/paqueteria/entities/hoja-ruta-paquete.entity';
 import { Suscripcion } from '../modules/suscripciones/entities/suscripcion.entity';
 import { Pasarela } from '../modules/pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../modules/pasarela/entities/tenant-pasarela.entity';
@@ -227,6 +232,11 @@ export const ENTIDADES = [
   LiquidacionPropinasParticipante,
   LiquidacionPropinasFuente,
   LiquidacionPropinasEvento,
+  PaqueteConfiguracion,
+  Repartidor,
+  Paquete,
+  HojaRuta,
+  HojaRutaPaquete,
   TipoDocumentoTributario,
   UmbralIdentidadPagador,
   Tercero,

@@ -3057,3 +3057,94 @@ CREATE INDEX idx_impresoras_tenant ON impresoras (tenant_id);
 -- impresora de rol 'comanda' al enviar comanda.
 ALTER TABLE "categorias"
     ADD COLUMN impresora_id UUID REFERENCES impresoras(impresora_id);
+
+
+-- =============================================================
+-- PAQUETERÍA (repartidores, paquetes y hojas de ruta)
+-- =============================================================
+
+-- Montos por defecto del tenant; un paquete los copia al crearse.
+CREATE TABLE paquete_configuracion (
+    paquete_configuracion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id               UUID NOT NULL REFERENCES tenants(tenant_id),
+    precio_envio_defecto    NUMERIC(18,4) NOT NULL,
+    pago_repartidor_defecto NUMERIC(18,4) NOT NULL,
+    creado_el               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el            TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_paquete_config_tenant
+    ON paquete_configuracion (tenant_id) WHERE eliminado_el IS NULL;
+
+CREATE TABLE repartidores (
+    repartidor_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id      UUID NOT NULL REFERENCES tenants(tenant_id),
+    nombre         VARCHAR(150) NOT NULL,
+    telefono       VARCHAR(30),
+    activo         BOOLEAN NOT NULL DEFAULT true,
+    creado_el      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el   TIMESTAMPTZ
+);
+CREATE INDEX idx_repartidores_tenant ON repartidores (tenant_id);
+
+CREATE TABLE paquetes (
+    paquete_id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id             UUID NOT NULL REFERENCES tenants(tenant_id),
+    codigo                VARCHAR(100) NOT NULL,
+    destinatario_nombre   VARCHAR(150),
+    destinatario_telefono VARCHAR(30),
+    direccion             VARCHAR(255),
+    comuna                VARCHAR(100),
+    nota                  TEXT,
+    remitente_tercero_id  UUID REFERENCES terceros(tercero_id),
+    cobro_en_destino      BOOLEAN NOT NULL DEFAULT false,
+    precio_envio          NUMERIC(18,4) NOT NULL,
+    pago_repartidor       NUMERIC(18,4) NOT NULL,
+    creado_el             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el          TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_paquetes_tenant_codigo
+    ON paquetes (tenant_id, codigo) WHERE eliminado_el IS NULL;
+CREATE INDEX idx_paquetes_remitente ON paquetes (remitente_tercero_id);
+
+-- Una hoja por repartidor y día. Los totales se congelan al rendir (null mientras está abierta).
+CREATE TABLE hojas_ruta (
+    hoja_ruta_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id             UUID NOT NULL REFERENCES tenants(tenant_id),
+    repartidor_id         UUID NOT NULL REFERENCES repartidores(repartidor_id),
+    fecha                 DATE NOT NULL,
+    estado                VARCHAR(20) NOT NULL DEFAULT 'abierta',   -- 'abierta' | 'rendida'
+    rendida_por           UUID,
+    rendida_el            TIMESTAMPTZ,
+    total_asignados       INTEGER,
+    total_entregados      INTEGER,
+    total_cobro_destino   INTEGER,
+    monto_cobrado_destino NUMERIC(18,4),
+    monto_pago_repartidor NUMERIC(18,4),
+    monto_total_general   NUMERIC(18,4),
+    neto_a_rendir         NUMERIC(18,4),
+    creado_el             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el          TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_hojas_ruta_repartidor_fecha
+    ON hojas_ruta (tenant_id, repartidor_id, fecha) WHERE eliminado_el IS NULL;
+CREATE INDEX idx_hojas_ruta_tenant_fecha ON hojas_ruta (tenant_id, fecha);
+
+-- Un paquete solo puede estar 'en_ruta' en una hoja a la vez (índice parcial único).
+CREATE TABLE hoja_ruta_paquetes (
+    hoja_ruta_paquete_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id            UUID NOT NULL REFERENCES tenants(tenant_id),
+    hoja_ruta_id         UUID NOT NULL REFERENCES hojas_ruta(hoja_ruta_id),
+    paquete_id           UUID NOT NULL REFERENCES paquetes(paquete_id),
+    estado               VARCHAR(20) NOT NULL DEFAULT 'en_ruta',   -- 'en_ruta' | 'entregado' | 'no_entregado'
+    creado_el            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el         TIMESTAMPTZ
+);
+CREATE UNIQUE INDEX uq_hoja_ruta_paquetes_en_ruta
+    ON hoja_ruta_paquetes (paquete_id) WHERE estado = 'en_ruta' AND eliminado_el IS NULL;
+CREATE INDEX idx_hoja_ruta_paquetes_hoja ON hoja_ruta_paquetes (hoja_ruta_id);
+CREATE INDEX idx_hoja_ruta_paquetes_paquete ON hoja_ruta_paquetes (paquete_id);
