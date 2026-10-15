@@ -214,7 +214,7 @@ const gruposConProblemas = computed(() => {
       clave: 'atrasadas',
       qa: 'grupo-atrasadas',
       titulo: 'Atrasadas',
-      texto: 'El sistema la sigue enviando; no tienes que hacer nada. Si pasa de un día, escribe a soporte con el folio.',
+      texto: 'El SII todavía no la confirma. Si el motivo dice qué falta, corrígelo; si no, y pasa de un día, escribe a soporte con el folio.',
       filas: c.atrasadas,
     },
     {

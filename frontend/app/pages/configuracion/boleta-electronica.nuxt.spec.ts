@@ -536,7 +536,7 @@ describe('boletas con observaciones del SII', () => {
 
     expect(texto).toContain('Boletas con observaciones del SII')
     expect(texto).toContain('Atrasadas')
-    expect(texto).toContain('El sistema la sigue enviando; no tienes que hacer nada. Si pasa de un día, escribe a soporte con el folio.')
+    expect(texto).toContain('El SII todavía no la confirma. Si el motivo dice qué falta, corrígelo; si no, y pasa de un día, escribe a soporte con el folio.')
     expect(texto).toContain('Rechazadas')
     expect(texto).toContain('No la vuelvas a emitir: escribe a soporte con el folio.')
     expect(texto).toContain('Con reparos (últimos 30 días)')

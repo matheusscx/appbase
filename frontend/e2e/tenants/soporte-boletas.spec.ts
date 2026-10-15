@@ -22,6 +22,8 @@ const fila = (over: Record<string, unknown>) => ({
   intentos: 2,
   ultimoError: null,
   detalleSii: null,
+  envioEstadoSii: null,
+  envioUltimoError: null,
   ...over,
 })
 

@@ -28,6 +28,8 @@ function fila(over: Partial<BoletaConProblemaSoporte> = {}): BoletaConProblemaSo
     intentos: 3,
     ultimoError: null,
     detalleSii: null,
+    envioEstadoSii: null,
+    envioUltimoError: null,
     ...over,
   }
 }
@@ -119,6 +121,40 @@ describe('pages/admin — panel de soporte', () => {
     expect(detalle.exists()).toBe(true)
     expect(detalle.text()).toContain('El SII rechazó el sobre')
     expect(detalle.find('pre').text()).toBe(JSON.stringify({ estado: 'RCH', glosa: 'Folio repetido' }, null, 2))
+    wrapper.unmount()
+  })
+
+  it('una atrasada trabada muestra el estado y el último error de su envío', async () => {
+    filas = [fila({
+      grupo: 'atrasada',
+      envioEstadoSii: 'XYZ',
+      envioUltimoError: 'El SII contestó un código que no conocemos <b>x</b>',
+    })]
+
+    const wrapper = await montar()
+    await wrapper.find('[data-qa="soporte-desplegar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+
+    const detalle = wrapper.find('[data-qa="soporte-detalle"]')
+    expect(detalle.find('[data-qa="soporte-envio-estado"]').text()).toBe('Estado del envío en el SII: XYZ')
+    // Interpolación: el texto del SII se muestra tal cual, no se interpreta como HTML.
+    expect(detalle.find('[data-qa="soporte-envio-error"]').text()).toBe(
+      'Último error del envío: El SII contestó un código que no conocemos <b>x</b>',
+    )
+    expect(detalle.find('[data-qa="soporte-envio-error"] b').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('sin envío el desplegable no pinta las líneas del envío', async () => {
+    filas = [fila({ envioEstadoSii: null, envioUltimoError: null })]
+
+    const wrapper = await montar()
+    await wrapper.find('[data-qa="soporte-desplegar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+
+    const detalle = wrapper.find('[data-qa="soporte-detalle"]')
+    expect(detalle.find('[data-qa="soporte-envio-estado"]').exists()).toBe(false)
+    expect(detalle.find('[data-qa="soporte-envio-error"]').exists()).toBe(false)
     wrapper.unmount()
   })
 

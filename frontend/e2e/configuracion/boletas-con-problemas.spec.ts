@@ -43,7 +43,7 @@ test('la tarjeta muestra los tres grupos con su texto fijo y el motivo de cada b
 
   const atrasadas = tarjeta.locator('[data-qa="grupo-atrasadas"]')
   await expect(atrasadas).toContainText('Atrasadas')
-  await expect(atrasadas).toContainText('El sistema la sigue enviando; no tienes que hacer nada. Si pasa de un día, escribe a soporte con el folio.')
+  await expect(atrasadas).toContainText('El SII todavía no la confirma. Si el motivo dice qué falta, corrígelo; si no, y pasa de un día, escribe a soporte con el folio.')
   await expect(atrasadas).toContainText('El SII todavía no la acusa')
 
   const rechazadas = tarjeta.locator('[data-qa="grupo-rechazadas"]')

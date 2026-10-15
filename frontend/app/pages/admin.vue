@@ -107,6 +107,12 @@ const textoDetalle = (detalle: unknown) => JSON.stringify(detalle, null, 2)
               <p v-if="row.original.ultimoError" class="text-default">
                 <span class="font-medium">Último error:</span> {{ row.original.ultimoError }}
               </p>
+              <p v-if="row.original.envioEstadoSii" class="text-default" data-qa="soporte-envio-estado">
+                <span class="font-medium">Estado del envío en el SII:</span> {{ row.original.envioEstadoSii }}
+              </p>
+              <p v-if="row.original.envioUltimoError" class="text-default" data-qa="soporte-envio-error">
+                <span class="font-medium">Último error del envío:</span> {{ row.original.envioUltimoError }}
+              </p>
               <pre
                 v-if="row.original.detalleSii !== null && row.original.detalleSii !== undefined"
                 class="overflow-x-auto rounded-md bg-elevated p-3 text-xs text-default"

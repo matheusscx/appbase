@@ -1792,7 +1792,7 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     // El panel de soporte (/admin/dte) agrega sus `it` DENTRO de este describe y reusa las filas
     // A y B: por eso se arman una vez en el `beforeAll` y se limpian en el `afterAll`, no al final
     // de un `it`.
-    let A: Sembrada; // atrasada
+    let A: Sembrada; // atrasada `enviado`, con su envío trabado (el motivo vive en el envío)
     let B: Sembrada; // rechazada
     let C: Sembrada; // con reparos reciente
     let D: Sembrada; // con reparos de hace más de 30 días: no aparece
@@ -1840,6 +1840,32 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
 
     const ids = (filas: FilaProblemaRes[]) => filas.map((f) => f.documentoId);
 
+    const ERROR_DEL_ENVIO = 'El SII contestó un código que no conocemos';
+    let envioDeA: string;
+
+    /**
+     * El sobre en que viajó `b`, trabado: el SII real no existe en el e2e, así que se arma por SQL.
+     * Con track id y consulta en el futuro, para que ningún job lo reintente.
+     */
+    async function enviarTrabado(b: Sembrada): Promise<string> {
+      const [envio] = await ds.query<{ envio_id: string }[]>(
+        `INSERT INTO dte_envios
+           (tenant_id, razon_social_id, ambiente, trackid, estado_sii, enviado_el,
+            consultar_desde, ultimo_error)
+         SELECT d.tenant_id, d.razon_social_id, d.ambiente, 987654321, 'XYZ', now(),
+                now() + interval '1 day', $2
+           FROM dte_documentos d
+          WHERE d.documento_id = $1
+         RETURNING envio_id`,
+        [b.documentoId, ERROR_DEL_ENVIO],
+      );
+      await ds.query(
+        'UPDATE dte_documentos SET envio_id = $2 WHERE documento_id = $1',
+        [b.documentoId, envio.envio_id],
+      );
+      return envio.envio_id;
+    }
+
     beforeAll(async () => {
       await reiniciarLimpio();
       A = await vender1();
@@ -1848,7 +1874,8 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
       D = await vender1();
       E = await vender1();
       F = await vender1();
-      await dejar(A, 'pendiente', '61 minutes');
+      await dejar(A, 'enviado', '61 minutes');
+      envioDeA = await enviarTrabado(A);
       await dejar(B, 'rechazado', '5 minutes', {
         origen: 'sobre',
         estado: 'RSC',
@@ -1872,6 +1899,11 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
         `UPDATE dte_documentos SET estado = 'aceptado', detalle_sii = NULL
           WHERE documento_id = ANY($1::uuid[])`,
         [[A, B, C, D, E, F].map((b) => b.documentoId)],
+      );
+      // El envío trabado se da de baja (soft delete): ya no explica nada.
+      await ds.query(
+        'UPDATE dte_envios SET eliminado_el = now() WHERE envio_id = $1',
+        [envioDeA],
       );
     });
 
@@ -1960,6 +1992,8 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
       intentos: number;
       ultimoError: string | null;
       detalleSii: unknown;
+      envioEstadoSii: string | null;
+      envioUltimoError: string | null;
     }
 
     it('GET /admin/dte/boletas-con-problemas: el superadmin ve las atrasadas y rechazadas de otro tenant, sin las demás', async () => {
@@ -1983,6 +2017,10 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
         tipo: 39,
         grupo: 'atrasada',
         detalleSii: null,
+        // Una atrasada `enviado` trabada no tiene el motivo en la boleta sino en su envío.
+        ultimoError: null,
+        envioEstadoSii: 'XYZ',
+        envioUltimoError: ERROR_DEL_ENVIO,
       });
       expect(de(B)).toMatchObject({
         tenantId: TENANT_ID,
@@ -1990,6 +2028,9 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
         razonSocial: NOMBRE,
         grupo: 'rechazada',
         detalleSii: { origen: 'sobre', estado: 'RSC' },
+        // Sin envío, el LEFT JOIN deja los dos campos en null en vez de perder la fila.
+        envioEstadoSii: null,
+        envioUltimoError: null,
       });
       expect(typeof de(A)?.folio).toBe('number');
       expect(typeof de(A)?.intentos).toBe('number');
@@ -1998,6 +2039,26 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
       // Ni la con reparos (C), ni la de hace más de 30 días (D), ni la dada de baja (E), ni la
       // de hace 10 minutos (F) son un problema para soporte.
       for (const fuera of [C, D, E, F]) expect(de(fuera)).toBeUndefined();
+    });
+
+    it('GET /admin/dte/boletas-con-problemas: un envío dado de baja no explica nada', async () => {
+      const tokenSuper = await loginComo(ADMIN_FALABELLA, FALABELLA_TENANT_ID);
+      await ds.query(
+        'UPDATE dte_envios SET eliminado_el = now() WHERE envio_id = $1',
+        [envioDeA],
+      );
+
+      const res = await getCon(tokenSuper, 'admin/dte/boletas-con-problemas');
+
+      expect(res.status).toBe(200);
+      const fila = (res.body as BoletaSoporteRes[]).find(
+        (f) => f.documentoId === A.documentoId,
+      );
+      expect(fila).toMatchObject({
+        grupo: 'atrasada',
+        envioEstadoSii: null,
+        envioUltimoError: null,
+      });
     });
 
     it('GET /admin/dte/boletas-con-problemas: quien no es superadmin recibe 403', async () => {

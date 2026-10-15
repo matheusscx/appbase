@@ -1132,9 +1132,13 @@ rechazada**. Con reparos es válida y no avisa.
   siendo una sola consulta, la del interruptor, y devuelve 0. Los reparos no cuentan.
 - **Panel de soporte:** es la única lectura del frente que cruza tenants, y la consulta lo dice. No
   recibe `tenant_id` de ningún lado. Una consulta, con `JOIN` a tenants vivos y `LEFT JOIN` a la
-  razón social (la boleta se ve aunque la razón social esté dada de baja). Cada fila trae `tenantId`,
-  nombre del local, razón social, ambiente, tipo, folio, `emitidaEl`, `grupo`, `intentos`,
-  `ultimoError` y `detalleSii` **completo**: soporte necesita lo técnico.
+  razón social (la boleta se ve aunque la razón social esté dada de baja) y `LEFT JOIN` a
+  `dte_envios` (vivo): una pendiente no tiene envío, y un envío dado de baja no explica nada. Cada
+  fila trae `tenantId`, nombre del local, razón social, ambiente, tipo, folio, `emitidaEl`, `grupo`,
+  `intentos`, `ultimoError`, `detalleSii` **completo** (soporte necesita lo técnico) y, del envío,
+  `envioEstadoSii` y `envioUltimoError`. Este último es el motivo de una atrasada `enviado` trabada
+  (código desconocido del SII, 404 de 24 h): vive en el envío, la boleta tiene `ultimo_error` y
+  `detalle_sii` en null, y sin él soporte vería una fila sin explicación.
 
 ### El motivo, en palabras del local
 
@@ -1154,16 +1158,20 @@ trae `estado: 'RCH'`, pero quien falló fue el sistema.
 - **Admin** (`configuracion/boleta-electronica`): la tarjeta *"Boletas con observaciones del SII"*,
   debajo de la de las sin emitir. Los grupos vacíos no se muestran; con los tres vacíos dice *"No hay
   boletas con observaciones."*. Cada fila: fecha, folio, tipo, monto, motivo y enlace a la venta. Un
-  texto fijo por grupo: *"El sistema la sigue enviando; no tienes que hacer nada. Si pasa de un día,
-  escribe a soporte con el folio."* (atrasadas), *"No la vuelvas a emitir: escribe a soporte con el
+  texto fijo por grupo: *"El SII todavía no la confirma. Si el motivo dice qué falta, corrígelo; si no,
+  y pasa de un día, escribe a soporte con el folio."* (atrasadas), *"No la vuelvas a emitir: escribe a soporte con el
   folio."* (rechazadas) y *"Es válida. Revisa el aviso del SII para corregirlo en las próximas
   boletas."* (con reparos).
+  El texto de las atrasadas **no promete que el sistema la sigue enviando** porque sería falso en dos
+  casos: una `pendiente` cuyo sobre no se puede armar (certificado vencido, perfil incompleto) no
+  sale hasta que el dueño actúe, y por eso la fila muestra ese motivo; y una `enviado` con el envío
+  ya cerrado (código desconocido del SII, 404 de 24 h) no la reenvía ni la reconsulta nadie.
 - **Cajero** (`FranjaEmision.vue`, la del POS y la de salones): con `conProblemas > 0`, *"Hay 1 boleta con
   problemas en el SII: avisa al encargado"* o *"Hay N boletas con problemas en el SII: avisa al
   encargado"*, sin punto final.
 - **Soporte** (`pages/admin.vue`): la tarjeta *"Boletas con problemas en el SII"* con la tabla de
-  todos los locales; el último error y el detalle del SII se despliegan por fila. Sin ninguna: *"Ningún
-  local tiene boletas con problemas."*.
+  todos los locales; el último error, el detalle del SII y, si hay envío, su estado y su último
+  error se despliegan por fila. Sin ninguna: *"Ningún local tiene boletas con problemas."*.
 - **Si la lectura falla, ninguna de las dos tarjetas dice el vacío**: muestran *"No se pudo leer el
   estado de las boletas en el SII."* además del toast, porque "no hay problemas" sería mentira.
   Monto o motivo en null se muestran "—".

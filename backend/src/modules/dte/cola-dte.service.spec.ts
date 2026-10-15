@@ -149,6 +149,8 @@ describe('ColaDteService', () => {
       intentos: 3,
       ultimo_error: 'No hay conexión con el SII',
       detalle_sii: null,
+      envio_estado_sii: '1',
+      envio_ultimo_error: 'El SII contestó un código que no conocemos',
     };
 
     it('hace una sola consulta y pasa de snake_case a camelCase', async () => {
@@ -161,6 +163,8 @@ describe('ColaDteService', () => {
           razon_social: null,
           ultimo_error: null,
           detalle_sii: { estado: 'RCH' },
+          envio_estado_sii: null,
+          envio_ultimo_error: null,
         },
       ]);
 
@@ -181,6 +185,8 @@ describe('ColaDteService', () => {
           intentos: 3,
           ultimoError: 'No hay conexión con el SII',
           detalleSii: null,
+          envioEstadoSii: '1',
+          envioUltimoError: 'El SII contestó un código que no conocemos',
         },
         expect.objectContaining({
           documentoId: 'aaaaaaaa-8888-4777-8666-555555555555',
@@ -188,6 +194,8 @@ describe('ColaDteService', () => {
           razonSocial: null,
           ultimoError: null,
           detalleSii: { estado: 'RCH' },
+          envioEstadoSii: null,
+          envioUltimoError: null,
         }),
       ]);
     });
@@ -209,6 +217,9 @@ describe('ColaDteService', () => {
       expect(sql).toContain('t.eliminado_el IS NULL');
       expect(sql).toContain('rs.eliminado_el IS NULL');
       expect(sql).toContain('LEFT JOIN razones_sociales rs');
+      expect(sql).toContain(
+        'LEFT JOIN dte_envios e ON e.envio_id = d.envio_id AND e.eliminado_el IS NULL',
+      );
       expect(sql).toContain(COND_CON_PROBLEMAS);
       expect(sql).toContain(COND_RECHAZADA);
       expect(sql).toContain('ORDER BY d.emitido_el, d.folio');

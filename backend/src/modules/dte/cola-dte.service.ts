@@ -46,6 +46,10 @@ export interface BoletaConProblemaSoporte {
   intentos: number;
   ultimoError: string | null;
   detalleSii: unknown;
+  /** `dte_envios.estado_sii` del sobre en que viajó; null si aún no viajó o el sobre se dio de baja. */
+  envioEstadoSii: string | null;
+  /** `dte_envios.ultimo_error`: por qué una atrasada `enviado` quedó trabada (la boleta no lo guarda). */
+  envioUltimoError: string | null;
 }
 
 interface FilaProblemaSoporte {
@@ -61,20 +65,27 @@ interface FilaProblemaSoporte {
   intentos: number;
   ultimo_error: string | null;
   detalle_sii: unknown;
+  envio_estado_sii: string | null;
+  envio_ultimo_error: string | null;
 }
 
 // Cruza tenants a propósito: es el eje superadmin, como `/admin/tenants`; la ruta que la usa
 // lleva SuperadminGuard y no recibe tenant de ningún lado. El LEFT JOIN a la razón social deja ver
 // la boleta aunque la razón social se haya dado de baja (el tenant sí tiene que estar vivo).
+// El LEFT JOIN a `dte_envios` trae el motivo de una atrasada `enviado` trabada (código desconocido
+// del SII, 404 de 24 h): vive en el envío, no en la boleta. Es LEFT porque una `pendiente` no tiene
+// envío, y filtra `eliminado_el` porque un envío dado de baja no explica nada.
 // El tope de 200 acota la respuesta; las más antiguas van primero, que son las más atrasadas.
 const PROBLEMAS_DE_TODOS = `
   SELECT d.documento_id, d.tenant_id, t.nombre AS tenant, rs.nombre AS razon_social, d.ambiente,
          d.tipo, d.folio, d.emitido_el,
          CASE WHEN ${COND_RECHAZADA} THEN 'rechazada' ELSE 'atrasada' END AS grupo,
-         d.intentos, d.ultimo_error, d.detalle_sii
+         d.intentos, d.ultimo_error, d.detalle_sii,
+         e.estado_sii AS envio_estado_sii, e.ultimo_error AS envio_ultimo_error
     FROM dte_documentos d
     JOIN tenants t ON t.tenant_id = d.tenant_id AND t.eliminado_el IS NULL
     LEFT JOIN razones_sociales rs ON rs.razon_social_id = d.razon_social_id AND rs.eliminado_el IS NULL
+    LEFT JOIN dte_envios e ON e.envio_id = d.envio_id AND e.eliminado_el IS NULL
    WHERE d.eliminado_el IS NULL AND ${COND_CON_PROBLEMAS}
    ORDER BY d.emitido_el, d.folio
    LIMIT 200`;
@@ -150,6 +161,8 @@ export class ColaDteService {
       intentos: f.intentos,
       ultimoError: f.ultimo_error,
       detalleSii: f.detalle_sii,
+      envioEstadoSii: f.envio_estado_sii,
+      envioUltimoError: f.envio_ultimo_error,
     }));
   }
 }

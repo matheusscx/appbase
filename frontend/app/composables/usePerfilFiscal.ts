@@ -114,6 +114,9 @@ export interface BoletaConProblemaSoporte {
   intentos: number
   ultimoError: string | null
   detalleSii: unknown
+  /** Del sobre en que viajó: el motivo de una atrasada `enviado` trabada vive acá, no en la boleta. */
+  envioEstadoSii: string | null
+  envioUltimoError: string | null
 }
 
 const ETIQUETA_GRUPO_SOPORTE: Record<GrupoProblemaSoporte, { label: string, color: 'warning' | 'error' }> = {
