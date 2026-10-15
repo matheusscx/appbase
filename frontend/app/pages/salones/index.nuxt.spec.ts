@@ -5116,6 +5116,28 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(filaItem.slice(0, 5).trim(), 'la columna CANT no quedó en "0"').not.toBe('0')
   })
 
+  it('el ticket del cierre lleva la fecha de la venta que devolvió el servidor, no la de hoy', async () => {
+    catalogoItemsMock = [producto('20.0000', '10.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+    cierreBoletaOverride = {
+      ...boletaCierreDefault(),
+      fecha: '2026-08-28T12:00:00.000Z',
+    }
+
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+
+    expect(impresionesQz, 'la boleta salió').toHaveLength(1)
+    expect(impresionesQz[0]!.join('')).toContain(`Fecha : ${new Date('2026-08-28T12:00:00.000Z').toLocaleString('es-CL')}`)
+  })
+
   /**
    * Spec `2026-10-14-boleta-desde-la-venta` § 7 y § 8.2: el cierre de la cuenta también emite la
    * boleta electrónica. Si salió, el papel lleva su folio; si no salió, el ticket de hoy más la

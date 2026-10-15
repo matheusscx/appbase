@@ -59,7 +59,7 @@ describe('textoParaEmitir', () => {
 
 describe('pistaDelGrupo', () => {
   it('lo del perfil se arregla en esta pantalla y lo de la boleta no se puede emitir', () => {
-    expect(pistaDelGrupo('perfil')).toBe('Se arregla en esta pantalla; después se emite con el botón.')
+    expect(pistaDelGrupo('perfil')).toBe('Se arregla en el perfil (o con soporte, si el motivo lo dice); después, emítelas con el botón.')
     expect(pistaDelGrupo('boleta')).toBe('No se puede emitir.')
   })
 })

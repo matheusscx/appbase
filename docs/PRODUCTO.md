@@ -1145,8 +1145,9 @@ configure. Si el sistema también emitiera, la venta llegaría dos veces al SII.
   nota de crédito). Una boleta del
   sistema **solo armada, sin enviar al SII**, no cuenta como emitida: la venta se anula y esa
   boleta queda descartada. Sin esto, con la regla de abajo toda venta nacería documentada y anular
-  no aplicaría nunca. Cuando el sistema envíe al SII, lo enviado va por nota de crédito (owner,
-  2026-10-01);
+  no aplicaría nunca. Una boleta ya emitida por el sistema (con folio y en la cola de envío al SII, lo que hace
+  desde el 2026-10-15 con el interruptor del tenant prendido) va por nota de crédito y no se anula
+  (owner, 2026-10-01);
 - **un documento hecho por fuera (otro facturador) se pregunta al anular**: el sistema sabe que le
   tocaba al otro facturador, no si ya lo hizo. Al anular aparece "¿Ya hiciste esta factura en tu
   facturador?". Si sí, va por nota de crédito, hecha por fuera y anotada con su número; si no, se

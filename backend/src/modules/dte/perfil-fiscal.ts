@@ -97,6 +97,14 @@ export const vacio = (valor: string | null): valor is null =>
   valor === null || valor.trim() === '';
 
 /**
+ * El faltante del proveedor de software y el `PERFIL_INCOMPLETO` de `emitir` dicen lo mismo: no
+ * lo arregla el dueño del local en su pantalla (es configuración del sistema), así que el texto
+ * lo manda a soporte. Una sola constante para que los dos no se separen.
+ */
+export const MENSAJE_SIN_PROVEEDOR_SOFTWARE =
+  'Falta el proveedor de software en la configuración del sistema: avisa a soporte';
+
+/**
  * Qué le falta al emisor para poder emitir boletas (`faltantes`) y qué conviene mirar ya
  * (`avisos`). Pura: sin base y sin reloj, `ahora` viene de afuera. Los mensajes son para el
  * dueño del local. `proveedor` es la empresa dueña del software (configuración del sistema, no
@@ -196,10 +204,7 @@ export function evaluarPerfil(
     }
   };
   if (!proveedorUsable(proveedor))
-    falta(
-      'SIN_PROVEEDOR_SOFTWARE',
-      'Falta el proveedor de software en la configuración del sistema',
-    );
+    falta('SIN_PROVEEDOR_SOFTWARE', MENSAJE_SIN_PROVEEDOR_SOFTWARE);
 
   for (const [tipo, restantes] of folios) {
     // El 39 sin folios ya salió como faltante: no se repite como aviso.

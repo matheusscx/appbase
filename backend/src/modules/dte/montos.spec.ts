@@ -356,6 +356,15 @@ describe('verificarMontos', () => {
     ).toBe('IMPUESTO_ADICIONAL_NO_SOPORTADO');
   });
 
+  it('el rechazo del impuesto adicional dice la regla: el ILA es costo y se quita del producto', () => {
+    const d = boleta();
+    expect(() =>
+      verificarMontos({ ...d, montos: { ...d.montos, adicionales: '250' } }),
+    ).toThrow(
+      /son costo y no se cobran en la venta.*Quita el impuesto adicional/,
+    );
+  });
+
   it('boleta 41 con una línea afecta o con neto → BOLETA_EXENTA_CON_AFECTO', () => {
     expect(codigo(() => verificarMontos(boleta({ tipo: 41 })))).toBe(
       'BOLETA_EXENTA_CON_AFECTO',

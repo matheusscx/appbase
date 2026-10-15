@@ -460,6 +460,49 @@ describe('ventas/pos — la boleta se imprime desde la respuesta de POST /ventas
   })
 
   /**
+   * `Fecha :` del papel es la de la venta que armó el servidor (`venta.boleta.fecha`), no el
+   * `new Date()` del navegador: el cobro y el papel tienen que decir lo mismo que la boleta
+   * electrónica (`FchEmis`), también si el reloj de la caja está corrido.
+   */
+  it('el ticket lleva la fecha de la venta que devolvió el servidor, no la de hoy', async () => {
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    impresorasBoleta = [impresoraDeBoleta()]
+    ventaBoletaMock = {
+      ventaId: 'venta-fecha',
+      fecha: '2026-08-28T12:00:00.000Z',
+      cajero: 'Ana Torres',
+      items: [{
+        descripcion: 'Palta',
+        cantidad: '1',
+        cantidadPresentacion: null,
+        unidadCodigoPresentacion: null,
+        unidadCodigoBase: 'unidad',
+        precioUnitario: '4000',
+        totalLinea: '4000',
+      }],
+      totales: {
+        subtotalNeto: '4000',
+        totalDescuentos: '0',
+        totalRecargos: '0',
+        totalImpuestos: '0',
+        totalFinal: '4000',
+      },
+      impuestos: [],
+      promociones: [],
+      propina: null,
+      pagos: [{ nombre: 'Efectivo', monto: '4000' }],
+      vuelto: null,
+    }
+
+    const wrapper = await montar()
+    wrapper.findComponent({ name: 'VentasCobroModal' }).vm.$emit('confirmar', [{ metodoPagoId: 'mp-efectivo', monto: '4000' }], '0')
+    await esperar(50)
+
+    expect(impresionesQz, 'la boleta salió').toHaveLength(1)
+    expect(impresionesQz[0]!.join('')).toContain(`Fecha : ${new Date('2026-08-28T12:00:00.000Z').toLocaleString('es-CL')}`)
+  })
+
+  /**
    * El agujero que encontró la revisión de toda la rama: el cliente impreso
    * salía de `customer.value` (el formulario, estado local), no de la
    * respuesta del servidor — así que reimprimir la misma venta como COPIA

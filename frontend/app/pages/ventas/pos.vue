@@ -349,6 +349,8 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         emisor: emisor.value,
         // Si la boleta salió: su folio y su emisor; si no salió: la línea de pendiente.
         ...paraTicket(venta.boleta),
+        // La fecha de la VENTA: una reimpresión de ayer no puede decir hoy.
+        fecha: new Date(venta.boleta.fecha),
         meta: {
           cajero: venta.boleta.cajero ?? undefined,
         },

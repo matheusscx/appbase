@@ -503,6 +503,8 @@ describe('EmisionBoletaService.emitir', () => {
       expect(r).toMatchObject({
         estado: 'sin_emitir',
         codigo: 'PERFIL_INCOMPLETO',
+        mensaje:
+          'Falta el proveedor de software en la configuración del sistema: avisa a soporte',
       });
       expect(emitirBoletaMock).not.toHaveBeenCalled();
     });
@@ -782,25 +784,23 @@ describe('EmisionBoletaService: emitir después (spec § 5, § 8.1)', () => {
       expect(leer.params).toEqual([TENANT]);
     });
 
-    it('un error del perfil (SIN_FOLIOS) corta: las que siguen fallarían igual', async () => {
+    it('SIN_FOLIOS NO corta: los folios son por tipo y la siguiente puede ser de otro', async () => {
       const emitir = jest
         .spyOn(servicio, 'emitir')
-        .mockResolvedValueOnce(sinEmitirCon('SIN_FOLIOS'));
+        .mockResolvedValue(sinEmitirCon('SIN_FOLIOS'));
       quedan = 3;
 
       const r = await servicio.emitirPendientes(TENANT, AHORA);
 
-      expect(emitir).toHaveBeenCalledTimes(1);
+      expect(emitir).toHaveBeenCalledTimes(3);
       expect(r).toEqual({
         emitidas: 0,
         pendientes: 3,
-        errores: [
-          {
-            ventaId: 'venta-1',
-            codigo: 'SIN_FOLIOS',
-            mensaje: 'falló SIN_FOLIOS',
-          },
-        ],
+        errores: [1, 2, 3].map((n) => ({
+          ventaId: `venta-${n.toString()}`,
+          codigo: 'SIN_FOLIOS',
+          mensaje: 'falló SIN_FOLIOS',
+        })),
       });
     });
 
@@ -809,7 +809,7 @@ describe('EmisionBoletaService: emitir después (spec § 5, § 8.1)', () => {
       'CERTIFICADO_VENCIDO',
       'PERFIL_INCOMPLETO',
       'AMBIENTE_DISTINTO',
-    ] as const)('%s también corta', async (codigo) => {
+    ] as const)('%s corta: las que siguen fallarían igual', async (codigo) => {
       const emitir = jest
         .spyOn(servicio, 'emitir')
         .mockResolvedValue(sinEmitirCon(codigo));

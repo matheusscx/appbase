@@ -56,7 +56,7 @@ describe('evaluarPerfil', () => {
       {
         codigo: 'SIN_PROVEEDOR_SOFTWARE',
         mensaje:
-          'Falta el proveedor de software en la configuración del sistema',
+          'Falta el proveedor de software en la configuración del sistema: avisa a soporte',
       },
     ]);
   });

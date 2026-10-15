@@ -11,7 +11,10 @@ import {
 import { ColaDteService } from '../dte/cola-dte.service';
 import { emitirBoleta } from '../dte/envio-boleta';
 import { FoliosService } from '../dte/folios.service';
-import { ahoraChile } from '../dte/perfil-fiscal';
+import {
+  ahoraChile,
+  MENSAJE_SIN_PROVEEDOR_SOFTWARE,
+} from '../dte/perfil-fiscal';
 import { PerfilFiscalService } from '../dte/perfil-fiscal.service';
 import type { VentaDocumento } from './entities/venta-documento.entity';
 import {
@@ -306,9 +309,13 @@ export class EmisionBoletaService {
    * después CAF), así que una anulación en paralelo o espera o ya ganó: `emitir` vuelve a mirar
    * el documento bajo bloqueo y, si se descartó, lo omite.
    *
-   * Un error del grupo del perfil (`SIN_FOLIOS`, certificado…) corta: las que siguen fallarían
-   * igual. Uno de la boleta (un impuesto adicional, un texto) se anota y sigue. Cualquier error
-   * que no sea de la emisión se propaga (R9 de la cola): las ya emitidas quedaron confirmadas.
+   * Un error del grupo del perfil (certificado, perfil incompleto, ambiente) corta: las que
+   * siguen fallarían igual. `SIN_FOLIOS` NO corta aunque sea del perfil: los folios son por tipo,
+   * y la siguiente puede ser de otro (una exenta pide CAF 41, una afecta CAF 39), así que con el
+   * CAF de un solo tipo agotado las del otro tipo sí salen. El costo: con ambos agotados el botón
+   * hace hasta 200 intentos rápidos que fallan, en vez de 1. Uno de la boleta (un impuesto
+   * adicional, un texto) se anota y sigue. Cualquier error que no sea de la emisión se propaga
+   * (R9 de la cola): las ya emitidas quedaron confirmadas.
    *
    * Procesar de a una es escritura de N filas, no una lectura N+1: la lista sale de una consulta.
    */
@@ -339,7 +346,8 @@ export class EmisionBoletaService {
         codigo: r.codigo,
         mensaje: r.mensaje,
       });
-      if (grupoDelError(r.codigo) === 'perfil') break;
+      if (r.codigo !== 'SIN_FOLIOS' && grupoDelError(r.codigo) === 'perfil')
+        break;
     }
     return {
       emitidas,
@@ -463,10 +471,7 @@ export class EmisionBoletaService {
     );
     const proveedor = this.perfil.proveedorSoftware();
     if (!proveedor)
-      throw new DteError(
-        'PERFIL_INCOMPLETO',
-        'Falta el proveedor de software en la configuración del sistema',
-      );
+      throw new DteError('PERFIL_INCOMPLETO', MENSAJE_SIN_PROVEEDOR_SOFTWARE);
 
     const boleta = emitirBoleta(
       datosBoletaDeVenta(venta, folio, cred.emisor, proveedor),

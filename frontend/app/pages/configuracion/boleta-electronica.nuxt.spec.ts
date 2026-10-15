@@ -431,7 +431,7 @@ describe('boletas sin emitir', () => {
     expect(filas[0]!.text()).toContain('14-10-2026')
     expect(filas[0]!.text()).toContain('$11900')
     expect(filas[0]!.text()).toContain('No quedan folios de boleta (39) para emitir')
-    expect(filas[0]!.text()).toContain('Se arregla en esta pantalla; después se emite con el botón.')
+    expect(filas[0]!.text()).toContain('Se arregla en el perfil (o con soporte, si el motivo lo dice); después, emítelas con el botón.')
     expect(filas[0]!.find('a').attributes('href')).toBe('/ventas?venta=venta-1')
     expect(filas[1]!.text()).toContain('El producto lleva un impuesto adicional que la boleta no informa')
     expect(filas[1]!.text()).toContain('No se puede emitir.')

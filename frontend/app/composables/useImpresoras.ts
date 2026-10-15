@@ -344,6 +344,12 @@ export function useImpresoras() {
     /** De `useBoletaElectronica().paraTicket(boleta)`. Ver `buildBoletaTicket`. */
     electronica?: BoletaElectronicaTicket
     pendienteDeEmision?: boolean
+    /**
+     * La fecha de la venta (la `fecha` de la boleta que arma el servidor), no la de hoy: la
+     * reimpresión de una venta de ayer lleva `Fecha :` de ayer; lo que dice cuándo se imprimió
+     * la copia es `copia.impresaEl`.
+     */
+    fecha: Date
     meta: BoletaMetaOperativa
     cliente?: BoletaCliente
     items: BoletaItem[]
@@ -359,7 +365,7 @@ export function useImpresoras() {
   }): Promise<void> {
     const impresora = await obtenerImpresoraBoleta()
     if (!impresora) return
-    const lineas = buildBoletaTicket({ ...input, fecha: new Date() })
+    const lineas = buildBoletaTicket(input)
     await imprimirEn(impresora, lineas, apiUrl)
   }
 

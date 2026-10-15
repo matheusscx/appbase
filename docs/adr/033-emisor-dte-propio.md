@@ -111,7 +111,10 @@ Operación:
   prendido, la venta toma el folio del perfil (1), arma y firma con el motor (2) y encola para la
   cola y el cliente del web service del SII (3). Faltan la nota de crédito electrónica y la
   pantalla de atrasadas y rechazadas (frentes 2 y 3).
-- Siguen diferidos de ADR-010: los impuestos adicionales (ILA) en la boleta, que el motor rechaza con
-  código hasta saber qué hace el SII con ellos.
+- **El ILA no se informa en la boleta, y eso es la regla, no un diferimiento** (decisión del owner,
+  2026-10-14): para el local que vende al público el ILA es costo, no un impuesto de su venta, así
+  que el motor rechaza con código (`IMPUESTO_ADICIONAL_NO_SOPORTADO`) un ítem con adicional. Lo que
+  sigue en pausa es el ILA en el catálogo, habilitable por tenant, y la factura del contribuyente
+  afecto (`docs/features/emision-electronica.md` § Decidido por el owner).
 - Dependencias nuevas, aprobadas por el owner: `node-forge`, `xml-crypto` y `@xmldom/xmldom` en
   producción; `xmllint-wasm` solo en desarrollo.

@@ -956,6 +956,8 @@ async function reimprimirBoleta() {
       emisor: emisor.value,
       // Después de emitirla, la reimpresión sale con el folio.
       ...paraTicket(boleta),
+      // La fecha de la VENTA: una reimpresión de ayer no puede decir hoy.
+      fecha: new Date(boleta.fecha),
       meta: {
         cajero: boleta.cajero ?? undefined,
         mesa: boleta.mesa ?? undefined,
@@ -1457,6 +1459,14 @@ function onNcOtrosDatos() {
               </p>
               <p v-if="estadoDocumento(doc)" class="text-xs text-muted">
                 {{ estadoDocumento(doc) }}
+              </p>
+              <!-- Por qué la boleta no salió: lo escribe el servidor al dejarla sin emitir. -->
+              <p
+                v-if="doc.estadoEnvio === 'sin_emitir' && !doc.descarte && doc.emisionError"
+                class="text-xs text-muted"
+                data-qa="motivo-sin-emitir"
+              >
+                {{ doc.emisionError }}
               </p>
               <div v-if="doc.ncElectronicaPendiente" class="flex flex-col items-start gap-1" data-qa="nc-electronica-pendiente">
                 <UBadge color="warning" variant="subtle" size="xs" label="NC electrónica pendiente" />

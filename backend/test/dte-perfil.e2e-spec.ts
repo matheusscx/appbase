@@ -818,7 +818,7 @@ describe('Perfil fiscal del emisor (e2e)', () => {
           {
             codigo: 'SIN_PROVEEDOR_SOFTWARE',
             mensaje:
-              'Falta el proveedor de software en la configuración del sistema',
+              'Falta el proveedor de software en la configuración del sistema: avisa a soporte',
           },
         ]);
 
@@ -827,7 +827,7 @@ describe('Perfil fiscal del emisor (e2e)', () => {
         });
         expect(enciende.status).toBe(400);
         expect((enciende.body as EmisionError).message).toBe(
-          'Para emitir falta: Falta el proveedor de software en la configuración del sistema',
+          'Para emitir falta: Falta el proveedor de software en la configuración del sistema: avisa a soporte',
         );
 
         // Apagar no pregunta nada: siempre se puede parar.

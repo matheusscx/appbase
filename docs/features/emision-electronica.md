@@ -217,7 +217,7 @@ lanza el perfil fiscal y `LINEA_SIN_NOMBRE`, el armado desde la venta; ninguno e
 | `RUT_INVALIDO` | Un RUT no pasa el dígito verificador |
 | `CDG_SUCURSAL_INVALIDO` | `CdgSIISucur` no es un entero de 1 a 9 dígitos sin ceros a la izquierda |
 | `FALTA_IDENTIFICACION_135_UF` | Sobre el umbral falta RUT (válido y no genérico), nombre o medio de pago |
-| `IMPUESTO_ADICIONAL_NO_SOPORTADO` | `adicionales` > 0: la boleta no tiene dónde informarlos |
+| `IMPUESTO_ADICIONAL_NO_SOPORTADO` | `adicionales` > 0: la boleta no informa el ILA (es costo para el local que vende al público); se quita del producto |
 | `ENVIO_VACIO` | El sobre no tiene boletas |
 | `ENVIO_DEMASIADAS_BOLETAS` | Más de 500 boletas en un sobre |
 | `ENVIO_FOLIO_REPETIDO` | El mismo (tipo, folio) dos veces en un sobre |
@@ -418,7 +418,7 @@ cuántos CAF haya.
     vencimiento, subir o reemplazar; nunca muestra la clave) y folios (tabla de CAF, subir, y borrar
     solo en los sin folios usados).
   - **"Boletas sin emitir"**: fecha, monto, el motivo tal como lo manda el servidor (con una pista:
-    *"Se arregla en esta pantalla…"* si es del perfil, *"No se puede emitir."* si es de esa boleta) y
+    *"Se arregla en el perfil (o con soporte, si el motivo lo dice)…"* si es del perfil, *"No se puede emitir."* si es de esa boleta) y
     link a la venta (`/ventas?venta=…`). El botón **"Emitir pendientes"** (`POST /dte/emitir-pendientes`)
     corre una sola tanda a la vez —queda deshabilitado mientras corre—, muestra `N emitidas`, cuántas
     siguen sin emitir y los errores con link a su venta, y vuelve a pedir la lista y el perfil.
@@ -442,8 +442,11 @@ rangos que empiezan igual.
   ni un CAF usado. Un RUT distinto es otro contribuyente ante el SII: para cambiar de RUT se crea
   otra razón social y se la marca preferida, y lo emitido conserva su rastro.
 - **Nombre del ítem:** el catálogo valida al crear y al editar (80 caracteres en ISO-8859-1). Los
-  ítems que ya no cumplen no se corrigen solos: el motor los rechaza al emitir (texto inválido), la boleta queda
-  `sin_emitir` y el motivo (con el producto) lo ve el cajero al cobrar y el admin en "Boletas sin emitir". El seed no tiene ninguno (medido: 12 ítems, máximo 28 caracteres).
+  ítems que ya no cumplen no se corrigen solos: el motor los rechaza al emitir y la boleta queda
+  `sin_emitir` con el motivo, que ve el cajero al cobrar y el admin en "Boletas sin emitir". Con un
+  carácter inválido el motivo trae el nombre del producto (`NmbItem de la línea N tiene un carácter
+  que la boleta no admite …: "nombre"`); con un nombre demasiado largo dice solo `NmbItem de la
+  línea N admite 80 caracteres y trae M`, sin el nombre.
 - **ILA y adicionales (2026-10-14, por AskUserQuestion, después de leer la
   [investigación](../agent/investigaciones/2026-10-14-ila-en-boleta-electronica.md)):** para el
   local que vende al público **el ILA es costo, no un impuesto de su venta** (DL 825 art. 43 inciso
@@ -870,9 +873,11 @@ sale del token, ninguna recibe body). Viven en `EmisionBoletaController`, del m�
   a mirar el documento con `FOR UPDATE`. El orden es venta → CAF, igual que al vender. Una
   anulación en paralelo o espera al botón o ya ganó: el documento quedó descartado y `emitir` lo
   omite (`omitido` no suma ni es un error).
-- **Un error del grupo `perfil` corta** (`SIN_FOLIOS`, `SIN_CERTIFICADO`, `CERTIFICADO_VENCIDO`,
-  `PERFIL_INCOMPLETO`, `AMBIENTE_DISTINTO`): las que siguen fallarían igual. **Uno del grupo
-  `boleta` se anota y sigue** (un impuesto adicional, un texto que no cabe).
+- **Un error del grupo `perfil` corta, salvo `SIN_FOLIOS`** (`SIN_CERTIFICADO`,
+  `CERTIFICADO_VENCIDO`, `PERFIL_INCOMPLETO`, `AMBIENTE_DISTINTO`): las que siguen fallarían igual.
+  `SIN_FOLIOS` se anota y sigue, porque los folios son por tipo y la siguiente puede ser de otro
+  (una exenta pide CAF 41, una afecta CAF 39). **Uno del grupo `boleta` también se anota y sigue**
+  (un impuesto adicional, un texto que no cabe).
 - Responde `{ emitidas, pendientes, errores: [{ ventaId, codigo, mensaje }] }`; `pendientes` es un
   `count` de lo que sigue `sin_emitir` al terminar. Un error que no es un `DteError` se propaga (R9):
   las que ya salieron quedaron confirmadas. Procesar de a una es escritura de N filas, no una
@@ -909,8 +914,9 @@ y facturador externo, exenta (41), sin folios, sin certificado (el folio tomado 
 que se cae, una venta que se cae después de emitir, 10 en paralelo, la venta de $0 por descuento,
 descuento de línea + de venta + granel, pago mixto con la máquina, cierre de mesa (con folios, con
 el CAF agotado y con deuda), callback de la tienda, alta de suscripción, la reimpresión y, de
-emitir después: la lista y el botón con el CAF agotado (corta) y con uno nuevo (emite las 3 con la
-fecha de su venta), el error de una boleta que no corta, la **anulación en paralelo** (un query
+emitir después: la lista y el botón con el CAF agotado (anota las 3 y no corta) y con uno nuevo
+(emite las 3 con la fecha de su venta), la exenta sin CAF 41 más vieja que dos afectas (el botón
+emite las dos y deja la exenta con `SIN_FOLIOS`), el error de una boleta que no corta, la **anulación en paralelo** (un query
 runner retiene la fila de la venta, el botón queda esperando según `pg_blocking_pids`, la
 anulación gana y el botón no emite: se usa SQL y no la ruta de anular porque esa pide el mismo
 bloqueo desde otra conexión), anular una `sin_emitir` y una `emitido`, la nota de crédito sobre
@@ -924,7 +930,7 @@ botón emite todas las del tenant.
 Mutantes (revertidos con `cp` y `cmp`): sin savepoint, atrapar cualquier error, el umbral con
 `now()`, el IVA mal leído de `ventas_impuestos`, `conSavepoint` sin `ROLLBACK TO` y la factura
 emitida como boleta; del botón: sin el `FOR UPDATE` de la venta, cortar también con el grupo
-`boleta`, no cortar con `SIN_FOLIOS` y `estado-emision` con `TenantAdminGuard` (los cuatro caen). El umbral del año de la venta solo lo ve un test unitario: el e2e emite en el
+`boleta`, volver a cortar con `SIN_FOLIOS` y `estado-emision` con `TenantAdminGuard` (los cuatro caen). El umbral del año de la venta solo lo ve un test unitario: el e2e emite en el
 mismo año de la venta, y la diferencia aparece recién al emitir después (el botón).
 
 ### Lo que queda abierto
@@ -958,6 +964,22 @@ mismo año de la venta, y la diferencia aparece recién al emitir después (el b
   mientras valida; la emisión revalida el perfil al emitir, así que no emite sin lo necesario.
 - **Certificación (subproyecto 5):** hasta que el SII reciba boletas de verdad, nada de lo emitido
   tiene validez.
+- **`SIN_FOLIOS` ya no corta el botón.** El costo: con los CAF de los dos tipos agotados, el botón
+  hace hasta 200 intentos rápidos que fallan, en vez de uno.
+- **Una `sin_emitir` del grupo `boleta` no tiene salida** salvo anular la venta, y la franja del
+  cajero no baja mientras exista (el frente 3 lo resuelve).
+- **El toast del cajero muestra el mensaje crudo del motor**, que puede ser técnico.
+- **Una NC sobre una venta `sin_emitir` que se emite después** sale por el total original, y la marca
+  *NC electrónica pendiente* aparece en la corrección.
+- **Varios `POST` del botón en paralelo cargan el pool**: el front lo deshabilita mientras corre, el
+  backend no lo impide.
+- **`.env.example` y `docker-compose` traen valores de prueba de `DTE_PROVEEDOR_*`**; Railway necesita
+  los reales antes de prender el interruptor.
+- **La confirmación del interruptor no avisa que en certificación nada tiene validez.**
+- **Un hueco heredado de la regla 2 del motor:** una línea sin cantidad ni precio con
+  `DescuentoMonto` explicaría un total de $0. El armado desde la venta nunca la arma así.
+- **Residuos de Playwright en la base local** (razones sociales 'Emisor e2e POS', 'Emisor e2e
+  pantalla' y 'Emisor e2e interruptor', con CAF usados): no se limpian solas.
 
 ---
 

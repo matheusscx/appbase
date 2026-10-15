@@ -2947,6 +2947,8 @@ async function cerrarCuentaConPin(
       await impresorasApi.imprimirBoleta({
         emisor: emisor.value,
         ...paraTicket(boleta),
+        // La fecha de la VENTA: una reimpresión de ayer no puede decir hoy.
+        fecha: new Date(boleta.fecha),
         meta: {
           cajero: boleta.cajero ?? undefined,
           mesa: boleta.mesa ?? undefined,

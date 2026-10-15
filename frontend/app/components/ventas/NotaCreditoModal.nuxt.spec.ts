@@ -495,6 +495,28 @@ describe('NotaCreditoModal — una nota por intento de emisión (ADR-026)', () =
     expect(apiFetch.mock.calls.some(([url]) => String(url).endsWith('/caja/caja-1/movimientos/resumen'))).toBe(true)
   })
 
+  it('si la nota corrige una boleta electrónica ya emitida, muestra el aviso del servidor como warning', async () => {
+    const aviso = 'La boleta de esta venta ya se emitió: la nota de crédito ante el SII hazla en su portal por ahora.'
+    const wrapper = await montar([EFECTIVO], true, 'v-aviso-nc')
+    backend(() => Promise.resolve({ ...NOTA, avisoNcElectronica: aviso }))
+
+    generar().click()
+    await esperar()
+
+    expect(wrapper.emitted('success')).toHaveLength(1)
+    expect(toastAdd).toHaveBeenCalledWith({ title: aviso, color: 'warning' })
+  })
+
+  it('sin boleta electrónica emitida no hay aviso de NC pendiente', async () => {
+    await montar([EFECTIVO], true, 'v-sin-aviso-nc')
+    backend(() => Promise.resolve({ ...NOTA, avisoNcElectronica: null }))
+
+    generar().click()
+    await esperar()
+
+    expect(toastAdd.mock.calls.some(([t]) => (t as { color: string }).color === 'warning')).toBe(false)
+  })
+
   it('el 422 de otros datos: avisa, se cierra y pide recargar el detalle; reabrir es otro intento', async () => {
     const wrapper = await montar([EFECTIVO], true, 'v-otros')
     const otrosDatos = Object.assign(new Error('422'), {

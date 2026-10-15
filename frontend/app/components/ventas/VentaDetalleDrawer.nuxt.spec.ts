@@ -974,6 +974,28 @@ describe('VentaDetalleDrawer — documentos', () => {
     expect(fila(wrapper, 'doc-s').text()).toContain('Boleta electrónica N° 1234')
   })
 
+  it('una boleta sin emitir muestra el motivo debajo de la línea de estado', async () => {
+    const wrapper = await montarCon([
+      documento({ id: 'doc-s', estadoEnvio: 'sin_emitir', emisionError: 'No quedan folios de tipo 39 cargados' }),
+    ])
+
+    const docFila = fila(wrapper, 'doc-s')
+    expect(docFila.text()).toContain('Boleta electrónica sin emitir')
+    const motivo = docFila.find('[data-qa="motivo-sin-emitir"]')
+    expect(motivo.exists()).toBe(true)
+    expect(motivo.text()).toBe('No quedan folios de tipo 39 cargados')
+  })
+
+  it('el motivo solo se muestra mientras la boleta sigue sin emitir', async () => {
+    const wrapper = await montarCon([
+      documento({ id: 'doc-e', estadoEnvio: 'emitido', folio: 7, emisionError: 'resto de un motivo viejo' }),
+      documento({ id: 'doc-d', estadoEnvio: 'sin_emitir', emisionError: 'No quedan folios', descarte: 'armado_sin_enviar', descartadoEl: '2026-10-02T15:00:00.000Z' }),
+    ])
+
+    expect(fila(wrapper, 'doc-e').find('[data-qa="motivo-sin-emitir"]').exists()).toBe(false)
+    expect(fila(wrapper, 'doc-d').find('[data-qa="motivo-sin-emitir"]').exists()).toBe(false)
+  })
+
   it('una corrección sobre una boleta electrónica dice que su NC está pendiente y qué hacer por ahora', async () => {
     const wrapper = await montarCon([
       documento({ id: 'doc-nc', ventaId: 'nc-1', documentoCorregidoId: 'doc-s', ncElectronicaPendiente: true }),
@@ -1565,6 +1587,33 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
     expect(texto, 'una venta pagada no sale ANULADA').not.toContain('ANULADA')
     expect(texto).toContain('Pizza grande')
     expect(texto).toContain('Ana Torres')
+  })
+
+  /**
+   * El papel dice cuándo fue la VENTA, no cuándo se reimprime: `Fecha :` sale de `boleta.fecha`
+   * (la que arma el servidor) y la copia lleva aparte `Reimpreso: <ahora>`. Antes `imprimirBoleta`
+   * ponía `new Date()` y una venta de ayer se reimprimía con la fecha de hoy.
+   */
+  it('reimprime la venta de ayer con `Fecha :` de ayer y `Reimpreso:` de ahora', async () => {
+    impresionesQz.length = 0
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-15T13:00:00.000Z'))
+    try {
+      const wrapper = await montar()
+      await botonReimprimir(wrapper)!.trigger('click')
+      await new Promise(r => setTimeout(r, 50))
+
+      expect(impresionesQz, 'la boleta se imprimió').toHaveLength(1)
+      const texto = impresionesQz[0]!.join('')
+      const deLaVenta = new Date(BOLETA_REIMPRESION.fecha).toLocaleString('es-CL')
+      const ahora = new Date('2026-10-15T13:00:00.000Z').toLocaleString('es-CL')
+      expect(texto).toContain(`Fecha : ${deLaVenta}`)
+      expect(texto, 'la fecha del papel no es la de hoy').not.toContain(`Fecha : ${ahora}`)
+      expect(texto).toContain(`Reimpreso: ${ahora}`)
+    }
+    finally {
+      vi.useRealTimers()
+    }
   })
 
   /** La reimpresión de una boleta ya emitida sale con su folio, marcada COPIA (spec § 7). */

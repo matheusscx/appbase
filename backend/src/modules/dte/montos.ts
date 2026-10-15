@@ -127,7 +127,7 @@ export function verificarMontos(datos: DatosBoleta): {
   if (aDecimal('adicionales', m.adicionales).gt(0)) {
     throw new DteError(
       'IMPUESTO_ADICIONAL_NO_SOPORTADO',
-      'La boleta no informa impuestos adicionales; falta definir cómo los trata el SII',
+      'La boleta no informa impuestos adicionales (ILA): para el local que vende al público son costo y no se cobran en la venta. Quita el impuesto adicional del producto.',
     );
   }
   const neto = noNegativo(

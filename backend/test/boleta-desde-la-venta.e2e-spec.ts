@@ -1245,7 +1245,7 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     return f.d;
   };
 
-  it('con el CAF agotado la lista trae las 3 ventas; el botón corta en la primera y, con un CAF nuevo, emite las 3 con la fecha de su venta', async () => {
+  it('con el CAF agotado la lista trae las 3 ventas; el botón no corta con SIN_FOLIOS (las anota las 3) y, con un CAF nuevo, emite las 3 con la fecha de su venta', async () => {
     await reiniciarLimpio();
     await agotarCaf39();
     const v1 = await venderOk({
@@ -1281,20 +1281,19 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
       expect(Number.isNaN(Date.parse(f.fecha))).toBe(false);
     }
 
-    // Sin folios: la primera falla y las otras fallarían igual, así que corta.
+    // Sin folios NO corta (R7): los folios son por tipo y la siguiente puede ser de otro; acá las
+    // 3 son del mismo tipo, así que las 3 fallan y las 3 quedan anotadas, en orden.
     const sinCaf = await botonCon(token);
     expect(sinCaf.status).toBe(201);
     sinBlobs(sinCaf);
     expect(sinCaf.body).toEqual({
       emitidas: 0,
       pendientes: 3,
-      errores: [
-        {
-          ventaId: v1.id,
-          codigo: 'SIN_FOLIOS',
-          mensaje: expect.stringContaining('No quedan folios de tipo 39'),
-        },
-      ],
+      errores: [v1, v2, v3].map((v) => ({
+        ventaId: v.id,
+        codigo: 'SIN_FOLIOS',
+        mensaje: expect.stringContaining('No quedan folios de tipo 39'),
+      })),
     });
     expect(await colaDte()).toEqual([]);
 
@@ -1328,6 +1327,58 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     expect(otraVez.status).toBe(201);
     expect(otraVez.body).toEqual({ emitidas: 0, pendientes: 0, errores: [] });
     expect((await getCon(token, 'dte/boletas-sin-emitir')).body).toEqual([]);
+  });
+
+  it('SIN_FOLIOS de un tipo no frena al otro: la exenta (sin CAF 41), más vieja, no impide que salgan las dos afectas (R7)', async () => {
+    await reiniciarLimpio();
+    // Sin ningún CAF: las tres quedan sin emitir por falta de folios, la exenta (41) primero.
+    await ds.query(
+      `UPDATE dte_cafs SET siguiente_folio = hasta + 1
+        WHERE razon_social_id = $1 AND tipo IN (39, 41) AND eliminado_el IS NULL`,
+      [razonSocialId],
+    );
+    const exenta = await venderOk({
+      lineas: [{ itemId: itemExento, cantidad: '1' }],
+    });
+    const a1 = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+    });
+    const a2 = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '2' }],
+    });
+    for (const v of [exenta, a1, a2]) {
+      expect(await boletaDelSistema(v.id)).toMatchObject({
+        estado_envio: 'sin_emitir',
+        emision_error_codigo: 'SIN_FOLIOS',
+      });
+    }
+    // Solo hay CAF de boletas afectas: el 41 sigue sin folios.
+    await subirCafNuevo();
+
+    const res = await botonCon(token);
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      emitidas: 2,
+      pendientes: 1,
+      errores: [
+        {
+          ventaId: exenta.id,
+          codigo: 'SIN_FOLIOS',
+          mensaje: expect.stringContaining('tipo 41'),
+        },
+      ],
+    });
+    expect((await boletaDelSistema(a1.id)).estado_envio).toBe('emitido');
+    expect((await boletaDelSistema(a2.id)).estado_envio).toBe('emitido');
+    expect(await boletaDelSistema(exenta.id)).toMatchObject({
+      estado_envio: 'sin_emitir',
+      emision_error_codigo: 'SIN_FOLIOS',
+    });
+    expect((await colaDte()).map((d) => [d.tipo, d.folio])).toEqual([
+      [39, CAF39.desde],
+      [39, CAF39.desde + 1],
+    ]);
   });
 
   it('una boleta con un error propio (un impuesto adicional) no corta: las demás salen y su motivo queda en la lista', async () => {

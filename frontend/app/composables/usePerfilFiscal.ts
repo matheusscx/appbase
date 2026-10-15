@@ -91,7 +91,7 @@ export function textoParaEmitir(faltantes: Observacion[]): string {
 /** Qué puede hacer el admin con una boleta sin emitir, según quién arregla el error. */
 export function pistaDelGrupo(grupo: GrupoErrorEmision): string {
   return grupo === 'perfil'
-    ? 'Se arregla en esta pantalla; después se emite con el botón.'
+    ? 'Se arregla en el perfil (o con soporte, si el motivo lo dice); después, emítelas con el botón.'
     : 'No se puede emitir.'
 }
 

@@ -57,6 +57,11 @@ export interface NotaCreditoSuccessPayload {
   devoluciones: Array<{ itemId: string, cantidad: string, stock?: DestinoStock }>
   /** La nota ya había entrado y el backend la reprodujo (ADR-026). */
   repetida?: boolean
+  /**
+   * Con la boleta de la venta ya emitida ante el SII, su nota de crédito electrónica todavía no
+   * existe: el servidor manda qué hacer por ahora. `null` si la nota no corrige una boleta emitida.
+   */
+  avisoNcElectronica?: string | null
 }
 
 const emit = defineEmits<{
@@ -238,6 +243,10 @@ async function confirmar() {
         : 'Nota de crédito generada',
       color: 'success',
     })
+    // La nota ya entró, pero ante el SII no hay nada que la acompañe: sin este aviso el cajero
+    // creería que la boleta quedó corregida. Es lo que dice el servidor, tal cual.
+    if (res.avisoNcElectronica)
+      toast.add({ title: res.avisoNcElectronica, color: 'warning' })
     if (res.repetida)
       toast.add({
         title: avisoNotaRepetida(opcionElegida.value, formatMonto(res.totalFinal)),

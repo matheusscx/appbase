@@ -113,7 +113,10 @@ destapa una decisión que no es mía).
   ya es otra. **Leído en la captura, no medido en el código.** Lo que falta: confirmar la carrera
   (esperar la respuesta de la búsqueda antes de tomar la fila) y ver por qué el CI no la pisa.
   En el Playwright entero del frente "bloques del interruptor" (2026-10-13, stack propio, base
-  recién sembrada, RC 0/0) **pasó**: la carrera no sale siempre.
+  recién sembrada, RC 0/0) **pasó**: la carrera no sale siempre. El 2026-10-15 (frente "la venta
+  emite la boleta", checkout principal, base recién sembrada, RC 0/0, carga del host 7–9) cayó
+  1 de 2 en otro punto del mismo test: el `toHaveCount(1)` del campo "Item" recién abierto el drawer
+  (`:129`), que encaja con el drawer de otro ítem. Solo, pasó.
 - [ ] **`caja/apertura-cierre.spec.ts:107` no vio "No hay caja abierta…" en 5 s, una vez**
   (Playwright; visto el 2026-10-13 en el gate del frente "bloques del interruptor", con stack
   propio, base recién sembrada, RC 0/0 y load ~7). Fue el primer test después de `auth.setup`:

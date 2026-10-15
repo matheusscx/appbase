@@ -225,7 +225,7 @@ emisión apagada no pinta nada, y si la lectura falla se queda como estaba (es u
 condición del cobro). El detalle de la venta suma el folio a la etiqueta del documento emitido
 (`Boleta electrónica N° 1234`) y, en una corrección sobre una boleta emitida, el badge `NC
 electrónica pendiente`: la nota de crédito ante el SII todavía no existe y se hace en el portal del
-SII. Spec: `docs/superpowers/specs/2026-10-14-boleta-desde-la-venta-design.md` § 7 y § 8.2.
+SII. Spec del frente (borrada al cerrar; en git: `git log -- docs/superpowers/specs/2026-10-14-boleta-desde-la-venta-design.md`), § 7 y § 8.2; lo vivo está en [`emision-electronica.md`](./emision-electronica.md) § La venta emite la boleta.
 
 ### QZ Tray
 
