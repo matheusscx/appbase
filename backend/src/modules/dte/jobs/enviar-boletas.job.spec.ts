@@ -16,6 +16,11 @@ import {
   JOB_ENVIAR_BOLETAS,
 } from './enviar-boletas.job';
 
+const revisar = jest.fn();
+jest.mock('../esquema-sii', () => ({
+  revisarSobreBoleta: (...a: unknown[]) => revisar(...a),
+}));
+
 jest.mock('../envio-boleta', () => ({
   armarEnvioBoleta: jest.fn(() => '<EnvioBOLETA/>'),
 }));
@@ -65,6 +70,8 @@ describe('EnviarBoletasJob', () => {
 
   beforeEach(() => {
     jest.spyOn(Logger.prototype, 'error').mockImplementation();
+    revisar.mockReset();
+    revisar.mockResolvedValue({ valido: true });
     llamadas = [];
     grupos = [GRUPO];
     lote = [fila(1), fila(2), fila(3)];
@@ -270,6 +277,158 @@ describe('EnviarBoletasJob', () => {
     expect(con('intentos = intentos + 1')).toHaveLength(0);
     expect(enviar).toHaveBeenCalledTimes(1);
     expect(con('trackid = $2::bigint')).toHaveLength(1);
+  });
+
+  describe('validación del sobre contra el esquema', () => {
+    const REEMPLAZO = 'unnest($2::uuid[], $4::jsonb[])';
+    const SIN_ESPERA = 'proximo_intento_el = now(), actualizado_el';
+    const BAJA = 'eliminado_el = now(), actualizado_el';
+
+    it('una boleta que no cumple el esquema queda rechazada sola; las otras vuelven sin espera y el SII no se llama', async () => {
+      revisar.mockResolvedValue({
+        valido: false,
+        errores: ['sobre'],
+        invalidos: [{ tipo: 39, folio: 4002, errores: ['Basura'] }],
+      });
+
+      const mensaje = await job.enviarLotes();
+
+      expect(enviar).not.toHaveBeenCalled();
+      expect(mensaje).toContain('1 rechazadas');
+      expect(mensaje).toContain('2 boletas devueltas');
+      const [rech] = con(REEMPLAZO);
+      expect(rech.params[0]).toBe('envio-1');
+      expect(rech.params[1]).toEqual(['doc-2']);
+      expect(rech.params[2]).toBe(
+        'La boleta no cumple el esquema del SII; no se envió',
+      );
+      expect((rech.params[3] as string[]).map((j) => JSON.parse(j))).toEqual([
+        { origen: 'esquema', errores: ['Basura'] },
+      ]);
+      const [dev] = con(SIN_ESPERA);
+      expect(dev.params).toEqual(['envio-1', ['doc-1', 'doc-3']]);
+      expect(dev.sql).not.toContain('intentos');
+      expect(dev.sql).not.toContain('ultimo_error');
+      const bajas = con(BAJA);
+      expect(bajas).toHaveLength(1); // el envío, dado de baja
+      expect(bajas[0].params).toEqual([
+        'envio-1',
+        'Una boleta no cumple el esquema del SII; el sobre no se envió',
+      ]);
+      expect(con('trackid = $2::bigint')).toHaveLength(0);
+    });
+
+    it('si ninguna boleta falla sola, el error es del sobre: todas rechazadas y nada vuelve a la cola', async () => {
+      revisar.mockResolvedValue({
+        valido: false,
+        errores: ['carátula'],
+        invalidos: [],
+      });
+
+      const mensaje = await job.enviarLotes();
+
+      expect(enviar).not.toHaveBeenCalled();
+      expect(mensaje).toContain('3 rechazadas');
+      expect(mensaje).toContain('0 boletas devueltas');
+      const [rech] = con(REEMPLAZO);
+      expect(rech.params[1]).toEqual(['doc-1', 'doc-2', 'doc-3']);
+      expect((rech.params[3] as string[]).map((j) => JSON.parse(j))).toEqual(
+        Array(3).fill({ origen: 'esquema', errores: ['carátula'] }),
+      );
+      expect(con(SIN_ESPERA)).toEqual([]);
+      expect(con(BAJA)).toHaveLength(1);
+    });
+
+    it('un inválido que no calza con ninguna fila del lote no se puede señalar: todas rechazadas y nada vuelve', async () => {
+      revisar.mockResolvedValue({
+        valido: false,
+        errores: ['sobre'],
+        invalidos: [{ tipo: 39, folio: 9999, errores: ['x'] }],
+      });
+
+      const mensaje = await job.enviarLotes();
+
+      expect(enviar).not.toHaveBeenCalled();
+      expect(mensaje).toContain('3 rechazadas');
+      const [rech] = con(REEMPLAZO);
+      expect(rech.params[1]).toEqual(['doc-1', 'doc-2', 'doc-3']);
+      expect((rech.params[3] as string[]).map((j) => JSON.parse(j))).toEqual(
+        Array(3).fill({ origen: 'esquema', errores: ['sobre'] }),
+      );
+      expect(con(SIN_ESPERA)).toEqual([]);
+    });
+
+    it('el envío se da de baja primero y las boletas después: el mismo orden de bloqueo que devolver()', async () => {
+      revisar.mockResolvedValue({
+        valido: false,
+        errores: ['sobre'],
+        invalidos: [{ tipo: 39, folio: 4002, errores: ['Basura'] }],
+      });
+
+      await job.enviarLotes();
+
+      const orden = (fragmento: string) =>
+        llamadas.findIndex((l) => l.sql.includes(fragmento));
+      const baja = orden(BAJA);
+      const rechazo = orden(REEMPLAZO);
+      const devolucion = orden(SIN_ESPERA);
+      expect(baja).toBeGreaterThan(-1);
+      expect(baja).toBeLessThan(rechazo);
+      expect(rechazo).toBeLessThan(devolucion);
+    });
+
+    it('la clave es (tipo, folio): con el mismo folio en una 39 y una 41, solo se rechaza la inválida', async () => {
+      lote = [
+        fila(2),
+        { ...fila(2), documento_id: 'doc-41', tipo: 41 },
+        fila(3),
+      ];
+      revisar.mockResolvedValue({
+        valido: false,
+        errores: ['sobre'],
+        invalidos: [{ tipo: 41, folio: 4002, errores: ['Basura'] }],
+      });
+
+      await job.enviarLotes();
+
+      expect(con(REEMPLAZO)[0].params[1]).toEqual(['doc-41']);
+      expect(con(SIN_ESPERA)[0].params[1]).toEqual(['doc-2', 'doc-3']);
+    });
+
+    it('un inválido reconocido y otro que no calza: no se puede señalar a todos, así que todas se rechazan', async () => {
+      revisar.mockResolvedValue({
+        valido: false,
+        errores: ['sobre'],
+        invalidos: [
+          { tipo: 39, folio: 4002, errores: ['Basura'] },
+          { tipo: 39, folio: 9999, errores: ['x'] },
+        ],
+      });
+
+      await job.enviarLotes();
+
+      const [rech] = con(REEMPLAZO);
+      expect(rech.params[1]).toEqual(['doc-1', 'doc-2', 'doc-3']);
+      expect((rech.params[3] as string[]).map((j) => JSON.parse(j))).toEqual(
+        Array(3).fill({ origen: 'esquema', errores: ['sobre'] }),
+      );
+      expect(con(SIN_ESPERA)).toEqual([]);
+    });
+
+    it('un fallo del validador (no un resultado) se propaga y no envía', async () => {
+      revisar.mockRejectedValue(new Error('wasm'));
+
+      await expect(job.enviarLotes()).rejects.toThrow('wasm');
+
+      expect(enviar).not.toHaveBeenCalled();
+      expect(con(REEMPLAZO)).toHaveLength(0);
+    });
+
+    it('un sobre válido sigue como siempre: se envía', async () => {
+      await job.enviarLotes();
+      expect(enviar).toHaveBeenCalledTimes(1);
+      expect(con(REEMPLAZO)).toHaveLength(0);
+    });
   });
 
   it('el lote se toma con el tenant del grupo', async () => {

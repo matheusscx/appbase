@@ -638,6 +638,37 @@ describe('Cola de envío al SII (e2e)', () => {
       expect(sobre).toContain('<RutEmisor>76555444-6</RutEmisor>');
     });
 
+    it('una boleta que no cumple el esquema queda rechazada sola y las buenas salen en el sobre siguiente', async () => {
+      await reiniciar();
+      await vender(3);
+      await envejecer();
+      // Rompe la forma de UNA boleta dejando el XML bien formado (la firma ya no vale, pero el
+      // XSD no la verifica).
+      await ds.query(
+        `UPDATE dte_documentos SET xml = replace(xml, '<Folio>4008</Folio>', '<Folio>4008</Folio><Basura>1</Basura>')
+          WHERE razon_social_id = $1 AND folio = 4008 AND eliminado_el IS NULL`,
+        [razonSocialId],
+      );
+
+      await job.enviarLotes();
+
+      expect(sobres()).toHaveLength(0); // el SII no recibió nada
+      const tras1 = await documentos();
+      expect(
+        tras1.map((d) => [d.folio, d.estado, d.intentos, d.envio_id]),
+      ).toEqual([
+        [4007, 'pendiente', 0, null],
+        [4008, 'rechazado', 0, null],
+        [4009, 'pendiente', 0, null],
+      ]);
+      expect(tras1[1].detalle_sii).toMatchObject({ origen: 'esquema' });
+
+      await job.enviarLotes();
+
+      expect(sobres()).toHaveLength(1);
+      expect(foliosEnviados()).toEqual([4007, 4009]);
+    });
+
     it('transitorio (500): las boletas vuelven a pendiente con intentos 1 y +30 s, y el envío se da de baja', async () => {
       await reiniciar();
       await vender(3);

@@ -7,6 +7,7 @@ import { CronRunnerService } from '../../cron/cron-runner.service';
 import { DteError } from '../dte.types';
 import type { AmbienteSii } from '../entities/dte-caf.entity';
 import { armarEnvioBoleta } from '../envio-boleta';
+import { type RevisionSobre, revisarSobreBoleta } from '../esquema-sii';
 import { FoliosService } from '../folios.service';
 import { ahoraChile } from '../perfil-fiscal';
 import { ESTADOS_ENVIO_EN_PROCESO } from '../resultado-sii';
@@ -133,6 +134,22 @@ const ANOTAR_ENVIO_RECHAZADO = `
 const RECHAZAR_BOLETAS = `
   UPDATE dte_documentos
      SET estado = 'rechazado', detalle_sii = $3::jsonb, ultimo_error = $4, actualizado_el = now()
+   WHERE documento_id = ANY($2) AND envio_id = $1 AND eliminado_el IS NULL`;
+
+// El sobre no cumplió el esquema: sus boletas malas quedan rechazadas, cada una con sus errores.
+// `envio_id = NULL` porque el sobre no existió para el SII y se da de baja (DAR_DE_BAJA_ENVIO):
+// una boleta rechazada no puede quedar apuntando a un envío borrado.
+const RECHAZAR_POR_ESQUEMA = `
+  UPDATE dte_documentos d
+     SET estado = 'rechazado', envio_id = NULL, detalle_sii = x.detalle, ultimo_error = $3,
+         actualizado_el = now()
+    FROM unnest($2::uuid[], $4::jsonb[]) AS x(id, detalle)
+   WHERE d.documento_id = x.id AND d.envio_id = $1 AND d.eliminado_el IS NULL`;
+
+// Las buenas de un sobre que se descartó vuelven sin espera ni intento gastado: no hicieron nada.
+const DEVOLVER_SIN_ESPERA = `
+  UPDATE dte_documentos
+     SET estado = 'pendiente', envio_id = NULL, proximo_intento_el = now(), actualizado_el = now()
    WHERE documento_id = ANY($2) AND envio_id = $1 AND eliminado_el IS NULL`;
 
 interface GrupoListo {
@@ -294,6 +311,20 @@ export class EnviarBoletasJob {
       throw e;
     }
 
+    // Un error del validador que no sea un resultado (el wasm se cae) se propaga: es de
+    // programación, y la reserva vence sola como en cualquier otro.
+    const revision = await revisarSobreBoleta(sobre);
+    if (!revision.valido) {
+      const { rechazadas, devueltas } = await this.descartarPorEsquema(
+        envioId,
+        filas,
+        revision,
+      );
+      resumen.rechazados += rechazadas;
+      resumen.devueltos += devueltas;
+      return;
+    }
+
     const r = await this.cliente.enviar(
       grupo.ambiente,
       credenciales.certificado,
@@ -389,6 +420,68 @@ export class EnviarBoletasJob {
         ESCALA_REINTENTO_MS.map((_, i) => espera(i + 1)),
         espera(ESCALA_REINTENTO_MS.length + 1),
       ]);
+    });
+  }
+
+  /**
+   * El sobre no cumple el esquema y no se envía. Las boletas que fallan solas quedan rechazadas
+   * y las demás vuelven a la cola sin espera. Si el error es del sobre (la carátula) o hay un
+   * inválido que no se reconoce entre las filas, ninguna se puede señalar: todas se rechazan, o el
+   * mismo sobre volvería a armarse para siempre.
+   */
+  private descartarPorEsquema(
+    envioId: string,
+    filas: FilaLote[],
+    revision: Extract<RevisionSobre, { valido: false }>,
+  ): Promise<{ rechazadas: number; devueltas: number }> {
+    const clave = (tipo: number, folio: number) =>
+      `${tipo.toString()}:${folio.toString()}`;
+    const erroresDe = new Map<string, string[]>();
+    for (const inv of revision.invalidos) {
+      const k = clave(inv.tipo, inv.folio);
+      erroresDe.set(k, [...(erroresDe.get(k) ?? []), ...inv.errores]);
+    }
+    const reconocidos = new Set(filas.map((f) => clave(f.tipo, f.folio)));
+    const identificables =
+      erroresDe.size > 0 &&
+      [...erroresDe.keys()].every((k) => reconocidos.has(k));
+
+    const malas = identificables
+      ? filas.filter((f) => erroresDe.has(clave(f.tipo, f.folio)))
+      : filas;
+    const buenas = identificables
+      ? filas.filter((f) => !erroresDe.has(clave(f.tipo, f.folio)))
+      : [];
+
+    return this.db.transaccion(async () => {
+      // El envío se bloquea primero y las boletas después: el mismo orden que `devolver()`,
+      // `rechazar()` y DEVOLVER_RESERVAS_VENCIDAS. Al revés, otra instancia que barre la reserva
+      // en el medio se cruzaría con esta transacción y habría un deadlock. Dar de baja el envío
+      // no cambia `dte_documentos.envio_id`, así que los UPDATE de abajo lo siguen encontrando.
+      await this.db.query(DAR_DE_BAJA_ENVIO, [
+        envioId,
+        'Una boleta no cumple el esquema del SII; el sobre no se envió',
+      ]);
+      await this.db.query(RECHAZAR_POR_ESQUEMA, [
+        envioId,
+        malas.map((f) => f.documento_id),
+        'La boleta no cumple el esquema del SII; no se envió',
+        malas.map((f) =>
+          JSON.stringify({
+            origen: 'esquema',
+            errores: identificables
+              ? erroresDe.get(clave(f.tipo, f.folio))
+              : revision.errores,
+          }),
+        ),
+      ]);
+      if (buenas.length > 0) {
+        await this.db.query(DEVOLVER_SIN_ESPERA, [
+          envioId,
+          buenas.map((f) => f.documento_id),
+        ]);
+      }
+      return { rechazadas: malas.length, devueltas: buenas.length };
     });
   }
 
