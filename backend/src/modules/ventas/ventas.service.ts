@@ -365,7 +365,17 @@ export interface NotaCreditoCreada {
   fecha: Date;
   comentario: string | null;
   devoluciones: DevolucionReembolso[];
+  /**
+   * Con la boleta de la venta ya emitida ante el SII, su nota de crédito electrónica todavía no
+   * existe (spec `2026-10-14-boleta-desde-la-venta`, § 6): el aviso para el cajero. `null` si la
+   * nota no corrige una boleta emitida.
+   */
+  avisoNcElectronica: string | null;
 }
+
+/** Lo que se le dice al local cuando corrige una boleta ya emitida (spec § 6). */
+export const AVISO_NC_ELECTRONICA =
+  'La boleta de esta venta ya se emitió: la nota de crédito ante el SII hazla en su portal por ahora.';
 
 export interface TipoDocumentoResponse {
   id: string;
@@ -3472,6 +3482,20 @@ export class VentasService {
 
       await params.enLaTransaccion?.(manager, nc.id);
 
+      // ¿Corrige una boleta que ya salió ante el SII? Una consulta fija, por el documento que
+      // resolvió `documentoQueCorrige`. La nota se registra igual; esto solo avisa que su par
+      // electrónico todavía se hace a mano.
+      let corrigeEmitida = false;
+      if (destino.documento) {
+        const emitidas: unknown[] = await manager.query(
+          `SELECT 1 FROM venta_documentos
+            WHERE documento_id = $1 AND tenant_id = $2
+              AND estado_envio = 'emitido' AND eliminado_el IS NULL`,
+          [destino.documento.id, params.tenantId],
+        );
+        corrigeEmitida = emitidas.length > 0;
+      }
+
       return {
         id: nc.id,
         totalFinal: nc.totalFinal,
@@ -3479,6 +3503,7 @@ export class VentasService {
         fecha: nc.creadoEl,
         comentario: nc.comentario,
         devoluciones: params.devoluciones ?? [],
+        avisoNcElectronica: corrigeEmitida ? AVISO_NC_ELECTRONICA : null,
       };
     });
   }

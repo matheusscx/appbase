@@ -1460,6 +1460,10 @@ describe('Documentos de la venta (e2e)', () => {
       descarte: string | null;
       descartadoEl: string | null;
       descartadoPorNombre: string | null;
+      folio: number | null;
+      estadoSii: string | null;
+      emisionError: string | null;
+      ncElectronicaPendiente: boolean;
       numerosBorrados: unknown[];
     }
     interface Detalle {
@@ -1526,6 +1530,11 @@ describe('Documentos de la venta (e2e)', () => {
           descarte: null,
           descartadoEl: null,
           descartadoPorNombre: null,
+          // Lo de la boleta electrónica: un voucher de la máquina no tiene nada de eso.
+          folio: null,
+          estadoSii: null,
+          emisionError: null,
+          ncElectronicaPendiente: false,
           numerosBorrados: [],
         });
         expect(sistema).toMatchObject({

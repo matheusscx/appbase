@@ -16,7 +16,9 @@ import { PerfilFiscalService } from '../dte/perfil-fiscal.service';
 import type { VentaDocumento } from './entities/venta-documento.entity';
 import {
   datosBoletaDeVenta,
+  grupoDelError,
   tipoBoletaDe,
+  type GrupoErrorEmision,
   type LineaParaBoleta,
   type VentaParaBoleta,
 } from './boleta-de-venta';
@@ -27,6 +29,37 @@ export type ResultadoEmision =
   | { estado: 'sin_emitir'; codigo: CodigoDteError; mensaje: string }
   /** El documento ya no está por emitir (se emitió, se anuló, se descartó): no se hizo nada. */
   | { estado: 'omitido' };
+
+/** Lo que responde `POST /dte/emitir-pendientes` (spec § 5). */
+export interface ResultadoEmitirPendientes {
+  emitidas: number;
+  /** Cuántas siguen `sin_emitir` al terminar (también las que esta llamada no alcanzó). */
+  pendientes: number;
+  errores: { ventaId: string; codigo: string; mensaje: string }[];
+}
+
+/** Una fila de `GET /dte/boletas-sin-emitir` (spec § 4.5). */
+export interface BoletaSinEmitirListada {
+  ventaId: string;
+  fecha: Date;
+  monto: string;
+  codigo: string;
+  mensaje: string;
+  grupo: GrupoErrorEmision;
+}
+
+/** Lo que responde `GET /dte/estado-emision` (spec § 8.1). */
+export interface EstadoEmision {
+  activa: boolean;
+  avisos: {
+    codigo: 'POCOS_FOLIOS' | 'CERTIFICADO_POR_VENCER';
+    mensaje: string;
+  }[];
+  sinEmitir: number;
+}
+
+/** Tope de boletas por llamada del botón: una transacción cada una, no se cuelga una petición. */
+const MAX_PENDIENTES_POR_LLAMADA = 200;
 
 /** El nombre del savepoint: una constante, nunca un valor de entrada. */
 const SAVEPOINT_EMISION = 'emision_boleta';
@@ -98,6 +131,38 @@ const LEER_ADICIONALES = `
     -- Sin filtro de baja en impuestos: lo que la venta cobró no cambia porque se borre la regla.
     JOIN impuestos i ON i.impuesto_id = vi.impuesto_id
    WHERE vi.venta_id = $1 AND vi.eliminado_el IS NULL AND i.tipo <> 'iva'`;
+
+// Las boletas por emitir de un tenant: el predicado del índice parcial
+// `idx_venta_documentos_sin_emitir` más la venta viva. La venta se une para que la lista, el
+// conteo y el botón vean lo mismo: un documento cuya venta ya no existe no se puede emitir
+// (`emitir` lo trata como un error de datos) y tampoco se ofrece.
+const SIN_EMITIR_DEL_TENANT = `
+    FROM venta_documentos d
+    JOIN ventas v ON v.venta_id = d.venta_id AND v.tenant_id = d.tenant_id
+                 AND v.eliminado_el IS NULL
+   WHERE d.tenant_id = $1 AND d.estado_envio = 'sin_emitir'
+     AND d.descarte IS NULL AND d.eliminado_el IS NULL`;
+
+const LEER_SIN_EMITIR = `
+  SELECT d.documento_id, d.venta_id, d.monto, v.creado_el AS fecha,
+         d.emision_error_codigo, d.emision_error
+  ${SIN_EMITIR_DEL_TENANT}
+   ORDER BY d.creado_el, d.documento_id
+   LIMIT ${MAX_PENDIENTES_POR_LLAMADA.toString()}`;
+
+const LEER_INTERRUPTOR = `
+  SELECT emite_boleta_electronica AS emite FROM tenants
+   WHERE tenant_id = $1 AND eliminado_el IS NULL`;
+
+const CONTAR_SIN_EMITIR = `SELECT count(*)::int AS n ${SIN_EMITIR_DEL_TENANT}`;
+
+// El bloqueo de la venta que toma `VentasService.lockVentaOriginal` (anular, la nota de crédito y
+// el PATCH del número). Es un duplicado deliberado de ese SQL: este módulo no puede importar a
+// `VentasService` (ventas importa a venta-documentos). Si cambia el bloqueo allá, cambia acá.
+const BLOQUEAR_VENTA = `
+  SELECT venta_id FROM ventas
+   WHERE venta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+     FOR UPDATE`;
 
 const LEER_RECEPTOR = `
   SELECT nombre, rut, email, telefono
@@ -232,6 +297,113 @@ export class EmisionBoletaService {
       );
       return { estado: 'sin_emitir', codigo: e.codigo, mensaje: e.message };
     }
+  }
+
+  /**
+   * El botón "emitir pendientes" (spec § 5): las boletas `sin_emitir` del tenant, de la más
+   * vieja a la más nueva, hasta 200. Cada una va en SU transacción —un fallo no deshace las que
+   * ya salieron— y primero toma el bloqueo de su venta, el mismo orden que la venta (venta y
+   * después CAF), así que una anulación en paralelo o espera o ya ganó: `emitir` vuelve a mirar
+   * el documento bajo bloqueo y, si se descartó, lo omite.
+   *
+   * Un error del grupo del perfil (`SIN_FOLIOS`, certificado…) corta: las que siguen fallarían
+   * igual. Uno de la boleta (un impuesto adicional, un texto) se anota y sigue. Cualquier error
+   * que no sea de la emisión se propaga (R9 de la cola): las ya emitidas quedaron confirmadas.
+   *
+   * Procesar de a una es escritura de N filas, no una lectura N+1: la lista sale de una consulta.
+   */
+  async emitirPendientes(
+    tenantId: string,
+    ahora: Date,
+  ): Promise<ResultadoEmitirPendientes> {
+    const lista = await this.db.query<
+      { documento_id: string; venta_id: string }[]
+    >(LEER_SIN_EMITIR, [tenantId]);
+    let emitidas = 0;
+    const errores: ResultadoEmitirPendientes['errores'] = [];
+    for (const pendiente of lista) {
+      const r = await this.db.transaccion(
+        async (): Promise<ResultadoEmision> => {
+          const venta = await this.db.query<{ venta_id: string }[]>(
+            BLOQUEAR_VENTA,
+            [pendiente.venta_id, tenantId],
+          );
+          if (venta.length === 0) return { estado: 'omitido' };
+          return this.emitir(tenantId, pendiente.documento_id, ahora);
+        },
+      );
+      if (r.estado === 'emitido') emitidas++;
+      if (r.estado !== 'sin_emitir') continue;
+      errores.push({
+        ventaId: pendiente.venta_id,
+        codigo: r.codigo,
+        mensaje: r.mensaje,
+      });
+      if (grupoDelError(r.codigo) === 'perfil') break;
+    }
+    return {
+      emitidas,
+      pendientes: await this.contarSinEmitir(tenantId),
+      errores,
+    };
+  }
+
+  /** Las boletas por emitir con su motivo, para la pantalla del admin: UNA consulta (spec § 4.5). */
+  async sinEmitir(tenantId: string): Promise<BoletaSinEmitirListada[]> {
+    const filas = await this.db.query<
+      {
+        venta_id: string;
+        monto: string;
+        fecha: Date;
+        emision_error_codigo: string | null;
+        emision_error: string | null;
+      }[]
+    >(LEER_SIN_EMITIR, [tenantId]);
+    return filas.map((f) => {
+      // Un `sin_emitir` siempre trae su motivo (lo escribe `emitir`); si faltara, el código
+      // desconocido cae en el grupo de la boleta y no corta nada.
+      const codigo = (f.emision_error_codigo ??
+        'DESCONOCIDO') as CodigoDteError;
+      return {
+        ventaId: f.venta_id,
+        fecha: f.fecha,
+        monto: f.monto,
+        codigo,
+        mensaje: f.emision_error ?? '',
+        grupo: grupoDelError(codigo),
+      };
+    });
+  }
+
+  /**
+   * Lo que ve el cajero (spec § 8.1): si el local emite, los avisos del perfil y cuántas boletas
+   * siguen sin emitir. El POS lo lee tras cada cobro, así que con la emisión apagada es UNA
+   * consulta (el interruptor) y no se arma el perfil. Prendida: el interruptor, el perfil
+   * (cuatro) y un `count`; fijas, sin importar cuántos CAF haya. Solo devuelve los mensajes de
+   * los avisos: nada del emisor ni del certificado.
+   */
+  async estadoEmision(tenantId: string, ahora: Date): Promise<EstadoEmision> {
+    const [tenant] = await this.db.query<{ emite: boolean }[]>(
+      LEER_INTERRUPTOR,
+      [tenantId],
+    );
+    if (!tenant?.emite) return { activa: false, avisos: [], sinEmitir: 0 };
+    const perfil = await this.perfil.obtener(tenantId, ahora);
+    return {
+      activa: true,
+      avisos: perfil.avisos.map((a) => ({
+        codigo: a.codigo,
+        mensaje: a.mensaje,
+      })),
+      sinEmitir: await this.contarSinEmitir(tenantId),
+    };
+  }
+
+  private async contarSinEmitir(tenantId: string): Promise<number> {
+    const [fila] = await this.db.query<{ n: number }[]>(CONTAR_SIN_EMITIR, [
+      tenantId,
+    ]);
+    return fila?.n ?? 0;
   }
 
   private async emitirDentro(

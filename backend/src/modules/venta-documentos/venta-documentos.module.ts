@@ -1,6 +1,7 @@
 import { Module } from '@nestjs/common';
 import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { DteModule } from '../dte/dte.module';
+import { EmisionBoletaController } from './emision-boleta.controller';
 import { EmisionBoletaService } from './emision-boleta.service';
 import { VentaDocumento } from './entities/venta-documento.entity';
 import { VentaDocumentosService } from './venta-documentos.service';
@@ -16,6 +17,7 @@ import { VentaDocumentosService } from './venta-documentos.service';
  */
 @Module({
   imports: [RepositoriosModule.forFeature([VentaDocumento]), DteModule],
+  controllers: [EmisionBoletaController],
   providers: [VentaDocumentosService, EmisionBoletaService],
   exports: [VentaDocumentosService, EmisionBoletaService],
 })

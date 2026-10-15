@@ -33,11 +33,22 @@ import { abrirCaja, cerrarCaja, type CajaAbierta } from './helpers/caja';
  * Cada test parte de sus propios CAF (`reiniciar`): un 39 de 5001 a 5200 y un 41 de 6001 a 6050.
  * Los folios que se leen son los de la base (`siguiente_folio`), no lo que cuenta la respuesta.
  *
+ * Emitir después (spec § 5, § 8.1): el botón `POST /dte/emitir-pendientes`, la lista
+ * `GET /dte/boletas-sin-emitir` y el aviso del cajero `GET /dte/estado-emision`. Esos casos parten
+ * de `reiniciarLimpio`: el botón emite TODAS las `sin_emitir` del tenant, y las que dejaron los
+ * otros tests (o corridas anteriores) no son de este caso, así que las descarta por SQL.
+ *
  * Callback de la tienda y alta de suscripción corren de verdad (con el proveedor de pago
  * simulado por `jest.spyOn` sobre los servicios de la app, que `restoreAllMocks` suelta).
  */
 const TENANT_ID = '550e8400-e29b-41d4-a716-446655440007'; // Paris
 const ADMIN = { email: 'admin.paris@paris.cl', password: 'admin' };
+/** El vendedor/cajero del seed (rol `Vendedor`): vende, no administra el tenant. */
+const CAJERO = { email: 'vendedor@paris.cl', password: 'admin' };
+const AVISO_NC =
+  'La boleta de esta venta ya se emitió: la nota de crédito ante el SII hazla en su portal por ahora.';
+const MOTIVO_ANULAR_EMITIDA =
+  'La boleta ya se emitió: se revierte con una nota de crédito, no se anula.';
 const NOMBRE = 'Emisor e2e boleta venta';
 const RUT = '76.777.888-0';
 const RUT_SII = '76777888-0';
@@ -135,10 +146,13 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     return res.body as T;
   }
 
-  async function loginParis(): Promise<string> {
+  async function loginComo(usuario: {
+    email: string;
+    password: string;
+  }): Promise<string> {
     const login = await request(app.getHttpServer())
       .post('/api/auth/login')
-      .send(ADMIN);
+      .send(usuario);
     expect(login.status).toBe(200);
     const tenant = await request(app.getHttpServer())
       .post('/api/auth/switch-tenant')
@@ -151,6 +165,7 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     expect(tenant.status).toBe(200);
     return (tenant.body as TokenResponse).access_token;
   }
+  const loginParis = () => loginComo(ADMIN);
 
   /** Crea la razón social por nombre (o la reusa), la marca preferida y le deja el perfil completo. */
   async function emisora(): Promise<string> {
@@ -256,6 +271,38 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
         WHERE razon_social_id = $1 AND eliminado_el IS NULL ORDER BY folio`,
       [razonSocialId],
     );
+
+  /** Descarta las `sin_emitir` que hayan quedado (de otros tests o de corridas anteriores). */
+  const descartarSinEmitir = () =>
+    ds.query(
+      // Lo mismo que hace la anulación con un documento armado (`armado_sin_enviar`), sin tocar
+      // la venta: así el botón y el conteo del tenant solo ven las ventas del test.
+      `UPDATE venta_documentos
+          SET descarte = 'armado_sin_enviar', descartado_el = now(), actualizado_el = now()
+        WHERE tenant_id = $1 AND estado_envio = 'sin_emitir'
+          AND descarte IS NULL AND eliminado_el IS NULL`,
+      [TENANT_ID],
+    );
+
+  /** `reiniciar` + el tenant sin boletas `sin_emitir` ajenas al test. */
+  async function reiniciarLimpio(): Promise<void> {
+    await descartarSinEmitir();
+    await reiniciar();
+  }
+
+  /** Agotar el CAF por SQL equivale a haber vendido sus folios, sin hacerlo. */
+  const agotarCaf39 = () =>
+    ds.query(
+      `UPDATE dte_cafs SET siguiente_folio = hasta + 1
+        WHERE razon_social_id = $1 AND tipo = 39 AND eliminado_el IS NULL`,
+      [razonSocialId],
+    );
+
+  /** Quita los CAF (el agotado) y sube uno nuevo de boletas: lo que hace el admin al "subir un CAF". */
+  async function subirCafNuevo(): Promise<void> {
+    await limpiar();
+    await subirCaf(39, CAF39);
+  }
 
   const documentosDe = (ventaId: string) =>
     ds.query<FilaVentaDoc[]>(
@@ -447,6 +494,9 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
       await intentar('crédito', () => patchMetodo(CREDITO_ID, 'sistema'));
       await intentar('limpiar la cola y los CAF', limpiar);
       await intentar('limpiar certificados', limpiarCertificados);
+      // Las ventas sin emitir de estos tests quedarían vivas en Paris: una suite o un Playwright
+      // que prenda la emisión y pulse el botón las procesaría.
+      await intentar('descartar las sin emitir', descartarSinEmitir);
       // No hay una ruta que des-marque la preferida, y las otras suites no esperan una.
       await intentar('preferida', () =>
         ds.query(
@@ -481,6 +531,14 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
       );
       if (Number(vivos.n) !== 0)
         fallos.push('quedaron CAF, certificados, envíos o documentos');
+      const [sinEmitirVivas] = await ds.query<{ n: string }[]>(
+        `SELECT count(*) AS n FROM venta_documentos
+          WHERE tenant_id = $1 AND estado_envio = 'sin_emitir'
+            AND descarte IS NULL AND eliminado_el IS NULL`,
+        [TENANT_ID],
+      );
+      if (Number(sinEmitirVivas.n) !== 0)
+        fallos.push('quedaron documentos sin_emitir vivos en Paris');
       const [preferida] = await ds.query<{ preferida: boolean }[]>(
         `SELECT preferida FROM razones_sociales WHERE razon_social_id = $1`,
         [razonSocialId],
@@ -1120,5 +1178,521 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
     const reimpresa = res.body as BoletaRes;
     expect(reimpresa.boletaElectronica).toBeNull();
     expect(reimpresa.boletaSinEmitir).toEqual(venta.boleta.boletaSinEmitir);
+  });
+
+  // ---- Emitir después --------------------------------------------------------------------
+
+  interface PendienteRes {
+    ventaId: string;
+    fecha: string;
+    monto: string;
+    codigo: string;
+    mensaje: string;
+    grupo: 'perfil' | 'boleta';
+  }
+  interface EstadoEmisionRes {
+    activa: boolean;
+    avisos: { codigo: string; mensaje: string }[];
+    sinEmitir: number;
+  }
+  interface DetalleRes {
+    documentos: {
+      id: string;
+      ventaId: string;
+      emisor: string;
+      estadoEnvio: string | null;
+      folio: number | null;
+      estadoSii: string | null;
+      emisionError: string | null;
+      ncElectronicaPendiente: boolean;
+      descarte: string | null;
+    }[];
+  }
+
+  const botonCon = (t: string) =>
+    request(app.getHttpServer())
+      .post('/api/dte/emitir-pendientes')
+      .set('Authorization', `Bearer ${t}`);
+  const getCon = (t: string, ruta: string) =>
+    request(app.getHttpServer())
+      .get(`/api/${ruta}`)
+      .set('Authorization', `Bearer ${t}`);
+  const detalleDe = async (ventaId: string): Promise<DetalleRes> => {
+    const res = await llamar('get', `ventas/${ventaId}`);
+    expect(res.status).toBe(200);
+    return res.body as DetalleRes;
+  };
+
+  /** Ninguna de estas rutas puede devolver un XML, una llave ni un blob cifrado. */
+  const sinBlobs = (res: { text: string }) => {
+    expect(res.text).not.toMatch(/xml/i);
+    expect(res.text).not.toContain('BEGIN');
+    expect(res.text).not.toMatch(/cifrad/i);
+  };
+
+  const hoyChile = async (): Promise<string> => {
+    const [f] = await ds.query<{ d: string }[]>(
+      `SELECT to_char(now() AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS d`,
+    );
+    return f.d;
+  };
+  const fechaVentaChile = async (ventaId: string): Promise<string> => {
+    const [f] = await ds.query<{ d: string }[]>(
+      `SELECT to_char(creado_el AT TIME ZONE 'America/Santiago', 'YYYY-MM-DD') AS d
+         FROM ventas WHERE venta_id = $1`,
+      [ventaId],
+    );
+    return f.d;
+  };
+
+  it('con el CAF agotado la lista trae las 3 ventas; el botón corta en la primera y, con un CAF nuevo, emite las 3 con la fecha de su venta', async () => {
+    await reiniciarLimpio();
+    await agotarCaf39();
+    const v1 = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+    });
+    const v2 = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '2' }],
+    });
+    const v3 = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '3' }],
+    });
+    // La fecha de la boleta es la de la VENTA, no la de hoy: la primera cayó ayer.
+    await ds.query(
+      `UPDATE ventas SET creado_el = creado_el - interval '1 day' WHERE venta_id = $1`,
+      [v1.id],
+    );
+
+    const lista = await llamar('get', 'dte/boletas-sin-emitir');
+    expect(lista.status).toBe(200);
+    sinBlobs(lista);
+    const filas = lista.body as PendienteRes[];
+    // Del más viejo al más nuevo (por cuándo se armó la boleta).
+    expect(filas.map((f) => f.ventaId)).toEqual([v1.id, v2.id, v3.id]);
+    expect(filas.map((f) => f.monto)).toEqual([
+      '5000.0000',
+      '10000.0000',
+      '15000.0000',
+    ]);
+    for (const f of filas) {
+      expect(f.codigo).toBe('SIN_FOLIOS');
+      expect(f.grupo).toBe('perfil');
+      expect(f.mensaje).toContain('No quedan folios de tipo 39');
+      expect(Number.isNaN(Date.parse(f.fecha))).toBe(false);
+    }
+
+    // Sin folios: la primera falla y las otras fallarían igual, así que corta.
+    const sinCaf = await botonCon(token);
+    expect(sinCaf.status).toBe(201);
+    sinBlobs(sinCaf);
+    expect(sinCaf.body).toEqual({
+      emitidas: 0,
+      pendientes: 3,
+      errores: [
+        {
+          ventaId: v1.id,
+          codigo: 'SIN_FOLIOS',
+          mensaje: expect.stringContaining('No quedan folios de tipo 39'),
+        },
+      ],
+    });
+    expect(await colaDte()).toEqual([]);
+
+    await subirCafNuevo();
+    const emitidas = await botonCon(token);
+    expect(emitidas.status).toBe(201);
+    sinBlobs(emitidas);
+    expect(emitidas.body).toEqual({ emitidas: 3, pendientes: 0, errores: [] });
+
+    for (const [i, v] of [v1, v2, v3].entries()) {
+      expect(await boletaDelSistema(v.id)).toMatchObject({
+        estado_envio: 'emitido',
+        emision_error_codigo: null,
+        emision_error: null,
+      });
+      const xml = await xmlDe(v.id);
+      expect(xml).toContain(`<Folio>${(CAF39.desde + i).toString()}</Folio>`);
+      expect(xml).toContain(
+        `<FchEmis>${await fechaVentaChile(v.id)}</FchEmis>`,
+      );
+    }
+    expect(await fechaVentaChile(v1.id)).not.toBe(await hoyChile());
+    expect((await colaDte()).map((d) => d.folio)).toEqual([
+      CAF39.desde,
+      CAF39.desde + 1,
+      CAF39.desde + 2,
+    ]);
+
+    // Ya no hay nada: el botón es idempotente.
+    const otraVez = await botonCon(token);
+    expect(otraVez.status).toBe(201);
+    expect(otraVez.body).toEqual({ emitidas: 0, pendientes: 0, errores: [] });
+    expect((await getCon(token, 'dte/boletas-sin-emitir')).body).toEqual([]);
+  });
+
+  it('una boleta con un error propio (un impuesto adicional) no corta: las demás salen y su motivo queda en la lista', async () => {
+    await reiniciarLimpio();
+    const ila = await crear('impuestos', {
+      nombre: `ILA e2e boleta ${randomUUID()}`,
+      porcentaje: '0.10',
+    });
+    const itemIla = await crearItem('Con adicional', '1000', {
+      clasificacionTributaria: 'afecto',
+      impuestosIds: [ila.id],
+    });
+    await agotarCaf39();
+    // La del impuesto adicional va PRIMERA: si cortara, las otras dos quedarían sin salir.
+    const conIla = await venderOk({
+      lineas: [{ itemId: itemIla, cantidad: '1' }],
+    });
+    const v2 = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+    });
+    const v3 = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '2' }],
+    });
+    await subirCafNuevo();
+
+    const res = await botonCon(token);
+
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({
+      emitidas: 2,
+      pendientes: 1,
+      errores: [
+        {
+          ventaId: conIla.id,
+          codigo: 'IMPUESTO_ADICIONAL_NO_SOPORTADO',
+          mensaje: expect.any(String),
+        },
+      ],
+    });
+    expect((await boletaDelSistema(v2.id)).estado_envio).toBe('emitido');
+    expect((await boletaDelSistema(v3.id)).estado_envio).toBe('emitido');
+    expect(await boletaDelSistema(conIla.id)).toMatchObject({
+      estado_envio: 'sin_emitir',
+      emision_error_codigo: 'IMPUESTO_ADICIONAL_NO_SOPORTADO',
+    });
+    // Los dos folios que salieron son consecutivos: el error de la primera no consumió ninguno.
+    expect((await colaDte()).map((d) => d.folio)).toEqual([
+      CAF39.desde,
+      CAF39.desde + 1,
+    ]);
+
+    const lista = (await getCon(token, 'dte/boletas-sin-emitir'))
+      .body as PendienteRes[];
+    expect(lista).toHaveLength(1);
+    expect(lista[0]).toMatchObject({
+      ventaId: conIla.id,
+      codigo: 'IMPUESTO_ADICIONAL_NO_SOPORTADO',
+      grupo: 'boleta',
+    });
+  });
+
+  it('el botón sobre una venta que se anuló entre la lista y el bloqueo: la salta, no la emite (Review Focus 5)', async () => {
+    await reiniciarLimpio();
+    await agotarCaf39();
+    // Una venta pendiente (sin pagos), anulable, que queda sin_emitir por falta de folios.
+    const venta = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+      pagos: [],
+    });
+    expect((await boletaDelSistema(venta.id)).estado_envio).toBe('sin_emitir');
+    // Con folios la boleta SÍ saldría: lo único que la frena es lo que pasa abajo.
+    await subirCafNuevo();
+
+    // Quien anula toma la fila de la venta (`FOR UPDATE`, como `cancelarUnaVez`) y la retiene.
+    // Se hace en SQL desde un query runner propio y no por la ruta de anular: la ruta pide ese
+    // mismo bloqueo desde otra conexión y esperaría al runner, que no podría soltar nunca.
+    const runner = ds.createQueryRunner();
+    let boton: Promise<request.Response> | undefined;
+    try {
+      await runner.connect();
+      await runner.startTransaction();
+      await runner.query(
+        `SELECT venta_id FROM ventas WHERE venta_id = $1 FOR UPDATE`,
+        [venta.id],
+      );
+      const [{ pid }]: { pid: number }[] = await runner.query(
+        `SELECT pg_backend_pid() AS pid`,
+      );
+
+      boton = botonCon(token).then((r) => r);
+      // El botón llega al bloqueo de la venta y espera: no la emitió por delante.
+      let esperando = 0;
+      for (let i = 0; i < 100 && esperando === 0; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        const [{ n }] = await ds.query<{ n: number }[]>(
+          `SELECT count(*)::int AS n FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`,
+          [pid],
+        );
+        esperando = n;
+      }
+      expect(esperando).toBeGreaterThan(0);
+
+      // La anulación gana: estado y descarte, como `cancelarUnaVez` y `descartarAlAnular`.
+      await runner.query(
+        `UPDATE ventas SET estado = 'cancelada', cancelada_el = now(), motivo_cancelacion = $2,
+                actualizado_el = now()
+          WHERE venta_id = $1`,
+        [venta.id, 'Anulada mientras el botón esperaba'],
+      );
+      await runner.query(
+        `UPDATE venta_documentos
+            SET descarte = 'armado_sin_enviar', descartado_el = now(), actualizado_el = now()
+          WHERE venta_id = $1 AND descarte IS NULL AND eliminado_el IS NULL`,
+        [venta.id],
+      );
+      await runner.commitTransaction();
+    } finally {
+      if (runner.isTransactionActive) await runner.rollbackTransaction();
+      await runner.release();
+    }
+
+    const res = await boton;
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ emitidas: 0, pendientes: 0, errores: [] });
+    expect(await boletaDelSistema(venta.id)).toMatchObject({
+      estado_envio: 'sin_emitir',
+      dte_documento_id: null,
+    });
+    expect(await colaDte()).toEqual([]);
+    expect(await siguienteFolio()).toBe(CAF39.desde);
+    // Nunca una venta cancelada con una boleta emitida.
+    const [{ n }] = await ds.query<{ n: string }[]>(
+      `SELECT count(*) AS n
+         FROM ventas v JOIN venta_documentos d ON d.venta_id = v.venta_id
+        WHERE v.venta_id = $1 AND v.estado = 'cancelada' AND d.estado_envio = 'emitido'`,
+      [venta.id],
+    );
+    expect(Number(n)).toBe(0);
+  });
+
+  it('anular una boleta sin_emitir: 201 y queda descartada; una emitida: 400 con el motivo', async () => {
+    await reiniciarLimpio();
+    await agotarCaf39();
+    const sinEmitir = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+      pagos: [],
+    });
+    await subirCafNuevo();
+    // Con folios, una venta pendiente emite su boleta en el momento.
+    const emitida = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+      pagos: [],
+    });
+    expect((await boletaDelSistema(emitida.id)).estado_envio).toBe('emitido');
+
+    const anulada = await llamar('post', `ventas/${sinEmitir.id}/anular`, {
+      motivo: 'Cargada por error al cliente',
+    });
+    expect(anulada.status).toBe(201);
+    expect(await boletaDelSistema(sinEmitir.id)).toMatchObject({
+      estado_envio: 'sin_emitir',
+      dte_documento_id: null,
+    });
+    const [descartada] = await ds.query<{ descarte: string | null }[]>(
+      `SELECT descarte FROM venta_documentos
+        WHERE venta_id = $1 AND emisor = 'sistema' AND eliminado_el IS NULL`,
+      [sinEmitir.id],
+    );
+    expect(descartada.descarte).toBe('armado_sin_enviar');
+    // Descartada, ya no figura entre las que faltan emitir.
+    expect((await getCon(token, 'dte/boletas-sin-emitir')).body).toEqual([]);
+
+    const rechazada = await llamar('post', `ventas/${emitida.id}/anular`, {
+      motivo: 'Cargada por error al cliente',
+    });
+    expect(rechazada.status).toBe(400);
+    expect((rechazada.body as { message: string }).message).toBe(
+      MOTIVO_ANULAR_EMITIDA,
+    );
+    expect((await boletaDelSistema(emitida.id)).estado_envio).toBe('emitido');
+  });
+
+  it('la nota de crédito sobre una venta emitida: 201 con el aviso, y el detalle marca su nota como pendiente', async () => {
+    await reiniciarLimpio();
+    const venta = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+    });
+    const [{ pago_id }] = await ds.query<{ pago_id: string }[]>(
+      `SELECT pago_id FROM pagos
+        WHERE venta_id = $1 AND metodo_pago_id = $2 AND eliminado_el IS NULL`,
+      [venta.id, EFECTIVO_ID],
+    );
+    const clave = randomUUID();
+    const cuerpo = {
+      monto: '1000',
+      comentario: 'devolución parcial',
+      devolucion: { pagoId: pago_id },
+    };
+
+    const nc = await llamar(
+      'post',
+      `ventas/${venta.id}/notas-credito`,
+      cuerpo,
+      clave,
+    );
+
+    expect(nc.status).toBe(201);
+    expect(
+      (nc.body as { avisoNcElectronica: string | null }).avisoNcElectronica,
+    ).toBe(AVISO_NC);
+    // El reintento con la misma clave reproduce la respuesta, aviso incluido.
+    const repetida = await llamar(
+      'post',
+      `ventas/${venta.id}/notas-credito`,
+      cuerpo,
+      clave,
+    );
+    expect(repetida.status).toBe(201);
+    expect(repetida.body).toMatchObject({
+      repetida: true,
+      avisoNcElectronica: AVISO_NC,
+    });
+
+    const { documentos } = await detalleDe(venta.id);
+    const ncId = (nc.body as IdResponse).id;
+    const boleta = documentos.find((d) => d.ventaId === venta.id)!;
+    const delaNota = documentos.find((d) => d.ventaId === ncId)!;
+    expect(boleta).toMatchObject({
+      estadoEnvio: 'emitido',
+      folio: CAF39.desde,
+      estadoSii: 'pendiente',
+      emisionError: null,
+      ncElectronicaPendiente: false,
+    });
+    expect(delaNota).toMatchObject({
+      emisor: 'sistema',
+      ncElectronicaPendiente: true,
+    });
+  });
+
+  it('la nota de crédito sobre una boleta que no se emitió (interruptor apagado) no trae aviso ni marca', async () => {
+    await reiniciarLimpio();
+    await emision(false);
+    const venta = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+    });
+    const [{ pago_id }] = await ds.query<{ pago_id: string }[]>(
+      `SELECT pago_id FROM pagos
+        WHERE venta_id = $1 AND metodo_pago_id = $2 AND eliminado_el IS NULL`,
+      [venta.id, EFECTIVO_ID],
+    );
+
+    const nc = await llamar(
+      'post',
+      `ventas/${venta.id}/notas-credito`,
+      {
+        monto: '1000',
+        comentario: 'devolución parcial',
+        devolucion: { pagoId: pago_id },
+      },
+      randomUUID(),
+    );
+
+    expect(nc.status).toBe(201);
+    expect(
+      (nc.body as { avisoNcElectronica: string | null }).avisoNcElectronica,
+    ).toBeNull();
+    const { documentos } = await detalleDe(venta.id);
+    expect(documentos.every((d) => !d.ncElectronicaPendiente)).toBe(true);
+    expect(documentos.find((d) => d.ventaId === venta.id)).toMatchObject({
+      estadoEnvio: 'armado',
+      folio: null,
+      estadoSii: null,
+    });
+  });
+
+  it('el detalle de una boleta sin emitir trae su motivo', async () => {
+    await reiniciarLimpio();
+    await agotarCaf39();
+    const venta = await venderOk({
+      lineas: [{ itemId: itemAfecto, cantidad: '1' }],
+    });
+
+    const { documentos } = await detalleDe(venta.id);
+
+    expect(documentos.find((d) => d.emisor === 'sistema')).toMatchObject({
+      estadoEnvio: 'sin_emitir',
+      folio: null,
+      emisionError: expect.stringContaining('No quedan folios de tipo 39'),
+      ncElectronicaPendiente: false,
+    });
+  });
+
+  // ---- El aviso del cajero ---------------------------------------------------------------
+
+  it('GET /dte/estado-emision: el cajero lo lee; con menos de 100 folios trae POCOS_FOLIOS y cuenta las sin emitir', async () => {
+    await reiniciarLimpio();
+    const tokenCajero = await loginComo(CAJERO);
+    // Quedan 51 folios de 200.
+    await ds.query(
+      `UPDATE dte_cafs SET siguiente_folio = 5150
+        WHERE razon_social_id = $1 AND tipo = 39 AND eliminado_el IS NULL`,
+      [razonSocialId],
+    );
+
+    const sano = await getCon(tokenCajero, 'dte/estado-emision');
+    expect(sano.status).toBe(200);
+    sinBlobs(sano);
+    const estado = sano.body as EstadoEmisionRes;
+    expect(estado.activa).toBe(true);
+    expect(estado.sinEmitir).toBe(0);
+    // También avisa el CAF de exentas (50 folios): se busca el de las afectas.
+    expect(estado.avisos).toContainEqual({
+      codigo: 'POCOS_FOLIOS',
+      mensaje: expect.stringMatching(/Quedan 51 folios/) as string,
+    });
+
+    await agotarCaf39();
+    await venderOk({ lineas: [{ itemId: itemAfecto, cantidad: '1' }] });
+    await venderOk({ lineas: [{ itemId: itemAfecto, cantidad: '2' }] });
+
+    const conPendientes = await getCon(tokenCajero, 'dte/estado-emision');
+    expect(conPendientes.status).toBe(200);
+    expect((conPendientes.body as EstadoEmisionRes).sinEmitir).toBe(2);
+    // El admin, que también vende, lo lee igual.
+    expect((await getCon(token, 'dte/estado-emision')).status).toBe(200);
+  });
+
+  it('GET /dte/estado-emision con la emisión apagada: activa false, sin avisos y sin conteo', async () => {
+    await reiniciarLimpio();
+    await agotarCaf39();
+    await venderOk({ lineas: [{ itemId: itemAfecto, cantidad: '1' }] });
+    await emision(false);
+    const tokenCajero = await loginComo(CAJERO);
+
+    const res = await getCon(tokenCajero, 'dte/estado-emision');
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ activa: false, avisos: [], sinEmitir: 0 });
+  });
+
+  it('el cajero no emite pendientes, no ve la lista y no toca el interruptor: 403', async () => {
+    await reiniciarLimpio();
+    const tokenCajero = await loginComo(CAJERO);
+
+    expect((await botonCon(tokenCajero)).status).toBe(403);
+    expect((await getCon(tokenCajero, 'dte/boletas-sin-emitir')).status).toBe(
+      403,
+    );
+    const interruptor = await request(app.getHttpServer())
+      .patch('/api/dte/emision')
+      .set('Authorization', `Bearer ${tokenCajero}`)
+      .send({ activa: false });
+    expect(interruptor.status).toBe(403);
+    // Y la emisión sigue prendida.
+    expect((await getCon(token, 'dte/perfil')).body).toMatchObject({
+      emisionActiva: true,
+    });
+  });
+
+  it('sin sesión, las tres rutas dan 401', async () => {
+    const sin = (m: 'get' | 'post', ruta: string) =>
+      request(app.getHttpServer())[m](`/api/${ruta}`);
+    expect((await sin('post', 'dte/emitir-pendientes')).status).toBe(401);
+    expect((await sin('get', 'dte/boletas-sin-emitir')).status).toBe(401);
+    expect((await sin('get', 'dte/estado-emision')).status).toBe(401);
   });
 });

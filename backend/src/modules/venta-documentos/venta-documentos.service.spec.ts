@@ -1461,6 +1461,10 @@ describe('VentaDocumentosService.listarParaDetalle', () => {
     descarte: 'afirmado_no_hecho',
     descartado_el: new Date('2026-10-01T12:00:00Z'),
     descartado_por_nombre: 'Ana Pérez',
+    folio: null,
+    estado_sii: null,
+    emision_error: null,
+    nc_electronica_pendiente: false,
   };
 
   /**
@@ -1516,9 +1520,61 @@ describe('VentaDocumentosService.listarParaDetalle', () => {
         descarte: 'afirmado_no_hecho',
         descartadoEl: FILA.descartado_el,
         descartadoPorNombre: 'Ana Pérez',
+        folio: null,
+        estadoSii: null,
+        emisionError: null,
+        ncElectronicaPendiente: false,
         numerosBorrados: [],
       },
     ]);
+  });
+
+  it('la boleta electrónica y la marca de la nota salen de LEFT JOINs de la misma consulta, no de una por documento', async () => {
+    const m = managerDeDetalle([
+      {
+        ...FILA,
+        emisor: 'sistema',
+        estado_envio: 'emitido',
+        descarte: null,
+        folio: 1234,
+        estado_sii: 'aceptado',
+      },
+      {
+        ...FILA,
+        documento_id: 'doc-2',
+        emisor: 'sistema',
+        estado_envio: 'armado',
+        descarte: null,
+        emision_error: 'No quedan folios',
+        nc_electronica_pendiente: true,
+      },
+      // Sin el JOIN al documento corregido (una boleta sin corregir) pg devuelve null.
+      { ...FILA, documento_id: 'doc-3', nc_electronica_pendiente: null },
+    ]);
+
+    const docs = await new VentaDocumentosService().listarParaDetalle(
+      m.manager,
+      { tenantId: TENANT, ventaId: VENTA },
+    );
+
+    // Los documentos y el lote de borrados: dos consultas, con tres documentos.
+    expect(m.query).toHaveBeenCalledTimes(2);
+    const [sql] = m.query.mock.calls[0];
+    expect(sql).toMatch(
+      /LEFT JOIN dte_documentos dd ON dd\.documento_id = vd\.dte_documento_id/,
+    );
+    expect(sql).toMatch(/LEFT JOIN venta_documentos corregido/);
+    expect(sql).toMatch(/corregido\.documento_id = vd\.documento_corregido_id/);
+    expect(sql).toMatch(/corregido\.eliminado_el IS NULL/);
+    expect(sql).toMatch(
+      /vd\.emisor = 'sistema' AND corregido\.estado_envio = 'emitido'/,
+    );
+    expect(docs[0]).toMatchObject({ folio: 1234, estadoSii: 'aceptado' });
+    expect(docs[1]).toMatchObject({
+      emisionError: 'No quedan folios',
+      ncElectronicaPendiente: true,
+    });
+    expect(docs[2].ncElectronicaPendiente).toBe(false);
   });
 
   describe('los borrados de número (PRODUCTO § 10)', () => {

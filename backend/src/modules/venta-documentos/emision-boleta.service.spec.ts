@@ -3,12 +3,15 @@ import { DataSource, type EntityManager } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { TxContext } from '../../common/db/tx-context';
 import { ColaDteService } from '../dte/cola-dte.service';
-import { DteError } from '../dte/dte.types';
+import { type CodigoDteError, DteError } from '../dte/dte.types';
 import { emitirBoleta } from '../dte/envio-boleta';
 import { FoliosService } from '../dte/folios.service';
 import { PerfilFiscalService } from '../dte/perfil-fiscal.service';
 import type { VentaDocumento } from './entities/venta-documento.entity';
-import { EmisionBoletaService } from './emision-boleta.service';
+import {
+  EmisionBoletaService,
+  type ResultadoEmision,
+} from './emision-boleta.service';
 
 jest.mock('../dte/envio-boleta', () => ({ emitirBoleta: jest.fn() }));
 
@@ -631,5 +634,329 @@ describe('EmisionBoletaService.emitir', () => {
 
     expect(r).toMatchObject({ estado: 'emitido', tipo: 41 });
     expect(folios.tomarFolio).toHaveBeenCalledWith(TENANT, 41);
+  });
+});
+
+describe('EmisionBoletaService: emitir después (spec § 5, § 8.1)', () => {
+  // Db + TxContext de verdad sobre un manager que anota cada sentencia; `emitir` se espía: acá
+  // se prueba lo que rodea a cada boleta (el orden, el bloqueo de la venta, el corte), no el motor.
+  const sentencias: { sql: string; params?: unknown[]; enTx: boolean }[] = [];
+  let enTransaccion = false;
+  let filas: (sql: string) => unknown[];
+  const consulta = (sql: string, params?: unknown[]) => {
+    sentencias.push({ sql, params, enTx: enTransaccion });
+    return Promise.resolve(filas(sql));
+  };
+  const manager = { query: jest.fn(consulta) } as unknown as EntityManager;
+  const dataSource = {
+    query: jest.fn(consulta),
+    transaction: jest.fn(async (cb: (m: EntityManager) => Promise<unknown>) => {
+      enTransaccion = true;
+      try {
+        return await cb(manager);
+      } finally {
+        enTransaccion = false;
+      }
+    }),
+  } as unknown as DataSource;
+  const perfil = { obtener: jest.fn() };
+
+  let servicio: EmisionBoletaService;
+  const AHORA = new Date('2027-01-05T15:00:00Z');
+
+  const pendiente = (n: number) => ({
+    documento_id: `doc-${n.toString()}`,
+    venta_id: `venta-${n.toString()}`,
+    monto: '5000.0000',
+    fecha: new Date('2027-01-04T15:00:00Z'),
+    emision_error_codigo: 'SIN_FOLIOS',
+    emision_error: 'No quedan folios de tipo 39',
+  });
+  let lista: ReturnType<typeof pendiente>[];
+  let quedan: number;
+  let emisionPrendida: boolean;
+  let ventaExiste: (ventaId: string) => boolean;
+
+  beforeEach(async () => {
+    sentencias.length = 0;
+    jest.clearAllMocks();
+    lista = [1, 2, 3].map(pendiente);
+    quedan = 0;
+    emisionPrendida = true;
+    ventaExiste = () => true;
+    filas = (sql) => {
+      if (sql.includes('FROM ventas') && sql.includes('FOR UPDATE')) {
+        const ventaId = sentencias.at(-1)?.params?.[0] as string;
+        return ventaExiste(ventaId) ? [{ venta_id: ventaId }] : [];
+      }
+      if (sql.includes('FROM tenants')) return [{ emite: emisionPrendida }];
+      if (sql.includes('count(*)')) return [{ n: quedan }];
+      if (sql.includes('FROM venta_documentos d')) return lista;
+      return [];
+    };
+    const modulo = await Test.createTestingModule({
+      providers: [
+        TxContext,
+        Db,
+        EmisionBoletaService,
+        { provide: DataSource, useValue: dataSource },
+        { provide: FoliosService, useValue: {} },
+        { provide: ColaDteService, useValue: {} },
+        { provide: PerfilFiscalService, useValue: perfil },
+      ],
+    }).compile();
+    servicio = modulo.get(EmisionBoletaService);
+  });
+
+  const emitidaCon = (folio: number): ResultadoEmision => ({
+    estado: 'emitido',
+    folio,
+    tipo: 39,
+  });
+  const sinEmitirCon = (codigo: CodigoDteError): ResultadoEmision => ({
+    estado: 'sin_emitir',
+    codigo,
+    mensaje: `falló ${codigo}`,
+  });
+
+  describe('emitirPendientes', () => {
+    it('emite cada pendiente, cuenta las que salieron y dice cuántas quedan', async () => {
+      const emitir = jest
+        .spyOn(servicio, 'emitir')
+        .mockResolvedValueOnce(emitidaCon(1))
+        .mockResolvedValueOnce(emitidaCon(2))
+        .mockResolvedValueOnce(emitidaCon(3));
+
+      const r = await servicio.emitirPendientes(TENANT, AHORA);
+
+      expect(r).toEqual({ emitidas: 3, pendientes: 0, errores: [] });
+      expect(emitir.mock.calls.map((c) => c[1])).toEqual([
+        'doc-1',
+        'doc-2',
+        'doc-3',
+      ]);
+      expect(emitir).toHaveBeenCalledWith(TENANT, 'doc-1', AHORA);
+    });
+
+    it('cada boleta va en SU transacción y bloquea su venta antes de emitir', async () => {
+      const antes: string[][] = [];
+      jest.spyOn(servicio, 'emitir').mockImplementation(() => {
+        // Lo que ya se ejecutó en la transacción de esta boleta cuando `emitir` arranca.
+        antes.push(
+          sentencias.filter((s) => s.enTx).map((s) => s.params?.[0] as string),
+        );
+        return Promise.resolve(emitidaCon(1));
+      });
+
+      await servicio.emitirPendientes(TENANT, AHORA);
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(3);
+      const locks = sentencias.filter((s) => s.sql.includes('FOR UPDATE'));
+      expect(locks.map((s) => s.params)).toEqual([
+        ['venta-1', TENANT],
+        ['venta-2', TENANT],
+        ['venta-3', TENANT],
+      ]);
+      expect(locks.every((s) => s.enTx)).toBe(true);
+      expect(locks[0].sql).toMatch(/eliminado_el IS NULL/);
+      // Al llegar a `emitir`, el bloqueo de su venta ya se tomó.
+      expect(antes[0]).toContain('venta-1');
+      expect(antes[1]).toContain('venta-2');
+    });
+
+    it('la lista sale de UNA consulta, del más viejo al más nuevo, con tope de 200 y del tenant', async () => {
+      jest.spyOn(servicio, 'emitir').mockResolvedValue(emitidaCon(1));
+
+      await servicio.emitirPendientes(TENANT, AHORA);
+
+      const lecturas = sentencias.filter(
+        (s) => !s.enTx && s.sql.includes('FROM venta_documentos d'),
+      );
+      // La lista y el conteo de lo que queda: dos lecturas en total, no una por boleta.
+      expect(lecturas).toHaveLength(2);
+      const [leer] = lecturas;
+      expect(leer.sql).toMatch(/ORDER BY d\.creado_el, d\.documento_id/);
+      expect(leer.sql).toMatch(/LIMIT 200/);
+      expect(leer.sql).toMatch(/d\.eliminado_el IS NULL/);
+      expect(leer.sql).toMatch(/d\.descarte IS NULL/);
+      expect(leer.params).toEqual([TENANT]);
+    });
+
+    it('un error del perfil (SIN_FOLIOS) corta: las que siguen fallarían igual', async () => {
+      const emitir = jest
+        .spyOn(servicio, 'emitir')
+        .mockResolvedValueOnce(sinEmitirCon('SIN_FOLIOS'));
+      quedan = 3;
+
+      const r = await servicio.emitirPendientes(TENANT, AHORA);
+
+      expect(emitir).toHaveBeenCalledTimes(1);
+      expect(r).toEqual({
+        emitidas: 0,
+        pendientes: 3,
+        errores: [
+          {
+            ventaId: 'venta-1',
+            codigo: 'SIN_FOLIOS',
+            mensaje: 'falló SIN_FOLIOS',
+          },
+        ],
+      });
+    });
+
+    it.each([
+      'SIN_CERTIFICADO',
+      'CERTIFICADO_VENCIDO',
+      'PERFIL_INCOMPLETO',
+      'AMBIENTE_DISTINTO',
+    ] as const)('%s también corta', async (codigo) => {
+      const emitir = jest
+        .spyOn(servicio, 'emitir')
+        .mockResolvedValue(sinEmitirCon(codigo));
+
+      await servicio.emitirPendientes(TENANT, AHORA);
+
+      expect(emitir).toHaveBeenCalledTimes(1);
+    });
+
+    it('un error de ESA boleta (un impuesto adicional) anota el error y sigue con las demás', async () => {
+      const emitir = jest
+        .spyOn(servicio, 'emitir')
+        .mockResolvedValueOnce(sinEmitirCon('IMPUESTO_ADICIONAL_NO_SOPORTADO'))
+        .mockResolvedValueOnce(emitidaCon(2))
+        .mockResolvedValueOnce(emitidaCon(3));
+      quedan = 1;
+
+      const r = await servicio.emitirPendientes(TENANT, AHORA);
+
+      expect(emitir).toHaveBeenCalledTimes(3);
+      expect(r.emitidas).toBe(2);
+      expect(r.pendientes).toBe(1);
+      expect(r.errores).toEqual([
+        {
+          ventaId: 'venta-1',
+          codigo: 'IMPUESTO_ADICIONAL_NO_SOPORTADO',
+          mensaje: 'falló IMPUESTO_ADICIONAL_NO_SOPORTADO',
+        },
+      ]);
+    });
+
+    it('una boleta omitida (ya emitida o anulada) no suma ni es un error', async () => {
+      jest
+        .spyOn(servicio, 'emitir')
+        .mockResolvedValueOnce({ estado: 'omitido' })
+        .mockResolvedValueOnce(emitidaCon(2))
+        .mockResolvedValueOnce({ estado: 'omitido' });
+
+      const r = await servicio.emitirPendientes(TENANT, AHORA);
+
+      expect(r).toEqual({ emitidas: 1, pendientes: 0, errores: [] });
+    });
+
+    it('una venta que ya no está (borrada entre la lista y el bloqueo) se salta sin emitir', async () => {
+      ventaExiste = (id) => id !== 'venta-2';
+      const emitir = jest
+        .spyOn(servicio, 'emitir')
+        .mockResolvedValue(emitidaCon(1));
+
+      const r = await servicio.emitirPendientes(TENANT, AHORA);
+
+      expect(emitir.mock.calls.map((c) => c[1])).toEqual(['doc-1', 'doc-3']);
+      expect(r.emitidas).toBe(2);
+    });
+
+    it('un error que no es de la emisión se propaga: no se traga en una lista de errores', async () => {
+      jest.spyOn(servicio, 'emitir').mockRejectedValue(new Error('se cayó'));
+
+      await expect(servicio.emitirPendientes(TENANT, AHORA)).rejects.toThrow(
+        'se cayó',
+      );
+    });
+
+    it('sin pendientes no hace nada más que leer', async () => {
+      lista = [];
+      const emitir = jest.spyOn(servicio, 'emitir');
+
+      const r = await servicio.emitirPendientes(TENANT, AHORA);
+
+      expect(r).toEqual({ emitidas: 0, pendientes: 0, errores: [] });
+      expect(emitir).not.toHaveBeenCalled();
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('sinEmitir', () => {
+    it('una consulta, con el grupo de cada error', async () => {
+      lista = [
+        pendiente(1),
+        {
+          ...pendiente(2),
+          emision_error_codigo: 'IMPUESTO_ADICIONAL_NO_SOPORTADO',
+          emision_error: 'lleva un impuesto adicional',
+        },
+      ];
+
+      const r = await servicio.sinEmitir(TENANT);
+
+      expect(sentencias).toHaveLength(1);
+      expect(r).toEqual([
+        {
+          ventaId: 'venta-1',
+          fecha: new Date('2027-01-04T15:00:00Z'),
+          monto: '5000.0000',
+          codigo: 'SIN_FOLIOS',
+          mensaje: 'No quedan folios de tipo 39',
+          grupo: 'perfil',
+        },
+        {
+          ventaId: 'venta-2',
+          fecha: new Date('2027-01-04T15:00:00Z'),
+          monto: '5000.0000',
+          codigo: 'IMPUESTO_ADICIONAL_NO_SOPORTADO',
+          mensaje: 'lleva un impuesto adicional',
+          grupo: 'boleta',
+        },
+      ]);
+    });
+  });
+
+  describe('estadoEmision', () => {
+    it('con la emisión apagada lee solo el interruptor: ni arma el perfil ni cuenta', async () => {
+      emisionPrendida = false;
+      perfil.obtener.mockResolvedValue({
+        emisionActiva: false,
+        avisos: [{ codigo: 'POCOS_FOLIOS', mensaje: 'Quedan 40 folios' }],
+      });
+
+      const r = await servicio.estadoEmision(TENANT, AHORA);
+
+      expect(r).toEqual({ activa: false, avisos: [], sinEmitir: 0 });
+      expect(perfil.obtener).not.toHaveBeenCalled();
+      expect(sentencias).toHaveLength(1);
+      expect(sentencias[0].sql).toMatch(/FROM tenants/);
+      expect(sentencias[0].sql).toMatch(/eliminado_el IS NULL/);
+      expect(sentencias[0].params).toEqual([TENANT]);
+    });
+
+    it('prendida: los avisos del perfil y cuántas boletas siguen sin emitir', async () => {
+      perfil.obtener.mockResolvedValue({
+        emisionActiva: true,
+        faltantes: [{ codigo: 'SIN_GIRO', mensaje: 'no debe salir' }],
+        emisor: { rut: '76543210-3' },
+        avisos: [{ codigo: 'POCOS_FOLIOS', mensaje: 'Quedan 40 folios' }],
+      });
+      quedan = 4;
+
+      const r = await servicio.estadoEmision(TENANT, AHORA);
+
+      expect(r).toEqual({
+        activa: true,
+        avisos: [{ codigo: 'POCOS_FOLIOS', mensaje: 'Quedan 40 folios' }],
+        sinEmitir: 4,
+      });
+      // El interruptor y el conteo; las del perfil las hace `obtener`.
+      expect(sentencias).toHaveLength(2);
+      expect(perfil.obtener).toHaveBeenCalledWith(TENANT, AHORA);
+    });
   });
 });

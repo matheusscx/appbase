@@ -772,7 +772,7 @@ apagado (el default) no cambia nada.
 
 `EmisionBoletaService.emitir(tenantId, ventaDocumentoId, ahora)` (módulo `venta-documentos`, que
 ahora importa `DteModule`; `dte` no importa nada de ventas, así que no hay ciclo). Una sola función
-emite: la venta al crearse y, más adelante, el botón de las pendientes. La llama
+emite: la venta al crearse y el botón de las pendientes (abajo). La llama
 `crearEnTransaccion` **al final**, después de stock, caja, pagos y `documentarVenta`, si
 `tenants.emite_boleta_electronica` y `documentoAEmitir(docs, tipoEsBoleta)` devuelve un documento
 (el del emisor `sistema`, de tipo boleta, vigente y que no sea un duplicado; a lo sumo uno, ADR-028).
@@ -826,6 +826,54 @@ suma, leídos de la base por `armarBoleta` en **una** consulta:
 La respuesta se guarda con la `Idempotency-Key` **después** de emitir: el reintento devuelve el
 mismo folio. Que el ticket la dibuje es de otra tarea.
 
+### Emitir después: el botón
+
+`POST /dte/emitir-pendientes` y `GET /dte/boletas-sin-emitir` (`TenantAdminGuard`; el `tenant_id`
+sale del token, ninguna recibe body). Viven en `EmisionBoletaController`, del módulo
+`venta-documentos` y no en `DteController`: ese es del módulo `dte`, que no puede importar a
+`venta-documentos`, y lleva el guard de admin a nivel de clase. Comparten el prefijo `/dte`.
+
+- **La lista** (`GET`): `{ ventaId, fecha, monto, codigo, mensaje, grupo }[]`, del documento más
+  viejo al más nuevo, hasta 200, en **una** consulta (el predicado del índice parcial
+  `idx_venta_documentos_sin_emitir` más la venta viva). `mensaje` es el del `DteError`, tal cual:
+  lo lee el admin. `grupo` es `grupoDelError(codigo)`: `perfil` (lo arregla el admin: sube un CAF,
+  renueva el certificado) o `boleta` (un dato de esa venta).
+- **El botón** (`POST`): lee la misma lista y procesa **de a una**, cada una en su propia
+  transacción: primero el bloqueo de su venta (`SELECT … FOR UPDATE`, el mismo de
+  `VentasService.lockVentaOriginal` que usan anular y la nota de crédito; es un SQL duplicado a
+  propósito porque este módulo no puede importar a `VentasService`) y después `emitir`, que vuelve
+  a mirar el documento con `FOR UPDATE`. El orden es venta → CAF, igual que al vender. Una
+  anulación en paralelo o espera al botón o ya ganó: el documento quedó descartado y `emitir` lo
+  omite (`omitido` no suma ni es un error).
+- **Un error del grupo `perfil` corta** (`SIN_FOLIOS`, `SIN_CERTIFICADO`, `CERTIFICADO_VENCIDO`,
+  `PERFIL_INCOMPLETO`, `AMBIENTE_DISTINTO`): las que siguen fallarían igual. **Uno del grupo
+  `boleta` se anota y sigue** (un impuesto adicional, un texto que no cabe).
+- Responde `{ emitidas, pendientes, errores: [{ ventaId, codigo, mensaje }] }`; `pendientes` es un
+  `count` de lo que sigue `sin_emitir` al terminar. Un error que no es un `DteError` se propaga (R9):
+  las que ya salieron quedaron confirmadas. Procesar de a una es escritura de N filas, no una
+  lectura N+1.
+- La fecha de cada boleta es la de su venta (`FchEmis`), no la de hoy.
+
+### El estado para el cajero
+
+`GET /dte/estado-emision` lo lee quien vende: `JwtAuthGuard, TenantGuard, PermisosGuard` y
+`@RequiresPermiso('Ventas', 'Crear')`, **sin** `TenantAdminGuard` (`GET /dte/perfil` es de admin y
+el cajero recibe 403 ahí). Devuelve `{ activa, avisos: [{ codigo: 'POCOS_FOLIOS' |
+'CERTIFICADO_POR_VENCER', mensaje }], sinEmitir }`. Los avisos son los que calcula el perfil
+(`UMBRAL_FOLIOS` 100, `DIAS_AVISO_CERTIFICADO` 30), solo código y mensaje: nada del emisor ni del
+certificado. Con la emisión apagada responde `activa: false`, `avisos: []` y `sinEmitir: 0` (un
+local que no emite no ve la franja). Con la emisión apagada es una sola consulta (el interruptor, sin armar el perfil: el POS lo lee tras cada cobro). Prendida son consultas fijas: el interruptor, el perfil (cuatro) y un `count`.
+
+### Lo que ve el detalle de la venta
+
+`documentos[]` del `GET /ventas/:id` suma, desde la misma consulta (dos `LEFT JOIN`, sin una
+consulta por documento): `folio` y `estadoSii` (el `estado` de su fila en `dte_documentos`),
+`emisionError` (el motivo de un `sin_emitir`) y `ncElectronicaPendiente` (una corrección `sistema`
+cuyo `documento_corregido_id` apunta a una boleta `emitido`; ver
+[`reembolsos-nota-credito.md`](./reembolsos-nota-credito.md)). Anular una `sin_emitir` se permite y
+la descarta como a una `armado`; una `emitido` da 400 (*"La boleta ya se emitió: se revierte con
+una nota de crédito, no se anula."*).
+
 ### Pruebas
 
 Unitarias: `Db.conSavepoint` (`db.spec.ts`), `documentoAEmitir` y `emitir` con las sentencias
@@ -835,10 +883,19 @@ reales del savepoint (`emision-boleta.service.spec.ts`), y el cableado en la ven
 y facturador externo, exenta (41), sin folios, sin certificado (el folio tomado vuelve), la cola
 que se cae, una venta que se cae después de emitir, 10 en paralelo, la venta de $0 por descuento,
 descuento de línea + de venta + granel, pago mixto con la máquina, cierre de mesa (con folios, con
-el CAF agotado y con deuda), callback de la tienda, alta de suscripción y la reimpresión.
+el CAF agotado y con deuda), callback de la tienda, alta de suscripción, la reimpresión y, de
+emitir después: la lista y el botón con el CAF agotado (corta) y con uno nuevo (emite las 3 con la
+fecha de su venta), el error de una boleta que no corta, la **anulación en paralelo** (un query
+runner retiene la fila de la venta, el botón queda esperando según `pg_blocking_pids`, la
+anulación gana y el botón no emite: se usa SQL y no la ruta de anular porque esa pide el mismo
+bloqueo desde otra conexión), anular una `sin_emitir` y una `emitido`, la nota de crédito sobre
+una venta emitida y sobre una que no, el aviso del cajero (200, `POCOS_FOLIOS`, apagado) y los 403.
+Antes de cada caso del botón se descartan por SQL las `sin_emitir` que dejaron otros tests: el
+botón emite todas las del tenant.
 Mutantes (revertidos con `cp` y `cmp`): sin savepoint, atrapar cualquier error, el umbral con
 `now()`, el IVA mal leído de `ventas_impuestos`, `conSavepoint` sin `ROLLBACK TO` y la factura
-emitida como boleta. El umbral del año de la venta solo lo ve un test unitario: el e2e emite en el
+emitida como boleta; del botón: sin el `FOR UPDATE` de la venta, cortar también con el grupo
+`boleta`, no cortar con `SIN_FOLIOS` y `estado-emision` con `TenantAdminGuard` (los cuatro caen). El umbral del año de la venta solo lo ve un test unitario: el e2e emite en el
 mismo año de la venta, y la diferencia aparece recién al emitir después (el botón).
 
 ---

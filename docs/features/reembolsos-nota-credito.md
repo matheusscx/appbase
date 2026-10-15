@@ -686,6 +686,26 @@ manual y la del webhook— resuelve el receptor bajo el lock de la venta:
   receptor la clave no aparece, así que la huella es la de antes del campo y una clave emitida
   antes del deploy se sigue reproduciendo.
 
+## La nota sobre una boleta ya emitida (2026-10-15)
+
+Spec [`boleta-desde-la-venta`](../superpowers/specs/2026-10-14-boleta-desde-la-venta-design.md)
+§ 6. Con el interruptor de emisión encendido la boleta de la venta sale ante el SII
+([`emision-electronica.md`](./emision-electronica.md)); la **nota de crédito electrónica** todavía
+no existe (frente 2). Mientras tanto la nota se registra **como siempre** (stock, caja, totales, su
+documento `sistema` / `armado`) y el sistema solo avisa que su par ante el SII se hace a mano:
+
+- **La respuesta de la emisión** (`POST /ventas/:id/notas-credito`) suma
+  `avisoNcElectronica: string | null`: *"La boleta de esta venta ya se emitió: la nota de crédito
+  ante el SII hazla en su portal por ahora."* cuando el documento que corrige (el que resolvió
+  `documentoQueCorrige`) está `emitido`, y `null` si no. Se calcula con una consulta fija dentro de
+  la transacción, así que la `Idempotency-Key` reproduce el mismo aviso. Los REFUND de la pasarela
+  pasan por el mismo camino.
+- **El detalle de la venta**: `documentos[].ncElectronicaPendiente` es `true` en un documento
+  `sistema` cuyo `documento_corregido_id` apunta a uno `emitido`. No es una columna: se deriva en
+  la consulta que ya trae los documentos, para que el drawer lo muestre con *"Hazla en el portal
+  del SII por ahora; el sistema la emitirá cuando esté disponible."*.
+- Anular una venta con la boleta `emitido` está bloqueado (400): se revierte con esta nota.
+
 ## Redondeo: la NC hereda el criterio del documento que corrige (2026-08-21)
 
 **La regla.** Una NC no redondea con las preferencias vigentes del tenant: lee el

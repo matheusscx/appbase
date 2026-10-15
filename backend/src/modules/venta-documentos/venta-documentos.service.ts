@@ -184,6 +184,17 @@ export interface DocumentoDetalle {
   descartadoEl: Date | null;
   /** Nombre de quien descartó: en `afirmado_no_hecho`, quién afirmó que no estaba hecho (E10). */
   descartadoPorNombre: string | null;
+  /** Con la boleta electrónica emitida: su folio. Nulo si el documento no se emitió. */
+  folio: number | null;
+  /** Con la boleta emitida: dónde va ante el SII (`dte_documentos.estado`: pendiente, enviado, aceptado…). */
+  estadoSii: string | null;
+  /** Con `sin_emitir`: por qué no salió, en palabras para el local. */
+  emisionError: string | null;
+  /**
+   * Una corrección `sistema` que corrige una boleta ya emitida: su nota de crédito ante el SII
+   * todavía no existe (la hace el local en el portal del SII por ahora). Se deriva, no se guarda.
+   */
+  ncElectronicaPendiente: boolean;
   /**
    * Cada vez que alguien borró el número de este documento (solo el `externo`
    * lo admite), el **más nuevo primero**. Vacío si nunca se borró. Reescribir el
@@ -799,13 +810,20 @@ export class VentaDocumentosService {
       descarte: Descarte | null;
       descartado_el: Date | null;
       descartado_por_nombre: string | null;
+      folio: number | null;
+      estado_sii: string | null;
+      emision_error: string | null;
+      nc_electronica_pendiente: boolean;
     }[] = await lector.query(
       `SELECT vd.documento_id, vd.venta_id, vd.emisor, vd.tipo_documento_id,
               td.codigo AS tipo_codigo, td.nombre AS tipo_nombre,
               vd.clase_maquina, vd.numero, vd.estado_envio, vd.monto, vd.pago_id,
               vd.documento_corregido_id, vd.es_duplicado, vd.descarte,
               vd.descartado_el,
-              NULLIF(TRIM(CONCAT_WS(' ', u.nombre, u.apellido)), '') AS descartado_por_nombre
+              NULLIF(TRIM(CONCAT_WS(' ', u.nombre, u.apellido)), '') AS descartado_por_nombre,
+              dd.folio, dd.estado AS estado_sii, vd.emision_error,
+              (vd.emisor = 'sistema' AND corregido.estado_envio = 'emitido')
+                AS nc_electronica_pendiente
          FROM venta_documentos vd
          -- Sin filtrar \`eliminado_el\` del tipo ni del usuario, a propósito: un
          -- documento ya emitido conserva su tipo y su historial aunque el catálogo
@@ -814,6 +832,16 @@ export class VentaDocumentosService {
          LEFT JOIN tipos_documento_tributario td
                 ON td.tipo_documento_id = vd.tipo_documento_id
          LEFT JOIN usuarios u ON u.usuario_id = vd.descartado_por_usuario_id
+         -- La boleta electrónica en la cola de envío (folio y estado ante el SII). Sin filtrar
+         -- \`eliminado_el\`, como el tipo: una boleta ya emitida sigue siendo la que se emitió.
+         LEFT JOIN dte_documentos dd ON dd.documento_id = vd.dte_documento_id
+                AND dd.tenant_id = vd.tenant_id
+         -- El documento que esta corrección corrige: si ya salió como boleta, la nota de crédito
+         -- electrónica no existe todavía.
+         LEFT JOIN venta_documentos corregido
+                ON corregido.documento_id = vd.documento_corregido_id
+               AND corregido.tenant_id = vd.tenant_id
+               AND corregido.eliminado_el IS NULL
         WHERE vd.tenant_id = $2
           AND vd.eliminado_el IS NULL
           -- Una sola lista (la venta y sus correcciones) y no \`= $1 OR IN (...)\`:
@@ -856,6 +884,10 @@ export class VentaDocumentosService {
       descarte: f.descarte,
       descartadoEl: f.descartado_el,
       descartadoPorNombre: f.descartado_por_nombre,
+      folio: f.folio,
+      estadoSii: f.estado_sii,
+      emisionError: f.emision_error,
+      ncElectronicaPendiente: f.nc_electronica_pendiente === true,
       numerosBorrados: borradosPorDocumento.get(f.documento_id) ?? [],
     }));
   }
