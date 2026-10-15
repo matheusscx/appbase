@@ -193,8 +193,8 @@ cd backend && npm test -- modules/dte
 ## Códigos de error
 
 `DteError.codigo` existe para que el subproyecto 4 le diga al cajero qué pasó. La fuente de
-verdad es `CodigoDteError` en `dte.types.ts`. Los cinco últimos los lanza el perfil fiscal, no el
-motor.
+verdad es `CodigoDteError` en `dte.types.ts`. Los cinco últimos antes de `LINEA_SIN_NOMBRE` los
+lanza el perfil fiscal y `LINEA_SIN_NOMBRE`, el armado desde la venta; ninguno es del motor.
 
 | Código | Cuándo |
 |---|---|
@@ -229,6 +229,7 @@ motor.
 | `CERTIFICADO_VENCIDO` | Del perfil fiscal: el certificado vigente ya venció |
 | `PERFIL_INCOMPLETO` | Del perfil fiscal: falta giro, comuna, dirección, ambiente o resolución |
 | `AMBIENTE_DISTINTO` | Del perfil fiscal: la razón social cambió de ambiente entre tomar el folio y firmar con su CAF |
+| `LINEA_SIN_NOMBRE` | Del armado desde la venta (no del motor): una línea de la venta no tiene descripción; el motor la emitiría con `NmbItem` vacío y el SII la rechazaría al recibirla |
 
 ---
 
