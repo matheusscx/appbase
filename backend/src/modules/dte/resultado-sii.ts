@@ -2,8 +2,8 @@ import type { EstadoDocumentoDte } from './entities/dte-documento.entity';
 import type { EstadoEnvioSii } from './sii-boleta.cliente';
 
 /**
- * Estados del envío con los que el SII ya no cambia de opinión (spec cola-envio-sii § 6). Es la
- * única fuente: el job la pasa a las consultas y a la anotación, y no la repite.
+ * Estados del envío con los que el SII ya no cambia de opinión (emision-electronica.md, § Envío
+ * al SII). Es la única fuente: el job la pasa a las consultas y a la anotación, y no la repite.
  */
 export const ESTADOS_ENVIO_FINALES: readonly string[] = [
   'EPR',
@@ -21,7 +21,13 @@ export const ESTADOS_ENVIO_FINALES: readonly string[] = [
 export const ESTADO_ENVIO_REPETIDO = 'RPT';
 
 /** Estados del envío que siguen en proceso: se vuelve a consultar y no hay nada que avisar. */
-const EN_PROCESO = ['REC', 'SOK', 'FOK', 'CRT', 'PRD'];
+export const ESTADOS_ENVIO_EN_PROCESO: readonly string[] = [
+  'REC',
+  'SOK',
+  'FOK',
+  'CRT',
+  'PRD',
+];
 
 /** Rechazos del sobre entero: ninguna de sus boletas se pudo ni leer. */
 const RECHAZOS_DEL_SOBRE = ['RCH', 'RCO', 'RFR', 'RSC', 'RCT', 'VOF'];
@@ -54,7 +60,8 @@ export interface ResultadoReparto {
 
 /**
  * Reparte lo que el SII contestó sobre un sobre entre las boletas que llevaba. Pura: no toca la
- * base ni el reloj, así que cada fila de la tabla de la spec § 6 se prueba sin infraestructura.
+ * base ni el reloj, así que cada fila de la tabla "El job de consulta" de emision-electronica.md
+ * se prueba sin infraestructura.
  *
  * El reparto es por `(tipo, folio)`, nunca solo por folio: una boleta 39 y una 41 pueden llevar
  * el mismo folio. Una entrada con `folio` ausente o null (error de esquema o de firma) alcanza a
@@ -124,7 +131,8 @@ export function repartirResultado(
   // código que no conocemos se vuelven a consultar: un código nuevo del SII no puede dar por
   // aceptada ni por rechazada una boleta. El desconocido, además, avisa.
   const conocido =
-    codigo === ESTADO_ENVIO_REPETIDO || EN_PROCESO.includes(codigo);
+    codigo === ESTADO_ENVIO_REPETIDO ||
+    ESTADOS_ENVIO_EN_PROCESO.includes(codigo);
   return {
     final: codigo === ESTADO_ENVIO_REPETIDO,
     cambios: [],

@@ -125,7 +125,9 @@ todo compatible con SII, sin integrarlo.
   funciones puras, sin envío. Decisión, razones y lo que sigue diferido (web service del
   SII, ILA, factura; los folios/CAF se cerraron el mismo día con el perfil fiscal del emisor,
   subproyecto 1): [ADR-033](./033-emisor-dte-propio.md). Detalle:
-  [`features/emision-electronica.md`](../features/emision-electronica.md).
+  [`features/emision-electronica.md`](../features/emision-electronica.md). El **web service del
+  SII ya no está diferido**: la cola de envío y su cliente (subproyecto 3) también se construyeron;
+  ver § Envío al SII de ese mismo archivo y el ADR-033.
 
   ⚠️ **Actualización 2026-08-21 — este diferimiento dejó de ser neutro.** El cierre del
   redondeo de plata tuvo que decidir *una* regla ahora, y decidió que con precio de

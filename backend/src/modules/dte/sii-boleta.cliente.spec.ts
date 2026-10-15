@@ -287,6 +287,43 @@ describe('SiiBoletaCliente', () => {
       expect(sinEspera).toMatchObject({ tipo: 'ok', reintentarEnMs: null });
     });
 
+    it('X-Retry-After sobre 1 hora se topea a 1 hora; uno no numérico o negativo se ignora', async () => {
+      for (const [valor, esperado] of [
+        ['999999', 3_600_000],
+        ['abc', null],
+        ['-5', null],
+        ['', null],
+      ] as const) {
+        falso.responder('envio', {
+          headers: { 'X-Retry-After': valor },
+          cuerpo: '{"trackid":7,"estado":"REC"}',
+        });
+        expect(await enviar()).toMatchObject({
+          tipo: 'ok',
+          reintentarEnMs: esperado,
+        });
+      }
+    });
+
+    it('un trackid que no son hasta 15 dígitos no es ok: es transitorio con mensaje fijo', async () => {
+      for (const trackid of [
+        'abc',
+        '1234567890123456',
+        '12 3',
+        '-4',
+        '1e3',
+        1.5,
+      ]) {
+        falso.responder('envio', {
+          cuerpo: JSON.stringify({ trackid, estado: 'REC' }),
+        });
+        expect(await enviar()).toEqual({
+          tipo: 'transitorio',
+          mensaje: 'El SII respondió sin un número de envío válido',
+        });
+      }
+    });
+
     it('un 400 es peticion_invalida con el texto del SII', async () => {
       falso.responder('envio', {
         status: 400,

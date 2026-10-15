@@ -1571,8 +1571,8 @@ describe('Cola de envío al SII (e2e)', () => {
         [razonSocialId],
       );
 
-      // La definición de "atrasada" (spec § 3): no es una columna, se calcula al leer. Esta
-      // consulta la fija para el subproyecto 4.
+      // La definición de "atrasada" (emision-electronica.md, § Envío al SII): no es una columna,
+      // se calcula al leer. Esta consulta la fija para el subproyecto 4.
       const atrasadas = await ds.query<{ folio: number }[]>(
         `SELECT folio FROM dte_documentos
           WHERE razon_social_id = $1 AND eliminado_el IS NULL

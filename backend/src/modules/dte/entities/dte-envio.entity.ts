@@ -25,6 +25,9 @@ import type { AmbienteSii } from './dte-caf.entity';
 @Index('idx_dte_envios_consulta', ['consultarDesde'], {
   where: '"trackid" IS NOT NULL AND "eliminado_el" IS NULL',
 })
+@Index('idx_dte_envios_reserva', ['reservadoHasta'], {
+  where: '"trackid" IS NULL AND "eliminado_el" IS NULL',
+})
 export class DteEnvio {
   @PrimaryGeneratedColumn('uuid', { name: 'envio_id' }) id: string;
   @Column({ name: 'tenant_id', type: 'uuid' }) tenantId: string;

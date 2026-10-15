@@ -373,10 +373,14 @@ es parte del enunciado y viaja con ella.
      decisión en [ADR-033](../adr/033-emisor-dte-propio.md), detalle en
      [`features/emision-electronica.md`](../features/emision-electronica.md). **No emite nada al
      SII**: son funciones puras que nadie llama todavía para emitir;
-  3. cliente del SII y cola de envío (sigue; recibe el sobre que arma el motor con lo que entrega
-     `credencialesParaFirmar`);
-  4. conexión con la venta y la nota de crédito (llama a `tomarFolio` dentro de la transacción de
-     la venta; abre la pantalla a todos los admin y trae el aviso al cajero);
+  3. ✅ **cliente del SII y cola de envío** (hecho el 2026-10-14: tareas 1 a 7 de la cola de
+     envío, más el cierre): `ColaDteService.encolar`, el cliente de la API de boleta y los jobs
+     `enviar-boletas` y `consultar-envios`. Detalle en
+     [`features/emision-electronica.md`](../features/emision-electronica.md) § Envío al SII.
+     **No emite nada**: nadie llama a `encolar` todavía;
+  4. **conexión con la venta y la nota de crédito** (**sigue**; llama a `tomarFolio` y a `encolar`
+     dentro de la transacción de la venta; abre la pantalla a todos los admin, trae el aviso al
+     cajero, y la pantalla de boletas atrasadas y rechazadas, ver abajo);
   5. certificación;
   6. intercambio de factura.
 
@@ -403,10 +407,30 @@ es parte del enunciado y viaja con ella.
     (orden de bloqueo), y qué pasa si el ambiente o la razón social preferida cambian entre
     medio.
 
+  **Lo que dejó la cola de envío (detalle en `features/emision-electronica.md`, § "Lo que queda
+  abierto" de Envío al SII):**
+  - ⏳ **decisión provisional, pendiente del owner:** un código del SII que no entendemos (en una
+    boleta de `detalle_rep_rech` o en el sobre) nunca da por aceptada ni rechazada una boleta: queda
+    `enviado`, atrasada a la vista, con el aviso en `ultimo_error` del envío. Si el owner prefiere
+    `reparos`, `rechazado` o `aceptado` por ausencia, es una línea en `resultado-sii.ts`;
+  - para el subproyecto 4: la **pantalla y el aviso** de las boletas atrasadas y rechazadas
+    (`estado IN ('pendiente','enviado') AND emitido_el < now() - 1 hora`, o `rechazado`), incluidas
+    las que quedan `enviado` por observaciones o por un 404 de 24 horas y las que se reenviaron tras
+    una caída entre el `ok` del SII y anotar el `trackid` (el SII contesta `RPT`); un `DteError` al
+    armar el sobre, que hoy reintenta cada 10 minutos sin alerta; y que `encolar` no verifica el tipo
+    ni el folio contra el CAF (confía en el `cafId` de `tomarFolio`);
+  - la consulta de una boleta individual (`/boleta.electronica/{rut}-{dv}-{tipo}-{folio}/estado`)
+    resolvería el `RPT` perdido; hoy no existe.
+
   **Lo que dejó el motor y solo confirma la certificación (subproyecto 5):**
   - Riesgos de forma: aplanado del `<DD>`, namespaces del `<DTE>`, ubicación de
     `RutProvSW`/`RznSocProvSW`, `<RSR></RSR>` vacío, escape de solo `& < >` y `CdgIntRecep`
     sobre 135 UF.
+
+  **Lo que dejó la cola y solo confirma la certificación (subproyecto 5):** la unidad de
+  `X-RateLimit-Reset` (hoy segundos, tope 1 h), el `User-Agent` exacto que acepta el SII, el formato
+  real del 400 y del 405, si `pangal`/`rahue` siguen siendo los servidores de envío, y si el límite
+  por IP (compartido por todos los tenants) alcanza con el lote de 50 o 5 minutos.
 
 - [ ] **La compra online pide los datos del cliente, como un ecommerce** (producto + backend +
   frontend; **pedido por el owner el 2026-10-11** en el chat de la orquestadora: *"hay que pedir

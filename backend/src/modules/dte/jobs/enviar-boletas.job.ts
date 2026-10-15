@@ -9,6 +9,7 @@ import type { AmbienteSii } from '../entities/dte-caf.entity';
 import { armarEnvioBoleta } from '../envio-boleta';
 import { FoliosService } from '../folios.service';
 import { ahoraChile } from '../perfil-fiscal';
+import { ESTADOS_ENVIO_EN_PROCESO } from '../resultado-sii';
 import { SiiBoletaCliente } from '../sii-boleta.cliente';
 
 export const JOB_ENVIAR_BOLETAS = 'enviar-boletas';
@@ -71,7 +72,9 @@ const DEVOLVER_RESERVAS_VENCIDAS = `
    WHERE d.envio_id = v.envio_id AND d.estado = 'enviado' AND d.eliminado_el IS NULL`;
 
 // SKIP LOCKED: dos instancias del backend toman lotes distintos en vez de esperarse (o de mandar
-// la misma boleta en dos sobres).
+// la misma boleta en dos sobres). Con varias instancias, la segunda puede mandar un sobre chico:
+// la regla del lote (50 o 5 minutos) se evalúa antes del lock, y la primera ya pudo llevarse las
+// boletas. Es aceptado: el sobre chico es válido y las boletas no se duplican.
 const TOMAR_LOTE = `
   SELECT documento_id, caf_id, xml, folio, tipo, rut_emisor
     FROM dte_documentos
@@ -99,7 +102,7 @@ const ANOTAR_ENVIO_OK = `
   UPDATE dte_envios
      SET trackid = $2::bigint, estado_sii = $3, enviado_el = now(),
          consultar_desde = now() + ($4::double precision * interval '1 millisecond'),
-         reservado_hasta = NULL, ultimo_error = NULL, actualizado_el = now()
+         reservado_hasta = NULL, ultimo_error = $5, actualizado_el = now()
    WHERE envio_id = $1 AND eliminado_el IS NULL`;
 
 // Soft delete a propósito (no es un olvido del filtro): el sobre no llegó a existir para el SII,
@@ -299,15 +302,24 @@ export class EnviarBoletasJob {
     );
 
     switch (r.tipo) {
-      case 'ok':
+      case 'ok': {
+        // El estado del POST se guarda solo si es uno que sigue en proceso. Un código final
+        // (o desconocido) dejaría al envío fuera de la consulta antes de que nadie la haga:
+        // queda sin código, se consulta igual y el motivo queda anotado.
+        const estado = r.datos.estado;
+        const guardable = ESTADOS_ENVIO_EN_PROCESO.includes(estado);
         await this.db.query(ANOTAR_ENVIO_OK, [
           envioId,
           r.datos.trackid,
-          r.datos.estado.slice(0, 3) || null,
+          guardable ? estado : null,
           Math.max(ESPERA_CONSULTA_MS, r.reintentarEnMs ?? 0),
+          estado === '' || guardable
+            ? null
+            : `El SII respondió el envío con el código ${estado.slice(0, 20)}; se consulta igual`,
         ]);
         resumen.enviados += 1;
         return;
+      }
       case 'peticion_invalida':
         await this.rechazar(envioId, ids, r.mensaje);
         resumen.rechazados += ids.length;

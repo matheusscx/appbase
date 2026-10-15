@@ -111,12 +111,70 @@ describe('EnviarBoletasJob', () => {
       '1014',
       'REC',
       ESPERA_CONSULTA_MS,
+      null,
     ]);
     // Una sola escritura sobre las boletas: reservarlas. Ni devueltas ni rechazadas.
     expect(con('intentos = intentos + 1')).toHaveLength(0);
     expect(con("estado = 'rechazado'")).toHaveLength(0);
     expect(con("SET estado = 'enviado'")).toHaveLength(1);
   });
+
+  it('ok: un estado final del POST no se guarda: queda sin código y con el motivo, para consultarlo igual', async () => {
+    enviar.mockResolvedValue({
+      tipo: 'ok',
+      datos: { trackid: '1014', estado: 'EPR' },
+      reintentarEnMs: null,
+    });
+    await job.enviarLotes();
+    expect(con('trackid = $2::bigint')[0].params).toEqual([
+      'envio-1',
+      '1014',
+      null,
+      ESPERA_CONSULTA_MS,
+      'El SII respondió el envío con el código EPR; se consulta igual',
+    ]);
+  });
+
+  it('ok: un estado desconocido del POST tampoco se guarda y el código del aviso se recorta a 20', async () => {
+    enviar.mockResolvedValue({
+      tipo: 'ok',
+      datos: { trackid: '1014', estado: 'Z'.repeat(40) },
+      reintentarEnMs: null,
+    });
+    await job.enviarLotes();
+    const params = con('trackid = $2::bigint')[0].params;
+    expect(params[2]).toBeNull();
+    expect(params[4]).toBe(
+      `El SII respondió el envío con el código ${'Z'.repeat(20)}; se consulta igual`,
+    );
+  });
+
+  it('ok: un POST sin estado queda sin código y sin aviso (no hay código que mostrar)', async () => {
+    enviar.mockResolvedValue({
+      tipo: 'ok',
+      datos: { trackid: '1014', estado: '' },
+      reintentarEnMs: null,
+    });
+    await job.enviarLotes();
+    const params = con('trackid = $2::bigint')[0].params;
+    expect(params[2]).toBeNull();
+    expect(params[4]).toBeNull();
+  });
+
+  it.each(['REC', 'SOK', 'FOK', 'CRT', 'PRD'])(
+    'ok: el estado %s del POST, que sigue en proceso, se guarda sin aviso',
+    async (estado) => {
+      enviar.mockResolvedValue({
+        tipo: 'ok',
+        datos: { trackid: '1014', estado },
+        reintentarEnMs: null,
+      });
+      await job.enviarLotes();
+      const params = con('trackid = $2::bigint')[0].params;
+      expect(params[2]).toBe(estado);
+      expect(params[4]).toBeNull();
+    },
+  );
 
   it('ok: si el SII pide esperar más de 10 minutos, se espera eso', async () => {
     enviar.mockResolvedValue({

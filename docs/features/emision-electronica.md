@@ -1,12 +1,13 @@
-# Feature: Emisión electrónica — el motor de la boleta y el perfil fiscal del emisor (sin envío)
+# Feature: Emisión electrónica — el motor de la boleta, el perfil fiscal del emisor y la cola de envío al SII
 
-**Status**: In Development — el motor y el perfil fiscal están terminados; **todavía no se emite nada al SII**
+**Status**: In Development — el motor, el perfil fiscal y la cola de envío están terminados; **todavía no se emite nada al SII**: ninguna venta llama a la cola (subproyecto 4)
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-10-14
 
-Este documento tiene dos partes: **el motor** (subproyecto 2, funciones puras) y, más abajo,
+Este documento tiene tres partes: **el motor** (subproyecto 2, funciones puras) y, más abajo,
 [**el perfil fiscal del emisor**](#perfil-fiscal-del-emisor) (subproyecto 1: certificado, CAF y
-folios, con su pantalla).
+folios, con su pantalla) y [**el envío al SII**](#envío-al-sii) (subproyecto 3: la cola, el cliente
+de la API de boleta y los dos jobs).
 
 Decisión y razones: [ADR-033](../adr/033-emisor-dte-propio.md). Diseño:
 [`2026-10-14-motor-boleta-electronica-design.md`](../superpowers/specs/2026-10-14-motor-boleta-electronica-design.md).
@@ -23,8 +24,9 @@ Un conjunto de **funciones puras** (`backend/src/modules/dte/`) que reciben los 
 boleta (39 afecta, 41 exenta), un CAF y un certificado, y devuelven el `<DTE>` con su timbre
 (TED) y su firma, y el sobre `EnvioBOLETA` firmado que agrupa de 1 a 500 boletas. No lee la base,
 el reloj ni la red. Las funciones siguen siendo puras aunque el módulo `dte` ya existe (nació con
-el perfil fiscal): el perfil usa `leerCaf` y `leerCertificado` al subir y al descifrar; nadie
-llama todavía a `emitirBoleta` ni a `armarEnvioBoleta`.
+el perfil fiscal): el perfil usa `leerCaf` y `leerCertificado` al subir y al descifrar, y el job de
+envío llama a `armarEnvioBoleta`; nadie llama todavía a `emitirBoleta` (lo hará la venta, en el
+subproyecto 4).
 
 ### Why does it exist?
 
@@ -36,10 +38,12 @@ RUT piloto: se prueba contra los XSD y contra la firma del ejemplo oficial, sin 
 
 - Incluido: armar y firmar la boleta y el sobre; leer un CAF y un `.pfx`; verificar los montos;
   rechazar con código lo que el SII rechazaría. Lo que guarda el emisor y la cuenta de folios
-  está en el [perfil fiscal](#perfil-fiscal-del-emisor).
+  está en el [perfil fiscal](#perfil-fiscal-del-emisor); la cola que lleva las boletas al SII y
+  trae su resultado, en [Envío al SII](#envío-al-sii).
 - **No incluido** (cada cosa tiene su dueño):
-  - guardar el documento (subproyecto 4; la cuenta de folios ya la lleva el perfil fiscal);
-  - enviar al SII y reintentar (subproyecto 3);
+  - emitir la boleta desde una venta y guardarla en la transacción de la venta (subproyecto 4; la
+    cuenta de folios ya la lleva el perfil fiscal, y la cola ya la espera: ver
+    [Envío al SII](#envío-al-sii));
   - leer `venta_documentos` o armar el contrato desde una venta (subproyecto 4);
   - verificar la firma `FRMA` del SII sobre el CAF (sigue abierto, ver el perfil fiscal);
   - impuestos adicionales (ILA): el motor los rechaza con código (ver más abajo);
@@ -438,6 +442,293 @@ rangos que empiezan igual.
 
 ---
 
+## Envío al SII
+
+Subproyecto 3 de 6 (hecho el 2026-10-14). Lleva al SII cada boleta que el subproyecto 4 emita,
+**sin que la venta espere al SII**, y guarda qué contestó (aceptada, con reparos o rechazada, con
+el motivo). **Todavía no se emite nada**: nadie llama a `encolar` (lo hará la venta, en el
+subproyecto 4), así que las dos tablas están vacías. Código en `backend/src/modules/dte/`:
+`cola-dte.service.ts`, `sii-boleta.cliente.ts`, `resultado-sii.ts` y los dos jobs de `jobs/`.
+**Fiscal: frente propio** (ADR-010). La spec y el plan se borraron al terminar (la historia queda
+en git); lo durable está acá.
+
+- **No incluido** (cada cosa tiene su dueño):
+  - quién llama a `encolar`, reemitir una boleta rechazada, avisar al dueño o mostrar una pantalla
+    (subproyecto 4);
+  - la consulta de una boleta individual (`/boleta.electronica/{rut}-{dv}-{tipo}-{folio}/estado`);
+  - el envío al cliente por correo o QR;
+  - la certificación ante el SII (subproyecto 5).
+- **Plazo legal:** la boleta se envía "inmediato, máximo 1 hora". Sin conexión se genera igual, y
+  la hora corre desde que vuelve (Res. 74, F.6).
+
+### Decidido por el owner (2026-10-14, por AskUserQuestion)
+
+- **Quién se entera de un rechazo:** queda registrado en la boleta; la pantalla y el aviso llegan
+  con el subproyecto 4. Se descartó una lista desde ya: hoy estaría siempre vacía, porque nadie
+  emite.
+- **Boleta con más de 1 hora sin llegar:** se sigue reintentando **sin tope** y queda "atrasada"
+  (ver más abajo). Se descartó frenar las ventas: un SII caído dejaría al local sin vender.
+
+### Los datos
+
+Dos tablas, con la migración `1792019884107-ColaEnvioSii.ts` (ADR-030). Ninguna fila se borra de
+verdad; el único `eliminado_el` que se escribe es el de un sobre que **nunca existió para el SII**
+(ver "Qué pasa al enviar").
+
+- **`dte_documentos`**: una fila por boleta. `xml` es el `<DTE>` firmado tal como lo devolvió
+  `emitirBoleta` (el documento legal; no se cifra porque no trae secretos, el `RSASK` del CAF no
+  viaja en el DTE). Lleva `tipo` (39/41), `folio`, `ambiente`, `rut_emisor`, `caf_id`,
+  `razon_social_id`, `emitido_el` (fija el plazo de 1 hora), `proximo_intento_el`, `intentos` y
+  `ultimo_error` (por boleta, porque la espera creciente es por boleta: un sobre que falla deja de
+  existir como unidad), `envio_id` (null hasta que entra a un sobre) y `detalle_sii` (jsonb: los
+  errores que el SII devolvió para esa boleta, o el motivo del rechazo del sobre). Índice único
+  `(razon_social_id, tipo, ambiente, folio)` entre las no borradas: un folio no se encola dos veces.
+- **`dte_envios`**: un sobre. `trackid` (bigint, null hasta el 200 del SII; `pg` lo devuelve como
+  texto), `estado_sii` (el código del SII, 3 letras), `enviado_el`, `consultar_desde` (cuándo
+  puede consultarse; null saca el envío de la consulta), `reservado_hasta` (la reserva mientras el
+  sobre está en vuelo; un índice parcial la sirve para encontrar las reservas vencidas),
+  `intentos_consulta`, `ultimo_error` y `respuesta_sii` (jsonb, la última
+  respuesta de la consulta).
+
+Los estados de `dte_documentos` (CHECK en la base):
+
+| Estado | Significa |
+|---|---|
+| `pendiente` | Está en la cola: nunca salió, o salió y volvió porque el envío falló |
+| `enviado` | Va en un sobre. Sale de aquí cuando el SII da su resultado |
+| `aceptado` | El SII la aceptó sin comentarios (`detalle_sii` null) |
+| `reparos` | El SII la aceptó **con reparos** (Res. 121/2026); el detalle queda en `detalle_sii` |
+| `rechazado` | El SII la rechazó, o el pedido de envío estaba mal formado. El motivo queda siempre en `detalle_sii`; `ultimo_error` de la boleta lo lleva solo cuando el rechazo fue el 400 del envío |
+
+**"Atrasada" no es una columna**: se calcula al leer, y es
+`estado IN ('pendiente','enviado') AND emitido_el < now() - interval '1 hour'` (con
+`eliminado_el IS NULL`). Un test e2e fija esa consulta para el subproyecto 4. Incluye a la boleta
+que quedó `enviado` sin resultado (un 404 de 24 horas, un código que no se entendió, una caída entre
+el `ok` y el trackid): se ve atrasada y alguien la revisa.
+
+### Encolar
+
+`ColaDteService.encolar(tenantId, boleta, cafId) → { documentoId }` es lo único que el módulo
+expone para el subproyecto 4. **Exige una transacción activa** (`TxContext.managerActivo()`), igual
+que `tomarFolio`: si la venta hace rollback, la boleta no queda en la cola, y el folio, la boleta y
+la venta se confirman juntos o ninguno (una boleta sin venta es un folio perdido ante el SII). Fuera
+de una transacción tira un `Error` de programación.
+
+- La razón social y el ambiente salen **del CAF con que se tomó el folio**, no de quien llama. Una
+  sola sentencia inserta la fila `pendiente` (`emitido_el` y `proximo_intento_el` en `now()`) solo si
+  el RUT del CAF es el de la boleta.
+- Sin CAF (o de otro tenant) → `SIN_FOLIOS`. RUT de la boleta distinto del del CAF →
+  `ENVIO_OTRO_EMISOR`.
+
+### El job de envío
+
+`EnviarBoletasJob` (`jobs/enviar-boletas.job.ts`), cada **30 segundos**, mismo patrón de
+`expirar-ordenes` ([`cron.md`](./cron.md)). Un tick sin trabajo no entra al runner (serían ~2.900
+filas diarias en `cron_ejecuciones` para no decir nada). Cada corrida:
+
+1. **Devuelve las reservas vencidas.** Un sobre sin `trackid` cuya `reservado_hasta` venció es un
+   proceso que se cayó con el sobre en vuelo: el sobre se **da de baja** (soft delete: para el SII
+   nunca existió, y sin eso la reserva vencida contaría como trabajo en cada tick) y sus boletas
+   vuelven a `pendiente`, sin sumar intento.
+2. **Elige qué sale: la regla del lote.** Por razón social (y ambiente) arma un sobre cuando hay
+   **50 o más** boletas listas, o cuando **la más antigua lleva 5 minutos** esperando (medido
+   desde su `emitido_el`). Una boleta está lista cuando es `pendiente` y su `proximo_intento_el`
+   llegó: la que volvió a la cola con su espera sin cumplir no cuenta ni para las 50 ni para la más
+   antigua. Así un local con poco movimiento no hace un envío por boleta (el límite del SII es por
+   IP y lo comparten todos los tenants), y la boleta sigue llegando muy dentro de la hora. El SII
+   recomienda 50 por sobre; admite hasta 500.
+3. **Reserva**, en una transacción corta: `SELECT … FOR UPDATE SKIP LOCKED LIMIT 50` sobre las
+   pendientes de la razón social (por `emitido_el`, `folio`), crea el `dte_envios` con
+   `reservado_hasta = now() + 5 min`, pasa las boletas a `enviado` con su `envio_id` y confirma.
+   `SKIP LOCKED` hace que dos instancias del backend tomen lotes distintos en vez de esperarse. Con
+   varias instancias, la segunda puede mandar un sobre chico (la regla del lote del paso 2 se
+   evalúa antes del lock): es aceptado, el sobre es válido y las boletas no se duplican.
+4. **Envía, fuera de la transacción.** Nunca hay una llamada HTTP con una conexión de la base
+   tomada. Con el `caf_id` de la boleta más antigua pide `credencialesParaFirmar` (certificado,
+   carátula; rechaza si la empresa cambió de ambiente, si el certificado venció o si falta un dato),
+   arma el sobre con `armarEnvioBoleta` y lo manda con `SiiBoletaCliente`.
+5. **Anota el resultado.**
+
+Un error de programación en una razón social no le quita el turno a las demás: se registra, se
+sigue, y al final se vuelve a tirar (el runner lo deja en `cron_ejecuciones` y la reserva vence
+sola).
+
+### Qué pasa al enviar
+
+| Respuesta | Qué hace |
+|---|---|
+| 200 con `trackid` | El envío guarda `trackid`, `estado_sii` (`REC`) y `consultar_desde = enviado_el + max(10 min, X-Retry-After)`; las boletas siguen `enviado`. `X-Retry-After` se topa a 1 hora (como la pausa por límite); uno no numérico o negativo se ignora |
+| 200 con un `trackid` que no son hasta 15 dígitos (ausente, vacío, con letras o decimales) | No es un envío hecho: falla transitoria con "El SII respondió sin un número de envío válido". Las boletas vuelven a la cola y se reenvían; el SII contestará que ya tenía el sobre (`RPT`), el hueco de lo abierto |
+| 200 con un `estado` del POST que ya es final (o no se conoce) | El `estado_sii` **no se guarda** (quedaría fuera de la consulta antes de que nadie la haga): queda sin código, con `ultimo_error` "El SII respondió el envío con el código X; se consulta igual" (X recortado a 20), y el job de consulta lo toma igual. Solo se guarda un estado que sigue en proceso (`REC`, `SOK`, `FOK`, `CRT`, `PRD`) |
+| Red caída, timeout, 500, 405, pausa por el límite, RUT inválido | Las boletas vuelven a `pendiente` con `envio_id` null, `intentos + 1` y `ultimo_error`; el sobre se da de baja con el mismo motivo |
+| 401 | El cliente descarta el token, pide otro y reintenta **una vez**. Si vuelve a dar 401 (o la semilla/token dan 400, 401 o 403), se trata como falla: las boletas vuelven a la cola, **nunca** se rechazan por esto |
+| 404 | Como falla: vuelven a la cola con "no encontró el servicio de recepción" |
+| 400 | El pedido está mal armado y es un error nuestro: las boletas pasan a `rechazado` con `detalle_sii = { origen: 'envio', mensaje }`. No se reintenta solo, porque repetiría el error. El envío queda con `ultimo_error` |
+| `DteError` del perfil (certificado vencido, perfil incompleto, ambiente distinto) o del armado | Vuelven a la cola con el mensaje a la vista, hasta que el dueño lo arregle |
+| El proceso se cae a mitad | La reserva vence y el paso 1 del siguiente tick devuelve las boletas a `pendiente` |
+
+**La espera creciente es por boleta, sin tope de intentos:** tras el intento que falló, 30 s, 1,
+2 y 5 minutos, y de ahí **cada 10 minutos** (`espera(n)` en el job es la única fuente de la escala).
+La boleta que choca con el límite del SII cuenta ese intento: no se agrega una espera aparte.
+
+### El límite de pedidos del SII
+
+El SII limita los pedidos **por IP y por hora**, y todos los tenants salen por la misma IP. Una
+respuesta 405, o con `X-RateLimit-Remaining: 0`, **pausa al cliente** hasta `X-RateLimit-Reset`:
+
+- La pausa es **en memoria y por proceso**: con más de una instancia, cada una aprende al chocar.
+- **Tope de 1 hora** (el límite es por hora); sin un valor útil, 60 s.
+- `X-RateLimit-Reset` se lee como **segundos de espera**; un valor mayor que 1e9 se toma como hora
+  epoch en segundos. **La unidad no está confirmada** hasta la certificación (ver lo abierto).
+- Los dos jobs miran `pausadoHasta()` antes de cada reserva y cortan sin reservar si está pausado:
+  no se reserva nada que después no se pueda mandar.
+
+### El cliente del SII y el token
+
+`SiiBoletaCliente` (provider de `DteModule`, sin exportar) habla con la API REST de boleta del SII
+(OpenAPI 1.0.5): semilla, token, envío del sobre y consulta del envío.
+
+- **Token:** semilla → `<getToken>` firmado con `firmarDocumento` (XMLDSig enveloped, `URI=""`,
+  RSA-SHA1; su oráculo es la semilla `030530912644`, cuyo `DigestValue` publica el SII) → `Cookie:
+  TOKEN=…`. Se cachea **en memoria por certificado y ambiente**, se considera vencido a los **50
+  minutos sin uso** (el SII lo da por 1 hora y renueva con cada uso), y dos pedidos a la vez
+  comparten uno. Se pierde en cada deploy: el primer envío después cuesta dos pedidos extra, no es
+  un riesgo.
+- Cada pedido lleva `User-Agent` (el SII lo exige), un timeout de 20 s, no sigue redirects (la
+  cookie con el token no debe viajar a otro lado) y lee como máximo 1 MiB de respuesta.
+- Devuelve un `RespuestaSii` (`ok`, `no_autorizado`, `peticion_invalida`, `no_encontrado` o
+  `transitorio`) para todo lo que viene del SII, de la red o del certificado; el job decide. Un error
+  de programación sí tira. **Ningún mensaje, resultado ni log lleva el token ni la llave.**
+- Las URLs salen de configuración, con los servidores del SII por defecto:
+
+| Variable | Default |
+|---|---|
+| `SII_BOLETA_API_CERTIFICACION` | `https://apicert.sii.cl/recursos/v1` (semilla, token y consulta) |
+| `SII_BOLETA_ENVIO_CERTIFICACION` | `https://pangal.sii.cl/recursos/v1` (envío) |
+| `SII_BOLETA_API_PRODUCCION` | `https://api.sii.cl/recursos/v1` |
+| `SII_BOLETA_ENVIO_PRODUCCION` | `https://rahue.sii.cl/recursos/v1` |
+
+### El job de consulta
+
+`ConsultarEnviosJob` (`jobs/consultar-envios.job.ts`), cada **minuto**. Toma hasta **20** envíos
+con `trackid`, sin resultado final y con `consultar_desde` vencido (el SII recomienda esperar 10
+minutos tras enviar y respetar `X-Retry-After`), y reparte el resultado entre sus boletas.
+
+- **Reserva con lease:** una transacción corta hace `SELECT … FOR UPDATE SKIP LOCKED` y mueve
+  `consultar_desde` 5 minutos adelante; la llamada al SII va fuera de ella. El `FOR UPDATE` muere
+  con el commit, así que lo que protege el resto del tiempo es ese movimiento: si el proceso se cae,
+  la consulta se repite sola cuando vence. Si otra instancia retoma un envío que esta todavía no
+  anotó, el reparto es inocuo (solo escribe boletas `enviado`).
+- **El reparto es en un solo `UPDATE`** para todas las boletas del sobre (estado y detalle de cada
+  una en arreglos, nunca una consulta por boleta). Solo escribe boletas que siguen `enviado`: una
+  con estado final no se pisa. Las credenciales se piden una vez por razón social, no por envío.
+
+| `estado` del SII | Qué hace |
+|---|---|
+| `EPR` o `RPR` | Cada boleta según `detalle_rep_rech` (la lista de más abajo); el envío queda final |
+| `RCH`, `RCO`, `RFR`, `RSC`, `RCT`, `VOF` (rechazo del sobre) | Todas las boletas del sobre pasan a `rechazado`, con `detalle_sii = { origen: 'sobre', estado, descripcion }` |
+| `RPT` | El SII ya tenía ese sobre. El envío queda final con `ultimo_error` "El SII ya tenía este envío (RPT)" y **las boletas no cambian de estado** ni se reenvían (ver lo abierto) |
+| `REC`, `SOK`, `FOK`, `CRT`, `PRD` | En proceso: se vuelve a consultar en `max(5 min, X-Retry-After)` |
+| Un código que no conocemos | Igual que en proceso, pero con `ultimo_error` "El SII devolvió el código X; se sigue consultando", **sin plazo**. Nunca da por aceptada ni rechazada una boleta |
+| 404 | Se vuelve a consultar cada 5 minutos con `ultimo_error` "todavía no encuentra el envío". Si sigue a las **24 horas** de `enviado_el`, el envío sale de la consulta con "no encuentra el envío" y sus boletas siguen `enviado` (atrasadas a la vista) |
+| Red, 500, 405, 401, 400, o `DteError` de credenciales | Se anota en `ultimo_error` y se reintenta en 5 minutos, sin tocar las boletas |
+
+**El reparto por boleta** (`repartirResultado`, función pura en `resultado-sii.ts`) se hace por
+**`(tipo, folio)`**, nunca solo por folio: una 39 y una 41 pueden llevar el mismo folio. La
+respuesta llega sin validar, así que `tipo` y `folio` pueden venir ausentes o como texto, y se
+comparan como número.
+
+- Una entrada `RCH` deja la boleta `rechazado` (gana sobre cualquier otra), una `RPR` la deja
+  `reparos`, y sin entrada propia queda `aceptado` **solo si el SII no dejó observaciones**
+  (ninguna entrada sin boleta, ningún código desconocido, ninguna lista ilegible); si las dejó,
+  queda `enviado` con el aviso en `ultimo_error` del envío.
+- Un envío sin boletas vivas (todas borradas o reasignadas) sale de la consulta con
+  `ultimo_error` "El envío no tiene boletas vivas que consultar" y sin reintento: sin boletas no
+  hay certificado con qué descifrar, así que reintentar no lo arregla.
+- Una entrada con `folio` ausente o null (error de esquema o de firma) alcanza a **todas** las
+  boletas del sobre.
+- El detalle completo del SII queda en `respuesta_sii` del envío; en la boleta, la entrada que le
+  tocó.
+
+#### Decisiones provisionales, pendientes del owner (2026-10-14)
+
+Estas dos reglas las tomó el agente al construir la cola, **no el owner**, y quedan pendientes de
+su confirmación. La razón común: nunca aceptar por ausencia cuando el SII habló de algo que no
+entendimos.
+
+- **Entrada con un código desconocido:** una entrada de `detalle_rep_rech` cuyo código no es
+  `RCH` ni `RPR` **no es un reparo** (`reparos` es "aceptada con observaciones"). La boleta queda
+  `enviado` (atrasada a la vista) y el envío lleva `ultimo_error` para revisión. Una entrada
+  `RCH`/`RPR` que no calza con ninguna boleta del sobre también deja `ultimo_error`.
+- **Boletas sin entrada cuando el SII dejó observaciones:** si hay una entrada `RCH`/`RPR` sin
+  boleta que calce, o un `detalle_rep_rech` presente que no es una lista, las boletas **sin entrada
+  propia no pasan a `aceptado`**: quedan `enviado` con el aviso. Las que sí tienen entrada se
+  reparten igual. Un código de sobre fuera de los conocidos deja `ultimo_error` y se consulta sin
+  plazo.
+- **Si está mal:** el owner elige `reparos` o `rechazado` para esas entradas, o `aceptado` por
+  ausencia; es una línea en `resultado-sii.ts`. El costo mientras tanto es boletas atrasadas a la
+  vista que alguien revisa.
+
+### Configuración: `DTE_COLA_AUTOMATICA`
+
+Los dos jobs salen sin hacer nada si `DTE_COLA_AUTOMATICA` vale `'false'`. **Sin definir (Railway,
+producción) están encendidos**; no hace falta ninguna variable nueva. `docker-compose.yml` y los e2e
+(`backend/test/setup-env.ts`) la apagan: en desarrollo y en las pruebas los jobs no deben mandar a
+nadie nada por su cuenta, y los tests llaman a `enviarLotes()` y `consultar()` a mano. Las
+`SII_BOLETA_*` y esta variable están comentadas en `.env.example`.
+
+### Pruebas
+
+Sin RUT piloto no se le pega al SII de verdad.
+
+- **Un SII falso** (`__fixtures__/sii-falso.ts`, un `http.createServer` de Node, sin dependencias
+  nuevas) con las rutas, headers y respuestas del OpenAPI 1.0.5; el cliente toma sus URLs de
+  configuración y el test las apunta al falso.
+- **El oráculo del token:** la firma del `getToken` de la semilla `030530912644` da exactamente el
+  `DigestValue` del SII.
+- **Unitarios** del reparto (cada fila de la tabla, con fixtures que no usan el 1 ni cantidades
+  iguales), del cliente y de los dos jobs.
+- **e2e con base real** (`backend/test/dte-cola.e2e-spec.ts`): encolar sin transacción tira; encolar
+  y hacer rollback no deja nada; dos `enviarLotes` a la vez no mandan la misma boleta (`SKIP
+  LOCKED`); la reserva vencida vuelve las boletas a `pendiente`; el lote sale a las 50 o a los 5
+  minutos y no antes; un 405 pausa; una boleta con más de 1 hora se lee atrasada; de punta a punta
+  contra el SII falso (encolar → enviar → consultar → `aceptado`, `reparos` y `rechazado` en el
+  mismo sobre); el tick apagado no escribe en `cron_ejecuciones`.
+
+```bash
+cd backend && npm test -- modules/dte
+cd backend && npx jest --config ./test/jest-e2e.json test/dte-cola.e2e-spec.ts
+```
+
+### Lo que queda abierto
+
+- **Caída entre el `ok` del SII y anotar el `trackid`.** Si el proceso se cae (o la reserva vence
+  mientras el SII contesta) después de que el SII recibió el sobre, las boletas vuelven a la cola y
+  se reenvían. El SII contesta `RPT` y **el `trackid` del primer envío se pierde**: esas boletas
+  quedan `enviado` sin resultado, atrasadas a la vista. Lo resuelve la consulta por boleta
+  individual, que queda fuera de este subproyecto.
+- **Boletas que quedan `enviado` por observaciones (las decisiones provisionales de arriba) o por un 404 de 24 horas requieren
+  revisión de una persona.** Hoy el motivo está en `ultimo_error` del envío y en `respuesta_sii`; la
+  pantalla y el aviso son del subproyecto 4.
+- **Un código de sobre desconocido se consulta sin plazo**, con el aviso en `ultimo_error`. Si el
+  SII nunca lo cambia, el envío se consulta cada 5 minutos para siempre.
+- **Un `DteError` al armar el sobre** (por ejemplo un XML que el motor ya no acepta) reintenta cada
+  10 minutos sin alerta. La pantalla del subproyecto 4 es la que lo muestra.
+- **`encolar` no verifica el tipo ni el folio de la boleta contra el tipo y el rango del CAF**:
+  depende de que quien llama pase el `cafId` que le dio `tomarFolio`.
+- **`X-RateLimit-Reset`: la unidad no está confirmada.** Se lee como segundos (o epoch si pasa de
+  1e9), con tope de 1 hora. Si está mal, la pausa es de hasta 1 hora de más o de menos. Lo confirma
+  la certificación.
+- **El límite por IP lo comparten todos los tenants.** El lote de 50 o 5 minutos lo achica, pero con
+  muchos tenants activos puede no alcanzar. Se mide en producción (subproyecto 5).
+- **Lo que solo confirma la certificación:** el `User-Agent` exacto que acepta el SII, el formato
+  real del 400 y del 405, y si `pangal`/`rahue` siguen siendo los servidores de envío (el OpenAPI
+  los llama "temporales").
+- **El esquema de envío ya está adoptado:** el `esquemas/EnvioBOLETA_v11.xsd` del motor es el del
+  zip 720 del SII (ver "Timbre, firma y sobre"); ya no es un punto abierto.
+
+---
+
 ## Pendiente de decisión
 
 El tratamiento de **ILA y otros impuestos adicionales** en la boleta no está decidido (la
@@ -449,6 +740,7 @@ frente aparte (`docs/agent/desarrollo-nuevo.md`).
 ## Related Features
 
 - [ADR-033](../adr/033-emisor-dte-propio.md) — por qué se construye y qué falta.
+- [`cron.md`](./cron.md) — el runner de los dos jobs de la cola (`cron_ejecuciones`).
 - [`tenants-razones-sociales.md`](./tenants-razones-sociales.md) — las columnas del emisor y la
   protección del RUT.
 - [`impuestos.md`](./impuestos.md) — el IVA congelado y la deuda del peso de la góndola.

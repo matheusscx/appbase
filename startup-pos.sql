@@ -340,6 +340,32 @@ CREATE INDEX "idx_dte_cafs_razon_social" ON "dte_cafs" ("razon_social_id");
 CREATE UNIQUE INDEX "uq_dte_cafs_desde" ON "dte_cafs" ("razon_social_id", "tipo", "ambiente", "desde")
   WHERE "eliminado_el" IS NULL;
 
+-- Un sobre mandado al SII (cola de envío). El estado de cada boleta vive en "dte_documentos"; acá
+-- queda lo del envío. "reservado_hasta" es la reserva del sobre en vuelo: si el proceso se cae,
+-- vence y las boletas vuelven a la cola. Mismo aviso sobre los REFERENCES que en "dte_cafs".
+CREATE TABLE "dte_envios" (
+  "envio_id"          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"         UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "razon_social_id"   UUID        NOT NULL REFERENCES "razones_sociales" ("razon_social_id"),
+  "ambiente"          TEXT        NOT NULL,  -- 'certificacion' | 'produccion'
+  "trackid"           BIGINT,                -- el pg lo devuelve como string; la entity lo guarda así
+  "estado_sii"        VARCHAR(3),
+  "enviado_el"        TIMESTAMPTZ,
+  "consultar_desde"   TIMESTAMPTZ,
+  "reservado_hasta"   TIMESTAMPTZ,
+  "intentos_consulta" INTEGER     NOT NULL DEFAULT 0,
+  "ultimo_error"      TEXT,
+  "respuesta_sii"     JSONB,
+  "creado_el"         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el"    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "eliminado_el"      TIMESTAMPTZ,
+  CONSTRAINT chk_dte_envios_ambiente CHECK ("ambiente" IN ('certificacion','produccion'))
+);
+CREATE INDEX "idx_dte_envios_consulta" ON "dte_envios" ("consultar_desde")
+  WHERE "trackid" IS NOT NULL AND "eliminado_el" IS NULL;
+CREATE INDEX "idx_dte_envios_reserva" ON "dte_envios" ("reservado_hasta")
+  WHERE "trackid" IS NULL AND "eliminado_el" IS NULL;
+
 -- Una boleta electrónica emitida y su camino al SII (cola de envío; una fila por boleta). "xml" es
 -- el <DTE> firmado tal como lo devolvió emitirBoleta: el documento legal. "intentos" y
 -- "ultimo_error" van acá porque la espera creciente es por boleta. "envio_id" apunta al sobre en
@@ -374,30 +400,6 @@ CREATE UNIQUE INDEX "uq_dte_documentos_folio" ON "dte_documentos" ("razon_social
 CREATE INDEX "idx_dte_documentos_cola" ON "dte_documentos" ("razon_social_id", "emitido_el")
   WHERE "estado" = 'pendiente' AND "eliminado_el" IS NULL;
 CREATE INDEX "idx_dte_documentos_envio" ON "dte_documentos" ("envio_id");
-
--- Un sobre mandado al SII (cola de envío). El estado de cada boleta vive en "dte_documentos"; acá
--- queda lo del envío. "reservado_hasta" es la reserva del sobre en vuelo: si el proceso se cae,
--- vence y las boletas vuelven a la cola. Mismo aviso sobre los REFERENCES que en "dte_cafs".
-CREATE TABLE "dte_envios" (
-  "envio_id"          UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
-  "tenant_id"         UUID        NOT NULL REFERENCES "tenants" ("tenant_id"),
-  "razon_social_id"   UUID        NOT NULL REFERENCES "razones_sociales" ("razon_social_id"),
-  "ambiente"          TEXT        NOT NULL,  -- 'certificacion' | 'produccion'
-  "trackid"           BIGINT,                -- el pg lo devuelve como string; la entity lo guarda así
-  "estado_sii"        VARCHAR(3),
-  "enviado_el"        TIMESTAMPTZ,
-  "consultar_desde"   TIMESTAMPTZ,
-  "reservado_hasta"   TIMESTAMPTZ,
-  "intentos_consulta" INTEGER     NOT NULL DEFAULT 0,
-  "ultimo_error"      TEXT,
-  "respuesta_sii"     JSONB,
-  "creado_el"         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  "actualizado_el"    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  "eliminado_el"      TIMESTAMPTZ,
-  CONSTRAINT chk_dte_envios_ambiente CHECK ("ambiente" IN ('certificacion','produccion'))
-);
-CREATE INDEX "idx_dte_envios_consulta" ON "dte_envios" ("consultar_desde")
-  WHERE "trackid" IS NOT NULL AND "eliminado_el" IS NULL;
 
 -- Directorio de entidades externas del tenant: proveedores, empresas, personas naturales
 CREATE TABLE "terceros" (

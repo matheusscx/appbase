@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-07-11
+**Last Updated**: 2026-10-14
 
 ---
 
@@ -31,7 +31,12 @@ recurrente de suscripciones, vencimiento por `activa_hasta`, tasas).
 
 ### Scope
 
-- Incluido: `CronRunnerService`, tabla `cron_ejecuciones`, job `expirar-ordenes`.
+- Incluido: `CronRunnerService`, tabla `cron_ejecuciones`, job `expirar-ordenes`, y los dos jobs
+  del módulo `dte` (cola de envío de la boleta al SII, ver
+  [`emision-electronica.md`](./emision-electronica.md) § Envío al SII):
+  - `enviar-boletas` (cada 30 s): arma y manda los sobres de boletas pendientes.
+  - `consultar-envios` (cada minuto): pregunta al SII por los envíos hechos y reparte el
+    resultado entre sus boletas.
 - NO incluido (futuro): cobro de suscripciones, UI de administración,
   locking distribuido, intervalos configurables en BD, reintentos.
 

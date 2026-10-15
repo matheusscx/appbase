@@ -22,9 +22,13 @@ export class ColaEnvioSii1792019884107 implements MigrationInterface {
     await queryRunner.query(
       `CREATE INDEX "idx_dte_envios_consulta" ON "dte_envios"  ("consultar_desde") WHERE "trackid" IS NOT NULL AND "eliminado_el" IS NULL`,
     );
+    await queryRunner.query(
+      `CREATE INDEX "idx_dte_envios_reserva" ON "dte_envios"  ("reservado_hasta") WHERE "trackid" IS NULL AND "eliminado_el" IS NULL`,
+    );
   }
 
   public async down(queryRunner: QueryRunner): Promise<void> {
+    await queryRunner.query(`DROP INDEX "public"."idx_dte_envios_reserva"`);
     await queryRunner.query(`DROP INDEX "public"."idx_dte_envios_consulta"`);
     await queryRunner.query(`DROP TABLE "dte_envios"`);
     await queryRunner.query(`DROP INDEX "public"."uq_dte_documentos_folio"`);

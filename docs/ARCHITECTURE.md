@@ -67,7 +67,7 @@ startup-app/
 │   │       ├── calculo-precios/  # Motor de cálculo de precios (servicio puro stateless)
 │   │       ├── ventas/           # Procesamiento de ventas transaccional + tipos de documento
 │   │       ├── pagos/            # Abonos a ventas pendientes y ledger de pagos
-│   │       ├── dte/              # Boleta electrónica (ADR-033): motor puro + perfil fiscal del emisor (rutas /dte/*, PerfilFiscalService, FoliosService, CifradoDteService)
+│   │       ├── dte/              # Boleta electrónica (ADR-033): motor puro + perfil fiscal del emisor (rutas /dte/*, PerfilFiscalService, FoliosService, CifradoDteService) + cola de envío al SII (ColaDteService, SiiBoletaCliente y dos jobs: enviar-boletas cada 30 s, consultar-envios cada minuto)
 │   │       ├── venta-documentos/ # Qué documentos tiene cada venta y quién los emitió (módulo hoja, ADR-028)
 │   │       ├── idempotencia/     # Un cobro por intento: Idempotency-Key → respuesta (ADR-026)
 │   │       ├── caja/             # Gestión de cajas (física/virtual, movimientos, cierre)

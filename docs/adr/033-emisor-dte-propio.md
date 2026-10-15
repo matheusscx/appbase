@@ -106,9 +106,10 @@ Operación:
 
 ### Neutral
 
-- **Todavía no se emite nada al SII.** Falta guardar el documento, enviar y conectar con la
-  venta (subproyectos 3 y 4). El subproyecto 1 ya lleva la cuenta de los folios usados.
-- Siguen diferidos de ADR-010: el web service del SII (subproyecto 3), y los impuestos adicionales (ILA) en la boleta, que el motor rechaza con
+- **Todavía no se emite nada al SII.** Falta conectar con la venta (subproyecto 4). El
+  subproyecto 1 ya lleva la cuenta de los folios usados y el 3 ya tiene la cola y el cliente del
+  web service del SII, que nadie alimenta todavía.
+- Siguen diferidos de ADR-010: los impuestos adicionales (ILA) en la boleta, que el motor rechaza con
   código hasta saber qué hace el SII con ellos.
 - Dependencias nuevas, aprobadas por el owner: `node-forge`, `xml-crypto` y `@xmldom/xmldom` en
   producción; `xmllint-wasm` solo en desarrollo.

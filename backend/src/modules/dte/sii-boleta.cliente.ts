@@ -66,6 +66,11 @@ const transitorio = (mensaje: string): Transitorio => ({
   mensaje,
 });
 
+const esTransitorio = (valor: unknown): valor is Transitorio =>
+  typeof valor === 'object' &&
+  valor !== null &&
+  (valor as { tipo?: unknown }).tipo === 'transitorio';
+
 /** Lee `<SEMILLA>` o `<TOKEN>` del XML del SII sin depender del prefijo de namespace. */
 function leerCampo(
   xml: string,
@@ -115,6 +120,8 @@ async function leerAcotado(r: Response): Promise<string | null> {
 const MENSAJE_FIRMA =
   'El certificado digital no sirve para firmar; súbalo de nuevo';
 const MENSAJE_RUT = 'El RUT del emisor o del certificado no es válido';
+const MENSAJE_TRACKID_INVALIDO =
+  'El SII respondió sin un número de envío válido';
 
 /** `[cuerpo, dv]` del RUT normalizado, o `null` si no es un RUT válido. */
 function partirRut(rut: string): [string, string] | null {
@@ -141,7 +148,8 @@ function describirFalla(e: unknown): string {
  * Cliente de la API REST de la boleta electrónica del SII: semilla, token, envío del sobre y
  * consulta del envío. `enviar` y `consultarEnvio` devuelven `RespuestaSii` para todo lo que viene
  * del SII, de la red, del certificado (llave que no firma) o de los RUT: quien lo usa decide qué
- * hacer con cada caso (spec cola-envio-sii § 6). Un error de programación sí tira.
+ * hacer con cada caso (emision-electronica.md, § Envío al SII). Un error de programación sí
+ * tira.
  *
  * Ningún mensaje, resultado ni log lleva el token ni la llave del certificado.
  */
@@ -202,11 +210,13 @@ export class SiiBoletaCliente {
     return this.interpretar(r, (cuerpo) => {
       const datos = this.json(cuerpo);
       const trackid = datos?.trackid;
+      // Un trackid que no es un número de hasta 15 dígitos no sirve para consultar el envío:
+      // las boletas vuelven a la cola y se reenvían (el SII contestará RPT, hueco documentado).
       if (
         (typeof trackid !== 'number' && typeof trackid !== 'string') ||
-        trackid === ''
+        !/^\d{1,15}$/.test(String(trackid))
       )
-        return null;
+        return transitorio(MENSAJE_TRACKID_INVALIDO);
       return {
         trackid: String(trackid),
         estado: typeof datos?.estado === 'string' ? datos.estado : '',
@@ -444,22 +454,23 @@ export class SiiBoletaCliente {
 
   private interpretar<T>(
     r: Bruta | Fallo,
-    extraer: (cuerpo: string) => T | null,
+    extraer: (cuerpo: string) => T | null | Transitorio,
   ): RespuestaSii<T> {
     if (r.tipo !== 'respuesta') return r;
     if (r.status >= 200 && r.status < 300) {
       const datos = extraer(r.cuerpo);
       if (datos === null)
         return transitorio('El SII contestó con un formato inesperado');
-      const espera = Number(r.headers.get('x-retry-after'));
+      if (esTransitorio(datos)) return datos;
+      const texto = r.headers.get('x-retry-after')?.trim();
+      const espera = texto ? Number(texto) : Number.NaN;
       return {
         tipo: 'ok',
         datos,
+        // Sin tope el SII podría pedir una espera de años; vale lo mismo que la pausa por límite.
         reintentarEnMs:
-          r.headers.get('x-retry-after') !== null &&
-          Number.isFinite(espera) &&
-          espera >= 0
-            ? espera * 1000
+          Number.isFinite(espera) && espera >= 0
+            ? Math.min(espera, PAUSA_MAXIMA_S) * 1000
             : null,
       };
     }
