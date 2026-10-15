@@ -54,6 +54,12 @@ Las decisiones que lo moldean, todas del owner el 2026-10-14:
 | Nombre del ítem fuera de norma | El motor **rechaza**; se limita el catálogo | Cortar o reemplazar caracteres en el motor |
 | Certificado del dueño | Se guarda cifrado; la consulta legal o al SII va en paralelo | Frenar el diseño |
 
+**Nota (2026-10-15):** la fila "Validación XSD" ya no vale tal cual. `xmllint-wasm` pasa a
+`dependencies` (versión fija 5.3.0, aprobado por el owner) porque el job de envío valida el sobre
+contra el esquema antes de mandarlo (subproyecto 4, frente 3; ver
+[`emision-electronica.md`](../features/emision-electronica.md) § Antes de enviar: el esquema). La
+decisión original queda como se escribió.
+
 El motor vive en `backend/src/modules/dte/` como **funciones puras**: no lee la base, el reloj ni
 la red. El módulo de Nest nació con el primer service, el del perfil fiscal (subproyecto 1, hecho
 el 2026-10-14), que guarda el certificado, los CAF y la cuenta de folios; el motor sigue siendo
@@ -109,12 +115,15 @@ Operación:
 - **La venta ya emite la boleta (2026-10-15, subproyecto 4, frente 1), pero nada de lo emitido tiene
   validez ante el SII** hasta la certificación (subproyecto 5). Con el interruptor del tenant
   prendido, la venta toma el folio del perfil (1), arma y firma con el motor (2) y encola para la
-  cola y el cliente del web service del SII (3). Faltan la nota de crédito electrónica y la
-  pantalla de atrasadas y rechazadas (frentes 2 y 3).
+  cola y el cliente del web service del SII (3). Faltan la nota de crédito electrónica (frente 2, en pausa
+  hasta consultar al SII) y reemitir una rechazada (espera las preguntas 1 y 2 de la
+  [investigación](../agent/investigaciones/2026-10-15-boleta-rechazada-o-atrasada.md)); la pantalla
+  de atrasadas y rechazadas (frente 3) se hizo el 2026-10-15.
 - **El ILA no se informa en la boleta, y eso es la regla, no un diferimiento** (decisión del owner,
   2026-10-14): para el local que vende al público el ILA es costo, no un impuesto de su venta, así
   que el motor rechaza con código (`IMPUESTO_ADICIONAL_NO_SOPORTADO`) un ítem con adicional. Lo que
   sigue en pausa es el ILA en el catálogo, habilitable por tenant, y la factura del contribuyente
   afecto (`docs/features/emision-electronica.md` § Decidido por el owner).
 - Dependencias nuevas, aprobadas por el owner: `node-forge`, `xml-crypto` y `@xmldom/xmldom` en
-  producción; `xmllint-wasm` solo en desarrollo.
+  producción; `xmllint-wasm` solo en desarrollo. **Nota (2026-10-15):** `xmllint-wasm` 5.3.0 pasó
+  a producción, aprobado por el owner, para que el job de envío valide el sobre antes de mandarlo.

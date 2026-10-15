@@ -1,15 +1,16 @@
 # Feature: Emisión electrónica — el motor de la boleta, el perfil fiscal del emisor, la cola de envío al SII y la venta que emite
 
-**Status**: In Development — el motor, el perfil fiscal, la cola de envío y la venta que emite (subproyecto 4, frente 1) están terminados; con el interruptor del tenant prendido cada venta emite su boleta. **Falta** la nota de crédito electrónica (frente 2, en pausa hasta consultar al SII), la pantalla de atrasadas y rechazadas (frente 3) y la certificación ante el SII (subproyecto 5): nada de lo emitido tiene validez hasta entonces
+**Status**: In Development — el motor, el perfil fiscal, la cola de envío, la venta que emite (subproyecto 4, frente 1) y las boletas con problemas (frente 3: verlas y avisar) están terminados; con el interruptor del tenant prendido cada venta emite su boleta. **Falta** la nota de crédito electrónica (frente 2, en pausa hasta consultar al SII), **reemitir una boleta rechazada** (espera dos respuestas del SII) y la certificación ante el SII (subproyecto 5): nada de lo emitido tiene validez hasta entonces
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-10-15
 
-Este documento tiene cuatro partes: **el motor** (subproyecto 2, funciones puras) y, más abajo,
+Este documento tiene cinco partes: **el motor** (subproyecto 2, funciones puras) y, más abajo,
 [**el perfil fiscal del emisor**](#perfil-fiscal-del-emisor) (subproyecto 1: certificado, CAF y
 folios, con su pantalla) y [**el envío al SII**](#envío-al-sii) (subproyecto 3: la cola, el cliente
 de la API de boleta y los dos jobs) y [**la venta emite la boleta**](#la-venta-emite-la-boleta)
 (subproyecto 4, frente 1: el interruptor, la emisión dentro de la venta, el botón de las pendientes y
-el aviso al cajero).
+el aviso al cajero) y [**boletas con problemas**](#boletas-con-problemas) (subproyecto 4, frente 3:
+la lista del admin, la franja del cajero y el panel de soporte).
 
 Decisión y razones: [ADR-033](../adr/033-emisor-dte-propio.md). Diseño:
 [`2026-10-14-motor-boleta-electronica-design.md`](../superpowers/specs/2026-10-14-motor-boleta-electronica-design.md).
@@ -50,7 +51,8 @@ RUT piloto: se prueba contra los XSD y contra la firma del ejemplo oficial, sin 
   - factura, nota de crédito y nota de débito;
   - el resumen diario RCOF/RVD, derogado desde el 2022-08-01 (Res. 53/2022);
   - el PDF417 del timbre impreso, opcional desde el 2026-01-01;
-  - validar contra el XSD en producción (ver "Pruebas").
+  - validar contra el XSD: lo hace el job de envío antes de mandar el sobre, no el motor (ver
+    [Antes de enviar: el esquema](#antes-de-enviar-el-esquema)).
 
 ---
 
@@ -175,9 +177,11 @@ sobre; el motor se apoya en eso y la certificación lo confirma.
 Unitarias, sin red ni base (`backend/src/modules/dte/*.spec.ts`). Certificado autofirmado y CAF
 generados con `node-forge` en los fixtures.
 
-- **El XSD se valida solo en las pruebas.** `xmllint-wasm` es una `devDependency`: en producción
-  el motor **no valida contra el XSD**, rechaza con códigos las entradas que el XSD rechazaría.
-  Si el XSD y los códigos se desfasan, lo ve una prueba, no el cajero.
+- **El motor no valida contra el XSD; lo valida el job de envío.** El motor rechaza con códigos las
+  entradas que el XSD rechazaría, y las pruebas lo validan contra el XSD con el mismo
+  `validarContraXsd` que usa producción (`esquema-sii.ts`). Si el XSD y los códigos se desfasan,
+  lo ve una prueba, no el cajero; y si algo se escapa, el job lo atrapa antes de enviar (ver
+  [Antes de enviar: el esquema](#antes-de-enviar-el-esquema)).
 - Se verifican la firma del `Documento`, la del sobre y el `FRMT` con la llave pública del CAF.
 - Se prueba el ejemplo oficial del SII: sus firmas verifican con `xml-crypto`.
 - Casos: afecta, exenta, mixta; descuento y recargo de línea y global; góndola con el peso de
@@ -500,11 +504,13 @@ el motivo). `encolar` lo llama la venta desde el 2026-10-15 (subproyecto 4); con
 cada tenant apagado, que es el default, las dos tablas siguen vacías. Código en `backend/src/modules/dte/`:
 `cola-dte.service.ts`, `sii-boleta.cliente.ts`, `resultado-sii.ts` y los dos jobs de `jobs/`.
 **Fiscal: frente propio** (ADR-010). La spec y el plan se borraron al terminar (la historia queda
-en git); lo durable está acá.
+en git); lo durable está acá. Desde el 2026-10-15 el job de envío valida el sobre contra el
+esquema antes de mandarlo y el de consulta lee los cuatro estados por boleta del SII (subproyecto
+4, frente 3; ver [Boletas con problemas](#boletas-con-problemas)).
 
 - **No incluido** (cada cosa tiene su dueño):
-  - reemitir una boleta rechazada, avisar al dueño o mostrar una pantalla de atrasadas y rechazadas
-    (subproyecto 4, frente 3; quién llama a `encolar` ya lo resolvió el frente 1);
+  - reemitir una boleta rechazada: espera dos respuestas del SII (ver [Boletas con
+    problemas](#boletas-con-problemas));
   - la consulta de una boleta individual (`/boleta.electronica/{rut}-{dv}-{tipo}-{folio}/estado`);
   - el envío al cliente por correo o QR;
   - la certificación ante el SII (subproyecto 5).
@@ -513,9 +519,9 @@ en git); lo durable está acá.
 
 ### Decidido por el owner (2026-10-14, por AskUserQuestion)
 
-- **Quién se entera de un rechazo:** queda registrado en la boleta; la pantalla y el aviso son del
-  frente 3 del subproyecto 4 (hoy el frente 1 solo muestra lo que no llegó a emitirse). Se descartó
-  una lista desde ya: estaría siempre vacía, porque nadie emitía.
+- **Quién se entera de un rechazo:** queda registrado en la boleta; la pantalla y el aviso los hizo
+  el frente 3 del subproyecto 4 ([Boletas con problemas](#boletas-con-problemas)). Se descartó una
+  lista desde el primer día: habría estado siempre vacía, porque nadie emitía.
 - **Boleta con más de 1 hora sin llegar:** se sigue reintentando **sin tope** y queda "atrasada"
   (ver más abajo). Se descartó frenar las ventas: un SII caído dejaría al local sin vender.
 
@@ -552,8 +558,10 @@ Los estados de `dte_documentos` (CHECK en la base):
 
 **"Atrasada" no es una columna**: se calcula al leer, y es
 `estado IN ('pendiente','enviado') AND emitido_el < now() - interval '1 hour'` (con
-`eliminado_el IS NULL`). Un test e2e fija esa consulta para la pantalla de atrasadas (frente 3). Incluye a la boleta
-que quedó `enviado` sin resultado (un 404 de 24 horas, un código que no se entendió, una caída entre
+`eliminado_el IS NULL`). La condición vive en un solo lugar, `problemas-sii.ts`, y la fijan
+`problemas-sii.spec.ts` y el bloque *boletas con problemas* de
+`backend/test/boleta-desde-la-venta.e2e-spec.ts` (una boleta de hace 61 minutos entra, una de hace
+10 no). El e2e de `dte-cola.e2e-spec.ts` trae su propia copia del SQL. Incluye a la boleta que quedó `enviado` sin resultado (un 404 de 24 horas, un código que no se entendió, una caída entre
 el `ok` y el trackid): se ve atrasada y alguien la revisa.
 
 ### Encolar
@@ -596,7 +604,8 @@ filas diarias en `cron_ejecuciones` para no decir nada). Cada corrida:
 4. **Envía, fuera de la transacción.** Nunca hay una llamada HTTP con una conexión de la base
    tomada. Con el `caf_id` de la boleta más antigua pide `credencialesParaFirmar` (certificado,
    carátula; rechaza si la empresa cambió de ambiente, si el certificado venció o si falta un dato),
-   arma el sobre con `armarEnvioBoleta` y lo manda con `SiiBoletaCliente`.
+   arma el sobre con `armarEnvioBoleta`, **lo valida contra el esquema del SII** (ver [Antes de
+   enviar: el esquema](#antes-de-enviar-el-esquema)) y lo manda con `SiiBoletaCliente`.
 5. **Anota el resultado.**
 
 Un error de programación en una razón social no le quita el turno a las demás: se registra, se
@@ -615,11 +624,60 @@ sola).
 | 404 | Como falla: vuelven a la cola con "no encontró el servicio de recepción" |
 | 400 | El pedido está mal armado y es un error nuestro: las boletas pasan a `rechazado` con `detalle_sii = { origen: 'envio', mensaje }`. No se reintenta solo, porque repetiría el error. El envío queda con `ultimo_error` |
 | `DteError` del perfil (certificado vencido, perfil incompleto, ambiente distinto) o del armado | Vuelven a la cola con el mensaje a la vista, hasta que el dueño lo arregle |
+| El sobre no cumple el esquema | No se envía: la boleta mala pasa a `rechazado` y las demás vuelven a la cola sin espera (ver [Antes de enviar: el esquema](#antes-de-enviar-el-esquema)) |
 | El proceso se cae a mitad | La reserva vence y el paso 1 del siguiente tick devuelve las boletas a `pendiente` |
 
 **La espera creciente es por boleta, sin tope de intentos:** tras el intento que falló, 30 s, 1,
 2 y 5 minutos, y de ahí **cada 10 minutos** (`espera(n)` en el job es la única fuente de la escala).
 La boleta que choca con el límite del SII cuenta ese intento: no se agrega una espera aparte.
+
+### Antes de enviar: el esquema
+
+Según una fuente secundaria (ver la
+[investigación](../agent/investigaciones/2026-10-15-boleta-rechazada-o-atrasada.md) § 7), una boleta
+mal formada hace que el SII rechace el sobre entero (`RSC`), y eso dejaría `rechazado` a las otras
+que iban con ella. Por eso el job valida el sobre firmado contra el esquema del SII
+**antes** de `cliente.enviar`, y la boleta mala no sale. El esquema es el mismo que usan las
+pruebas del motor (`esquemas/EnvioBOLETA_v11_formato42.xsd` con `xmldsignature_v10.xsd`, con la
+única corrección en memoria del `PctType`). Código: `esquema-sii.ts` (`revisarSobreBoleta`) y
+`descartarPorEsquema` en `enviar-boletas.job.ts`.
+
+1. Se valida el sobre. Si pasa, sigue como siempre.
+2. Si no pasa, se valida el sobre **sin ningún `<DTE>`**: con la carátula buena libxml solo dice que
+   falta un `<DTE>`. Si dice otra cosa, el error es de la carátula, que viaja con cada boleta, y
+   ninguna se puede señalar. Esto depende del texto de libxml: por eso `xmllint-wasm` va fijo en
+   5.3.0 y un test (`esquema-sii.spec.ts`) cae si el texto cambia.
+3. Con la carátula buena se valida cada `<DTE>` envuelto en el mismo sobre (la carátula y la firma
+   del sobre real: el XSD mira la forma de la firma, no la verifica).
+4. Las que fallan solas pasan a `rechazado` con `detalle_sii = { origen: 'esquema', errores }`
+   (hasta 5 mensajes de hasta 300 caracteres) y sin `envio_id`. Las demás vuelven a `pendiente`
+   **sin espera y sin sumar intento**: no hicieron nada. El sobre se da de baja, porque para el SII
+   nunca existió, y el SII no se llama.
+5. **Se rechazan todas** siempre que no se pueda señalar ninguna boleta: el error es del sobre (la
+   carátula, la firma del sobre) o una boleta inválida no calza, por `(tipo, folio)`, con ninguna
+   fila del lote. Volver a la cola armaría el mismo sobre para siempre.
+   Es un error nuestro, como el 400 del envío.
+
+- **Orden en la transacción:** primero el envío (`DAR_DE_BAJA_ENVIO`), después las boletas. Es el
+  mismo orden que `devolver()`, `rechazar()` y `DEVOLVER_RESERVAS_VENCIDAS`; al revés, la barrida
+  de reservas vencidas de otra instancia se cruzaría con esta transacción y habría un ciclo de
+  bloqueo.
+- **Costo medido:** ~33 ms por validación, casi todo compilar el esquema. Un sobre que pasa cuesta
+  una validación; uno que falla, la del sobre, la de la carátula y una por boleta. Lo medido son los
+  ~33 ms por validación; para un lote de 50 son 52 validaciones, ~1,7 s por cálculo (52 × ~33 ms),
+  contra los 5 minutos de la reserva. Es del job, no de la venta.
+- **Memoria:** `xmllint-wasm` tiene 32 MiB; un sobre de ~10 MB rechaza la promesa. Llegar ahí con
+  el lote máximo de 50 boletas es improbable: haría falta ~200 KB por boleta, y el motor no limita
+  las líneas. Un error del validador que no es un resultado (el wasm se
+  cae) se propaga como error de programación y la reserva vence sola.
+- **Producción:** `Dockerfile.prod` copia solo `dist/` e instala con `npm ci --omit=dev`. Por eso
+  `xmllint-wasm` está en `dependencies` (owner: sí, en el job de envío) y `nest-cli.json` copia
+  `modules/dte/esquemas/*.xsd` en `assets`. Sin cualquiera de las dos el job revienta en
+  producción y no en desarrollo.
+- **Riesgo:** se valida contra **nuestra** copia del esquema, con los cinco campos del formato
+  v4.2 que el v11 del SII no trae. Si la copia está mal, rechazaríamos boletas que el SII
+  aceptaría. Es la misma copia contra la que pasan todas las pruebas del motor; solo la
+  certificación lo confirma.
 
 ### El límite de pedidos del SII
 
@@ -688,10 +746,31 @@ minutos tras enviar y respetar `X-Retry-After`), y reparte el resultado entre su
 respuesta llega sin validar, así que `tipo` y `folio` pueden venir ausentes o como texto, y se
 comparan como número.
 
-- Una entrada `RCH` deja la boleta `rechazado` (gana sobre cualquier otra), una `RPR` la deja
-  `reparos`, y sin entrada propia queda `aceptado` **solo si el SII no dejó observaciones**
-  (ninguna entrada sin boleta, ningún código desconocido, ninguna lista ilegible); si las dejó,
-  queda `enviado` con el aviso en `ultimo_error` del envío.
+- El SII define **cuatro estados por boleta** (OpenAPI v1.0.5, `detalle_rep_rech.estado`, y se
+  leen los cuatro desde el 2026-10-15):
+
+| Estado por boleta | La boleta queda |
+|---|---|
+| `DOK` (aceptada) | `aceptado`, con `detalle_sii` null |
+| `RPR` (aceptada con reparos) | `reparos`, con la entrada en `detalle_sii` |
+| `RLV` (aceptada con reparos leves) | `reparos`, igual que `RPR` |
+| `RCH` (rechazada) | `rechazado`, con la entrada en `detalle_sii` |
+
+- Si una boleta trae varias entradas manda la peor: `RCH` > `RPR`/`RLV` > `DOK`. Antes, `RLV` y
+  `DOK` contaban como código desconocido: la boleta quedaba `enviado` para siempre y se habría visto
+  atrasada aunque el SII la aceptó.
+- **El `DOK` es una aceptación explícita de esa boleta, no silencio.** Un `DOK` con folio propio la
+  deja `aceptado` aunque otra entrada del sobre no se entienda, **salvo** que alguna entrada de esa
+  misma boleta (un comodín sin folio incluido) traiga un estado fuera de los cuatro: lo desconocido
+  cuenta como lo peor. Un `DOK` sin folio no acepta a nadie: es una observación (aviso en el envío),
+  no un comodín de aceptación. Consecuencia: un código desconocido sin folio bloquea el `DOK` de
+  todas las boletas del sobre, que quedan `enviado` con el aviso. Un `estado` que no es texto
+  (`['RCH']`) no se lee como `RCH`: es una observación.
+- Sin entrada propia, la boleta queda `aceptado` **solo si el SII no dejó observaciones**
+  (ninguna entrada sin boleta, ningún código desconocido, ningún `DOK` sin folio, ninguna lista
+  ilegible); si las dejó, queda `enviado` con el aviso en `ultimo_error` del envío. Un `DOK` sin
+  folio cuenta como observación porque no nombra a qué boleta se refiere: aceptar por él sería
+  aceptar a ciegas.
 - Un envío sin boletas vivas (todas borradas o reasignadas) sale de la consulta con
   `ultimo_error` "El envío no tiene boletas vivas que consultar" y sin reintento: sin boletas no
   hay certificado con qué descifrar, así que reintentar no lo arregla.
@@ -709,11 +788,13 @@ ausencia cuando el SII habló de algo que no entendimos; el costo es que, en el 
 revisa esas boletas a mano.
 
 - **Entrada con un código desconocido:** una entrada de `detalle_rep_rech` cuyo código no es
-  `RCH` ni `RPR` **no es un reparo** (`reparos` es "aceptada con observaciones"). La boleta queda
-  `enviado` (atrasada a la vista) y el envío lleva `ultimo_error` para revisión. Una entrada
-  `RCH`/`RPR` que no calza con ninguna boleta del sobre también deja `ultimo_error`.
-- **Boletas sin entrada cuando el SII dejó observaciones:** si hay una entrada `RCH`/`RPR` sin
-  boleta que calce, o un `detalle_rep_rech` presente que no es una lista, las boletas **sin entrada
+  `DOK`, `RPR`, `RLV` ni `RCH` **no es un reparo** (`reparos` es "aceptada con observaciones"). La
+  boleta queda `enviado` (atrasada a la vista) y el envío lleva `ultimo_error` para revisión. Una
+  entrada de uno de esos cuatro estados que no calza con ninguna boleta del sobre también deja
+  `ultimo_error`. (El 2026-10-15 `DOK` y `RLV` salieron de los desconocidos: el owner decidió leerlos
+  según el OpenAPI; ver [Boletas con problemas](#boletas-con-problemas).)
+- **Boletas sin entrada cuando el SII dejó observaciones:** si hay una entrada de los cuatro
+  estados sin boleta que calce, o un `detalle_rep_rech` presente que no es una lista, las boletas **sin entrada
   propia no pasan a `aceptado`**: quedan `enviado` con el aviso. Las que sí tienen entrada se
   reparten igual. Un código de sobre fuera de los conocidos deja `ultimo_error` y se consulta sin
   plazo.
@@ -736,11 +817,17 @@ Sin RUT piloto no se le pega al SII de verdad.
 - **El oráculo del token:** la firma del `getToken` de la semilla `030530912644` da exactamente el
   `DigestValue` del SII.
 - **Unitarios** del reparto (cada fila de la tabla, con fixtures que no usan el 1 ni cantidades
-  iguales), del cliente y de los dos jobs.
+  iguales; los cuatro estados por boleta, la prioridad y el `DOK` explícito en
+  `resultado-sii.spec.ts`), del cliente y de los dos jobs. La validación previa:
+  `esquema-sii.spec.ts` (un sobre bueno pasa, un `<DTE>` roto se aísla envuelto solo, un error de
+  carátula deja `invalidos` vacío, los errores se recortan) y `enviar-boletas.job.spec.ts` (la
+  rota queda `rechazado` con origen `esquema`, las buenas vuelven sin espera ni intento sumado y el
+  cliente del SII no se llama).
 - **e2e con base real** (`backend/test/dte-cola.e2e-spec.ts`): encolar sin transacción tira; encolar
   y hacer rollback no deja nada; dos `enviarLotes` a la vez no mandan la misma boleta (`SKIP
   LOCKED`); la reserva vencida vuelve las boletas a `pendiente`; el lote sale a las 50 o a los 5
-  minutos y no antes; un 405 pausa; una boleta con más de 1 hora se lee atrasada; de punta a punta
+  minutos y no antes; un 405 pausa; una boleta con más de 1 hora se lee atrasada; una boleta que
+  no cumple el esquema queda rechazada sola y las buenas salen en el sobre siguiente; de punta a punta
   contra el SII falso (encolar → enviar → consultar → `aceptado`, `reparos` y `rechazado` en el
   mismo sobre); el tick apagado no escribe en `cron_ejecuciones`.
 
@@ -757,12 +844,15 @@ cd backend && npx jest --config ./test/jest-e2e.json test/dte-cola.e2e-spec.ts
   quedan `enviado` sin resultado, atrasadas a la vista. Lo resuelve la consulta por boleta
   individual, que queda fuera de este subproyecto.
 - **Boletas que quedan `enviado` por observaciones (la decisión del owner de arriba) o por un 404 de 24 horas requieren
-  revisión de una persona.** Hoy el motivo está en `ultimo_error` del envío y en `respuesta_sii`; la
-  pantalla y el aviso son del frente 3 del subproyecto 4.
+  revisión de una persona.** El motivo está en `ultimo_error` del envío y en `respuesta_sii`. Pasada
+  la hora, la boleta sale como atrasada en la lista del admin y en el panel de soporte ([Boletas con
+  problemas](#boletas-con-problemas)), pero el aviso del envío queda solo en `dte_envios.ultimo_error`:
+  ninguna de las dos pantallas lo muestra.
 - **Un código de sobre desconocido se consulta sin plazo**, con el aviso en `ultimo_error`. Si el
   SII nunca lo cambia, el envío se consulta cada 5 minutos para siempre.
 - **Un `DteError` al armar el sobre** (por ejemplo un XML que el motor ya no acepta) reintenta cada
-  10 minutos sin alerta. La pantalla del frente 3 es la que lo va a mostrar.
+  10 minutos sin alerta. Pasada la hora la boleta sale atrasada en la lista del admin y en el panel
+  de soporte, con el mensaje del error como motivo.
 - **`encolar` no verifica el tipo ni el folio de la boleta contra el tipo y el rango del CAF**:
   depende de que quien llama pase el `cafId` que le dio `tomarFolio`.
 - **`X-RateLimit-Reset`: la unidad no está confirmada.** Se lee como segundos (o epoch si pasa de
@@ -889,10 +979,11 @@ sale del token, ninguna recibe body). Viven en `EmisionBoletaController`, del m�
 `GET /dte/estado-emision` lo lee quien vende: `JwtAuthGuard, TenantGuard, PermisosGuard` y
 `@RequiresPermiso('Ventas', 'Crear')`, **sin** `TenantAdminGuard` (`GET /dte/perfil` es de admin y
 el cajero recibe 403 ahí). Devuelve `{ activa, avisos: [{ codigo: 'POCOS_FOLIOS' |
-'CERTIFICADO_POR_VENCER', mensaje }], sinEmitir }`. Los avisos son los que calcula el perfil
+'CERTIFICADO_POR_VENCER', mensaje }], sinEmitir, conProblemas }` (`conProblemas`: ver [Boletas con
+problemas](#boletas-con-problemas)). Los avisos son los que calcula el perfil
 (`UMBRAL_FOLIOS` 100, `DIAS_AVISO_CERTIFICADO` 30), solo código y mensaje: nada del emisor ni del
-certificado. Con la emisión apagada responde `activa: false`, `avisos: []` y `sinEmitir: 0` (un
-local que no emite no ve la franja). Con la emisión apagada es una sola consulta (el interruptor, sin armar el perfil: el POS lo lee tras cada cobro). Prendida son consultas fijas: el interruptor, el perfil (cuatro) y un `count`.
+certificado. Con la emisión apagada responde `activa: false`, `avisos: []`, `sinEmitir: 0` y
+`conProblemas: 0` (un local que no emite no ve la franja). Con la emisión apagada es una sola consulta (el interruptor, sin armar el perfil: el POS lo lee tras cada cobro). Prendida son consultas fijas: el interruptor, el perfil (cuatro) y una consulta con las dos cuentas (`sinEmitir` y `conProblemas`).
 
 ### Lo que ve el detalle de la venta
 
@@ -941,8 +1032,6 @@ mismo año de la venta, y la diferencia aparece recién al emitir después (el b
   facturador ([investigación](../agent/investigaciones/2026-10-15-nota-credito-sobre-boleta.md)).
   Mientras tanto la nota ante el SII se hace en el portal, y el detalle de la venta marca la
   corrección con *NC electrónica pendiente*.
-- **Atrasadas y rechazadas**, y qué se hace con una rechazada, son el frente 3 (la pantalla y el
-  aviso). Hoy una rechazada solo queda en la base.
 - **Documento parcial sobre 135 UF** (pago mixto con la máquina): sale con la línea de saldo, y el
   SII pide ahí la descripción de los productos. No se resolvió.
 - **El plazo del SII para recibir una boleta con fecha pasada** no se investigó. La que se emite
@@ -970,7 +1059,7 @@ mismo año de la venta, y la diferencia aparece recién al emitir después (el b
 - **`SIN_FOLIOS` ya no corta el botón.** El costo: con los CAF de los dos tipos agotados, el botón
   hace hasta 200 intentos rápidos que fallan, en vez de uno.
 - **Una `sin_emitir` del grupo `boleta` no tiene salida** salvo anular la venta, y la franja del
-  cajero no baja mientras exista (el frente 3 lo resuelve).
+  cajero no baja mientras exista. El frente 3 no lo cambió.
 - **El toast del cajero muestra el mensaje crudo del motor**, que puede ser técnico.
 - **Una NC sobre una venta `sin_emitir` que se emite después** sale por el total original, y la marca
   *NC electrónica pendiente* aparece en la corrección.
@@ -983,6 +1072,166 @@ mismo año de la venta, y la diferencia aparece recién al emitir después (el b
   `DescuentoMonto` explicaría un total de $0. El armado desde la venta nunca la arma así.
 - **Residuos de Playwright en la base local** (razones sociales 'Emisor e2e POS', 'Emisor e2e
   pantalla' y 'Emisor e2e interruptor', con CAF usados): no se limpian solas.
+
+---
+
+## Boletas con problemas
+
+Subproyecto 4, frente 3 (hecho el 2026-10-15; spec `2026-10-15-boletas-con-problemas-design`,
+borrada al terminar; la historia queda en git). **Fiscal: frente propio** (ADR-010). Antes, una
+boleta que el SII rechazó, que llevaba más de una hora sin llegar o que volvió con reparos **solo
+quedaba en la base**: nadie se enteraba. Ahora la ve el admin del local, el cajero recibe un aviso
+y soporte (el superadmin) ve las de todos los locales. El frente arregla además dos fallas de la
+cola que habrían hecho mentir a esas pantallas: los cuatro estados por boleta del SII y el sobre
+que se rechaza entero por una boleta mala (ver [Envío al SII](#envío-al-sii)).
+
+### Decidido por el owner (2026-10-15, por AskUserQuestion, tras la [investigación](../agent/investigaciones/2026-10-15-boleta-rechazada-o-atrasada.md))
+
+- **Alcance:** la parte visible ahora; reemitir después (se descartó reemitir con supuestos y pausar
+  el frente).
+- **`RLV` y `DOK` por boleta:** leerlos según el OpenAPI (se descartó dejarlos como desconocidos).
+- **El sobre que el SII rechaza entero por una boleta mala:** revisar cada boleta contra el esquema
+  antes de enviar (se descartó reenviar las buenas de a una y dejarlo como estaba).
+- **El validador (`xmllint-wasm` 5.3.0) a producción, y en el job de envío** (se descartó la venta,
+  los dos lugares y no llevarlo).
+- **Dónde avisar, además de la pantalla del admin:** la franja del cajero y el panel del superadmin.
+- **Los reparos en la lista:** sí, los de los últimos 30 días.
+
+### Qué es cada grupo
+
+Se calcula al leer, nunca se guarda. Las condiciones viven en un solo lugar, `problemas-sii.ts`,
+para que la lista, la franja y soporte cuenten lo mismo; cada consulta pone su
+`eliminado_el IS NULL` en `dte_documentos`, `venta_documentos` y `ventas`.
+
+| Grupo | Condición en `dte_documentos` |
+|---|---|
+| **Atrasada** | `estado IN ('pendiente','enviado') AND emitido_el < now() - interval '1 hour'` |
+| **Rechazada** | `estado = 'rechazado'` |
+| **Con reparos** | `estado = 'reparos' AND emitido_el >= now() - interval '30 days'` |
+
+"Con problemas", lo que cuentan la franja del cajero y el panel de soporte, es **atrasada o
+rechazada**. Con reparos es válida y no avisa.
+
+### Las tres rutas
+
+| Ruta | Guard | Qué devuelve |
+|---|---|---|
+| `GET /dte/boletas-con-problemas` | `TenantAdminGuard`: es configuración del módulo, no caja | `{ atrasadas, rechazadas, conReparos }`, hasta 200 por grupo |
+| `GET /dte/estado-emision` (suma `conProblemas`) | `Ventas:Crear` | el conteo de atrasadas y rechazadas del tenant |
+| `GET /admin/dte/boletas-con-problemas` | `JwtAuthGuard` + `SuperadminGuard`, como `/admin/tenants` | hasta 200 atrasadas y rechazadas de **todos** los tenants |
+
+- **Lista del admin:** las atrasadas y las rechazadas van de la más vieja a la más nueva (lo que más
+  urge, primero); las con reparos, de la más nueva a la más vieja. Cada fila: `documentoId`,
+  `ventaId`, `tipo`, `folio`, `emitidaEl`, `monto` (string: `venta_documentos.monto`, lo que cubre la
+  boleta, nunca pasa por `number`) y `motivo`. Son **tres consultas fijas**, una por grupo, con
+  `LEFT JOIN` a `venta_documentos` y `ventas`. El `LEFT JOIN` es a propósito: una boleta del SII sin
+  su documento de venta (no debería pasar) igual se muestra, con `ventaId` y `monto` en null, en vez
+  de desaparecer justo cuando algo anda mal.
+- **Franja del cajero:** `conProblemas` sale **en la misma consulta** que ya contaba las
+  `sin_emitir` (dos subselects), así que no suma una ida a la base. Con la emisión apagada sigue
+  siendo una sola consulta, la del interruptor, y devuelve 0. Los reparos no cuentan.
+- **Panel de soporte:** es la única lectura del frente que cruza tenants, y la consulta lo dice. No
+  recibe `tenant_id` de ningún lado. Una consulta, con `JOIN` a tenants vivos y `LEFT JOIN` a la
+  razón social (la boleta se ve aunque la razón social esté dada de baja). Cada fila trae `tenantId`,
+  nombre del local, razón social, ambiente, tipo, folio, `emitidaEl`, `grupo`, `intentos`,
+  `ultimoError` y `detalleSii` **completo**: soporte necesita lo técnico.
+
+### El motivo, en palabras del local
+
+`motivoDe` (en `problemas-sii.ts`) lo arma desde `detalle_sii` y `ultimo_error`. Nunca lanza: el
+detalle llega del SII sin validar. **El origen manda sobre el estado**: el rechazo del sobre entero
+trae `estado: 'RCH'`, pero quien falló fue el sistema.
+
+| Origen | Texto |
+|---|---|
+| `origen: 'esquema'`, `'sobre'` o `'envio'` | *"Error del sistema al enviarla al SII."* |
+| Entrada `RCH` del SII | *"El SII la rechazó: {descripción del primer error}."* (sin error, la descripción de la entrada; sin ninguna, *"El SII la rechazó."*) |
+| Entrada `RPR` o `RLV` | *"El SII avisa: {descripción del primer error}."* (sin ninguna, *"El SII la aceptó con reparos."*) |
+| Atrasada | El `ultimo_error` de la boleta, o null |
+
+### Las pantallas
+
+- **Admin** (`configuracion/boleta-electronica`): la tarjeta *"Boletas con observaciones del SII"*,
+  debajo de la de las sin emitir. Los grupos vacíos no se muestran; con los tres vacíos dice *"No hay
+  boletas con observaciones."*. Cada fila: fecha, folio, tipo, monto, motivo y enlace a la venta. Un
+  texto fijo por grupo: *"El sistema la sigue enviando; no tienes que hacer nada. Si pasa de un día,
+  escribe a soporte con el folio."* (atrasadas), *"No la vuelvas a emitir: escribe a soporte con el
+  folio."* (rechazadas) y *"Es válida. Revisa el aviso del SII para corregirlo en las próximas
+  boletas."* (con reparos).
+- **Cajero** (`FranjaEmision.vue`, la del POS y la de salones): con `conProblemas > 0`, *"Hay 1 boleta con
+  problemas en el SII: avisa al encargado"* o *"Hay N boletas con problemas en el SII: avisa al
+  encargado"*, sin punto final.
+- **Soporte** (`pages/admin.vue`): la tarjeta *"Boletas con problemas en el SII"* con la tabla de
+  todos los locales; el último error y el detalle del SII se despliegan por fila. Sin ninguna: *"Ningún
+  local tiene boletas con problemas."*.
+- **Si la lectura falla, ninguna de las dos tarjetas dice el vacío**: muestran *"No se pudo leer el
+  estado de las boletas en el SII."* además del toast, porque "no hay problemas" sería mentira.
+  Monto o motivo en null se muestran "—".
+
+### Los índices
+
+La migración `1792098507237-BoletasConProblemas.ts` (ADR-030; también en `startup-pos.sql`) agrega
+dos índices parciales, porque el conteo del cajero corre después de cada cobro y el cruce de la
+boleta con su venta no tenía ninguno:
+
+- `idx_dte_documentos_problemas`: `dte_documentos (tenant_id, emitido_el)` donde
+  `estado IN ('pendiente','enviado','rechazado') AND eliminado_el IS NULL`. **No cubre los
+  reparos**: la lista de reparos no usa este índice, y no hace falta porque es una lectura del admin
+  y no corre después de cada cobro.
+- `idx_venta_documentos_dte`: `venta_documentos (dte_documento_id)` donde `dte_documento_id IS NOT
+  NULL`.
+
+Medido con `EXPLAIN`, con los índices competidores fuera y en una transacción revertida: el segundo
+se usa en el `LEFT JOIN` y el primero es elegible para el conteo del cajero (un `BitmapOr` sobre el
+`OR`). Con el seed chico el planner elige otro índice por empate de costo.
+
+### Pruebas
+
+- **Unitarias:** `resultado-sii.spec.ts` (los cuatro estados, la prioridad, el `DOK` explícito y el
+  desconocido que no acepta), `esquema-sii.spec.ts` y `enviar-boletas.job.spec.ts` (la validación
+  previa, ver [Antes de enviar: el esquema](#antes-de-enviar-el-esquema)), `problemas-sii.spec.ts`
+  (las condiciones y una fila de `motivoDe` por origen), `emision-boleta.service.spec.ts` (la lista
+  y el conteo del cajero) y `cola-dte.service.spec.ts` (la consulta de soporte). Frontend:
+  `boleta-electronica.nuxt.spec.ts`, `FranjaEmision.nuxt.spec.ts` y `admin.nuxt.spec.ts`.
+- **e2e contra Postgres** (`backend/test/boleta-desde-la-venta.e2e-spec.ts`, bloque *boletas con
+  problemas*): cada grupo con su venta, monto y motivo; una con reparos de hace 31 días y una dada
+  de baja que no aparecen; el admin de otro comercio ve las tres listas vacías; `conProblemas` cuenta
+  atrasadas y rechazadas y no reparos ni recientes, y vale 0 con la emisión apagada; el panel de
+  el superadmin, en otro tenant, ve las boletas de Paris, y un admin común recibe 403; el cajero recibe 403 en la lista del admin y la
+  lista del admin da 401 sin sesión. El envío con una boleta que no cumple el esquema, de punta a
+  punta, en `backend/test/dte-cola.e2e-spec.ts`.
+- **Playwright:** `frontend/e2e/configuracion/boletas-con-problemas.spec.ts` (la tarjeta del admin),
+  `frontend/e2e/ventas/boleta-electronica-pos.spec.ts` (la franja) y
+  `frontend/e2e/tenants/soporte-boletas.spec.ts` (el panel, como superadmin). Playwright no llega a la
+  base y no hay SII de verdad, así que las respuestas de las rutas se simulan con `page.route`; el
+  contrato real lo fijan los e2e de la API.
+
+```bash
+cd backend && npm test -- modules/dte modules/venta-documentos
+cd backend && npx jest --config ./test/jest-e2e.json test/boleta-desde-la-venta.e2e-spec.ts test/dte-cola.e2e-spec.ts
+```
+
+### Lo que queda abierto
+
+- **Reemitir una rechazada** espera la respuesta del SII a las preguntas 1 y 2 de la
+  [investigación](../agent/investigaciones/2026-10-15-boleta-rechazada-o-atrasada.md): si el folio de
+  una rechazada se consume o se reutiliza, y con qué `FchEmis` sale el reemplazo. Hasta entonces la
+  pantalla dice *"no la vuelvas a emitir: escribe a soporte"*.
+- **Una rechazada no tiene salida**, así que mantiene la franja del cajero prendida hasta que exista
+  reemitir: es el costo de avisar sin poder resolver.
+- **Una `sin_emitir` del grupo `boleta`** sigue sin salida salvo anular la venta.
+- **El panel de soporte ordena por fecha ascendente con tope de 200**: las rechazadas viejas (que no
+  tienen salida) pueden tapar a las atrasadas nuevas pasadas las 200.
+- **Un tenant dado de baja** no sale en el panel de soporte (el `JOIN` a tenants es a los vivos), y
+  los jobs de envío no miran si el tenant está vivo, así que sus boletas se siguen enviando. Es una
+  decisión de producto del owner, pendiente.
+- **`venta_documentos.dte_documento_id` no es único.** Hoy es 1:1 por construcción; si dos documentos
+  de venta apuntaran a la misma boleta, la lista del admin la mostraría dos veces.
+- **La copia del esquema** (formato v4.2) es nuestra: si está mal, la validación previa rechazaría
+  boletas buenas. Solo lo confirma la certificación.
+- **Cómo declara el IVA** el local con una boleta rechazada o atrasada es pregunta para el contador
+  (pregunta 9 de la investigación).
+- **El aviso por correo** de una boleta con problemas no se hizo.
 
 ---
 

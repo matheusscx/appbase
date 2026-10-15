@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // La franja de avisos de la boleta electrónica para quien vende (spec
 // `2026-10-14-boleta-desde-la-venta` § 8.2): pocos folios, certificado por vencer, boletas
-// sin emitir y boletas con problemas en el SII (atrasadas, rechazadas o con reparos). Lee
+// sin emitir y boletas con problemas en el SII (atrasadas o rechazadas; las con reparos no cuentan). Lee
 // `GET /dte/estado-emision` (permiso `Ventas:Crear`: el cajero no puede leer el perfil de
 // admin) al montarse, y el POS y el salón llaman `recargar()` después de cada cobro. Con la
 // emisión apagada no pinta nada.

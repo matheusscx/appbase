@@ -399,9 +399,18 @@ es parte del enunciado y viaja con ella.
         Si se retoma, quedó decidido partirlo en dos: 2a, el motor de la 61 y el canal de facturas
         (SOAP/upload, otro token, otra resolución), probados contra los XSD sin tocar la venta; 2b, la
         nota del drawer emite la 61. Es frente fiscal (va solo);
-     3. **pantalla de atrasadas y rechazadas** (abierto): la lista y el aviso de las boletas del SII
-        que no llegaron o volvieron rechazadas, y **qué hacer con una rechazada** (reemitir con otro
-        folio, corregir el dato, avisar al dueño). Hoy solo quedan en la base;
+     3. ✅ **boletas con problemas: verlas y avisar** (hecho el 2026-10-15, último commit de código
+        `5b7b6584`): la lista del admin (`GET /dte/boletas-con-problemas`), el conteo en la franja del
+        cajero (`conProblemas`), el panel de soporte de todos los locales (`/admin`), y dos arreglos
+        de la cola que esas pantallas necesitaban: la consulta lee `DOK` y `RLV` por boleta y el job
+        de envío valida el sobre contra el esquema antes de mandarlo. Detalle en
+        [`features/emision-electronica.md`](../features/emision-electronica.md) § Boletas con
+        problemas. **Queda abierto: reemitir una rechazada** (con otro folio, corregir el dato). Lo
+        destraba la respuesta del SII o de un contador a las preguntas 1 y 2 de la
+        [investigación](investigaciones/2026-10-15-boleta-rechazada-o-atrasada.md) (§ "Preguntas
+        para el contador o el SII"): qué pasa con el folio de una rechazada y con qué `FchEmis` sale
+        el reemplazo. Mientras tanto la pantalla dice *"no la vuelvas a emitir: escribe a soporte"* y
+        la franja del cajero queda prendida mientras exista una rechazada. Es frente fiscal (va solo);
   5. certificación. ⚠️ La guía de certificación de boletas del SII pide ser emisor de DTE
      previamente o certificarse en paralelo, y la Res. 74/2020 dice que eliminó esa condición: si rige
      la guía, cada local pasa también por la certificación de factura (pregunta 2 de la
@@ -450,19 +459,21 @@ es parte del enunciado y viaja con ella.
     entendemos (en una boleta de `detalle_rep_rech` o en el sobre) nunca da por aceptada ni
     rechazada una boleta: queda `enviado`, atrasada a la vista, con el aviso en `ultimo_error` del
     envío;
-  - para el frente 3 del subproyecto 4: la **pantalla y el aviso** de las boletas atrasadas y rechazadas
-    (`estado IN ('pendiente','enviado') AND emitido_el < now() - 1 hora`, o `rechazado`), incluidas
-    las que quedan `enviado` por observaciones o por un 404 de 24 horas y las que se reenviaron tras
-    una caída entre el `ok` del SII y anotar el `trackid` (el SII contesta `RPT`); un `DteError` al
-    armar el sobre, que hoy reintenta cada 10 minutos sin alerta; y que `encolar` no verifica el tipo
-    ni el folio contra el CAF (confía en el `cafId` de `tomarFolio`);
+  - ✅ hecho en el frente 3 del subproyecto 4 (2026-10-15): la **pantalla y el aviso** de las boletas
+    atrasadas y rechazadas (`estado IN ('pendiente','enviado') AND emitido_el < now() - 1 hora`, o
+    `rechazado`), con las que quedan `enviado` por observaciones o por un 404 de 24 horas, las que se
+    reenviaron tras una caída entre el `ok` del SII y anotar el `trackid` (el SII contesta `RPT`) y
+    el `DteError` al armar el sobre, que sigue reintentando cada 10 minutos pero ya sale atrasado a
+    la hora. Sigue sin dueño que `encolar` no verifica el tipo ni el folio contra el CAF (confía en
+    el `cafId` de `tomarFolio`);
   - la consulta de una boleta individual (`/boleta.electronica/{rut}-{dv}-{tipo}-{folio}/estado`)
     resolvería el `RPT` perdido; hoy no existe.
 
   **Lo que dejó el frente 1 de la venta** (detalle en `features/emision-electronica.md`, § "Lo que
   queda abierto" de La venta emite la boleta):
   - para el frente 2: la NC electrónica 61 y su envío;
-  - para el frente 3: que una rechazada o atrasada se vea y se pueda actuar sobre ella;
+  - para el frente 3: que una rechazada o atrasada se vea (✅, 2026-10-15) y se pueda actuar sobre
+    ella (reemitir: abierto, ver el punto 4.3);
   - sin dueño todavía: un documento parcial sobre 135 UF con la línea de saldo (el SII pide la
     descripción de los productos), el plazo del SII para una boleta con fecha pasada (no se
     investigó), la contención del CAF por tenant (en un cierre de mesa el tramo es más largo; se
