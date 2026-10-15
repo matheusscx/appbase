@@ -308,6 +308,10 @@ Los patrones completos están en `docs/patterns/backend.md` y `docs/patterns/fro
 - **Frontend:** `$fetch`/`useApiFetch`, nunca axios. Runtime config pública con prefijo
   `VITE_`. Utilidades de presentación en composables de `app/composables/`, nunca
   locales a un `.vue`. Las páginas no contienen lógica de negocio.
+- **Skills de frontend, en toda tarea que toque `frontend/app/**`** (owner, 2026-10-15): antes
+  de escribir, invocar `nuxt-ui` y `frontend-design`, las dos, aunque sea un arreglo chico o
+  un campo nuevo. `frontend-design` da la dirección visual, `nuxt-ui` los componentes; los
+  tokens semánticos de abajo siguen mandando. El brief de un subagente de frontend lo exige.
 - **Design System:** tokens semánticos de Nuxt UI, nunca Tailwind hardcoded. Excepción:
   colores financieros en el módulo Caja. Referencia: `frontend/docs/DESIGN-SYSTEM.md`
   y `frontend/app.config.ts`.
