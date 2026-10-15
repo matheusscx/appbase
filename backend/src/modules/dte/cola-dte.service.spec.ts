@@ -5,6 +5,7 @@ import { TxContext } from '../../common/db/tx-context';
 import { ColaDteService } from './cola-dte.service';
 import { DteError } from './dte.types';
 import type { BoletaEmitida } from './envio-boleta';
+import { COND_CON_PROBLEMAS, COND_RECHAZADA } from './problemas-sii';
 
 const TENANT = '550e8400-e29b-41d4-a716-446655440007';
 const CAF_ID = '11111111-2222-4333-8444-555555555555';
@@ -131,5 +132,87 @@ describe('ColaDteService', () => {
 
     const [, params] = db.query.mock.calls[0] as [string, unknown[]];
     expect(params[4]).toBe('76555444-6');
+  });
+
+  describe('problemasDeTodos', () => {
+    const EMITIDA = new Date('2026-10-15T10:00:00.000Z');
+    const FILA = {
+      documento_id: DOCUMENTO_ID,
+      tenant_id: TENANT,
+      tenant: 'Paris',
+      razon_social: 'Panadería Paris SpA',
+      ambiente: 'certificacion',
+      tipo: 39,
+      folio: 4007,
+      emitido_el: EMITIDA,
+      grupo: 'atrasada',
+      intentos: 3,
+      ultimo_error: 'No hay conexión con el SII',
+      detalle_sii: null,
+    };
+
+    it('hace una sola consulta y pasa de snake_case a camelCase', async () => {
+      db.query.mockResolvedValueOnce([
+        FILA,
+        {
+          ...FILA,
+          documento_id: 'aaaaaaaa-8888-4777-8666-555555555555',
+          grupo: 'rechazada',
+          razon_social: null,
+          ultimo_error: null,
+          detalle_sii: { estado: 'RCH' },
+        },
+      ]);
+
+      const filas = await service.problemasDeTodos();
+
+      expect(db.query).toHaveBeenCalledTimes(1);
+      expect(filas).toEqual([
+        {
+          documentoId: DOCUMENTO_ID,
+          tenantId: TENANT,
+          tenant: 'Paris',
+          razonSocial: 'Panadería Paris SpA',
+          ambiente: 'certificacion',
+          tipo: 39,
+          folio: 4007,
+          emitidaEl: EMITIDA,
+          grupo: 'atrasada',
+          intentos: 3,
+          ultimoError: 'No hay conexión con el SII',
+          detalleSii: null,
+        },
+        expect.objectContaining({
+          documentoId: 'aaaaaaaa-8888-4777-8666-555555555555',
+          grupo: 'rechazada',
+          razonSocial: null,
+          ultimoError: null,
+          detalleSii: { estado: 'RCH' },
+        }),
+      ]);
+    });
+
+    it('sin boletas con problemas devuelve una lista vacía', async () => {
+      db.query.mockResolvedValueOnce([]);
+
+      await expect(service.problemasDeTodos()).resolves.toEqual([]);
+    });
+
+    it('cruza tenants a propósito, sin parámetros, y filtra lo dado de baja en cada join', async () => {
+      db.query.mockResolvedValueOnce([]);
+      await service.problemasDeTodos();
+
+      const [sql, params] = db.query.mock.calls[0] as [string, unknown[]?];
+      expect(params ?? []).toEqual([]);
+      expect(sql).not.toContain('d.tenant_id =');
+      expect(sql).toContain('d.eliminado_el IS NULL');
+      expect(sql).toContain('t.eliminado_el IS NULL');
+      expect(sql).toContain('rs.eliminado_el IS NULL');
+      expect(sql).toContain('LEFT JOIN razones_sociales rs');
+      expect(sql).toContain(COND_CON_PROBLEMAS);
+      expect(sql).toContain(COND_RECHAZADA);
+      expect(sql).toContain('ORDER BY d.emitido_el, d.folio');
+      expect(sql).toContain('LIMIT 200');
+    });
   });
 });

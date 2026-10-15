@@ -1944,5 +1944,68 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
         conReparos: [],
       });
     });
+
+    // ---- El panel de soporte: /admin/dte/boletas-con-problemas ----------------------------
+
+    interface BoletaSoporteRes {
+      documentoId: string;
+      tenantId: string;
+      tenant: string;
+      razonSocial: string | null;
+      ambiente: string;
+      tipo: number;
+      folio: number;
+      emitidaEl: string;
+      grupo: 'atrasada' | 'rechazada';
+      intentos: number;
+      ultimoError: string | null;
+      detalleSii: unknown;
+    }
+
+    it('GET /admin/dte/boletas-con-problemas: el superadmin ve las atrasadas y rechazadas de otro tenant, sin las demás', async () => {
+      const tokenSuper = await loginComo(ADMIN_FALABELLA, FALABELLA_TENANT_ID);
+      const [paris] = await ds.query<{ nombre: string }[]>(
+        'SELECT nombre FROM tenants WHERE tenant_id = $1',
+        [TENANT_ID],
+      );
+
+      const res = await getCon(tokenSuper, 'admin/dte/boletas-con-problemas');
+
+      expect(res.status).toBe(200);
+      // La respuesta cruza tenants y puede traer filas de otros tests: se busca por documento.
+      const filas = res.body as BoletaSoporteRes[];
+      const de = (b: Sembrada) =>
+        filas.find((f) => f.documentoId === b.documentoId);
+      expect(de(A)).toMatchObject({
+        tenantId: TENANT_ID,
+        tenant: paris.nombre,
+        razonSocial: NOMBRE,
+        tipo: 39,
+        grupo: 'atrasada',
+        detalleSii: null,
+      });
+      expect(de(B)).toMatchObject({
+        tenantId: TENANT_ID,
+        tenant: paris.nombre,
+        razonSocial: NOMBRE,
+        grupo: 'rechazada',
+        detalleSii: { origen: 'sobre', estado: 'RSC' },
+      });
+      expect(typeof de(A)?.folio).toBe('number');
+      expect(typeof de(A)?.intentos).toBe('number');
+      expect(typeof de(A)?.ambiente).toBe('string');
+      expect(new Date(de(A)?.emitidaEl ?? '').getTime()).not.toBeNaN();
+      // Ni la con reparos (C), ni la de hace más de 30 días (D), ni la dada de baja (E), ni la
+      // de hace 10 minutos (F) son un problema para soporte.
+      for (const fuera of [C, D, E, F]) expect(de(fuera)).toBeUndefined();
+    });
+
+    it('GET /admin/dte/boletas-con-problemas: quien no es superadmin recibe 403', async () => {
+      const tokenParis = await loginComo(ADMIN);
+
+      const res = await getCon(tokenParis, 'admin/dte/boletas-con-problemas');
+
+      expect(res.status).toBe(403);
+    });
   });
 });

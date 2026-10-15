@@ -14,6 +14,7 @@ import { ConsultarEnviosJob } from './jobs/consultar-envios.job';
 import { EnviarBoletasJob } from './jobs/enviar-boletas.job';
 import { PerfilFiscalService } from './perfil-fiscal.service';
 import { SiiBoletaCliente } from './sii-boleta.cliente';
+import { SoporteDteController } from './soporte-dte.controller';
 
 @Module({
   imports: [
@@ -26,7 +27,7 @@ import { SiiBoletaCliente } from './sii-boleta.cliente';
       RazonSocial,
     ]),
   ],
-  controllers: [DteController],
+  controllers: [DteController, SoporteDteController],
   providers: [
     PerfilFiscalService,
     CifradoDteService,
