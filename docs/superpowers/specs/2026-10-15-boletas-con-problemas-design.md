@@ -93,7 +93,9 @@ rechazada**. Con reparos es válida y no avisa.
 **Índice nuevo**, porque el conteo del cajero corre después de cada cobro: parcial en
 `dte_documentos (tenant_id, emitido_el)` con
 `WHERE estado IN ('pendiente','enviado','rechazado') AND eliminado_el IS NULL`, con su migración
-(ADR-030). La lista de reparos usa el mismo `tenant_id` y es solo del admin.
+(ADR-030). La lista de reparos usa el mismo `tenant_id` y es solo del admin. Y un segundo índice,
+parcial, en `venta_documentos (dte_documento_id) WHERE dte_documento_id IS NOT NULL`: el cruce de
+la boleta con su venta (§ 6) no tiene hoy ninguno.
 
 ## 6. La tarjeta del admin
 
@@ -111,7 +113,7 @@ vieja. Cada `Fila`:
   tipo: 39 | 41
   folio: number
   emitidaEl: string          // emitido_el
-  total: string              // de la venta, en moneda oficial (Decimal como string)
+  monto: string | null       // venta_documentos.monto: lo que cubre la boleta, en moneda oficial
   motivo: string | null      // en palabras del local, ver abajo
 }
 ```
@@ -130,7 +132,7 @@ vieja. Cada `Fila`:
 
 **La pantalla** (`configuracion/boleta-electronica.vue`): una tarjeta *"Boletas con observaciones
 del SII"* debajo de la de pendientes, con los tres grupos (vacíos no se muestran; todos vacíos
-muestra *"No hay boletas con observaciones"*). Cada fila: fecha, folio, tipo, total, motivo y enlace
+muestra *"No hay boletas con observaciones"*). Cada fila: fecha, folio, tipo, monto, motivo y enlace
 a la venta. Texto fijo por grupo:
 
 - **Atrasadas:** *"El sistema la sigue enviando; no tienes que hacer nada. Si pasa de un día,
@@ -147,8 +149,9 @@ en un `SELECT`), así que no suma una ida a la base. Con la emisión apagada sig
 consulta al interruptor y devuelve `conProblemas: 0`.
 
 `FranjaEmision.vue` (POS, salones y drawer) muestra, si `conProblemas > 0`:
-*"Hay {n} boleta(s) con problemas en el SII: avisa al administrador."* (singular y plural bien
-escritos). Las boletas con reparos no cuentan.
+*"Hay {n} boleta(s) con problemas en el SII: avisa al encargado."* (singular y plural bien
+escritos; "encargado" es el sufijo que ya usan los otros avisos de la franja). Las boletas con
+reparos no cuentan.
 
 ## 8. El panel de soporte (superadmin)
 
@@ -183,8 +186,9 @@ problemas en el SII"* con esa tabla; el detalle de cada fila se despliega. Si no
   - la ruta de soporte: 403 a un admin común, ve dos tenants, no ve lo borrado;
   - los 403 de la ruta del admin para un cajero.
 - **Playwright:** la tarjeta del admin, la franja con el aviso nuevo, y el panel de soporte como
-  superadmin. Los estados se preparan por SQL en la base de prueba (no hay SII de verdad); el
-  e2e de API sí cubre el camino real del job.
+  superadmin. Playwright no llega a la base y no hay SII de verdad, así que las respuestas de las
+  dos rutas se simulan con `page.route` (como los specs de nota de crédito); el contrato real lo
+  fijan los e2e de API, que sí recorren el job.
 - **Mutantes** (revertidos con `cp` y `cmp`): `RLV` leído como desconocido, la ventana de 30 días
   quitada, el conteo del cajero sumando reparos, el guard del superadmin quitado, y la validación
   saltada en el job.
