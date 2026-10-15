@@ -1204,10 +1204,16 @@ se usa en el `LEFT JOIN` y el primero es elegible para el conteo del cajero (un 
 - **e2e contra Postgres** (`backend/test/boleta-desde-la-venta.e2e-spec.ts`, bloque *boletas con
   problemas*): cada grupo con su venta, monto y motivo; una con reparos de hace 31 días y una dada
   de baja que no aparecen; el admin de otro comercio ve las tres listas vacías; `conProblemas` cuenta
-  atrasadas y rechazadas y no reparos ni recientes, y vale 0 con la emisión apagada; el panel de
-  el superadmin, en otro tenant, ve las boletas de Paris, y un admin común recibe 403; el cajero recibe 403 en la lista del admin y la
-  lista del admin da 401 sin sesión. El envío con una boleta que no cumple el esquema, de punta a
-  punta, en `backend/test/dte-cola.e2e-spec.ts`.
+  atrasadas y rechazadas y no reparos ni recientes, y vale 0 con la emisión apagada; en el panel de
+  soporte, el superadmin, en otro tenant, ve las boletas de Paris (con el estado y el último error
+  de su envío), y un admin común recibe 403; el cajero recibe 403 en la lista del admin y la lista
+  del admin da 401 sin sesión. El envío con una boleta que no cumple el esquema, de punta a punta,
+  en `backend/test/dte-cola.e2e-spec.ts`.
+- **Mutantes** (2026-10-15, revertidos con `cp` y `cmp`, medidos contra unitarios y e2e por
+  separado): `RLV` de vuelta a desconocido, los reparos sin la ventana de 30 días, el conteo del
+  cajero sumando reparos, el panel de soporte sin `SuperadminGuard` y el job sin validar el sobre.
+  Los cinco caen. Dos caen en una sola capa: `RLV` solo en `resultado-sii.spec.ts` (ningún e2e
+  hace llegar un `RLV` del SII falso) y el guard solo en el e2e (el controller no tiene unitario).
 - **Playwright:** `frontend/e2e/configuracion/boletas-con-problemas.spec.ts` (la tarjeta del admin),
   `frontend/e2e/ventas/boleta-electronica-pos.spec.ts` (la franja) y
   `frontend/e2e/tenants/soporte-boletas.spec.ts` (el panel, como superadmin). Playwright no llega a la
