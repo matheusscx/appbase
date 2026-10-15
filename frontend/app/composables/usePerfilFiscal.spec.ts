@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  archivoABase64, etiquetaAmbiente, etiquetaTipoBoleta, etiquetaTipoCorta, formatoFecha, pistaDelGrupo, resumenEmision, textoParaEmitir,
+  archivoABase64, etiquetaAmbiente, etiquetaTipoBoleta, etiquetaGrupoSoporte, etiquetaTipoCorta, formatoFecha, pistaDelGrupo, resumenEmision, textoParaEmitir,
 } from './usePerfilFiscal'
 
 describe('archivoABase64', () => {
@@ -33,6 +33,13 @@ describe('etiquetaTipoCorta', () => {
   it('dice Afecta o Exenta, sin el código del SII', () => {
     expect(etiquetaTipoCorta(39)).toBe('Afecta')
     expect(etiquetaTipoCorta(41)).toBe('Exenta')
+  })
+})
+
+describe('etiquetaGrupoSoporte', () => {
+  it('atrasada es aviso y rechazada es error', () => {
+    expect(etiquetaGrupoSoporte('atrasada')).toEqual({ label: 'Atrasada', color: 'warning' })
+    expect(etiquetaGrupoSoporte('rechazada')).toEqual({ label: 'Rechazada', color: 'error' })
   })
 })
 

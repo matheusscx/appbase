@@ -93,6 +93,39 @@ export interface BoletasConProblemas {
   conReparos: BoletaConProblema[]
 }
 
+/** En qué quedó una boleta que el panel de soporte ve: sin acuse del SII todavía, o rechazada. */
+export type GrupoProblemaSoporte = 'atrasada' | 'rechazada'
+
+/**
+ * Una fila de `GET /admin/dte/boletas-con-problemas` (panel de soporte, todos los locales). A
+ * diferencia de `BoletaConProblema`, que es la vista de un local, trae el local y su ambiente.
+ * `emitidaEl` es un instante ISO; `detalleSii` viene del SII sin validar, por eso `unknown`.
+ */
+export interface BoletaConProblemaSoporte {
+  documentoId: string
+  tenantId: string
+  tenant: string
+  razonSocial: string | null
+  ambiente: string
+  tipo: TipoBoleta
+  folio: number
+  emitidaEl: string
+  grupo: GrupoProblemaSoporte
+  intentos: number
+  ultimoError: string | null
+  detalleSii: unknown
+}
+
+const ETIQUETA_GRUPO_SOPORTE: Record<GrupoProblemaSoporte, { label: string, color: 'warning' | 'error' }> = {
+  atrasada: { label: 'Atrasada', color: 'warning' },
+  rechazada: { label: 'Rechazada', color: 'error' },
+}
+
+/** El estado de una boleta del panel de soporte: su palabra y el color del `UBadge`. */
+export function etiquetaGrupoSoporte(grupo: GrupoProblemaSoporte): { label: string, color: 'warning' | 'error' } {
+  return ETIQUETA_GRUPO_SOPORTE[grupo]
+}
+
 /** Lo que responde `POST /dte/emitir-pendientes`. */
 export interface ResultadoEmitirPendientes {
   emitidas: number
