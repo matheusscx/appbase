@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import {
-  archivoABase64, etiquetaAmbiente, etiquetaTipoBoleta, formatoFecha, pistaDelGrupo, resumenEmision, textoParaEmitir,
+  archivoABase64, etiquetaAmbiente, etiquetaTipoBoleta, etiquetaTipoCorta, formatoFecha, pistaDelGrupo, resumenEmision, textoParaEmitir,
 } from './usePerfilFiscal'
 
 describe('archivoABase64', () => {
@@ -26,6 +26,13 @@ describe('etiquetaTipoBoleta', () => {
   it('nombra los dos tipos de boleta', () => {
     expect(etiquetaTipoBoleta(39)).toBe('Boleta (39)')
     expect(etiquetaTipoBoleta(41)).toBe('Boleta exenta (41)')
+  })
+})
+
+describe('etiquetaTipoCorta', () => {
+  it('dice Afecta o Exenta, sin el código del SII', () => {
+    expect(etiquetaTipoCorta(39)).toBe('Afecta')
+    expect(etiquetaTipoCorta(41)).toBe('Exenta')
   })
 })
 

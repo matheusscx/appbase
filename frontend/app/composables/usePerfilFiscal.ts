@@ -72,6 +72,27 @@ export interface BoletaSinEmitir {
   grupo: GrupoErrorEmision
 }
 
+/**
+ * Una fila de `GET /dte/boletas-con-problemas`. Las fechas llegan como instante ISO y el monto
+ * como string decimal (nunca `number`); `ventaId`, `monto` y `motivo` pueden venir `null`.
+ */
+export interface BoletaConProblema {
+  documentoId: string
+  ventaId: string | null
+  tipo: TipoBoleta
+  folio: number
+  emitidaEl: string
+  monto: string | null
+  motivo: string | null
+}
+
+/** Lo que responde `GET /dte/boletas-con-problemas`: un grupo por cada tipo de observación. */
+export interface BoletasConProblemas {
+  atrasadas: BoletaConProblema[]
+  rechazadas: BoletaConProblema[]
+  conReparos: BoletaConProblema[]
+}
+
 /** Lo que responde `POST /dte/emitir-pendientes`. */
 export interface ResultadoEmitirPendientes {
   emitidas: number
@@ -117,6 +138,20 @@ const ETIQUETA_TIPO: Record<TipoBoleta, string> = {
 // dos se auto-importan: con el mismo nombre ganaba uno en silencio.
 export function etiquetaTipoBoleta(tipo: TipoBoleta): string {
   return ETIQUETA_TIPO[tipo]
+}
+
+const ETIQUETA_TIPO_CORTA: Record<TipoBoleta, string> = {
+  39: 'Afecta',
+  41: 'Exenta',
+}
+
+/**
+ * El tipo en una sola palabra, para la columna "Tipo" de una tabla de boletas ya identificadas por
+ * su folio. Se distingue de `etiquetaTipoBoleta` ("Boleta (39)", "Boleta exenta (41)"), que nombra
+ * el documento entero con su código del SII y sirve donde el tipo es el sujeto (folios, avisos).
+ */
+export function etiquetaTipoCorta(tipo: TipoBoleta): string {
+  return ETIQUETA_TIPO_CORTA[tipo]
 }
 
 const ETIQUETA_AMBIENTE: Record<AmbienteSii, string> = {

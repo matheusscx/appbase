@@ -57,6 +57,35 @@ let llamadas: { url: string, method: string, body?: Record<string, unknown> }[] 
 let getsBuenos: number | null = null
 let toasts: { title: string, color?: string }[] = []
 let sinEmitir: BoletaSinEmitir[] = []
+interface FilaConProblema {
+  documentoId: string
+  ventaId: string | null
+  tipo: 39 | 41
+  folio: number
+  emitidaEl: string
+  monto: string | null
+  motivo: string | null
+}
+let conProblemas: { atrasadas: FilaConProblema[], rechazadas: FilaConProblema[], conReparos: FilaConProblema[] } = {
+  atrasadas: [],
+  rechazadas: [],
+  conReparos: [],
+}
+/** Si es `true`, `GET /dte/boletas-con-problemas` falla. */
+let fallaConProblemas = false
+
+function filaProblema(over: Partial<FilaConProblema> = {}): FilaConProblema {
+  return {
+    documentoId: 'doc-1',
+    ventaId: 'venta-9',
+    tipo: 39,
+    folio: 1234,
+    emitidaEl: '2026-10-13T15:00:00.000Z',
+    monto: '11900',
+    motivo: 'El SII no la ha acusado',
+    ...over,
+  }
+}
 /** Lo que contesta `POST /dte/emitir-pendientes`; si es una promesa, la respuesta queda en el aire. */
 let respuestaEmitir: Promise<ResultadoEmitirPendientes> | ResultadoEmitirPendientes = { emitidas: 0, pendientes: 0, errores: [] }
 /** Si no es `null`, `PATCH /dte/emision` falla con un 400 de este mensaje. */
@@ -99,6 +128,11 @@ mockNuxtImport('useApiFetch', () => {
       perfil.emisionActiva = opts?.body?.activa as boolean
       return Promise.resolve({ emisionActiva: perfil.emisionActiva })
     }
+    if (url.endsWith('/dte/boletas-con-problemas')) {
+      return fallaConProblemas
+        ? Promise.reject(Object.assign(new Error('500'), { data: { message: 'No se pudo leer' } }))
+        : Promise.resolve(structuredClone(conProblemas))
+    }
     if (url.endsWith('/dte/boletas-sin-emitir')) return Promise.resolve(structuredClone(sinEmitir))
     if (url.endsWith('/dte/emitir-pendientes')) return Promise.resolve(respuestaEmitir)
     return Promise.resolve({})
@@ -117,6 +151,8 @@ beforeEach(() => {
   getsBuenos = null
   toasts = []
   sinEmitir = []
+  conProblemas = { atrasadas: [], rechazadas: [], conReparos: [] }
+  fallaConProblemas = false
   respuestaEmitir = { emitidas: 0, pendientes: 0, errores: [] }
   rechazoEmision = null
 })
@@ -482,6 +518,139 @@ describe('boletas sin emitir', () => {
     terminar({ emitidas: 1, pendientes: 0, errores: [] })
     await new Promise(r => setTimeout(r, 50))
     expect(wrapper.find('[data-qa="resultado-emision"]').text()).toContain('1 emitida')
+    wrapper.unmount()
+  })
+})
+
+describe('boletas con observaciones del SII', () => {
+  it('cada grupo con datos muestra su subtítulo, su texto fijo, el motivo y el tipo', async () => {
+    conProblemas = {
+      atrasadas: [filaProblema({ folio: 101, motivo: 'Sigue sin respuesta del SII' })],
+      rechazadas: [filaProblema({ documentoId: 'doc-2', folio: 102, tipo: 41, motivo: 'El SII la rechazó' })],
+      conReparos: [filaProblema({ documentoId: 'doc-3', folio: 103, motivo: 'Dirección sin comuna' })],
+    }
+
+    const wrapper = await montar()
+    const tarjeta = wrapper.find('[data-qa="boletas-con-problemas"]')
+    const texto = tarjeta.text()
+
+    expect(texto).toContain('Boletas con observaciones del SII')
+    expect(texto).toContain('Atrasadas')
+    expect(texto).toContain('El sistema la sigue enviando; no tienes que hacer nada. Si pasa de un día, escribe a soporte con el folio.')
+    expect(texto).toContain('Rechazadas')
+    expect(texto).toContain('No la vuelvas a emitir: escribe a soporte con el folio.')
+    expect(texto).toContain('Con reparos (últimos 30 días)')
+    expect(texto).toContain('Es válida. Revisa el aviso del SII para corregirlo en las próximas boletas.')
+    expect(tarjeta.find('[data-qa="grupo-atrasadas"]').text()).toContain('Sigue sin respuesta del SII')
+    expect(tarjeta.find('[data-qa="grupo-rechazadas"]').text()).toContain('El SII la rechazó')
+    expect(tarjeta.find('[data-qa="grupo-con-reparos"]').text()).toContain('Dirección sin comuna')
+    expect(tarjeta.find('[data-qa="grupo-atrasadas"]').text()).toContain('Afecta')
+    expect(tarjeta.find('[data-qa="grupo-rechazadas"]').text()).toContain('Exenta')
+    expect(tarjeta.find('[data-qa="grupo-atrasadas"] tbody tr').text()).toContain('13-10-2026')
+    expect(tarjeta.find('[data-qa="grupo-atrasadas"] tbody tr').text()).toContain('$11900')
+    expect(tarjeta.find('[data-qa="grupo-atrasadas"] tbody tr').text()).toContain('101')
+    expect(tarjeta.find('[data-qa="sin-observaciones"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('un grupo sin filas no se pinta', async () => {
+    conProblemas = { atrasadas: [], rechazadas: [filaProblema()], conReparos: [] }
+
+    const wrapper = await montar()
+    const tarjeta = wrapper.find('[data-qa="boletas-con-problemas"]')
+
+    expect(tarjeta.find('[data-qa="grupo-rechazadas"]').exists()).toBe(true)
+    expect(tarjeta.find('[data-qa="grupo-atrasadas"]').exists()).toBe(false)
+    expect(tarjeta.find('[data-qa="grupo-con-reparos"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('con los tres grupos vacíos dice que no hay observaciones', async () => {
+    const wrapper = await montar()
+
+    const tarjeta = wrapper.find('[data-qa="boletas-con-problemas"]')
+    expect(tarjeta.find('[data-qa="sin-observaciones"]').text()).toBe('No hay boletas con observaciones.')
+    expect(tarjeta.text()).not.toContain('Atrasadas')
+    wrapper.unmount()
+  })
+
+  it('la fila con venta enlaza a ella; la que no tiene venta no muestra el enlace', async () => {
+    conProblemas = {
+      atrasadas: [
+        filaProblema({ ventaId: 'venta-9' }),
+        filaProblema({ documentoId: 'doc-2', ventaId: null, folio: 555 }),
+      ],
+      rechazadas: [],
+      conReparos: [],
+    }
+
+    const wrapper = await montar()
+
+    const filas = wrapper.findAll('[data-qa="grupo-atrasadas"] tbody tr')
+    expect(filas).toHaveLength(2)
+    expect(filas[0]!.find('a').attributes('href')).toBe('/ventas?venta=venta-9')
+    expect(filas[1]!.find('a').exists()).toBe(false)
+    expect(filas[1]!.text()).not.toContain('Ver venta')
+    wrapper.unmount()
+  })
+
+  it('el monto o el motivo que no vienen se pintan como un guion', async () => {
+    conProblemas = {
+      atrasadas: [filaProblema({ monto: null, motivo: null })],
+      rechazadas: [],
+      conReparos: [],
+    }
+
+    const wrapper = await montar()
+
+    const fila = wrapper.find('[data-qa="grupo-atrasadas"] tbody tr')
+    const celdas = fila.findAll('td').map(td => td.text())
+    expect(celdas[3]).toBe('—')
+    expect(celdas[4]).toBe('—')
+    expect(fila.text()).not.toContain('$null')
+    wrapper.unmount()
+  })
+
+  it('si la lectura falla avisa con un toast de error y la pantalla sigue', async () => {
+    fallaConProblemas = true
+
+    const wrapper = await montar()
+
+    expect(toasts.some(t => t.color === 'error' && t.title === 'No se pudo leer')).toBe(true)
+    expect(wrapper.text()).toContain('Boletas sin emitir')
+    // Un fallo no es "todo bien": la tarjeta lo dice y no afirma que no hay observaciones.
+    const tarjeta = wrapper.find('[data-qa="boletas-con-problemas"]')
+    expect(tarjeta.find('[data-qa="problemas-error"]').text()).toBe('No se pudo leer el estado de las boletas en el SII.')
+    expect(tarjeta.text()).not.toContain('No hay boletas con observaciones.')
+    expect(tarjeta.find('[data-qa="sin-observaciones"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('el error baja cuando una lectura posterior sale bien', async () => {
+    fallaConProblemas = true
+    sinEmitir = [boleta()]
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="problemas-error"]').exists()).toBe(true)
+
+    fallaConProblemas = false
+    await wrapper.findAll('button').find(b => b.text().includes('Emitir pendientes'))!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(wrapper.find('[data-qa="problemas-error"]').exists()).toBe(false)
+    expect(wrapper.find('[data-qa="sin-observaciones"]').text()).toBe('No hay boletas con observaciones.')
+    wrapper.unmount()
+  })
+
+  it('se recarga junto con la lista de sin emitir al emitir pendientes', async () => {
+    sinEmitir = [boleta()]
+    const wrapper = await montar()
+    const pedidasAntes = llamadas.filter(l => l.url.endsWith('/dte/boletas-con-problemas')).length
+    expect(pedidasAntes).toBe(1)
+
+    await wrapper.findAll('button').find(b => b.text().includes('Emitir pendientes'))!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(llamadas.filter(l => l.url.endsWith('/dte/boletas-con-problemas')).length).toBe(pedidasAntes + 1)
     wrapper.unmount()
   })
 })

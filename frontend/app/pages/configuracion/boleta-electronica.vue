@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import type {
-  AmbienteSii, BoletaSinEmitir, CafPerfil, PerfilFiscal, ResultadoEmitirPendientes,
+  AmbienteSii, BoletaConProblema, BoletaSinEmitir, BoletasConProblemas, CafPerfil, PerfilFiscal, ResultadoEmitirPendientes,
 } from '~/composables/usePerfilFiscal'
 
 // Configuración del tenant, no una operación de un módulo: los endpoints de `/dte` que usa van
@@ -175,8 +175,64 @@ async function emitirPendientes() {
   finally {
     emitiendo.value = false
   }
-  await Promise.all([cargarSinEmitir(), cargar()])
+  await Promise.all([cargarSinEmitir(), cargarConProblemas(), cargar()])
 }
+
+const conProblemas = ref<BoletasConProblemas>({ atrasadas: [], rechazadas: [], conReparos: [] })
+const cargandoProblemas = ref(true)
+/** Una lectura fallida no es "no hay problemas": sin esto la tarjeta diría que todo está bien. */
+const errorProblemas = ref(false)
+
+async function cargarConProblemas() {
+  try {
+    conProblemas.value = await useApiFetch<BoletasConProblemas>(`${apiUrl}/dte/boletas-con-problemas`)
+    errorProblemas.value = false
+  }
+  catch (e: unknown) {
+    errorProblemas.value = true
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar las boletas con observaciones del SII'), color: 'error' })
+  }
+  finally {
+    cargandoProblemas.value = false
+  }
+}
+
+const columnasConProblemas: TableColumn<BoletaConProblema>[] = [
+  { id: 'fecha', header: 'Fecha' },
+  { accessorKey: 'folio', header: 'Folio' },
+  { id: 'tipo', header: 'Tipo' },
+  { id: 'monto', header: 'Monto', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'motivo', header: 'Motivo' },
+  { id: 'venta', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
+]
+
+/** Qué hace el dueño con cada grupo: el texto es fijo, lo que cambia es el motivo de cada fila. */
+const gruposConProblemas = computed(() => {
+  const c = conProblemas.value
+  return [
+    {
+      clave: 'atrasadas',
+      qa: 'grupo-atrasadas',
+      titulo: 'Atrasadas',
+      texto: 'El sistema la sigue enviando; no tienes que hacer nada. Si pasa de un día, escribe a soporte con el folio.',
+      filas: c.atrasadas,
+    },
+    {
+      clave: 'rechazadas',
+      qa: 'grupo-rechazadas',
+      titulo: 'Rechazadas',
+      texto: 'No la vuelvas a emitir: escribe a soporte con el folio.',
+      filas: c.rechazadas,
+    },
+    {
+      clave: 'conReparos',
+      qa: 'grupo-con-reparos',
+      titulo: 'Con reparos (últimos 30 días)',
+      texto: 'Es válida. Revisa el aviso del SII para corregirlo en las próximas boletas.',
+      filas: c.conReparos,
+    },
+  ].filter(g => g.filas.length > 0)
+})
 
 const columnasSinEmitir: TableColumn<BoletaSinEmitir>[] = [
   { id: 'fecha', header: 'Fecha' },
@@ -330,6 +386,7 @@ const columns: TableColumn<CafPerfil>[] = [
 onMounted(() => {
   void cargar()
   void cargarSinEmitir()
+  void cargarConProblemas()
 })
 </script>
 
@@ -676,6 +733,75 @@ onMounted(() => {
               </div>
             </template>
           </UTable>
+        </div>
+      </UCard>
+
+      <UCard data-qa="boletas-con-problemas">
+        <template #header>
+          <h3 class="font-semibold text-default">
+            Boletas con observaciones del SII
+          </h3>
+        </template>
+
+        <div class="space-y-6">
+          <section
+            v-for="g in gruposConProblemas"
+            :key="g.clave"
+            :data-qa="g.qa"
+            class="space-y-2"
+          >
+            <div>
+              <h4 class="text-sm font-medium text-default">
+                {{ g.titulo }}
+              </h4>
+              <p class="text-sm text-muted">
+                {{ g.texto }}
+              </p>
+            </div>
+            <UTable :data="g.filas" :columns="columnasConProblemas">
+              <template #fecha-cell="{ row }">
+                {{ formatoFecha(row.original.emitidaEl) }}
+              </template>
+              <template #tipo-cell="{ row }">
+                {{ etiquetaTipoCorta(row.original.tipo) }}
+              </template>
+              <template #monto-cell="{ row }">
+                {{ row.original.monto === null ? '—' : formatMonto(row.original.monto) }}
+              </template>
+              <template #motivo-cell="{ row }">
+                <p class="text-default whitespace-normal">
+                  {{ row.original.motivo ?? '—' }}
+                </p>
+              </template>
+              <template #venta-cell="{ row }">
+                <UButton
+                  v-if="row.original.ventaId"
+                  :to="rutaVenta(row.original.ventaId)"
+                  color="neutral"
+                  variant="ghost"
+                  size="sm"
+                  icon="i-lucide-external-link"
+                >
+                  Ver venta
+                </UButton>
+              </template>
+            </UTable>
+          </section>
+
+          <p
+            v-if="errorProblemas"
+            class="py-6 text-center text-sm text-muted"
+            data-qa="problemas-error"
+          >
+            No se pudo leer el estado de las boletas en el SII.
+          </p>
+          <p
+            v-else-if="!cargandoProblemas && !gruposConProblemas.length"
+            class="py-6 text-center text-sm text-muted"
+            data-qa="sin-observaciones"
+          >
+            No hay boletas con observaciones.
+          </p>
         </div>
       </UCard>
     </template>

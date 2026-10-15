@@ -235,3 +235,18 @@ test('la cajera cobra con la emisión prendida: sin error, con folio, y la franj
   expect(await cerrarCaja(request, tokenVendedor, cajaId!, TOTAL_VENTA_MONTO)).toBe('cerrada')
   cajaId = undefined
 })
+
+// ⚠️ Playwright no llega a la base: `GET /dte/estado-emision` va simulado con `page.route` para ver
+// lo que el POS pinta cuando el servidor cuenta boletas con problemas en el SII. El contrato real
+// de ese conteo lo fija el e2e de la API en `backend/test/`.
+test('la franja avisa las boletas con problemas en el SII', async ({ page }) => {
+  await page.route('**/api/dte/estado-emision', route => route.fulfill({
+    json: { activa: true, avisos: [], sinEmitir: 0, conProblemas: 2 },
+  }))
+
+  await entrarComo(page, VENDEDOR.email, VENDEDOR.password)
+  await page.goto('/ventas/pos')
+
+  await expect(page.locator('[data-qa="franja-emision"]'))
+    .toContainText('Hay 2 boletas con problemas en el SII: avisa al encargado')
+})
