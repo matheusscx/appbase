@@ -650,11 +650,13 @@ comparan como número.
 - El detalle completo del SII queda en `respuesta_sii` del envío; en la boleta, la entrada que le
   tocó.
 
-#### Decisiones provisionales, pendientes del owner (2026-10-14)
+#### Decidido por el owner (2026-10-14): lo que no entendemos no se acepta
 
-Estas dos reglas las tomó el agente al construir la cola, **no el owner**, y quedan pendientes de
-su confirmación. La razón común: nunca aceptar por ausencia cuando el SII habló de algo que no
-entendimos.
+El agente las tomó como provisionales al construir la cola, porque se apartan de la spec ("ausente →
+aceptado"), y **el owner las confirmó el 2026-10-14** por AskUserQuestion, eligiéndolas frente a
+"aceptarlas como decía la spec" y "el código raro cuenta como reparos". La razón: nunca aceptar por
+ausencia cuando el SII habló de algo que no entendimos; el costo es que, en el caso raro, alguien
+revisa esas boletas a mano.
 
 - **Entrada con un código desconocido:** una entrada de `detalle_rep_rech` cuyo código no es
   `RCH` ni `RPR` **no es un reparo** (`reparos` es "aceptada con observaciones"). La boleta queda
@@ -665,9 +667,6 @@ entendimos.
   propia no pasan a `aceptado`**: quedan `enviado` con el aviso. Las que sí tienen entrada se
   reparten igual. Un código de sobre fuera de los conocidos deja `ultimo_error` y se consulta sin
   plazo.
-- **Si está mal:** el owner elige `reparos` o `rechazado` para esas entradas, o `aceptado` por
-  ausencia; es una línea en `resultado-sii.ts`. El costo mientras tanto es boletas atrasadas a la
-  vista que alguien revisa.
 
 ### Configuración: `DTE_COLA_AUTOMATICA`
 
@@ -707,7 +706,7 @@ cd backend && npx jest --config ./test/jest-e2e.json test/dte-cola.e2e-spec.ts
   se reenvían. El SII contesta `RPT` y **el `trackid` del primer envío se pierde**: esas boletas
   quedan `enviado` sin resultado, atrasadas a la vista. Lo resuelve la consulta por boleta
   individual, que queda fuera de este subproyecto.
-- **Boletas que quedan `enviado` por observaciones (las decisiones provisionales de arriba) o por un 404 de 24 horas requieren
+- **Boletas que quedan `enviado` por observaciones (la decisión del owner de arriba) o por un 404 de 24 horas requieren
   revisión de una persona.** Hoy el motivo está en `ultimo_error` del envío y en `respuesta_sii`; la
   pantalla y el aviso son del subproyecto 4.
 - **Un código de sobre desconocido se consulta sin plazo**, con el aviso en `ultimo_error`. Si el

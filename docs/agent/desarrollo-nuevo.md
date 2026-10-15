@@ -409,10 +409,10 @@ es parte del enunciado y viaja con ella.
 
   **Lo que dejó la cola de envío (detalle en `features/emision-electronica.md`, § "Lo que queda
   abierto" de Envío al SII):**
-  - ⏳ **decisión provisional, pendiente del owner:** un código del SII que no entendemos (en una
-    boleta de `detalle_rep_rech` o en el sobre) nunca da por aceptada ni rechazada una boleta: queda
-    `enviado`, atrasada a la vista, con el aviso en `ultimo_error` del envío. Si el owner prefiere
-    `reparos`, `rechazado` o `aceptado` por ausencia, es una línea en `resultado-sii.ts`;
+  - ✅ **decidido por el owner (2026-10-14, por AskUserQuestion):** un código del SII que no
+    entendemos (en una boleta de `detalle_rep_rech` o en el sobre) nunca da por aceptada ni
+    rechazada una boleta: queda `enviado`, atrasada a la vista, con el aviso en `ultimo_error` del
+    envío;
   - para el subproyecto 4: la **pantalla y el aviso** de las boletas atrasadas y rechazadas
     (`estado IN ('pendiente','enviado') AND emitido_el < now() - 1 hora`, o `rechazado`), incluidas
     las que quedan `enviado` por observaciones o por un 404 de 24 horas y las que se reenviaron tras
