@@ -12,9 +12,23 @@
 //   2. La papelera (`docs/features/papelera.md`): el toggle, la carrera de
 //      `cargar()`, el `eliminar()` que respeta el toggle, y el doble submit
 //      del restaurar.
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Impresoras from './impresoras.vue'
+
+// `imprimirPrueba` habla con QZ Tray; acá solo interesa que se le pida imprimir.
+const { qzMock } = vi.hoisted(() => ({
+  qzMock: {
+    websocket: { isActive: () => true, connect: vi.fn(), disconnect: vi.fn() },
+    configs: { create: vi.fn(() => ({})) },
+    security: { setCertificatePromise: () => {}, setSignatureAlgorithm: () => {}, setSignaturePromise: () => {} },
+    print: vi.fn(() => Promise.resolve()),
+  },
+}))
+vi.mock('qz-tray', () => ({ default: qzMock }))
+
+const toasts: { title: string, actions?: { label: string, onClick: () => void }[] }[] = []
+mockNuxtImport('useToast', () => () => ({ add: (t: { title: string }) => { toasts.push(t) } }))
 
 const IMPRESORA_ID = 'imp-1'
 const BORRADO_EL = '2026-08-01T21:00:00.000Z'
@@ -95,7 +109,7 @@ let postsCrear: unknown[] = []
 let restaurarRetenido: Promise<unknown> | null = null
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string }) => {
+  return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string' || !url.includes('/impresoras')) {
       return Promise.resolve([])
     }
@@ -108,6 +122,11 @@ mockNuxtImport('useApiFetch', () => {
         imp.eliminadoPorNombre = 'admin.paris'
       }
       return Promise.resolve(undefined)
+    }
+    if (method === 'PATCH') {
+      const imp = impresorasBackend.find(x => url.endsWith(`/${x.id}`))
+      if (imp) Object.assign(imp, opts?.body)
+      return Promise.resolve({ ...imp })
     }
     if (method === 'POST' && !url.endsWith('/restaurar')) {
       postsCrear.push(opts)
@@ -146,19 +165,22 @@ async function montar() {
 }
 
 function tieneBoton(wrapper: Awaited<ReturnType<typeof montar>>, texto: string) {
-  return wrapper.findAll('button').some(b => b.text().includes(texto))
+  return wrapper.findAll('button').some(b => b.text().includes(texto) && b.attributes('disabled') === undefined)
 }
 
 /**
- * Por `title`, no por la clase del icono: el icono lo renderiza `UIcon` en un
- * hijo y en el entorno de test no siempre resuelve, así que consultarlo ataría
- * el test al bundle de iconos en vez de al control.
+ * Botones de fila habilitados con ese nombre accesible. Sin permiso el botón sigue ahí, apagado y
+ * con el motivo en el `title` (auditoría UX 07.22); "habilitado" es lo que cuenta como "puede".
  */
 function cuentaPorTitulo(
   wrapper: Awaited<ReturnType<typeof montar>>,
-  title: string,
+  nombre: string,
 ) {
-  return wrapper.findAll(`[title="${title}"]`).length
+  return wrapper.findAll(`button[aria-label="${nombre}"]:not([disabled])`).length
+}
+
+function botonesApagados(wrapper: Awaited<ReturnType<typeof montar>>, nombre: string) {
+  return wrapper.findAll(`button[aria-label="${nombre}"][disabled]`)
 }
 
 async function activarVerEliminados(wrapper: Awaited<ReturnType<typeof montar>>) {
@@ -225,7 +247,7 @@ describe('impresoras — cada control con el permiso de SU endpoint', () => {
     reset()
   })
 
-  it('solo lectura: ni crear, ni editar, ni eliminar', async () => {
+  it('solo lectura: crear, editar y eliminar quedan apagados y dicen qué permiso falta', async () => {
     esAdmin = false
     permisos = ['Impresoras:Leer']
 
@@ -234,11 +256,16 @@ describe('impresoras — cada control con el permiso de SU endpoint', () => {
     expect(tieneBoton(wrapper, 'Nueva impresora')).toBe(false)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
+    // 07.22: no desaparecen; el motivo está en el `title`.
+    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nueva impresora'))
+    expect(nuevo?.attributes('title')).toBe('Necesitas el permiso Crear en Impresoras')
+    expect(botonesApagados(wrapper, 'Editar')[0]?.attributes('title')).toBe('Necesitas el permiso Actualizar en Impresoras')
+    expect(botonesApagados(wrapper, 'Eliminar')[0]?.attributes('title')).toBe('Necesitas el permiso Eliminar en Impresoras')
     // La tabla sigue cargando: el gate es de escritura, no de lectura.
     expect(wrapper.text()).toContain('Cocina')
   })
 
-  it('solo `Crear`: aparece el alta y NADA más', async () => {
+  it('solo `Crear`: se habilita el alta y NADA más', async () => {
     esAdmin = false
     permisos = ['Impresoras:Leer', 'Impresoras:Crear']
 
@@ -249,7 +276,7 @@ describe('impresoras — cada control con el permiso de SU endpoint', () => {
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
   })
 
-  it('solo `Actualizar`: aparece editar SIN aparecer crear ni eliminar', async () => {
+  it('solo `Actualizar`: se habilita editar SIN habilitar crear ni eliminar', async () => {
     esAdmin = false
     permisos = ['Impresoras:Leer', 'Impresoras:Actualizar']
 
@@ -260,7 +287,7 @@ describe('impresoras — cada control con el permiso de SU endpoint', () => {
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
   })
 
-  it('solo `Eliminar`: aparece la papelera y nada más', async () => {
+  it('solo `Eliminar`: se habilita la papelera y el borrado, y nada más', async () => {
     esAdmin = false
     permisos = ['Impresoras:Leer', 'Impresoras:Eliminar']
 
@@ -271,7 +298,7 @@ describe('impresoras — cada control con el permiso de SU endpoint', () => {
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBeGreaterThan(0)
   })
 
-  it('el admin del tenant ve los tres en un módulo que su tenant contrató', async () => {
+  it('el admin del tenant ve los tres habilitados en un módulo que su tenant contrató', async () => {
     esAdmin = true
     permisos = ADMIN_IMPRESORAS
 
@@ -282,7 +309,7 @@ describe('impresoras — cada control con el permiso de SU endpoint', () => {
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBeGreaterThan(0)
   })
 
-  it('el admin de un tenant que no contrató Impresoras no ve crear, editar ni eliminar', async () => {
+  it('el admin de un tenant que no contrató Impresoras no puede crear, editar ni eliminar', async () => {
     esAdmin = true
     permisos = ['Paquetería:Leer']
 
@@ -530,6 +557,140 @@ describe('impresoras — el alta valida al enviar', () => {
 
     expect(postsCrear).toHaveLength(0)
     expect(errores()).toEqual(['Escribe el nombre', 'Escribe la dirección IP o el nombre de la impresora'])
+    wrapper.unmount()
+  })
+})
+
+// 07.17 / 07.12 / 07.35
+describe('impresoras — host, prueba, nombres y vacío', () => {
+  beforeEach(() => {
+    impresorasBackend = [impresora()]
+    reset()
+    toasts.length = 0
+    qzMock.print.mockClear()
+    qzMock.configs.create.mockClear()
+    esAdmin = true
+    permisos = ADMIN_IMPRESORAS
+    document.body.innerHTML = ''
+  })
+
+  const espera = (ms = 30) => new Promise(r => setTimeout(r, ms))
+  async function abrirNueva(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await wrapper.findAll('button').find(b => b.text().includes('Nueva impresora'))!.trigger('click')
+    await espera()
+  }
+  function escribir(placeholder: string, valor: string) {
+    const input = document.querySelector<HTMLInputElement>(`#impresora-form input[placeholder="${placeholder}"]`)!
+    input.value = valor
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  }
+  async function enviar() {
+    document.querySelector('#impresora-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await espera()
+  }
+  const errores = () => [...document.querySelectorAll('#impresora-form [data-slot="error"]')].map(e => e.textContent?.trim())
+
+  it('un host mal escrito se marca junto al campo y no se manda', async () => {
+    const wrapper = await montar()
+    await abrirNueva(wrapper)
+    escribir('Cocina', 'Cocina')
+    escribir('192.168.1.50', '999.1.1.1')
+    await enviar()
+
+    expect(postsCrear).toHaveLength(0)
+    expect(errores()).toEqual(['Escribe una IP como 192.168.1.50 o un nombre como cocina.local'])
+    wrapper.unmount()
+  })
+
+  it('el campo "Rol" se llama "Para qué se usa"', async () => {
+    const wrapper = await montar()
+    await abrirNueva(wrapper)
+    const etiquetas = [...document.querySelectorAll('#impresora-form label')].map(l => l.textContent?.trim())
+    expect(etiquetas).toContain('Para qué se usa')
+    expect(etiquetas).not.toContain('Rol')
+    wrapper.unmount()
+  })
+
+  it('"Imprimir prueba" de la fila manda una hoja a esa impresora y avisa', async () => {
+    const wrapper = await montar()
+    await wrapper.find('button[aria-label="Imprimir prueba en Cocina"]').trigger('click')
+    await espera(50)
+
+    expect(qzMock.print).toHaveBeenCalledTimes(1)
+    expect(qzMock.configs.create).toHaveBeenCalledWith({ host: '192.168.1.50', port: 9100 }, expect.anything())
+    expect(toasts.map(t => t.title)).toContain('Prueba enviada a Cocina')
+    wrapper.unmount()
+  })
+
+  it('"Imprimir prueba" del panel prueba lo que está escrito, sin guardar', async () => {
+    const wrapper = await montar()
+    await abrirNueva(wrapper)
+    escribir('Cocina', 'Barra')
+    escribir('192.168.1.50', '10.0.0.7')
+    const boton = [...document.querySelectorAll('button')].find(b => b.textContent?.includes('Imprimir prueba'))!
+    boton.click()
+    await espera(50)
+
+    expect(qzMock.configs.create).toHaveBeenCalledWith({ host: '10.0.0.7', port: 9100 }, expect.anything())
+    expect(postsCrear).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('"Imprimir prueba" con un host mal escrito marca el campo y no imprime', async () => {
+    const wrapper = await montar()
+    await abrirNueva(wrapper)
+    escribir('192.168.1.50', '999.1.1.1')
+    const boton = [...document.querySelectorAll('button')].find(b => b.textContent?.includes('Imprimir prueba'))!
+    boton.click()
+    await espera(50)
+
+    expect(qzMock.print).not.toHaveBeenCalled()
+    expect(errores()).toEqual(['Escribe una IP como 192.168.1.50 o un nombre como cocina.local'])
+    wrapper.unmount()
+  })
+
+  it('apagar una impresora avisa con "Deshacer", sin pedir confirmación', async () => {
+    const wrapper = await montar()
+    await wrapper.find('[aria-label="Activar o desactivar impresora"]').trigger('click')
+    await espera(50)
+
+    const aviso = toasts.find(t => t.title === 'Impresora desactivada')
+    expect(aviso?.actions?.[0]?.label).toBe('Deshacer')
+    expect(dialogo()).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('tocar "Deshacer" vuelve el interruptor a como estaba (otro PATCH con el valor anterior)', async () => {
+    const wrapper = await montar()
+    await wrapper.find('[aria-label="Activar o desactivar impresora"]').trigger('click')
+    await espera(50)
+    expect(impresorasBackend[0]!.activo).toBe(false)
+
+    toasts.find(t => t.title === 'Impresora desactivada')!.actions![0]!.onClick()
+    await espera(50)
+
+    expect(impresorasBackend[0]!.activo).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('sin impresoras, el vacío dice cómo empezar y ofrece crear la primera', async () => {
+    impresorasBackend = []
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Aún no tienes impresoras')
+    const crear = wrapper.find('[data-qa="estado-vacio-accion"]')
+    expect(crear.exists()).toBe(true)
+    await crear.trigger('click')
+    await espera()
+    expect(document.querySelector('#impresora-form')).toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('sin permiso de crear, el vacío no ofrece el botón', async () => {
+    impresorasBackend = []
+    esAdmin = false
+    permisos = ['Impresoras:Leer']
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="estado-vacio-accion"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

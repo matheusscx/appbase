@@ -280,14 +280,29 @@ const columns: TableColumn<Turno>[] = [
             <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
             <span class="text-sm text-muted">Ver eliminados</span>
           </div>
-          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
+          <UButton
+            icon="i-lucide-plus"
+            :disabled="!puedeCrear"
+            :title="puedeCrear ? undefined : motivoSinPermiso('Crear', 'Salones')"
+            @click="abrirCrear"
+          >
             Nuevo turno
           </UButton>
         </div>
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="turnos" :columns="columns" :loading="loading" :error="errorCarga" recurso="los turnos" @reintentar="cargar">
+    <CrudTable
+      vacio="Aún no tienes turnos. Crea el primero para repartir las horas de tu salón."
+      :vacio-accion="puedeCrear ? 'Nuevo turno' : undefined"
+      @vacio-accion="abrirCrear"
+      :data="turnos"
+      :columns="columns"
+      :loading="loading"
+      :error="errorCarga"
+      recurso="los turnos"
+      @reintentar="cargar"
+    >
       <template #nombre-cell="{ row }">
         <div class="space-y-1">
           <div class="flex items-center gap-2">
@@ -334,31 +349,25 @@ const columns: TableColumn<Turno>[] = [
         </div>
         <div v-else class="flex items-center justify-end gap-1">
           <UButton
-            v-if="puedeActualizar"
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
-            title="Editar"
+            :disabled="!puedeActualizar"
+            :title="puedeActualizar ? 'Editar' : motivoSinPermiso('Actualizar', 'Salones')"
             aria-label="Editar"
             @click="abrirEditar(row.original)"
             class="size-11 justify-center"
           />
           <UButton
-            v-if="puedeEliminar"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
-            title="Eliminar"
+            :disabled="!puedeEliminar"
+            :title="puedeEliminar ? 'Eliminar' : motivoSinPermiso('Eliminar', 'Salones')"
             aria-label="Eliminar"
             @click="confirmarEliminar(row.original)"
             class="size-11 justify-center"
           />
-        </div>
-      </template>
-
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          No hay turnos. Crea el primero para empezar.
         </div>
       </template>
     </CrudTable>

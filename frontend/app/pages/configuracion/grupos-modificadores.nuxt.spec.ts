@@ -796,10 +796,27 @@ describe('configuracion/grupos-modificadores — `ids=` que falla', () => {
     await new Promise(r => setTimeout(r, 30))
 
     expect(toasts.map(t => t.title)).toContain(
-      'No se pudo cargar un ítem de las opciones: cierra y vuelve a abrir el grupo',
+      'No se pudo cargar un producto de las opciones: cierra y vuelve a abrir el grupo',
     )
     expect(escrituras).toEqual([])
 
+    wrapper.unmount()
+  })
+})
+
+describe('configuracion/grupos-modificadores — palabras del local y vacío con salida (07.30, 07.35)', () => {
+  it('la columna de uso dice "Productos que lo usan" (el catálogo se llama Productos)', async () => {
+    gruposBackend = []
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Productos que lo usan')
+    expect(wrapper.text()).not.toContain('Items que lo usan')
+    wrapper.unmount()
+  })
+
+  it('sin grupos dice por dónde empezar y ofrece crear el primero', async () => {
+    gruposBackend = []
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="estado-vacio-accion"]').text()).toContain('Nuevo grupo')
     wrapper.unmount()
   })
 })

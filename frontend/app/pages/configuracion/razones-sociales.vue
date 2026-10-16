@@ -242,7 +242,17 @@ const columns: TableColumn<RazonSocial>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="razones" :columns="columns" :loading="loading" :error="errorCarga" recurso="las razones sociales" @reintentar="cargar">
+    <CrudTable
+      vacio="Aún no tienes razones sociales. Crea la primera para emitir con los datos de tu empresa."
+      vacio-accion="Nueva razón social"
+      @vacio-accion="abrirCrear"
+      :data="razones"
+      :columns="columns"
+      :loading="loading"
+      :error="errorCarga"
+      recurso="las razones sociales"
+      @reintentar="cargar"
+    >
         <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <p class="font-medium truncate">
@@ -310,12 +320,6 @@ const columns: TableColumn<RazonSocial>[] = [
             />
           </div>
         </template>
-
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          No hay razones sociales registradas.
-        </div>
-      </template>
     </CrudTable>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">

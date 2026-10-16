@@ -227,3 +227,28 @@ describe('menú de configuración agrupado', () => {
     expect(separadores).toBe(Object.keys(esperado).length)
   })
 })
+
+// Auditoría UX 07.26 / 07.1: un salto sobre el menú y, en tablet, un selector en vez de la columna.
+describe('menú de configuración — accesibilidad y tablet', () => {
+  it('ofrece "Saltar al contenido" apuntando al contenido', async () => {
+    esAdmin = true
+    const wrapper = await mountSuspended(Configuracion)
+    const salto = wrapper.get('[data-qa="saltar-al-contenido"]')
+    expect(salto.attributes('href')).toBe('#configuracion-contenido')
+    expect(wrapper.find('#configuracion-contenido').exists()).toBe(true)
+  })
+
+  it('en pantalla angosta el menú se reemplaza por un selector y el contenido no lo comparte', async () => {
+    esAdmin = true
+    const wrapper = await mountSuspended(Configuracion)
+    expect(wrapper.get('[data-qa="configuracion-selector"]').classes()).toContain('lg:hidden')
+    expect(wrapper.get('[data-qa="configuracion-menu"]').classes()).toContain('hidden')
+    expect(wrapper.get('[data-qa="configuracion-menu"]').classes()).toContain('lg:block')
+  })
+
+  it('las entradas del menú miden 44 px', async () => {
+    esAdmin = true
+    const wrapper = await mountSuspended(Configuracion)
+    expect(wrapper.get('nav a').classes()).toContain('min-h-11')
+  })
+})

@@ -515,3 +515,47 @@ describe('configuracion/turnos — papelera: la carrera de `cargar()` bajo toggl
     wrapper.unmount()
   })
 })
+
+// Auditoría UX 07.22 / 07.35: sin permiso el botón queda apagado y dice qué falta, no desaparece.
+describe('configuracion/turnos — sin permiso: botones apagados con el motivo', () => {
+  beforeEach(() => {
+    turnosBackend = [turno()]
+    reset()
+  })
+
+  it('solo lectura: "Nuevo turno", editar y eliminar existen, apagados, y dicen el permiso que falta', async () => {
+    esAdmin = false
+    permisos = ['Salones:Leer']
+
+    const wrapper = await montar()
+
+    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nuevo turno'))
+    expect(nuevo?.attributes('disabled')).toBeDefined()
+    expect(nuevo?.attributes('title')).toBe('Necesitas el permiso Crear en Salones')
+    const editar = wrapper.find('[aria-label="Editar"], [aria-label^="Editar caja"]')
+    expect(editar.attributes('disabled')).toBeDefined()
+    expect(editar.attributes('title')).toBe('Necesitas el permiso Actualizar en Salones')
+    const eliminar = wrapper.find('[aria-label="Eliminar"], [aria-label^="Eliminar caja"]')
+    expect(eliminar.attributes('disabled')).toBeDefined()
+    expect(eliminar.attributes('title')).toBe('Necesitas el permiso Eliminar en Salones')
+    wrapper.unmount()
+  })
+
+  it('sin filas y sin permiso de crear, el vacío no ofrece crear', async () => {
+    turnosBackend = []
+    esAdmin = false
+    permisos = ['Salones:Leer']
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="estado-vacio-accion"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('sin filas y con permiso de crear, el vacío ofrece crear el primero', async () => {
+    turnosBackend = []
+    esAdmin = false
+    permisos = ['Salones:Leer', 'Salones:Crear']
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="estado-vacio-accion"]').text()).toContain('Nuevo turno')
+    wrapper.unmount()
+  })
+})

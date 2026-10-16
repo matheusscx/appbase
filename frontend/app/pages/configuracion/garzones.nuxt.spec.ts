@@ -1619,3 +1619,47 @@ describe('garzones — desvincular la cuenta desde el formulario', () => {
     expect(garzonesBackend[0]?.usuarioId).toBeNull()
   })
 })
+
+// Auditoría UX 07.22 / 07.35: sin permiso el botón queda apagado y dice qué falta, no desaparece.
+describe('configuracion/garzones — sin permiso: botones apagados con el motivo', () => {
+  beforeEach(() => {
+    garzonesBackend = [garzon()]
+    reset()
+  })
+
+  it('solo lectura: "Nuevo garzón", editar y eliminar existen, apagados, y dicen el permiso que falta', async () => {
+    esAdmin = false
+    permisos = ['Salones:Leer']
+
+    const wrapper = await montar()
+
+    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nuevo garzón'))
+    expect(nuevo?.attributes('disabled')).toBeDefined()
+    expect(nuevo?.attributes('title')).toBe('Necesitas el permiso Crear en Salones')
+    const editar = wrapper.find('[aria-label="Editar"], [aria-label^="Editar caja"]')
+    expect(editar.attributes('disabled')).toBeDefined()
+    expect(editar.attributes('title')).toBe('Necesitas el permiso Actualizar en Salones')
+    const eliminar = wrapper.find('[aria-label="Eliminar"], [aria-label^="Eliminar caja"]')
+    expect(eliminar.attributes('disabled')).toBeDefined()
+    expect(eliminar.attributes('title')).toBe('Necesitas el permiso Eliminar en Salones')
+    wrapper.unmount()
+  })
+
+  it('sin filas y sin permiso de crear, el vacío no ofrece crear', async () => {
+    garzonesBackend = []
+    esAdmin = false
+    permisos = ['Salones:Leer']
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="estado-vacio-accion"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('sin filas y con permiso de crear, el vacío ofrece crear el primero', async () => {
+    garzonesBackend = []
+    esAdmin = false
+    permisos = ['Salones:Leer', 'Salones:Crear']
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="estado-vacio-accion"]').text()).toContain('Nuevo garzón')
+    wrapper.unmount()
+  })
+})

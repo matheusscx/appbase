@@ -529,3 +529,47 @@ describe('configuracion/cajas — papelera: la carrera de `cargar()` bajo toggle
     wrapper.unmount()
   })
 })
+
+// Auditoría UX 07.22 / 07.35: sin permiso el botón queda apagado y dice qué falta, no desaparece.
+describe('configuracion/cajas — sin permiso: botones apagados con el motivo', () => {
+  beforeEach(() => {
+    cajonesBackend = [cajon()]
+    reset()
+  })
+
+  it('solo lectura: "Nueva caja", editar y eliminar existen, apagados, y dicen el permiso que falta', async () => {
+    esAdmin = false
+    permisos = ['Cajas:Leer']
+
+    const wrapper = await montar()
+
+    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nueva caja'))
+    expect(nuevo?.attributes('disabled')).toBeDefined()
+    expect(nuevo?.attributes('title')).toBe('Necesitas el permiso Crear en Cajas')
+    const editar = wrapper.find('[aria-label="Editar"], [aria-label^="Editar caja"]')
+    expect(editar.attributes('disabled')).toBeDefined()
+    expect(editar.attributes('title')).toBe('Necesitas el permiso Actualizar en Cajas')
+    const eliminar = wrapper.find('[aria-label="Eliminar"], [aria-label^="Eliminar caja"]')
+    expect(eliminar.attributes('disabled')).toBeDefined()
+    expect(eliminar.attributes('title')).toBe('Necesitas el permiso Eliminar en Cajas')
+    wrapper.unmount()
+  })
+
+  it('sin filas y sin permiso de crear, el vacío no ofrece crear', async () => {
+    cajonesBackend = []
+    esAdmin = false
+    permisos = ['Cajas:Leer']
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="estado-vacio-accion"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('sin filas y con permiso de crear, el vacío ofrece crear el primero', async () => {
+    cajonesBackend = []
+    esAdmin = false
+    permisos = ['Cajas:Leer', 'Cajas:Crear']
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="estado-vacio-accion"]').text()).toContain('Nueva caja')
+    wrapper.unmount()
+  })
+})

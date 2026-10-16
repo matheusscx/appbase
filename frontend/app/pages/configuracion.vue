@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import type { NavigationMenuItem } from '@nuxt/ui'
+import type { NavigationMenuItem, SelectMenuItem } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -11,110 +11,35 @@ onMounted(() => {
     permissionsStore.fetchPermisos()
 })
 
-// Agrupado por lo que configura, en el orden en que se arma un local (owner,
-// 2026-10-02). Cada entrada lleva su propio gate —el de la ruta, exacto—, y un
-// grupo sin entradas visibles se saca entero: el menú dibuja el separador y el
-// encabezado aunque la lista venga vacía.
-const navItems = computed<NavigationMenuItem[][]>(() => {
-  const admin = permissionsStore.esAdmin
-  // `Leer`, no `Crear`: lo que la pantalla pide para abrirse es el permiso de
-  // lectura. Con `Crear` el link quedaba escondido para quien solo tiene
-  // `Actualizar` o `Eliminar` —que sí puede trabajar ahí—, el mismo colapso de
-  // permisos que los gates por control vienen a evitar. Sin atajo para el admin:
-  // `mis-permisos` le trae solo los módulos que su tenant contrató (owner, 2026-10-15).
-  const lee = (modulo: string) => permissionsStore.can(modulo, 'Leer')
+// Los grupos y el gate de cada entrada viven en `useMenuConfiguracion`: los comparte el índice.
+const grupos = useMenuConfiguracion()
 
-  const grupos: { label: string, items: (NavigationMenuItem | false)[] }[] = [
-    {
-      label: 'Mi cuenta',
-      items: [
-        { label: 'Perfil', icon: 'i-lucide-circle-user', to: '/configuracion/perfil' },
-      ],
-    },
-    {
-      label: 'Organización',
-      items: [
-        admin && { label: 'Empresa', icon: 'i-lucide-building-2', to: '/configuracion/empresa' },
-        admin && { label: 'Razones sociales', icon: 'i-lucide-file-text', to: '/configuracion/razones-sociales' },
-        // La ve todo admin del tenant, el mismo gate de la ruta: desde que la venta emite su boleta,
-        // prender la emisión y emitir las pendientes es del dueño del local, no del superadmin.
-        admin && { label: 'Boleta electrónica', icon: 'i-lucide-receipt-text', to: '/configuracion/boleta-electronica' },
-        admin && { label: 'Usuarios', icon: 'i-lucide-users', to: '/configuracion/usuarios' },
-        admin && { label: 'Roles y permisos', icon: 'i-lucide-shield-check', to: '/configuracion/roles' },
-      ],
-    },
-    {
-      label: 'Catálogo',
-      items: [
-        lee('Items') && { label: 'Productos', icon: 'i-lucide-archive', to: '/configuracion/items' },
-        admin && { label: 'Categorías', icon: 'i-lucide-tag', to: '/configuracion/categorias' },
-        admin && { label: 'Grupos de modificadores', icon: 'i-lucide-list-plus', to: '/configuracion/grupos-modificadores' },
-      ],
-    },
-    {
-      label: 'Precios',
-      items: [
-        admin && { label: 'Preferencias financieras', icon: 'i-lucide-sliders-horizontal', to: '/configuracion/preferencias-financieras' },
-        admin && { label: 'Impuestos', icon: 'i-lucide-badge-percent', to: '/configuracion/impuestos' },
-        admin && { label: 'Descuentos', icon: 'i-lucide-trending-down', to: '/configuracion/descuentos' },
-        admin && { label: 'Recargos', icon: 'i-lucide-trending-up', to: '/configuracion/recargos' },
-        admin && { label: 'Promociones', icon: 'i-lucide-megaphone', to: '/configuracion/promociones' },
-        admin && { label: 'Monedas', icon: 'i-lucide-dollar-sign', to: '/configuracion/monedas' },
-      ],
-    },
-    {
-      label: 'Cobros',
-      items: [
-        admin && { label: 'Métodos de pago', icon: 'i-lucide-credit-card', to: '/configuracion/metodos-pago' },
-        lee('Pasarelas') && { label: 'Pasarelas de pago', icon: 'i-lucide-plug-zap', to: '/configuracion/pasarelas' },
-      ],
-    },
-    {
-      label: 'Caja',
-      items: [
-        lee('Cajas') && { label: 'Cajas', icon: 'i-lucide-inbox', to: '/configuracion/cajas' },
-        admin && { label: 'Motivos de diferencia', icon: 'i-lucide-scale', to: '/configuracion/motivos-diferencia' },
-      ],
-    },
-    {
-      label: 'Inventario',
-      items: [
-        admin && { label: 'Ubicaciones', icon: 'i-lucide-warehouse', to: '/configuracion/ubicaciones' },
-        admin && { label: 'Motivos de baja', icon: 'i-lucide-tags', to: '/configuracion/motivos-baja' },
-        admin && { label: 'Motivos de diferencia (inventario)', icon: 'i-lucide-clipboard-check', to: '/configuracion/motivos-diferencia-inventario' },
-        admin && { label: 'Motivos de traslado', icon: 'i-lucide-truck', to: '/configuracion/motivos-traslado' },
-      ],
-    },
-    {
-      label: 'Restaurante',
-      items: [
-        lee('Salones') && { label: 'Salones y mesas', icon: 'i-lucide-utensils', to: '/configuracion/salones' },
-        lee('Salones') && { label: 'Garzones', icon: 'i-lucide-users', to: '/configuracion/garzones' },
-        lee('Salones') && { label: 'Turnos', icon: 'i-lucide-clock-3', to: '/configuracion/turnos' },
-        (lee('Propinas') || permissionsStore.can('Propinas', 'Configurar'))
-        && { label: 'Distribución de propinas', icon: 'i-lucide-hand-coins', to: '/configuracion/propinas-distribucion' },
-        lee('Impresoras') && { label: 'Impresoras', icon: 'i-lucide-printer', to: '/configuracion/impresoras' },
-      ],
-    },
-    {
-      label: 'Paquetería',
-      items: [
-        // Admin-only en el backend y, además, de un módulo que el tenant contrata: hace falta ser
-        // admin Y tenerlo en `mis-permisos`. `lee()` solo pide lo segundo, y en `mis-permisos`
-        // `Paquetería:Leer` también puede tenerlo un rol que no es admin.
-        admin && permissionsStore.can('Paquetería', 'Leer')
-        && { label: 'Repartidores', icon: 'i-lucide-bike', to: '/configuracion/repartidores' },
-        admin && permissionsStore.can('Paquetería', 'Leer')
-        && { label: 'Valores por defecto', icon: 'i-lucide-badge-dollar-sign', to: '/configuracion/paqueteria' },
-      ],
-    },
-  ]
+const navItems = computed<NavigationMenuItem[][]>(() =>
+  grupos.value.map(g => [
+    { label: g.label, type: 'label' as const },
+    ...g.items.map(({ label, icon, to }) => ({ label, icon, to })),
+  ]),
+)
 
-  return grupos
-    .map(g => ({ label: g.label, items: g.items.filter(i => i !== false) }))
-    .filter(g => g.items.length > 0)
-    .map(g => [{ label: g.label, type: 'label' as const }, ...g.items])
-})
+// En una pantalla angosta (tablet) el menú de 240 px se come la mitad del ancho: pasa a un selector
+// arriba y el contenido ocupa todo (auditoría UX 07.1 / 07.5).
+const itemsSelector = computed<SelectMenuItem[][]>(() =>
+  grupos.value.map(g => [
+    { type: 'label' as const, label: g.label },
+    ...g.items.map(({ label, icon, to }) => ({ label, icon, value: to })),
+  ]),
+)
+
+// El menú mide más que la pantalla y se desliza solo: la entrada activa tiene que quedar a la vista,
+// si no el dueño no ve en qué parte del menú está (auditoría UX 07.4).
+const menu = ref<HTMLElement | null>(null)
+const contenido = ref<HTMLElement | null>(null)
+async function mostrarEntradaActiva() {
+  await nextTick()
+  menu.value?.querySelector('[aria-current="page"]')?.scrollIntoView({ block: 'nearest' })
+}
+onMounted(mostrarEntradaActiva)
+watch(() => [route.path, grupos.value.length], mostrarEntradaActiva)
 </script>
 
 <template>
@@ -124,15 +49,45 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
     </template>
 
     <template #body>
-      <div class="flex h-full">
-        <div class="w-60 border-r border-default shrink-0 py-3 overflow-y-auto">
+      <!-- El menú y el de la barra lateral van antes del contenido: sin este salto eran 31 Tab hasta
+           el primer botón (auditoría UX 07.26). -->
+      <a
+        href="#configuracion-contenido"
+        class="sr-only focus:not-sr-only focus:absolute focus:z-50 focus:m-2 focus:rounded-md focus:bg-default focus:px-3 focus:py-2 focus:text-sm focus:ring-2 focus:ring-primary"
+        data-qa="saltar-al-contenido"
+        @click.prevent="contenido?.focus()"
+      >
+        Saltar al contenido
+      </a>
+      <div class="flex h-full flex-col lg:flex-row">
+        <div class="shrink-0 pb-4 lg:hidden" data-qa="configuracion-selector">
+          <USelectMenu
+            :model-value="route.path"
+            :items="itemsSelector"
+            value-key="value"
+            placeholder="Ir a…"
+            class="w-full"
+            size="lg"
+            @update:model-value="(destino: unknown) => navigateTo(String(destino))"
+          />
+        </div>
+        <div
+          ref="menu"
+          class="hidden w-60 shrink-0 overflow-y-auto border-r border-default py-3 lg:block"
+          data-qa="configuracion-menu"
+        >
           <UNavigationMenu
             :items="navItems"
             orientation="vertical"
-            :ui="{ linkLabel: 'whitespace-normal text-clip' }"
+            :ui="{ linkLabel: 'whitespace-normal text-clip', link: 'min-h-11' }"
           />
         </div>
-        <div class="flex-1 overflow-y-auto p-6">
+        <div
+          id="configuracion-contenido"
+          ref="contenido"
+          tabindex="-1"
+          class="min-w-0 flex-1 overflow-y-auto p-6 focus:outline-none"
+        >
           <NuxtPage />
         </div>
       </div>

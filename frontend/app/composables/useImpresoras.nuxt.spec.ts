@@ -249,3 +249,41 @@ describe('useImpresoras — impresoras operativas (imprimir sin Impresoras:Leer)
     expect(qzMock.websocket.disconnect).not.toHaveBeenCalled()
   })
 })
+
+// 07.17: "Imprimir prueba" usa el mismo camino que la comanda (QZ Tray), con el destino que tiene
+// el formulario, aunque la impresora todavía no esté guardada.
+describe('useImpresoras — imprimirPrueba()', () => {
+  beforeEach(() => {
+    calls = []
+    qzState.activo = true
+    qzMock.print.mockClear()
+    qzMock.print.mockImplementation(() => Promise.resolve())
+  })
+
+  it('manda a imprimir una hoja de prueba que nombra la impresora', async () => {
+    await useImpresoras().imprimirPrueba({
+      nombre: 'Cocina', tipoConexion: 'red', host: '192.168.1.50', puerto: 9100, nombreCola: null,
+    })
+
+    expect(qzMock.print).toHaveBeenCalledTimes(1)
+    const datos = (qzMock.print.mock.calls[0] as unknown[])[1] as string[]
+    expect(datos.join('')).toContain('PRUEBA DE IMPRESION')
+    expect(datos.join('')).toContain('Cocina')
+  })
+
+  it('no pide la lista de impresoras ni reclama una comanda: no toca el estado del local', async () => {
+    await useImpresoras().imprimirPrueba({
+      nombre: 'Cocina', tipoConexion: 'sistema', host: null, puerto: null, nombreCola: 'EPSON',
+    })
+
+    expect(calls.filter(c => c.includes('/impresoras') && !c.includes('/qz/'))).toHaveLength(0)
+    expect(calls.some(c => c.includes('/comanda/reclamar'))).toBe(false)
+  })
+
+  it('si la impresora no responde, el error es el mismo mensaje en castellano', async () => {
+    qzMock.print.mockImplementation(() => Promise.reject(new Error('boom')))
+    await expect(useImpresoras().imprimirPrueba({
+      nombre: 'Cocina', tipoConexion: 'red', host: '10.0.0.1', puerto: 9100, nombreCola: null,
+    })).rejects.toThrow('No se pudo imprimir. Revisa la impresora.')
+  })
+})

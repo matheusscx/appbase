@@ -18,6 +18,7 @@ interface MotivoTraslado {
 
 const config = useRuntimeConfig()
 const toast = useToast()
+const avisarConDeshacer = useAvisoDeshacer()
 const apiUrl = config.public.apiUrl
 
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('motivos-traslado')
@@ -159,7 +160,7 @@ async function guardar() {
   }
 }
 
-async function toggleActivo(motivo: MotivoTraslado) {
+async function toggleActivo(motivo: MotivoTraslado, conDeshacer = true) {
   if (motivo.esFijo || motivo.eliminadoEl || toggling.has(motivo.id)) return
   toggling.add(motivo.id)
   const prev = motivo.activo
@@ -169,10 +170,9 @@ async function toggleActivo(motivo: MotivoTraslado) {
       method: 'PATCH',
       body: { activo: motivo.activo },
     })
-    toast.add({
-      title: motivo.activo ? 'Motivo activado' : 'Motivo desactivado',
-      color: 'success',
-    })
+    const titulo = motivo.activo ? 'Motivo activado' : 'Motivo desactivado'
+    if (conDeshacer) avisarConDeshacer(titulo, () => toggleActivo(motivo, false))
+    else toast.add({ title: titulo, color: 'success' })
   }
   catch (e: unknown) {
     motivo.activo = prev
@@ -315,6 +315,9 @@ const columns: TableColumn<MotivoTraslado>[] = [
     </CrudPageHeader>
 
     <CrudTable
+      vacio="Aún no tienes motivos de traslado. Crea el primero para registrar por qué se mueve el stock."
+      vacio-accion="Nuevo motivo"
+      @vacio-accion="abrirCrear"
       :data="motivos"
       :columns="columns"
       :loading="loading"
@@ -386,16 +389,6 @@ const columns: TableColumn<MotivoTraslado>[] = [
             @click="pedirEliminar(row.original)"
             class="size-11 justify-center"
           />
-        </div>
-      </template>
-
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          <UIcon
-            name="i-lucide-truck"
-            class="w-8 h-8 mx-auto mb-2 opacity-40"
-          />
-          No hay motivos de traslado.
         </div>
       </template>
     </CrudTable>

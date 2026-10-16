@@ -8,9 +8,12 @@
 // `eliminar()`) recarga desde el backend en vez de remover localmente cuando
 // `verEliminados` está activo — este test prueba el síntoma observable, no la
 // implementación.
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Categorias from './categorias.vue'
+
+const toastAdd = vi.fn()
+mockNuxtImport('useToast', () => () => ({ add: toastAdd }))
 
 mockNuxtImport('useImpresoras', () => {
   return () => ({ listar: () => Promise.resolve([]) })
@@ -196,9 +199,10 @@ describe('configuracion/categorias — cargando, error y vacío son tres cosas d
     fallaListado = null
   })
 
-  it('sin categorías dice "No hay categorías registradas."', async () => {
+  it('sin categorías dice por dónde empezar y ofrece crear la primera (07.35)', async () => {
     const wrapper = await montar()
-    expect(wrapper.text()).toContain('No hay categorías registradas.')
+    expect(wrapper.text()).toContain('Aún no tienes categorías')
+    expect(wrapper.find('[data-qa="estado-vacio-accion"]').text()).toContain('Nueva categoría')
     wrapper.unmount()
   })
 
@@ -223,6 +227,35 @@ describe('configuracion/categorias — cargando, error y vacío son tres cosas d
     await new Promise(r => setTimeout(r, 30))
     expect(wrapper.text()).toContain('Bebidas')
     expect(wrapper.text()).not.toContain('No pudimos cargar')
+    wrapper.unmount()
+  })
+})
+
+describe('configuracion/categorias — activar o desactivar guarda con "Deshacer" (07.12) y con área de 44 px (07.26)', () => {
+  beforeEach(() => {
+    categoriasBackend = [categoriaViva()]
+    toastAdd.mockReset()
+  })
+
+  it('al desactivar, el aviso trae "Deshacer" y tocarlo vuelve a activarla', async () => {
+    const wrapper = await montar()
+    // el mock de useApiFetch ignora PATCH: se observa el aviso y su reversa
+    await wrapper.find('[aria-label="Activo: Bebidas"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    const aviso = toastAdd.mock.calls.map(c => c[0]).find(a => a.actions?.length)
+    expect(aviso?.title).toBe('Categoría desactivada')
+    expect(aviso.actions[0].label).toBe('Deshacer')
+    aviso.actions[0].onClick()
+    await new Promise(r => setTimeout(r, 20))
+    const avisos = toastAdd.mock.calls.map(c => c[0].title)
+    expect(avisos).toContain('Categoría activada')
+    wrapper.unmount()
+  })
+
+  it('el interruptor de la fila tiene un área tocable que supera el dibujo', async () => {
+    const wrapper = await montar()
+    const sw = wrapper.find('[aria-label="Activo: Bebidas"]')
+    expect(sw.classes().join(' ')).toContain('after:-inset-')
     wrapper.unmount()
   })
 })

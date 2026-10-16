@@ -37,7 +37,7 @@ const apiUrl = runtimeConfig.public.apiUrl
 
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('recargos')
 const { estadoVigencia, vigenciaColor, vigenciaLabel } = useVigenciaRegla()
-const { nivelOptions, nivelLabel, itemsQueLoTienen } = useNivelRegla()
+const { nivelOptions, nivelLabel, itemsQueLoTienen } = useNivelRegla('recargo')
 
 const recargos = ref<Regla[]>([])
 const tipos = ref<{ label: string; value: string; codigo: string; descripcion: string | null }[]>([])
@@ -81,7 +81,7 @@ const {
   toggleActivo,
   cerrarPausar,
   confirmarPausar,
-} = usePausaRegla('recargos', 'Recargo', recargos)
+} = usePausaRegla('recargos', 'Recargo', recargos, { deshacer: true })
 
 const modoOptions = [
   { label: 'Porcentaje', value: 'porcentaje' },
@@ -855,7 +855,7 @@ const columns: TableColumn<Regla>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="recargos" :columns="columns" :loading="loading" :error="errorCarga" recurso="los recargos" @reintentar="cargar">
+    <CrudTable :data="recargos" :columns="columns" :loading="loading" :error="errorCarga" recurso="los recargos" vacio="Aún no tienes recargos. Crea el primero para sumarlo al cobrar." vacio-accion="Nuevo recargo" @vacio-accion="abrirCrear" @reintentar="cargar">
         <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <div class="flex items-center gap-2">
@@ -945,11 +945,6 @@ const columns: TableColumn<Regla>[] = [
           </div>
         </template>
 
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          No hay recargos registrados.
-        </div>
-      </template>
     </CrudTable>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">

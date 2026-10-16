@@ -119,7 +119,7 @@ async function abrirCombo(page: Page): Promise<Locator> {
 }
 
 const triggerDe = (drawer: Locator, idx: number) =>
-  campo(drawer, /^Item$/).nth(idx).locator(DISPARADOR_DE_SELECTOR)
+  campo(drawer, /^Producto$/).nth(idx).locator(DISPARADOR_DE_SELECTOR)
 
 test('el producto 101 se elige buscándolo, se guarda en el combo y reabre con su nombre', async ({ page, request }) => {
   test.setTimeout(120_000)
@@ -127,12 +127,12 @@ test('el producto 101 se elige buscándolo, se guarda en el combo y reabre con s
 
   // ── Abrir el combo: el 001 (el que ya tenía) se ve con su nombre ────────────
   let drawer = await abrirCombo(page)
-  await expect(campo(drawer, /^Item$/)).toHaveCount(1)
+  await expect(campo(drawer, /^Producto$/)).toHaveCount(1)
   await expect(triggerDe(drawer, 0)).toContainText(rotulo(primero()))
 
   // ── Sumar un componente y buscar el 101 en el servidor ──────────────────────
   await drawer.getByRole('button', { name: 'Agregar componente' }).click()
-  await expect(campo(drawer, /^Item$/)).toHaveCount(2)
+  await expect(campo(drawer, /^Producto$/)).toHaveCount(2)
   await triggerDe(drawer, 1).click()
 
   const termino = `${marca} 101`
@@ -182,7 +182,7 @@ test('el producto 101 se elige buscándolo, se guarda en el combo y reabre con s
   drawer = await abrirCombo(page)
   expect((await pedidoDeNombres).status()).toBe(200)
 
-  await expect(campo(drawer, /^Item$/)).toHaveCount(2)
+  await expect(campo(drawer, /^Producto$/)).toHaveCount(2)
   // El nombre, no un id ni un trigger vacío.
   const triggers = [triggerDe(drawer, 0), triggerDe(drawer, 1)]
   const textos = await Promise.all(triggers.map(t => t.innerText()))

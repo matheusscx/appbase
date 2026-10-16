@@ -21,6 +21,8 @@ interface Rol {
    * de un garzón.
    */
   esSistema: boolean
+  /** Cuántas personas lo tienen (membresías vivas): se dice antes de eliminarlo (auditoría UX 07.9). */
+  cantidadUsuarios?: number
 }
 
 interface RolPermisoModulo {
@@ -107,6 +109,14 @@ async function cargarPermisosRol(rolId: string) {
   seleccionados.value = new Set(perms.map(p => p.moduloAppPermisoId))
 }
 
+/**
+ * Administrador no guarda filas de permisos: tiene acceso a todo lo contratado. Para mostrarlo
+ * en la lista (auditoría UX 07.24) se marcan todas las casillas, deshabilitadas.
+ */
+function marcarTodos() {
+  seleccionados.value = new Set(modulos.value.flatMap(m => m.permisos.map(p => p.moduloAppPermisoId)))
+}
+
 async function abrirCrear() {
   resetDrawer()
   drawerOpen.value = true
@@ -129,7 +139,8 @@ async function abrirEditar(rol: Rol) {
   loadingDrawer.value = true
   try {
     await cargarModulos()
-    await cargarPermisosRol(rol.id)
+    if (rol.esFijo) marcarTodos()
+    else await cargarPermisosRol(rol.id)
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al cargar el rol')
@@ -146,16 +157,23 @@ watch(drawerOpen, (open) => {
   if (!open) resetDrawer()
 })
 
+/**
+ * Todos los módulos en UNA llamada: el servidor los escribe en una transacción, así que guardar
+ * es todo o nada (auditoría UX 07.11). Antes era un PUT por módulo y uno que fallaba a mitad
+ * dejaba el rol a medias.
+ */
 async function guardarPermisos(rolId: string) {
-  for (const modulo of modulos.value) {
-    const ids = modulo.permisos
-      .map(p => p.moduloAppPermisoId)
-      .filter(id => seleccionados.value.has(id))
-    await useApiFetch(
-      `${apiUrl}/roles/${rolId}/modules/${modulo.moduloTenantId}/permissions`,
-      { method: 'PUT', body: { moduloAppPermisoIds: ids } },
-    )
-  }
+  await useApiFetch(`${apiUrl}/roles/${rolId}/permissions`, {
+    method: 'PUT',
+    body: {
+      modulos: modulos.value.map(modulo => ({
+        moduloTenantId: modulo.moduloTenantId,
+        moduloAppPermisoIds: modulo.permisos
+          .map(p => p.moduloAppPermisoId)
+          .filter(id => seleccionados.value.has(id)),
+      })),
+    },
+  })
 }
 
 async function cargar() {
@@ -200,10 +218,13 @@ async function guardar() {
         method: 'POST',
         body: { nombre: form.nombre.trim(), descripcion: form.descripcion.trim() || null },
       })
+      upsertLocal(rol)
+      // El rol ya existe: si los permisos fallan, reintentar tiene que editarlo y no crear otro igual.
+      drawerMode.value = 'edit'
+      editandoRol.value = rol
       if (modulos.value.length) {
         await guardarPermisos(rol.id)
       }
-      upsertLocal(rol)
       toast.add({ title: 'Rol creado', color: 'success' })
     }
     else if (editandoRol.value) {
@@ -231,23 +252,53 @@ async function guardar() {
     )
     toast.add({ title: msg, color: 'error' })
     marcar(apiFieldErrors(e))
+    // Los permisos son todo o nada: tras un fallo, las casillas muestran lo que el servidor tiene.
+    if (editandoRol.value) {
+      try { await cargarPermisosRol(editandoRol.value.id) }
+      catch { /* el aviso del fallo ya salió; las casillas quedan como estaban */ }
+    }
   }
   finally {
     saving.value = false
   }
 }
 
-async function eliminar(rol: Rol) {
+const aEliminar = ref<Rol | null>(null)
+const eliminarOpen = ref(false)
+const eliminando = ref(false)
+
+function pedirEliminar(rol: Rol) {
   if (rol.esFijo || rol.esSistema) return
-  if (!confirm(`¿Eliminar el rol "${rol.nombre}"?`)) return
+  aEliminar.value = rol
+  eliminarOpen.value = true
+}
+
+/** Quien lo borra tiene que saber que esas personas pierden sus permisos (auditoría UX 07.9). */
+const mensajeEliminar = computed(() => {
+  const rol = aEliminar.value
+  if (!rol) return ''
+  const n = rol.cantidadUsuarios ?? 0
+  if (n === 0) return `Eliminar «${rol.nombre}»: nadie lo tiene todavía. ¿Eliminarlo?`
+  const quienes = n === 1 ? '1 persona lo tiene y perderá sus permisos' : `${n} personas lo tienen y perderán sus permisos`
+  return `Eliminar «${rol.nombre}»: ${quienes}. ¿Eliminarlo?`
+})
+
+async function eliminar() {
+  const rol = aEliminar.value
+  if (!rol) return
+  eliminando.value = true
   try {
     await useApiFetch(`${apiUrl}/roles/${rol.id}`, { method: 'DELETE' })
     removeLocal(rol.id)
+    eliminarOpen.value = false
     toast.add({ title: 'Rol eliminado', color: 'success' })
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al eliminar rol')
     toast.add({ title: msg, color: 'error' })
+  }
+  finally {
+    eliminando.value = false
   }
 }
 
@@ -274,7 +325,7 @@ const columns: TableColumn<Rol>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="roles" :columns="columns" :loading="loading" :error="errorCarga" recurso="los roles" @reintentar="cargar">
+    <CrudTable :data="roles" :columns="columns" :loading="loading" :error="errorCarga" recurso="los roles" vacio="Aún no tienes roles. Crea el primero para repartir permisos." vacio-accion="Nuevo rol" @reintentar="cargar" @vacio-accion="abrirCrear">
         <template #nombre-cell="{ row }">
           <div class="flex items-center gap-2">
             <span class="font-medium">{{ row.original.nombre }}</span>
@@ -320,18 +371,24 @@ const columns: TableColumn<Rol>[] = [
               color="error"
               variant="ghost"
               :disabled="row.original.esFijo || row.original.esSistema"
-              @click="eliminar(row.original)"
+              :title="row.original.esFijo ? 'Es un rol fijo, no se elimina' : row.original.esSistema ? 'Lo define la aplicación, no se elimina' : undefined"
+              @click="pedirEliminar(row.original)"
               class="size-11 justify-center"
             />
           </div>
         </template>
 
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          No hay roles todavía.
-        </div>
-      </template>
     </CrudTable>
+
+    <CrudModal
+      v-model:open="eliminarOpen"
+      title="Eliminar rol"
+      :message="mensajeEliminar"
+      :loading="eliminando"
+      cancel-label="Volver"
+      @cancel="aEliminar = null"
+      @confirm="eliminar"
+    />
 
     <AppDrawer v-model:open="drawerOpen" width="50%">
       <template #header>

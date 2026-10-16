@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  Matches,
   MaxLength,
   Min,
   ValidateIf,
@@ -14,6 +15,7 @@ import type {
   RolImpresora,
   TipoConexionImpresora,
 } from '../entities/impresora.entity';
+import { HOST_IMPRESORA, HOST_IMPRESORA_MENSAJE } from './host-impresora';
 
 export class CreateImpresoraDto {
   // Los topes de largo son los de las columnas `varchar` de `impresoras`: sin
@@ -33,6 +35,7 @@ export class CreateImpresoraDto {
   @IsString()
   @IsNotEmpty()
   @MaxLength(255)
+  @Matches(HOST_IMPRESORA, { message: HOST_IMPRESORA_MENSAJE })
   host?: string;
 
   // Un puerto TCP va de 1 a 65535: uno mayor se guardaba (201) y la

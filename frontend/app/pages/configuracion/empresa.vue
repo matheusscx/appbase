@@ -42,6 +42,7 @@ const apiUrl = config.public.apiUrl
 const loading = ref(false)
 const saving = ref(false)
 
+const { errores, marcar, limpiar } = useErroresCampo()
 const paises = ref<Pais[]>([])
 const provincias = ref<Provincia[]>([])
 
@@ -54,6 +55,12 @@ const form = ref({
   provinciaId: '',
   horaCorte: 0,
 })
+
+// Lo último que está guardado: "Guardar cambios" se apaga sin cambios, y el fin del día pide
+// confirmación solo si cambió (auditoría UX 07.31).
+const guardadoAntes = ref('')
+const claveForm = () => JSON.stringify(form.value)
+const hayCambios = computed(() => claveForm() !== guardadoAntes.value)
 
 async function cargar() {
   loading.value = true
@@ -69,6 +76,7 @@ async function cargar() {
     form.value.direccion = tenant.direccion ?? ''
     form.value.provinciaId = tenant.provinciaId
     form.value.horaCorte = tenant.horaCorte
+    horaCorteGuardada.value = tenant.horaCorte
 
     // Cargar todas las provincias para inferir el país actual
     const todasProvincias = await useApiFetch<Provincia[]>(`${apiUrl}/catalog/provincias`)
@@ -84,6 +92,7 @@ async function cargar() {
   }
   finally {
     loading.value = false
+    guardadoAntes.value = claveForm()
   }
 }
 
@@ -101,7 +110,25 @@ async function onPaisChange(paisId: string) {
   }
 }
 
+const horaCorteGuardada = ref<number | null>(null)
+const confirmarCorteOpen = ref(false)
+const corteNuevo = computed(() => `${String(form.value.horaCorte).padStart(2, '0')}:00`)
+
+/** El submit del formulario: valida, y si cambió el fin del día pide confirmar antes de guardar. */
+function pedirGuardar() {
+  const faltan: Record<string, string> = {}
+  if (!form.value.nombre.trim()) faltan.nombre = 'Escribe el nombre de la empresa'
+  if (!/^\S+@\S+\.\S+$/.test(form.value.correo.trim())) faltan.correo = 'Escribe un correo válido, por ejemplo contacto@tulocal.cl'
+  if (marcar(faltan)) return
+  if (horaCorteGuardada.value !== null && form.value.horaCorte !== horaCorteGuardada.value) {
+    confirmarCorteOpen.value = true
+    return
+  }
+  return guardar()
+}
+
 async function guardar() {
+  confirmarCorteOpen.value = false
   saving.value = true
   try {
     const body: Record<string, unknown> = {
@@ -118,6 +145,8 @@ async function guardar() {
       method: 'PATCH',
       body,
     })
+    guardadoAntes.value = claveForm()
+    horaCorteGuardada.value = form.value.horaCorte
     toast.add({ title: 'Datos de empresa actualizados', color: 'success' })
   }
   catch (e: unknown) {
@@ -155,13 +184,13 @@ onMounted(cargar)
     </div>
 
     <UCard v-else>
-      <UForm :state="form" class="space-y-4" @submit="guardar">
-        <UFormField label="Nombre">
-          <UInput v-model="form.nombre" placeholder="Nombre de la empresa" />
+      <UForm :state="form" class="space-y-4" @submit="pedirGuardar">
+        <UFormField label="Nombre" required :error="errores.nombre">
+          <UInput v-model="form.nombre" placeholder="Nombre de la empresa" @update:model-value="limpiar('nombre')" />
         </UFormField>
 
-        <UFormField label="Correo">
-          <UInput v-model="form.correo" type="email" placeholder="contacto@empresa.cl" />
+        <UFormField label="Correo" required :error="errores.correo">
+          <UInput v-model="form.correo" type="email" placeholder="contacto@empresa.cl" @update:model-value="limpiar('correo')" />
         </UFormField>
 
         <UFormField label="Teléfono">
@@ -172,7 +201,7 @@ onMounted(cargar)
           <UInput v-model="form.direccion" placeholder="Av. Ejemplo 123, Ciudad" />
         </UFormField>
 
-        <UFormField label="País">
+        <UFormField label="País" help="Lo define tu cuenta; para cambiarlo, escríbenos.">
           <USelectMenu
             v-model="form.paisId"
             :items="paisItems"
@@ -208,12 +237,23 @@ onMounted(cargar)
           <UButton
             type="submit"
             :loading="saving"
-            :disabled="saving"
+            :disabled="saving || !hayCambios"
           >
             Guardar cambios
           </UButton>
         </div>
       </UForm>
     </UCard>
+
+    <CrudModal
+      v-model:open="confirmarCorteOpen"
+      title="Cambiar el fin del día"
+      :message="`Los reportes pasados se recalcularán con el corte de las ${corteNuevo}. ¿Quieres cambiarlo?`"
+      confirm-label="Cambiar el corte"
+      confirm-color="primary"
+      cancel-label="Volver"
+      :loading="saving"
+      @confirm="guardar"
+    />
   </div>
 </template>

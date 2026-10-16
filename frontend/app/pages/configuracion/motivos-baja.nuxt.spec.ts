@@ -701,3 +701,33 @@ describe('configuracion/motivos-baja — tipo', () => {
     wrapper.unmount()
   })
 })
+
+// Auditoría UX 07.12 / 07.35: lo que se guarda al instante avisa con "Deshacer"; el vacío dice cómo empezar.
+describe('configuracion/motivos-baja — Deshacer y vacío', () => {
+  beforeEach(() => {
+    motivosBackend = [motivo()]
+    reset()
+  })
+
+  it('apagar un motivo avisa con "Deshacer" y tocarlo lo vuelve a prender', async () => {
+    const wrapper = await montar()
+    await wrapper.find('tbody button[role="switch"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    expect(patchesEditar.map(p => p.body.activo)).toEqual([false])
+
+    const aviso = useToast().toasts.value.find(t => t.title === 'Motivo desactivado')
+    expect(aviso?.actions?.[0]?.label).toBe('Deshacer')
+    ;(aviso!.actions![0] as { onClick: () => void }).onClick()
+    await new Promise(r => setTimeout(r, 0))
+
+    expect(patchesEditar.map(p => p.body.activo)).toEqual([false, true])
+    wrapper.unmount()
+  })
+
+  it('sin motivos, el vacío ofrece crear el primero', async () => {
+    motivosBackend = []
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="estado-vacio-accion"]').text()).toContain('Nuevo motivo')
+    wrapper.unmount()
+  })
+})

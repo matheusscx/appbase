@@ -61,6 +61,7 @@ const categoriasOpts = computed(() =>
 // nadie más, así que el toggle es directo — molde optimista+revert de
 // `docs/patterns/frontend.md` §3, sin el modal de `usePausaRegla`.
 const toggling = reactive(new Set<string>())
+const avisarConDeshacer = useAvisoDeshacer()
 
 async function toggleActivo(promo: Promocion) {
   if (toggling.has(promo.id)) return
@@ -70,10 +71,7 @@ async function toggleActivo(promo: Promocion) {
   try {
     const saved = await actualizar(promo.id, { activo: promo.activo })
     upsertLocal(saved)
-    toast.add({
-      title: promo.activo ? 'Promoción activada' : 'Promoción pausada',
-      color: 'success',
-    })
+    avisarConDeshacer(promo.activo ? 'Promoción activada' : 'Promoción pausada', () => toggleActivo(promo))
   }
   catch (e: unknown) {
     promo.activo = prev
@@ -364,7 +362,7 @@ const columns: TableColumn<Promocion>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="promociones" :columns="columns" :loading="loading" :error="errorCarga" recurso="las promociones" @reintentar="cargar">
+    <CrudTable :data="promociones" :columns="columns" :loading="loading" :error="errorCarga" recurso="las promociones" vacio="Aún no tienes promociones. Crea la primera para ofrecerla en tus ventas." vacio-accion="Nueva promoción" @vacio-accion="abrirCrear" @reintentar="cargar">
       <template #nombre-cell="{ row }">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -425,11 +423,6 @@ const columns: TableColumn<Promocion>[] = [
         </div>
       </template>
 
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          No hay promociones registradas.
-        </div>
-      </template>
     </CrudTable>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">

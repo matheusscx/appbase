@@ -808,14 +808,29 @@ const columns: TableColumn<Garzon>[] = [
             <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
             <span class="text-sm text-muted">Ver eliminados</span>
           </div>
-          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
+          <UButton
+            icon="i-lucide-plus"
+            :disabled="!puedeCrear"
+            :title="puedeCrear ? undefined : motivoSinPermiso('Crear', 'Salones')"
+            @click="abrirCrear"
+          >
             Nuevo garzón
           </UButton>
         </div>
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="garzones" :columns="columns" :loading="loading" :error="errorCarga" recurso="los garzones" @reintentar="cargar">
+    <CrudTable
+      vacio="Aún no tienes garzones. Crea el primero para que pueda tomar pedidos en el salón."
+      :vacio-accion="puedeCrear ? 'Nuevo garzón' : undefined"
+      @vacio-accion="abrirCrear"
+      :data="garzones"
+      :columns="columns"
+      :loading="loading"
+      :error="errorCarga"
+      recurso="los garzones"
+      @reintentar="cargar"
+    >
       <template #nombre-cell="{ row }">
         <div class="space-y-1">
           <div class="flex items-center gap-2">
@@ -863,42 +878,36 @@ const columns: TableColumn<Garzon>[] = [
                el garzón (`regenerarLabel`), no una elección libre del
                encargado: con cuenta vinculada invalida, sin cuenta genera. -->
           <UButton
-            v-if="puedeActualizar"
             icon="i-lucide-key-round"
             color="neutral"
             variant="ghost"
-            :title="regenerarLabel(row.original)"
+            :disabled="!puedeActualizar"
+            :title="puedeActualizar ? regenerarLabel(row.original) : motivoSinPermiso('Actualizar', 'Salones')"
             :aria-label="regenerarLabel(row.original)"
             :loading="abriendoRegenerarId === row.original.id"
             @click="abrirRegenerar(row.original)"
             class="size-11 justify-center"
           />
           <UButton
-            v-if="puedeActualizar"
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
-            title="Editar"
+            :disabled="!puedeActualizar"
+            :title="puedeActualizar ? 'Editar' : motivoSinPermiso('Actualizar', 'Salones')"
             aria-label="Editar"
             @click="abrirEditar(row.original)"
             class="size-11 justify-center"
           />
           <UButton
-            v-if="puedeEliminar"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
-            title="Eliminar"
+            :disabled="!puedeEliminar"
+            :title="puedeEliminar ? 'Eliminar' : motivoSinPermiso('Eliminar', 'Salones')"
             aria-label="Eliminar"
             @click="confirmarEliminar(row.original)"
             class="size-11 justify-center"
           />
-        </div>
-      </template>
-
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          No hay garzones. Crea el primero para empezar.
         </div>
       </template>
     </CrudTable>

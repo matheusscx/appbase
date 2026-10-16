@@ -26,9 +26,11 @@ const props = defineProps<{
   quitarTexto?: string
   /** El llamador no tiene cómo quitar el filtro: no se ofrece el botón. */
   sinQuitarFiltros?: boolean
+  /** Rótulo del botón que crea el primero ("Nueva categoría"); solo en el vacío de verdad. */
+  vacioAccion?: string
 }>()
 
-const emit = defineEmits<{ reintentar: [], quitarFiltros: [] }>()
+const emit = defineEmits<{ reintentar: [], quitarFiltros: [], vacioAccion: [] }>()
 
 /** "a" + "el" se contraen: "Sin acceso al stock mínimo", no "a el stock mínimo". */
 const aRecurso = computed(() =>
@@ -86,8 +88,18 @@ const estado = computed<'sin-permiso' | 'error' | 'filtrado' | 'vacio'>(() => {
       />
     </template>
 
-    <p v-else class="text-muted">
-      {{ vacio }}
-    </p>
+    <template v-else>
+      <p class="max-w-sm text-muted">
+        {{ vacio }}
+      </p>
+      <UButton
+        v-if="vacioAccion"
+        :label="vacioAccion"
+        icon="i-lucide-plus"
+        size="sm"
+        data-qa="estado-vacio-accion"
+        @click="emit('vacioAccion')"
+      />
+    </template>
   </div>
 </template>

@@ -61,7 +61,8 @@ test.afterAll(async ({ request }) => {
 
 async function abrirPlano(page: Page) {
   await page.goto('/configuracion/salones')
-  await elegirEnSelector(page, escenario.salonNombre!)
+  // Acotado a la barra del salón: Configuración trae antes un selector de sección, oculto en `lg`.
+  await elegirEnSelector(page.locator('[data-qa="salones-barra"]'), escenario.salonNombre!)
 }
 
 const mesaEn = (page: Page, id: string) => page.locator(`[data-qa="mesa-${id}"]`)

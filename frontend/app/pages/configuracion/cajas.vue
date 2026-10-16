@@ -17,6 +17,7 @@ interface Member {
 
 const runtimeConfig = useRuntimeConfig()
 const toast = useToast()
+const avisarConDeshacer = useAvisoDeshacer()
 const perms = usePermissionsStore()
 const apiUrl = runtimeConfig.public.apiUrl
 
@@ -150,7 +151,7 @@ async function guardar() {
   }
 }
 
-async function toggleActivo(c: Cajon) {
+async function toggleActivo(c: Cajon, conDeshacer = true) {
   if (c.eliminadoEl) return
   if (toggling.has(c.id)) return
   toggling.add(c.id)
@@ -158,7 +159,9 @@ async function toggleActivo(c: Cajon) {
   c.activo = !prev
   try {
     await useApiFetch(`${apiUrl}/cajones/${c.id}`, { method: 'PATCH', body: { activo: c.activo } })
-    toast.add({ title: c.activo ? 'Caja activada' : 'Caja desactivada', color: 'success' })
+    const titulo = c.activo ? 'Caja activada' : 'Caja desactivada'
+    if (conDeshacer) avisarConDeshacer(titulo, () => toggleActivo(c, false))
+    else toast.add({ title: titulo, color: 'success' })
   }
   catch (e: unknown) {
     c.activo = prev
@@ -371,14 +374,29 @@ const columns: TableColumn<Cajon>[] = [
             <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
             <span class="text-sm text-muted">Ver eliminados</span>
           </div>
-          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
+          <UButton
+            icon="i-lucide-plus"
+            :disabled="!puedeCrear"
+            :title="puedeCrear ? undefined : motivoSinPermiso('Crear', 'Cajas')"
+            @click="abrirCrear"
+          >
             Nueva caja
           </UButton>
         </div>
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="cajones" :columns="columns" :loading="loading" :error="errorCarga" recurso="las cajas" @reintentar="cargar">
+    <CrudTable
+      vacio="Aún no tienes cajas. Crea la primera para poder cobrar."
+      :vacio-accion="puedeCrear ? 'Nueva caja' : undefined"
+      @vacio-accion="abrirCrear"
+      :data="cajones"
+      :columns="columns"
+      :loading="loading"
+      :error="errorCarga"
+      recurso="las cajas"
+      @reintentar="cargar"
+    >
       <template #nombre-cell="{ row }">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -421,40 +439,34 @@ const columns: TableColumn<Cajon>[] = [
         <div v-else class="flex justify-end gap-2">
           <UButton
             :aria-label="`Usuarios de la caja ${row.original.nombre}`"
-            v-if="puedeActualizar"
             icon="i-lucide-users"
             color="neutral"
             variant="ghost"
-            title="Usuarios"
+            :disabled="!puedeActualizar"
+            :title="puedeActualizar ? 'Usuarios' : motivoSinPermiso('Actualizar', 'Cajas')"
             @click="abrirUsuarios(row.original)"
             class="size-11 justify-center"
           />
           <UButton
             :aria-label="`Editar caja ${row.original.nombre}`"
-            v-if="puedeActualizar"
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
-            title="Editar"
+            :disabled="!puedeActualizar"
+            :title="puedeActualizar ? 'Editar' : motivoSinPermiso('Actualizar', 'Cajas')"
             @click="abrirEditar(row.original)"
             class="size-11 justify-center"
           />
           <UButton
             :aria-label="`Eliminar caja ${row.original.nombre}`"
-            v-if="puedeEliminar"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
-            title="Eliminar"
+            :disabled="!puedeEliminar"
+            :title="puedeEliminar ? 'Eliminar' : motivoSinPermiso('Eliminar', 'Cajas')"
             @click="pedirEliminar(row.original)"
             class="size-11 justify-center"
           />
-        </div>
-      </template>
-
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          No hay cajas registradas.
         </div>
       </template>
     </CrudTable>

@@ -19,6 +19,8 @@ interface Member {
   correo: string
   /** La cuenta se usa como tótem compartido: en el salón siempre se pide PIN. */
   esTotem: boolean
+  /** El garzón cuya credencial es esta cuenta: dar de baja la membresía exige decidir qué pasa con él. */
+  garzonNombre?: string | null
   /**
    * El correo ya tenía cuenta, así que el alta **no la adopta**: le llegó un
    * mail y la persona todavía no aceptó sumarse. Hasta que acepte **no es
@@ -225,6 +227,29 @@ onMounted(cargar)
 
 // ── Tótem compartido ────────────────────────────────────────────────────────
 const marcandoTotem = ref<string | null>(null)
+const totemAConfirmar = ref<Member | null>(null)
+const totemOpen = ref(false)
+
+/**
+ * Dejar de ser tótem vuelve a lo normal y va directo; **marcarlo** cambia cómo entra esa persona
+ * al salón (siempre pedirá PIN), así que primero se explica y se confirma (auditoría UX 07.19).
+ */
+function alternarTotem(member: Member) {
+  if (marcandoTotem.value) return
+  if (member.esTotem) {
+    void aplicarTotem(member)
+    return
+  }
+  totemAConfirmar.value = member
+  totemOpen.value = true
+}
+
+async function confirmarTotem() {
+  const member = totemAConfirmar.value
+  if (!member) return
+  totemOpen.value = false
+  await aplicarTotem(member)
+}
 
 /**
  * Marca o desmarca la cuenta como tótem del salón.
@@ -232,7 +257,7 @@ const marcandoTotem = ref<string | null>(null)
  * Manda el estado **deseado**, no un "togglear": dos pestañas abiertas no
  * pueden dejar el marcador en el valor contrario al que muestran las dos.
  */
-async function alternarTotem(member: Member) {
+async function aplicarTotem(member: Member) {
   if (marcandoTotem.value) return
   marcandoTotem.value = member.usuarioId
   const esTotem = !member.esTotem
@@ -256,6 +281,68 @@ async function alternarTotem(member: Member) {
   }
   finally {
     marcandoTotem.value = null
+  }
+}
+
+// ── Quitar del local ────────────────────────────────────────────────────────
+type DecisionGarzon = 'sigue' | 'no-sigue'
+interface BajaResultado {
+  garzon: { id: string, nombre: string, accion: 'desvinculado' | 'desactivado', pin: string | null, advertencias: string[] } | null
+}
+
+const quitarOpen = ref(false)
+const aQuitar = ref<Member | null>(null)
+const decisionGarzon = ref<DecisionGarzon | undefined>(undefined)
+const quitando = ref(false)
+/** El PIN nuevo del garzón que sigue trabajando: existe en claro solo en esta respuesta. */
+const pinNuevo = ref<{ nombre: string, pin: string, advertencias: string[] } | null>(null)
+const pinOpen = ref(false)
+
+const opcionesGarzon = computed(() => {
+  const nombre = aQuitar.value?.garzonNombre ?? ''
+  return [
+    { value: 'sigue', label: `${nombre} sigue trabajando`, description: 'Se le genera un PIN propio para entrar al salón.' },
+    { value: 'no-sigue', label: `${nombre} ya no trabaja aquí`, description: 'Queda inactivo; su historial se conserva.' },
+  ]
+})
+/** Por qué «Quitar del local» está apagado. */
+const faltaDecision = computed(() =>
+  !!aQuitar.value?.garzonNombre && !decisionGarzon.value ? 'Elige qué pasa con el garzón.' : '',
+)
+
+function pedirQuitar(member: Member) {
+  aQuitar.value = member
+  decisionGarzon.value = undefined
+  quitarOpen.value = true
+}
+
+/**
+ * Da de baja la membresía (soft delete en el servidor, reversible: se la puede volver a invitar).
+ * La decisión del garzón viaja por query, como la pide el endpoint.
+ */
+async function quitar() {
+  const member = aQuitar.value
+  if (!member || faltaDecision.value || quitando.value) return
+  quitando.value = true
+  try {
+    const res = await useApiFetch<BajaResultado>(`${apiUrl}/tenants/members/${member.usuarioId}`, {
+      method: 'DELETE',
+      query: decisionGarzon.value ? { garzon: decisionGarzon.value } : undefined,
+    })
+    members.value = members.value.filter(m => m.usuarioId !== member.usuarioId)
+    quitarOpen.value = false
+    toast.add({ title: `${member.nombre} ya no está en tu local`, color: 'success' })
+    if (res?.garzon?.pin) {
+      pinNuevo.value = { nombre: res.garzon.nombre, pin: res.garzon.pin, advertencias: res.garzon.advertencias ?? [] }
+      pinOpen.value = true
+    }
+  }
+  catch (e: unknown) {
+    // El 400 del último administrador llega tal cual: dice la razón y qué hacer.
+    toast.add({ title: apiErrorMsg(e, 'No se pudo quitar a la persona'), color: 'error' })
+  }
+  finally {
+    quitando.value = false
   }
 }
 
@@ -294,7 +381,7 @@ const columns: TableColumn<Member>[] = [
       description="El alta salió bien: ya les llegó un mail avisando que las estás sumando a esta empresa. Recién cuando aceptan pasan a ser miembros y sus roles empiezan a valer."
     />
 
-    <CrudTable :data="members" :columns="columns" :loading="loading" :error="errorCarga" recurso="los usuarios" @reintentar="cargar">
+    <CrudTable :data="members" :columns="columns" :loading="loading" :error="errorCarga" recurso="los usuarios" vacio="Aún no hay personas en tu local. Crea la primera para darle sus roles." vacio-accion="Nuevo usuario" @reintentar="cargar" @vacio-accion="abrirAlta">
       <template #nombre-cell="{ row }">
         <div class="flex items-center gap-2">
           <CrudListItem
@@ -370,6 +457,9 @@ const columns: TableColumn<Member>[] = [
               @click="alternarTotem(row.original)"
               class="size-11 justify-center"
             />
+            <!-- El tótem cambia cómo entra la persona al salón; el lápiz, sus roles. Cuatro píxeles
+                 entre los dos invitaban a confundirlos (auditoría UX 07.19). -->
+            <span class="mx-2 h-6 w-px bg-accented" aria-hidden="true" data-qa="acciones-divisor" />
             <UButton
               :aria-label="row.original.pendienteConfirmacion ? 'Sus roles se pueden editar cuando acepte sumarse' : 'Editar roles'"
               icon="i-lucide-square-pen"
@@ -382,15 +472,85 @@ const columns: TableColumn<Member>[] = [
               @click="abrirEdicion(row.original)"
               class="size-11 justify-center"
             />
+            <UButton
+              :aria-label="`Quitar del local a ${row.original.nombre} ${row.original.apellido}`"
+              icon="i-lucide-user-minus"
+              color="error"
+              variant="ghost"
+              :disabled="row.original.pendienteConfirmacion"
+              :title="row.original.pendienteConfirmacion
+                ? 'Todavía no es miembro: no hay nada que quitar'
+                : 'Quitar del local'"
+              @click="pedirQuitar(row.original)"
+              class="size-11 justify-center"
+            />
           </div>
         </template>
 
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          Aún no hay usuarios en tu local.
+    </CrudTable>
+
+    <CrudModal
+      v-model:open="totemOpen"
+      title="Marcar como tótem compartido"
+      message="Esta cuenta pasará a ser un dispositivo compartido: en el salón siempre pedirá PIN. Un tótem es una tablet o pantalla que queda abierta y la usan varias personas."
+      confirm-label="Marcar como tótem"
+      confirm-color="primary"
+      cancel-label="Volver"
+      @cancel="totemAConfirmar = null"
+      @confirm="confirmarTotem"
+    />
+
+    <UModal v-model:open="quitarOpen" title="Quitar del local">
+      <template #body>
+        <div v-if="aQuitar" class="space-y-4">
+          <p class="text-sm">
+            {{ aQuitar.nombre }} {{ aQuitar.apellido }} dejará de ver este local y perderá sus roles.
+            Es reversible: puedes volver a invitar a esta persona desde «Nuevo usuario».
+          </p>
+          <div v-if="aQuitar.garzonNombre" class="space-y-2">
+            <p class="text-sm">
+              Esta cuenta es la credencial del garzón <strong>{{ aQuitar.garzonNombre }}</strong>: sin ella
+              se queda sin forma de operar. ¿Qué pasa con su PIN?
+            </p>
+            <URadioGroup v-model="decisionGarzon" :items="opcionesGarzon" value-key="value" />
+          </div>
         </div>
       </template>
-    </CrudTable>
+      <template #footer>
+        <AppModalFooter>
+          <p v-if="faltaDecision" class="mr-auto text-sm text-muted">
+            {{ faltaDecision }}
+          </p>
+          <UButton color="neutral" variant="ghost" @click="() => { quitarOpen = false }">
+            Volver
+          </UButton>
+          <UButton color="error" :loading="quitando" :disabled="!!faltaDecision" @click="quitar">
+            Quitar del local
+          </UButton>
+        </AppModalFooter>
+      </template>
+    </UModal>
+
+    <UModal v-model:open="pinOpen" title="PIN nuevo">
+      <template #body>
+        <div v-if="pinNuevo" class="space-y-3">
+          <p class="text-sm">
+            El PIN de {{ pinNuevo.nombre }} es <strong class="text-lg tabular-nums">{{ pinNuevo.pin }}</strong>.
+            Anótalo y entrégaselo ahora: no se vuelve a mostrar.
+          </p>
+          <ul v-if="pinNuevo.advertencias.length" class="list-disc pl-5 text-sm text-muted">
+            <li v-for="a in pinNuevo.advertencias" :key="a">{{ a }}</li>
+          </ul>
+        </div>
+      </template>
+      <template #footer>
+        <AppModalFooter>
+          <UButton @click="() => { pinOpen = false; pinNuevo = null }">
+            Ya lo anoté
+          </UButton>
+        </AppModalFooter>
+      </template>
+    </UModal>
 
     <UModal v-model:open="altaOpen" title="Nuevo usuario">
       <template #body>

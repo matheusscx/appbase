@@ -10,6 +10,7 @@ const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones'
 
 const toast = useToast()
 const salonesApi = useSalones()
+const { errores, marcar, limpiar } = useErroresCampo()
 
 // Dos recursos, dos endpoints de restaurar (`docs/features/papelera.md`):
 // `POST /salones/:id/restaurar` vive en `SalonesController`, `POST
@@ -236,6 +237,7 @@ const salonDrawerTitle = computed(() =>
 )
 
 function abrirCrearSalon() {
+  limpiar()
   salonEditingId.value = null
   salonForm.value = { nombre: '' }
   salonDrawerOpen.value = true
@@ -243,12 +245,14 @@ function abrirCrearSalon() {
 
 function abrirEditarSalon() {
   if (!selectedSalon.value || selectedSalon.value.eliminadoEl) return
+  limpiar()
   salonEditingId.value = selectedSalon.value.id
   salonForm.value = { nombre: selectedSalon.value.nombre }
   salonDrawerOpen.value = true
 }
 
 async function guardarSalon() {
+  if (marcar(salonForm.value.nombre.trim() ? {} : { nombre: 'Escribe el nombre del salón, por ejemplo Terraza' })) return
   savingSalon.value = true
   try {
     if (salonEditingId.value) {
@@ -368,6 +372,7 @@ const mesaDrawerTitle = computed(() =>
 
 function abrirCrearMesa() {
   if (!selectedSalon.value || selectedSalon.value.eliminadoEl) return
+  limpiar()
   mesaEditingId.value = null
   mesaForm.value = { nombre: '', forma: 'cuadrada', tamano: 'mediano' }
   mesaDrawerOpen.value = true
@@ -375,11 +380,24 @@ function abrirCrearMesa() {
 
 function abrirEditarMesa(mesa: MesaResumen) {
   if (mesa.eliminadoEl) return
+  limpiar()
   mesaEditingId.value = mesa.id
   mesaForm.value = { nombre: mesa.nombre, forma: mesa.forma, tamano: mesa.tamano }
   mesaToDelete.value = mesa
   mesaDrawerOpen.value = true
 }
+
+/** "Editar mesa" de la barra del plano: la mesa se elige de una lista, sin doble clic (auditoría UX 07.18). */
+const mesaItems = computed(() => [localMesas.value.map(m => ({
+  label: m.nombre,
+  onSelect: () => abrirEditarMesa(m),
+}))])
+
+const motivoEditarMesa = computed(() => {
+  if (!puedeActualizar.value) return motivoSinPermiso('Actualizar', 'Salones')
+  if (localMesas.value.length === 0) return 'Este salón todavía no tiene mesas'
+  return undefined
+})
 
 function eliminarMesaDesdeDrawer() {
   mesaDrawerOpen.value = false
@@ -388,6 +406,7 @@ function eliminarMesaDesdeDrawer() {
 
 async function guardarMesa() {
   if (!selectedSalonId.value) return
+  if (marcar(mesaForm.value.nombre.trim() ? {} : { nombre: 'Escribe el nombre de la mesa, por ejemplo Mesa 1' })) return
   savingMesa.value = true
   try {
     const salonId = selectedSalonId.value
@@ -536,10 +555,17 @@ async function restaurarMesaSeleccionada(id: string) {
                backend rechaza los dos restaurar (salón y mesa), así que
                mostrar la papelera sería ofrecer una acción que termina en 403. -->
           <div v-if="puedeEliminar" class="flex items-center gap-2">
-            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <label class="flex size-11 cursor-pointer items-center justify-center">
+              <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            </label>
             <span class="text-sm text-muted">Ver eliminados</span>
           </div>
-          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrearSalon">
+          <UButton
+            icon="i-lucide-plus"
+            :disabled="!puedeCrear"
+            :title="puedeCrear ? undefined : motivoSinPermiso('Crear', 'Salones')"
+            @click="abrirCrearSalon"
+          >
             Nuevo salón
           </UButton>
         </div>
@@ -550,12 +576,23 @@ async function restaurarMesaSeleccionada(id: string) {
       <UIcon name="i-lucide-loader" class="h-8 w-8 animate-spin text-muted" />
     </div>
 
-    <div v-else-if="salones.length === 0" class="py-12 text-center text-sm text-muted">
-      No hay salones. Crea el primero para empezar.
+    <div v-else-if="salones.length === 0" class="flex flex-col items-center gap-3 py-12 text-center text-sm text-muted">
+      <p class="max-w-sm">
+        Aún no tienes salones. Crea el primero y después ubica sus mesas en el plano.
+      </p>
+      <UButton
+        v-if="puedeCrear"
+        icon="i-lucide-plus"
+        size="sm"
+        data-qa="salones-vacio-accion"
+        @click="abrirCrearSalon"
+      >
+        Nuevo salón
+      </UButton>
     </div>
 
     <template v-else>
-      <div class="flex flex-wrap items-center gap-3">
+      <div class="flex flex-wrap items-center gap-3" data-qa="salones-barra">
         <USelectMenu
           v-model="selectedSalonId"
           :items="salonItems"
@@ -566,24 +603,26 @@ async function restaurarMesaSeleccionada(id: string) {
           Eliminado
         </UBadge>
         <UButton
-          v-if="puedeActualizar && !selectedSalon?.eliminadoEl"
+          v-if="!selectedSalon?.eliminadoEl"
           icon="i-lucide-square-pen"
           color="neutral"
           variant="ghost"
-          title="Editar salón"
+          :disabled="!puedeActualizar"
+          :title="puedeActualizar ? 'Editar salón' : motivoSinPermiso('Actualizar', 'Salones')"
           aria-label="Editar salón"
-          @click="abrirEditarSalon"
           class="size-11 justify-center"
+          @click="abrirEditarSalon"
         />
         <UButton
-          v-if="puedeEliminar && !selectedSalon?.eliminadoEl"
+          v-if="!selectedSalon?.eliminadoEl"
           icon="i-lucide-trash-2"
           color="error"
           variant="ghost"
-          title="Eliminar salón"
+          :disabled="!puedeEliminar"
+          :title="puedeEliminar ? 'Eliminar salón' : motivoSinPermiso('Eliminar', 'Salones')"
           aria-label="Eliminar salón"
-          @click="() => { deleteSalonOpen = true }"
           class="size-11 justify-center"
+          @click="() => { deleteSalonOpen = true }"
         />
         <UButton
           v-if="puedeEliminar && selectedSalon?.eliminadoEl"
@@ -614,7 +653,7 @@ async function restaurarMesaSeleccionada(id: string) {
                 </li>
                 <li class="flex items-start gap-2">
                   <UIcon name="i-lucide-mouse-pointer-click" class="mt-0.5 h-4 w-4 shrink-0 text-muted" />
-                  <span>Doble click en una mesa para editarla o eliminarla.</span>
+                  <span>Para editar o eliminar una mesa, usa «Editar mesa» o haz doble click sobre ella.</span>
                 </li>
               </ul>
             </AppInfoButton>
@@ -624,11 +663,25 @@ async function restaurarMesaSeleccionada(id: string) {
               <UIcon name="i-lucide-loader" class="h-3.5 w-3.5 animate-spin" />
               Guardando…
             </span>
+            <UDropdownMenu :items="mesaItems" :disabled="!!motivoEditarMesa">
+              <UButton
+                icon="i-lucide-square-pen"
+                size="sm"
+                variant="soft"
+                color="neutral"
+                aria-label="Editar mesa"
+                :disabled="!!motivoEditarMesa"
+                :title="motivoEditarMesa"
+              >
+                Editar mesa
+              </UButton>
+            </UDropdownMenu>
             <UButton
-              v-if="puedeCrear"
               icon="i-lucide-plus"
               size="sm"
               variant="soft"
+              :disabled="!puedeCrear"
+              :title="puedeCrear ? undefined : motivoSinPermiso('Crear', 'Salones')"
               @click="abrirCrearMesa"
             >
               Agregar mesa
@@ -689,8 +742,8 @@ async function restaurarMesaSeleccionada(id: string) {
       </template>
       <template #body>
         <UForm id="salon-form" :state="salonForm" class="space-y-4" @submit="guardarSalon">
-          <UFormField label="Nombre" required>
-            <UInput v-model="salonForm.nombre" placeholder="Salón Principal" autofocus />
+          <UFormField label="Nombre" required :error="errores.nombre">
+            <UInput v-model="salonForm.nombre" placeholder="Salón Principal" autofocus @update:model-value="limpiar('nombre')" />
           </UFormField>
         </UForm>
       </template>
@@ -711,8 +764,8 @@ async function restaurarMesaSeleccionada(id: string) {
       </template>
       <template #body>
         <UForm id="mesa-form" :state="mesaForm" class="space-y-4" @submit="guardarMesa">
-          <UFormField label="Nombre" required>
-            <UInput v-model="mesaForm.nombre" placeholder="Mesa 1" autofocus />
+          <UFormField label="Nombre" required :error="errores.nombre">
+            <UInput v-model="mesaForm.nombre" placeholder="Mesa 1" autofocus @update:model-value="limpiar('nombre')" />
           </UFormField>
           <UFormField label="Forma">
             <USelectMenu
@@ -737,11 +790,13 @@ async function restaurarMesaSeleccionada(id: string) {
           a este drawer es el doble-click del plano, que ya exige `Actualizar`.)
         -->
         <UButton
-          v-if="mesaEditingId && puedeEliminar"
+          v-if="mesaEditingId"
           color="error"
           variant="soft"
           icon="i-lucide-trash-2"
           class="mr-auto"
+          :disabled="!puedeEliminar"
+          :title="puedeEliminar ? undefined : motivoSinPermiso('Eliminar', 'Salones')"
           @click="eliminarMesaDesdeDrawer"
         >
           Eliminar

@@ -103,7 +103,9 @@ async function montar(componente: Parameters<typeof mountSuspended>[0]) {
 }
 
 function tieneBotonConTexto(wrapper: Wrapper, texto: string) {
-  return wrapper.findAll('button').some((b: DOMWrapper<Element>) => b.text().includes(texto))
+  // Un botón sin permiso queda apagado con el motivo (auditoría UX 07.22): "tener el control" es que
+  // se pueda tocar.
+  return wrapper.findAll('button').some((b: DOMWrapper<Element>) => b.text().includes(texto) && b.attributes('disabled') === undefined)
 }
 
 /**
@@ -312,7 +314,7 @@ describe('salones — el plano es una escritura más', () => {
     wrapper.findComponent(SalonPlano).vm.$emit('edit', SALON.mesas[0])
     await new Promise(r => setTimeout(r, 50))
     const eliminar = [...document.body.querySelectorAll('button')]
-      .filter(b => b.textContent?.trim() === 'Eliminar').length
+      .filter(b => b.textContent?.trim() === 'Eliminar' && !b.disabled).length
     wrapper.unmount()
     return eliminar
   }

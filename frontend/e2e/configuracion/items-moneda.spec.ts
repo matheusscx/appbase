@@ -110,7 +110,7 @@ test('cambiar la moneda frena y avisa; desistir no toca nada, confirmar vacía',
   const drawer = page.getByRole('dialog')
   const selectorMoneda = campo(drawer, /^Moneda$/).locator(DISPARADOR_DE_SELECTOR)
   const precio = campo(drawer, /^Precio base/).locator('input[inputmode="decimal"]')
-  const aviso = drawer.getByText('Cambiar la moneda del ítem')
+  const aviso = drawer.getByText('Cambiar la moneda del producto')
 
   await expect(selectorMoneda).toContainText(CLP)
   await expect(precio).toHaveValue('8.900')
@@ -149,7 +149,7 @@ test('un cambio a medio confirmar muere al cerrar el drawer', async ({
   await editar.click()
 
   const drawer = page.getByRole('dialog')
-  const aviso = drawer.getByText('Cambiar la moneda del ítem')
+  const aviso = drawer.getByText('Cambiar la moneda del producto')
 
   await campo(drawer, /^Moneda$/).locator(DISPARADOR_DE_SELECTOR).click()
   await page.getByRole('option', { name: `${USD} (USD)`, exact: true }).click()

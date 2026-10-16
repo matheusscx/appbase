@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, EntityManager } from 'typeorm';
+import { Repository, EntityManager, In } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import { Rol, ROL_OPERADOR_SALON } from './entities/rol.entity';
 import { RolUsuario } from './entities/rol-usuario.entity';
@@ -50,8 +50,32 @@ export class RolesService {
     private readonly rbacService: RbacService,
   ) {}
 
-  async findAll(tenantId: string): Promise<Rol[]> {
-    return this.rolRepo.find({ where: { tenantId } });
+  /**
+   * Los roles del tenant, cada uno con cuántas personas lo tienen
+   * (`cantidadUsuarios`): la pantalla lo muestra antes de eliminar un rol
+   * (auditoría UX 07.9). El conteo sale de UNA agregación para todos los roles,
+   * no una consulta por rol, y cuenta solo membresías vivas: quien ya no es
+   * miembro no "perdería" nada.
+   */
+  async findAll(
+    tenantId: string,
+  ): Promise<(Rol & { cantidadUsuarios: number })[]> {
+    const roles = await this.rolRepo.find({ where: { tenantId } });
+    const filas: { rol_id: string; cantidad: number }[] = await this.db.query(
+      `SELECT ru.rol_id, COUNT(*)::int AS cantidad
+         FROM roles_usuarios ru
+         JOIN usuarios_tenants ut ON ut.usuario_id = ru.usuario_id
+                                 AND ut.tenant_id = ru.tenant_id
+                                 AND ut.eliminado_el IS NULL
+        WHERE ru.tenant_id = $1
+          AND ru.eliminado_el IS NULL
+        GROUP BY ru.rol_id`,
+      [tenantId],
+    );
+    const porRol = new Map(filas.map((f) => [f.rol_id, f.cantidad]));
+    return roles.map((r) =>
+      Object.assign(r, { cantidadUsuarios: porRol.get(r.id) ?? 0 }),
+    );
   }
 
   async create(tenantId: string, dto: CreateRolDto): Promise<Rol> {
@@ -203,33 +227,91 @@ export class RolesService {
     if (!tenantModulo)
       throw new BadRequestException('El módulo no pertenece a este tenant');
 
-    // Borrar los permisos existentes y escribir los nuevos en una sola
-    // transacción: si el `save` de más abajo falla, el `delete` no debe
-    // quedar commiteado — si no, el rol se queda sin ningún permiso en este
-    // módulo hasta el próximo PUT exitoso.
+    await this.db.transaccion((manager) =>
+      this.aplicarPermisosDeModulo(
+        manager,
+        rolId,
+        moduloTenantId,
+        moduloAppPermisoIds,
+      ),
+    );
+  }
+
+  /**
+   * Guarda los permisos de **todos los módulos de un rol en una sola
+   * transacción**: o queda todo o no queda nada (auditoría UX 07.11).
+   *
+   * Mismas barreras que `setPermissions`, aplicadas al conjunto: el rol es del
+   * tenant, no es de sistema, y **cada** módulo pertenece al tenant —validados
+   * con una sola consulta—. Un módulo repetido se rechaza: el segundo pisaría
+   * al primero en silencio.
+   */
+  async setAllPermissions(
+    rolId: string,
+    tenantId: string,
+    modulos: { moduloTenantId: string; moduloAppPermisoIds: string[] }[],
+  ): Promise<void> {
+    const rol = await this.rolRepo.findOne({ where: { id: rolId, tenantId } });
+    if (!rol) throw new NotFoundException(`Rol ${rolId} no encontrado`);
+    // Mismo bloqueo que `setPermissions`: ver el ⚠️ de allá.
+    if (rol.esSistema) throw new BadRequestException(MENSAJE_ROL_DE_SISTEMA);
+
+    const ids = modulos.map((m) => m.moduloTenantId);
+    if (new Set(ids).size !== ids.length) {
+      throw new BadRequestException('Un módulo viene repetido en la lista');
+    }
+    const delTenant = await this.tenantModuloRepo.find({
+      where: { tenantId, moduloTenantId: In(ids) },
+    });
+    if (delTenant.length !== ids.length) {
+      throw new BadRequestException('El módulo no pertenece a este tenant');
+    }
+
     await this.db.transaccion(async (manager) => {
-      await manager.delete(RolPermisoModulo, { rolId, moduloTenantId });
-
-      if (moduloAppPermisoIds.length > 0) {
-        // El chequeo de permisos (RbacService) hace JOIN por modulos_roles, así
-        // que el rol debe estar vinculado al módulo del tenant para que los
-        // permisos surtan efecto. Asegurar la fila (crear o restaurar si está
-        // soft-deleted).
-        await this.ensureModuloRol(manager, rolId, moduloTenantId);
-
-        const entries = moduloAppPermisoIds.map((moduloAppPermisoId) =>
-          manager.create(RolPermisoModulo, {
-            rolId,
-            moduloTenantId,
-            moduloAppPermisoId,
-          }),
+      for (const m of modulos) {
+        await this.aplicarPermisosDeModulo(
+          manager,
+          rolId,
+          m.moduloTenantId,
+          m.moduloAppPermisoIds,
         );
-        await manager.save(entries);
-      } else {
-        // Sin permisos en este módulo → quitar el vínculo rol↔módulo.
-        await manager.softDelete(ModuloRol, { rolId, moduloTenantId });
       }
     });
+  }
+
+  /**
+   * Reemplaza los permisos de un (rol, módulo): borra los viejos y escribe los
+   * nuevos **con el manager de la transacción que abre quien llama** — si el
+   * `save` falla, el `delete` no debe quedar commiteado, o el rol se queda sin
+   * ningún permiso en el módulo hasta el próximo guardado exitoso.
+   */
+  private async aplicarPermisosDeModulo(
+    manager: EntityManager,
+    rolId: string,
+    moduloTenantId: string,
+    moduloAppPermisoIds: string[],
+  ): Promise<void> {
+    await manager.delete(RolPermisoModulo, { rolId, moduloTenantId });
+
+    if (moduloAppPermisoIds.length > 0) {
+      // El chequeo de permisos (RbacService) hace JOIN por modulos_roles, así
+      // que el rol debe estar vinculado al módulo del tenant para que los
+      // permisos surtan efecto. Asegurar la fila (crear o restaurar si está
+      // soft-deleted).
+      await this.ensureModuloRol(manager, rolId, moduloTenantId);
+
+      const entries = moduloAppPermisoIds.map((moduloAppPermisoId) =>
+        manager.create(RolPermisoModulo, {
+          rolId,
+          moduloTenantId,
+          moduloAppPermisoId,
+        }),
+      );
+      await manager.save(entries);
+    } else {
+      // Sin permisos en este módulo → quitar el vínculo rol↔módulo.
+      await manager.softDelete(ModuloRol, { rolId, moduloTenantId });
+    }
   }
 
   /**

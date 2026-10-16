@@ -81,7 +81,7 @@ const {
   toggleActivo,
   cerrarPausar,
   confirmarPausar,
-} = usePausaRegla('descuentos', 'Descuento', descuentos)
+} = usePausaRegla('descuentos', 'Descuento', descuentos, { deshacer: true })
 
 const modoOptions = [
   { label: 'Porcentaje', value: 'porcentaje' },
@@ -853,7 +853,7 @@ const columns: TableColumn<Regla>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="descuentos" :columns="columns" :loading="loading" :error="errorCarga" recurso="los descuentos" @reintentar="cargar">
+    <CrudTable :data="descuentos" :columns="columns" :loading="loading" :error="errorCarga" recurso="los descuentos" vacio="Aún no tienes descuentos. Crea el primero para usarlo al cobrar." vacio-accion="Nuevo descuento" @vacio-accion="abrirCrear" @reintentar="cargar">
         <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <div class="flex items-center gap-2">
@@ -943,11 +943,6 @@ const columns: TableColumn<Regla>[] = [
           </div>
         </template>
 
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          No hay descuentos registrados.
-        </div>
-      </template>
     </CrudTable>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">

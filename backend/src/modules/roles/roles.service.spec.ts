@@ -110,6 +110,7 @@ function crearManagerFalso(
 describe('RolesService', () => {
   let service: RolesService;
   let rolRepo: {
+    find: jest.Mock;
     findOne: jest.Mock;
     create: jest.Mock;
     save: jest.Mock;
@@ -121,7 +122,7 @@ describe('RolesService', () => {
     save: jest.Mock;
   };
   let rolPermisoModuloRepo: { find: jest.Mock };
-  let tenantModuloRepo: { findOne: jest.Mock };
+  let tenantModuloRepo: { findOne: jest.Mock; find: jest.Mock };
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
   let rbac: { administradoresDe: jest.Mock };
   // El manager que `transaction` le pasa al service, para poder afirmar sobre
@@ -134,6 +135,7 @@ describe('RolesService', () => {
 
   beforeEach(async () => {
     rolRepo = {
+      find: jest.fn().mockResolvedValue([]),
       findOne: jest.fn().mockResolvedValue({ id: ROL, tenantId: TENANT }),
       create: jest.fn((data: unknown) => data),
       save: jest.fn((row: unknown) => Promise.resolve(row)),
@@ -149,6 +151,10 @@ describe('RolesService', () => {
       findOne: jest
         .fn()
         .mockResolvedValue({ moduloTenantId: MODULO, tenantId: TENANT }),
+      // `setAllPermissions` valida todos los módulos con UNA consulta.
+      find: jest
+        .fn()
+        .mockResolvedValue([{ moduloTenantId: MODULO, tenantId: TENANT }]),
     };
     store = { permisos: [], modulosRol: [] };
     managerDeLaTx = null;
@@ -205,6 +211,43 @@ describe('RolesService', () => {
     }).compile();
 
     service = module.get<RolesService>(RolesService);
+  });
+
+  // Auditoría UX 07.9: eliminar un rol dice cuántas personas lo tienen.
+  describe('findAll — cantidadUsuarios', () => {
+    it('cada rol trae cuántas personas lo tienen, 0 si nadie', async () => {
+      rolRepo.find.mockResolvedValue([
+        { id: 'rol-a', tenantId: TENANT, nombre: 'Vendedor' },
+        { id: 'rol-b', tenantId: TENANT, nombre: 'Cajero' },
+      ]);
+      dataSource.query.mockResolvedValue([{ rol_id: 'rol-a', cantidad: 3 }]);
+
+      const roles = await service.findAll(TENANT);
+
+      expect(roles.map((r) => [r.id, r.cantidadUsuarios])).toEqual([
+        ['rol-a', 3],
+        ['rol-b', 0],
+      ]);
+    });
+
+    it('cuenta con UNA consulta para todos los roles, atada al tenant y a membresías vivas', async () => {
+      rolRepo.find.mockResolvedValue([
+        { id: 'rol-a', tenantId: TENANT },
+        { id: 'rol-b', tenantId: TENANT },
+      ]);
+      dataSource.query.mockResolvedValue([]);
+
+      await service.findAll(TENANT);
+
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(params).toEqual([TENANT]);
+      expect(sql).toContain('ru.eliminado_el IS NULL');
+      expect(sql).toContain('ut.eliminado_el IS NULL');
+    });
   });
 
   describe('assignUser', () => {
@@ -608,6 +651,137 @@ describe('RolesService', () => {
           moduloTenantId: MODULO,
           moduloAppPermisoId: 'permiso-viejo',
         },
+      ]);
+    });
+  });
+
+  // Auditoría UX 07.11 (owner, 2026-10-16): guardar un rol es todo o nada. Antes la pantalla
+  // lanzaba un PUT por módulo y, si el décimo fallaba, los nueve primeros ya estaban aplicados.
+  describe('setAllPermissions', () => {
+    const MODULO_2 = 'modulo-tenant-2-uuid';
+    const dosModulos = [
+      { moduloTenantId: MODULO, moduloAppPermisoIds: ['permiso-a'] },
+      { moduloTenantId: MODULO_2, moduloAppPermisoIds: ['permiso-b'] },
+    ];
+
+    beforeEach(() => {
+      tenantModuloRepo.find.mockResolvedValue([
+        { moduloTenantId: MODULO, tenantId: TENANT },
+        { moduloTenantId: MODULO_2, tenantId: TENANT },
+      ]);
+    });
+
+    it('rechaza un rol que no es de este tenant', async () => {
+      rolRepo.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.setAllPermissions(ROL, TENANT, dosModulos),
+      ).rejects.toBeInstanceOf(NotFoundException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rechaza tocarle los permisos a un rol de sistema', async () => {
+      rolRepo.findOne.mockResolvedValue({
+        id: ROL,
+        tenantId: TENANT,
+        esFijo: false,
+        esSistema: true,
+      });
+
+      await expect(
+        service.setAllPermissions(ROL, TENANT, dosModulos),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('rechaza si UN módulo no es del tenant, sin escribir nada de los otros', async () => {
+      tenantModuloRepo.find.mockResolvedValue([
+        { moduloTenantId: MODULO, tenantId: TENANT },
+      ]);
+
+      await expect(
+        service.setAllPermissions(ROL, TENANT, dosModulos),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('valida los módulos con una sola consulta, no una por módulo', async () => {
+      await service.setAllPermissions(ROL, TENANT, dosModulos);
+
+      expect(tenantModuloRepo.find).toHaveBeenCalledTimes(1);
+      expect(tenantModuloRepo.findOne).not.toHaveBeenCalled();
+    });
+
+    it('rechaza el mismo módulo dos veces: el segundo pisaría al primero', async () => {
+      await expect(
+        service.setAllPermissions(ROL, TENANT, [
+          dosModulos[0],
+          { moduloTenantId: MODULO, moduloAppPermisoIds: ['permiso-c'] },
+        ]),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('guarda todos los módulos en UNA transacción', async () => {
+      store.permisos = [
+        { rolId: ROL, moduloTenantId: MODULO, moduloAppPermisoId: 'viejo' },
+      ];
+
+      await service.setAllPermissions(ROL, TENANT, dosModulos);
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(store.permisos).toEqual([
+        { rolId: ROL, moduloTenantId: MODULO, moduloAppPermisoId: 'permiso-a' },
+        {
+          rolId: ROL,
+          moduloTenantId: MODULO_2,
+          moduloAppPermisoId: 'permiso-b',
+        },
+      ]);
+      expect(store.modulosRol).toHaveLength(2);
+    });
+
+    it('un módulo con lista vacía se desvincula del rol, los demás se guardan', async () => {
+      store.modulosRol = [
+        { rolId: ROL, moduloTenantId: MODULO_2, eliminadoEl: null },
+      ];
+
+      await service.setAllPermissions(ROL, TENANT, [
+        dosModulos[0],
+        { moduloTenantId: MODULO_2, moduloAppPermisoIds: [] },
+      ]);
+
+      expect(
+        store.modulosRol.find((m) => m.moduloTenantId === MODULO_2)
+          ?.eliminadoEl,
+      ).toBeInstanceOf(Date);
+      expect(store.permisos).toHaveLength(1);
+    });
+
+    it('si algo falla a mitad, no queda NADA guardado (ni los módulos anteriores)', async () => {
+      store.permisos = [
+        { rolId: ROL, moduloTenantId: MODULO, moduloAppPermisoId: 'viejo' },
+      ];
+      dataSource.transaction = jest.fn(
+        async (work: (manager: unknown) => Promise<unknown>) => {
+          const draft = {
+            permisos: [...store.permisos],
+            modulosRol: store.modulosRol.map((m) => ({ ...m })),
+          };
+          const manager = crearManagerFalso(draft, { fallaEnSave: true });
+          const result = await work(manager);
+          store.permisos = draft.permisos;
+          store.modulosRol = draft.modulosRol;
+          return result;
+        },
+      );
+
+      await expect(
+        service.setAllPermissions(ROL, TENANT, dosModulos),
+      ).rejects.toThrow('save falló');
+
+      expect(store.permisos).toEqual([
+        { rolId: ROL, moduloTenantId: MODULO, moduloAppPermisoId: 'viejo' },
       ]);
     });
   });

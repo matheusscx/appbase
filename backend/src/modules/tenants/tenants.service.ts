@@ -61,6 +61,12 @@ export interface TenantMember {
   correo: string;
   /** La cuenta se usa como tótem compartido: en el salón siempre se pide PIN. */
   esTotem: boolean;
+  /**
+   * El garzón cuya credencial es esta cuenta, si hay uno vivo. La pantalla lo
+   * necesita ANTES de dar de baja la membresía: el backend exige decidir qué
+   * pasa con ese garzón (auditoría UX 07.20).
+   */
+  garzonNombre: string | null;
   roles: { rolId: string; nombre: string }[];
   /**
    * `true` = **todavía no es miembro**: el alta le mandó un mail y la persona no
@@ -602,6 +608,7 @@ export class TenantsService {
       apellido: string;
       correo: string;
       es_totem: boolean;
+      garzon_nombre: string | null;
       rol_id: string | null;
       rol_nombre: string | null;
       pendiente: boolean;
@@ -611,6 +618,13 @@ export class TenantsService {
               u.apellido,
               u.correo,
               ut.es_totem,
+              -- Subconsulta escalar y no JOIN: dos garzones vivos sobre la misma cuenta
+              -- duplicarían las filas de roles de esa persona.
+              (SELECT g.nombre FROM garzones g
+                WHERE g.usuario_id = ut.usuario_id
+                  AND g.tenant_id = ut.tenant_id
+                  AND g.eliminado_el IS NULL
+                LIMIT 1) AS garzon_nombre,
               r.rol_id,
               r.nombre AS rol_nombre,
               false AS pendiente
@@ -634,6 +648,7 @@ export class TenantsService {
               u.apellido,
               u.correo,
               false AS es_totem,
+              NULL::text AS garzon_nombre,
               r.rol_id,
               r.nombre AS rol_nombre,
               true AS pendiente
@@ -670,6 +685,7 @@ export class TenantsService {
           apellido: row.apellido,
           correo: row.correo,
           esTotem: row.es_totem,
+          garzonNombre: row.garzon_nombre ?? null,
           roles: [],
           pendienteConfirmacion: row.pendiente,
         };

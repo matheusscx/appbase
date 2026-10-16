@@ -405,8 +405,10 @@ async function montar() {
   return wrapper
 }
 
+// Un botón sin permiso ya no desaparece (auditoría UX 07.22): queda apagado y con su motivo. Para
+// estos tests "se ve" quiere decir "está y se puede tocar".
 function tieneTexto(wrapper: Awaited<ReturnType<typeof montar>>, texto: string) {
-  return wrapper.findAll('button').some(b => b.text().includes(texto))
+  return wrapper.findAll('button').some(b => b.text().includes(texto) && b.attributes('disabled') === undefined)
 }
 
 function cuentaPorTitulo(
@@ -417,13 +419,13 @@ function cuentaPorTitulo(
 }
 
 describe('configuracion/items — permisos de módulo, no esAdmin', () => {
-  it('con Items:Leer no aparece ni crear ni editar', async () => {
+  it('con Items:Leer no puede crear ni editar', async () => {
     esAdmin = false
     permisos = ['Items:Leer']
 
     const wrapper = await montar()
 
-    expect(tieneTexto(wrapper, 'Nuevo item')).toBe(false)
+    expect(tieneTexto(wrapper, 'Nuevo producto')).toBe(false)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
   })
 
@@ -435,7 +437,7 @@ describe('configuracion/items — permisos de módulo, no esAdmin', () => {
 
     const wrapper = await montar()
 
-    expect(tieneTexto(wrapper, 'Nuevo item')).toBe(true)
+    expect(tieneTexto(wrapper, 'Nuevo producto')).toBe(true)
   })
 
   it('un NO admin con Items:Actualizar ve editar, sin ver crear', async () => {
@@ -444,7 +446,7 @@ describe('configuracion/items — permisos de módulo, no esAdmin', () => {
 
     const wrapper = await montar()
 
-    expect(tieneTexto(wrapper, 'Nuevo item')).toBe(false)
+    expect(tieneTexto(wrapper, 'Nuevo producto')).toBe(false)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBeGreaterThan(0)
   })
 
@@ -465,7 +467,7 @@ describe('configuracion/items — permisos de módulo, no esAdmin', () => {
 
     const wrapper = await montar()
 
-    expect(tieneTexto(wrapper, 'Nuevo item')).toBe(true)
+    expect(tieneTexto(wrapper, 'Nuevo producto')).toBe(true)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBeGreaterThan(0)
   })
 
@@ -475,7 +477,7 @@ describe('configuracion/items — permisos de módulo, no esAdmin', () => {
 
     const wrapper = await montar()
 
-    expect(tieneTexto(wrapper, 'Nuevo item')).toBe(false)
+    expect(tieneTexto(wrapper, 'Nuevo producto')).toBe(false)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
   })
 })
@@ -1072,8 +1074,8 @@ describe('configuracion/items — la unidad manda en costo y precio', () => {
 
   async function abrirAlta() {
     const wrapper = await montar()
-    const boton = wrapper.findAll('button').find(b => b.text().includes('Nuevo item'))
-    expect(boton, 'botón "Nuevo item"').toBeTruthy()
+    const boton = wrapper.findAll('button').find(b => b.text().includes('Nuevo producto'))
+    expect(boton, 'botón "Nuevo producto"').toBeTruthy()
     await boton!.trigger('click')
     await new Promise(r => setTimeout(r, 20))
     return wrapper
@@ -1225,8 +1227,8 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
 
   async function abrirAlta() {
     const wrapper = await montar()
-    const boton = wrapper.findAll('button').find(b => b.text().includes('Nuevo item'))
-    expect(boton, 'botón "Nuevo item"').toBeTruthy()
+    const boton = wrapper.findAll('button').find(b => b.text().includes('Nuevo producto'))
+    expect(boton, 'botón "Nuevo producto"').toBeTruthy()
     await boton!.trigger('click')
     await new Promise(r => setTimeout(r, 20))
     return wrapper
@@ -1348,7 +1350,7 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
     expect(aviso(wrapper)?.props('description')).toContain('no se vacía nada')
     // El encabezado tampoco puede prometer un vaciado que el cuerpo desmiente: es neutro
     // en los dos estados, y por eso no conmuta con ellos.
-    expect(aviso(wrapper)?.props('title')).toBe('Cambiar la moneda del ítem')
+    expect(aviso(wrapper)?.props('title')).toBe('Cambiar la moneda del producto')
     // Y sobre todo: NO se aplicó solo.
     expect(money(wrapper, 'Precio base').props('monedaId')).toBe('clp')
 
@@ -2168,9 +2170,9 @@ describe('configuracion/items — el nombre vacío se marca junto al campo', () 
     enviados.length = 0
   })
 
-  it('no manda nada y dice "Escribe el nombre del item"', async () => {
+  it('no manda nada y dice "Escribe el nombre del producto"', async () => {
     const wrapper = await montar()
-    await wrapper.findAll('button').find(b => b.text().includes('Nuevo item'))!.trigger('click')
+    await wrapper.findAll('button').find(b => b.text().includes('Nuevo producto'))!.trigger('click')
     await new Promise(r => setTimeout(r, 20))
 
     document.querySelector('#item-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
@@ -2178,7 +2180,7 @@ describe('configuracion/items — el nombre vacío se marca junto al campo', () 
 
     expect(enviados.filter(e => e.method === 'POST')).toHaveLength(0)
     const nombre = wrapper.findAllComponents({ name: 'UFormField' }).find(f => f.props('label') === 'Nombre')!
-    expect(nombre.find('[data-slot="error"]').text()).toBe('Escribe el nombre del item')
+    expect(nombre.find('[data-slot="error"]').text()).toBe('Escribe el nombre del producto')
     wrapper.unmount()
   })
 })

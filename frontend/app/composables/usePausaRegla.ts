@@ -62,14 +62,18 @@ interface UsoRegla {
  * @param lista    La lista que rinde la tabla. `confirmarPausar` busca ahí por
  *   id en vez de retener la fila: entre abrir el modal y confirmar, un
  *   `cargar()` pudo reemplazar los objetos, y mutar el viejo no se vería.
+ * @param opciones `deshacer`: el aviso de pausar/activar trae "Deshacer" (auditoría UX 07.12).
+ *   Impuestos no lo pide: es materia fiscal y va en su frente.
  */
 export function usePausaRegla<T extends ReglaPausable>(
   recurso: string,
   etiqueta: string,
   lista: Ref<T[]>,
+  opciones: { deshacer?: boolean } = {},
 ) {
   const apiUrl = useRuntimeConfig().public.apiUrl
   const toast = useToast()
+  const avisarConDeshacer = useAvisoDeshacer()
 
   /** Ids con un PATCH en vuelo: su switch queda deshabilitado. */
   const toggling = reactive(new Set<string>())
@@ -96,10 +100,13 @@ export function usePausaRegla<T extends ReglaPausable>(
         method: 'PATCH',
         body: { activo: regla.activo },
       })
-      toast.add({
-        title: `${etiqueta} ${regla.activo ? 'activado' : 'pausado'}`,
-        color: 'success',
-      })
+      const titulo = `${etiqueta} ${regla.activo ? 'activado' : 'pausado'}`
+      if (opciones.deshacer) {
+        avisarConDeshacer(titulo, () => aplicarActivo(regla, prev))
+      }
+      else {
+        toast.add({ title: titulo, color: 'success' })
+      }
     }
     catch (e: unknown) {
       regla.activo = prev

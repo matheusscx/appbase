@@ -27,7 +27,7 @@ const settingsItems = computed<NavigationMenuItem[]>(() => [
   {
     label: 'Configuración',
     icon: 'i-lucide-settings',
-    to: '/configuracion/perfil',
+    to: '/configuracion',
     active: route.path.startsWith('/configuracion'),
   },
   {

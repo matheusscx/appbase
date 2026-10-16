@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 import type { Impresora, RolImpresora, TipoConexionImpresora } from '~/composables/useImpresoras'
+import { hostImpresoraValido } from '~/utils/host-impresora'
 
 // La lectura es abierta (`Impresoras:Leer`), pero cada escritura pega a un
 // endpoint con su propio `@RequiresPermiso`.
@@ -8,6 +9,7 @@ const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Impresor
 
 const toast = useToast()
 const impresorasApi = useImpresoras()
+const avisarConDeshacer = useAvisoDeshacer()
 
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('impresoras')
 
@@ -130,15 +132,25 @@ function abrirEditar(imp: Impresora) {
 
 const { errores, marcar, limpiar } = useErroresCampo()
 
+const HOST_INVALIDO = 'Escribe una IP como 192.168.1.50 o un nombre como cocina.local'
+
+/** Los campos de conexión que faltan o están mal escritos; el alta y la prueba piden lo mismo. */
+function faltanDeConexion(f: typeof form.value): Record<string, string> {
+  const faltan: Record<string, string> = {}
+  if (f.tipoConexion === 'red') {
+    if (!f.host.trim()) faltan.host = 'Escribe la dirección IP o el nombre de la impresora'
+    else if (!hostImpresoraValido(f.host)) faltan.host = HOST_INVALIDO
+    if (!String(f.puerto).trim()) faltan.puerto = 'Escribe el puerto, por ejemplo 9100'
+  }
+  else if (!f.nombreCola.trim()) faltan.nombreCola = 'Escribe el nombre de la cola, como figura en el sistema'
+  return faltan
+}
+
 async function guardar() {
   const faltan: Record<string, string> = {}
   const f = form.value
   if (!f.nombre.trim()) faltan.nombre = 'Escribe el nombre'
-  if (f.tipoConexion === 'red') {
-    if (!f.host.trim()) faltan.host = 'Escribe la dirección IP o el nombre de la impresora'
-    if (!String(f.puerto).trim()) faltan.puerto = 'Escribe el puerto, por ejemplo 9100'
-  }
-  else if (!f.nombreCola.trim()) faltan.nombreCola = 'Escribe el nombre de la cola, como figura en el sistema'
+  Object.assign(faltan, faltanDeConexion(f))
   if (marcar(faltan)) return
   saving.value = true
   try {
@@ -146,7 +158,7 @@ async function guardar() {
       nombre: form.value.nombre,
       rol: form.value.rol,
       tipoConexion: form.value.tipoConexion,
-      host: form.value.tipoConexion === 'red' ? form.value.host : undefined,
+      host: form.value.tipoConexion === 'red' ? form.value.host.trim() : undefined,
       puerto: form.value.tipoConexion === 'red' ? Number(form.value.puerto) : undefined,
       nombreCola: form.value.tipoConexion === 'sistema' ? form.value.nombreCola : undefined,
       activo: form.value.activo,
@@ -204,7 +216,7 @@ async function eliminar() {
   }
 }
 
-async function toggleActivo(imp: Impresora) {
+async function toggleActivo(imp: Impresora, conAviso = true) {
   if (imp.eliminadoEl) return
   if (toggling.has(imp.id)) return
   toggling.add(imp.id)
@@ -213,10 +225,16 @@ async function toggleActivo(imp: Impresora) {
   try {
     const saved = await impresorasApi.actualizar(imp.id, { activo: imp.activo })
     upsertLocal(saved)
-    toast.add({
-      title: saved.activo ? 'Impresora activada' : 'Impresora desactivada',
-      color: 'success',
-    })
+    // Se guarda al instante; la reversa es volver a tocar el interruptor (07.12).
+    if (conAviso) {
+      avisarConDeshacer(
+        saved.activo ? 'Impresora activada' : 'Impresora desactivada',
+        () => toggleActivo(saved, false),
+      )
+    }
+    else {
+      toast.add({ title: saved.activo ? 'Impresora activada' : 'Impresora desactivada', color: 'success' })
+    }
   }
   catch (e: unknown) {
     imp.activo = prev
@@ -225,6 +243,44 @@ async function toggleActivo(imp: Impresora) {
   finally {
     toggling.delete(imp.id)
   }
+}
+
+// ── Imprimir prueba ─────────────────────────────────────────────────────────
+// Antes de poner la impresora en servicio: el dueño se enteraba de una IP mala cuando la cocina no
+// recibía la primera comanda (auditoría UX 07.17).
+const probando = ref(false)
+
+async function probar(destino: { nombre: string, tipoConexion: TipoConexionImpresora, host: string | null, puerto: number | null, nombreCola: string | null }) {
+  if (probando.value) return
+  probando.value = true
+  try {
+    await impresorasApi.imprimirPrueba(destino)
+    toast.add({ title: `Prueba enviada a ${destino.nombre}`, color: 'success' })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudo imprimir. Revisa la impresora.'), color: 'error' })
+  }
+  finally {
+    probando.value = false
+  }
+}
+
+function probarFila(imp: Impresora) {
+  if (imp.eliminadoEl) return
+  return probar(imp)
+}
+
+function probarFormulario() {
+  const f = form.value
+  const faltan = faltanDeConexion(f)
+  if (marcar(faltan)) return
+  return probar({
+    nombre: f.nombre.trim() || 'Impresora',
+    tipoConexion: f.tipoConexion,
+    host: f.tipoConexion === 'red' ? f.host.trim() : null,
+    puerto: f.tipoConexion === 'red' ? Number(f.puerto) : null,
+    nombreCola: f.tipoConexion === 'sistema' ? f.nombreCola : null,
+  })
 }
 
 // ── Restaurar ────────────────────────────────────────────────────────────────
@@ -294,14 +350,29 @@ const columns: TableColumn<Impresora>[] = [
             <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
             <span class="text-sm text-muted">Ver eliminados</span>
           </div>
-          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
+          <UButton
+            icon="i-lucide-plus"
+            :disabled="!puedeCrear"
+            :title="puedeCrear ? undefined : motivoSinPermiso('Crear', 'Impresoras')"
+            @click="abrirCrear"
+          >
             Nueva impresora
           </UButton>
         </div>
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="impresoras" :columns="columns" :loading="loading" :error="errorCarga" recurso="las impresoras" @reintentar="cargar">
+    <CrudTable
+      :data="impresoras"
+      :columns="columns"
+      :loading="loading"
+      :error="errorCarga"
+      recurso="las impresoras"
+      vacio="Aún no tienes impresoras. Agrega la primera para que la cocina reciba las comandas y la caja imprima las boletas."
+      :vacio-accion="puedeCrear ? 'Nueva impresora' : undefined"
+      @reintentar="cargar"
+      @vacio-accion="abrirCrear"
+    >
       <template #nombre-cell="{ row }">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -329,6 +400,7 @@ const columns: TableColumn<Impresora>[] = [
 
       <template #activo-cell="{ row }">
         <div class="flex justify-end">
+          <label class="flex size-11 cursor-pointer items-center justify-center">
           <!--
             Deshabilitado, no escondido: este switch además MUESTRA si la
             impresora está activa. Esconderlo le borraría el dato a quien puede
@@ -340,6 +412,7 @@ const columns: TableColumn<Impresora>[] = [
             aria-label="Activar o desactivar impresora"
             @update:model-value="toggleActivo(row.original)"
           />
+          </label>
         </div>
       </template>
 
@@ -357,31 +430,35 @@ const columns: TableColumn<Impresora>[] = [
         </div>
         <div v-else class="flex justify-end gap-1">
           <UButton
-            v-if="puedeActualizar"
+            icon="i-lucide-printer"
+            color="neutral"
+            variant="ghost"
+            title="Imprimir prueba"
+            :aria-label="`Imprimir prueba en ${row.original.nombre}`"
+            :loading="probando"
+            class="size-11 justify-center"
+            @click="probarFila(row.original)"
+          />
+          <UButton
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
-            title="Editar"
+            :disabled="!puedeActualizar"
+            :title="puedeActualizar ? 'Editar' : motivoSinPermiso('Actualizar', 'Impresoras')"
             aria-label="Editar"
-            @click="abrirEditar(row.original)"
             class="size-11 justify-center"
+            @click="abrirEditar(row.original)"
           />
           <UButton
-            v-if="puedeEliminar"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
-            title="Eliminar"
+            :disabled="!puedeEliminar"
+            :title="puedeEliminar ? 'Eliminar' : motivoSinPermiso('Eliminar', 'Impresoras')"
             aria-label="Eliminar"
-            @click="confirmarEliminar(row.original)"
             class="size-11 justify-center"
+            @click="confirmarEliminar(row.original)"
           />
-        </div>
-      </template>
-
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          No hay impresoras configuradas.
         </div>
       </template>
     </CrudTable>
@@ -396,7 +473,7 @@ const columns: TableColumn<Impresora>[] = [
           <UFormField label="Nombre" required :error="errores.nombre">
             <UInput v-model="form.nombre" placeholder="Cocina" autofocus @update:model-value="limpiar('nombre')" />
           </UFormField>
-          <UFormField label="Rol">
+          <UFormField label="Para qué se usa">
             <USelectMenu v-model="form.rol" :items="rolOptions" value-key="value" />
           </UFormField>
           <UFormField label="Tipo de conexión">
@@ -416,6 +493,16 @@ const columns: TableColumn<Impresora>[] = [
               <UInput v-model="form.nombreCola" placeholder="EPSON_TM_T20" @update:model-value="limpiar('nombreCola')" />
             </UFormField>
           </template>
+
+          <UButton
+            icon="i-lucide-printer"
+            color="neutral"
+            variant="outline"
+            :loading="probando"
+            @click="probarFormulario"
+          >
+            Imprimir prueba
+          </UButton>
 
           <UFormField label="Activa">
             <USwitch v-model="form.activo" />

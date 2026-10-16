@@ -276,4 +276,85 @@ describe('Catálogo paginado en el servidor (e2e)', () => {
     // P003 no tiene stock y aun así va tercero: ese orden no mira la disponibilidad.
     expect(nombres[2]).toBe(nombre(3));
   });
+  // Frente Configuración 07.33: la lista de Productos ordena por columna en el servidor. Ordenar la
+  // página en el cliente cambiaría el orden de una página a otra.
+  describe('orden por columna (nombre, precio, stock) con sentido', () => {
+    const URL = (orden: string, sentido: string) =>
+      `/api/items?tipo=producto&search=${marca}&orden=${orden}&sentido=${sentido}&pageSize=48`;
+
+    it('stock descendente: primero los 70 con stock, después los 35 sin stock, cada grupo por nombre', async () => {
+      const filas = await todasLasPaginas<FilaCatalogo>(
+        app,
+        token,
+        URL('stock', 'desc'),
+      );
+
+      // "el 101 se vende", más arriba, lo deja con 4: va después de los que tienen 5.
+      const conStock: string[] = [];
+      const sinStock: string[] = [];
+      for (let n = 1; n <= TOTAL; n++) {
+        if (n !== 101) (n % 3 === 0 ? sinStock : conStock).push(nombre(n));
+      }
+      conStock.push(nombre(101));
+      const nombres = filas.map((f) => f.nombre);
+      expect(nombres.slice(0, CON_STOCK)).toEqual(conStock);
+      expect(nombres.slice(CON_STOCK)).toEqual(sinStock);
+    });
+
+    it('stock ascendente: primero los sin stock', async () => {
+      const filas = await todasLasPaginas<FilaCatalogo>(
+        app,
+        token,
+        URL('stock', 'asc'),
+      );
+
+      const nombres = filas.map((f) => f.nombre);
+      expect(
+        nombres
+          .slice(0, SIN_STOCK)
+          .every((_, i) => nombres[i] === nombre((i + 1) * 3)),
+      ).toBe(true);
+    });
+
+    it('nombre descendente invierte el orden de siempre', async () => {
+      const filas = await todasLasPaginas<FilaCatalogo>(
+        app,
+        token,
+        URL('nombre', 'desc'),
+      );
+
+      expect(filas.map((f) => f.nombre)).toEqual(
+        Array.from({ length: TOTAL }, (_, i) => nombre(TOTAL - i)),
+      );
+    });
+
+    it('precio: el más caro va primero en descendente y último en ascendente, sin repetir filas entre páginas', async () => {
+      const res = await request(app.getHttpServer())
+        .patch(`/api/items/${idDe(2)}`)
+        .set('Authorization', `Bearer ${token}`)
+        .send({ precioBase: '2500' });
+      expect(res.status).toBe(200);
+
+      const desc = await todasLasPaginas<FilaCatalogo>(
+        app,
+        token,
+        URL('precio', 'desc'),
+      );
+      expect(desc[0].nombre).toBe(nombre(2));
+      const asc = await todasLasPaginas<FilaCatalogo>(
+        app,
+        token,
+        URL('precio', 'asc'),
+      );
+      expect(asc[asc.length - 1].nombre).toBe(nombre(2));
+    });
+
+    it('un sentido inválido da 400', async () => {
+      const res = await listar(
+        `tipo=producto&search=${marca}&orden=precio&sentido=arriba`,
+      );
+
+      expect(res.status).toBe(400);
+    });
+  });
 });

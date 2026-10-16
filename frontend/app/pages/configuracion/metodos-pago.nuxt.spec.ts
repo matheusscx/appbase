@@ -239,3 +239,74 @@ describe('metodos-pago — quién emite cada medio (fila)', () => {
     expect(toasts.at(-1)).toEqual({ title: 'El backend rechazó el cambio', color: 'error' })
   })
 })
+
+// Auditoría UX 07.12 (owner, 2026-10-16): apagar un método de pago saca ese medio de todas las
+// cajas del local con un toque. Apagar pide confirmación; encender y lo demás guardan al instante
+// con un toast que trae "Deshacer".
+describe('metodos-pago — apagar un método pide confirmación (07.12)', () => {
+  beforeEach(() => {
+    toasts = []
+    llamadas = []
+    metodosBackend = [metodo({ metodoPagoId: EFECTIVO, nombre: 'Efectivo', esEfectivo: true, habilitada: true })]
+    fallaElPatch = false
+    fallaTenantsMe = false
+  })
+
+  const interruptor = (w: Montado, etiqueta: string) =>
+    w.findAllComponents({ name: 'USwitch' }).find(s => s.element.querySelector(`[aria-label="${etiqueta}"]`) || s.element.getAttribute('aria-label') === etiqueta)!
+  const modal = (w: Montado) => w.findAllComponents({ name: 'CrudModal' }).find(m => m.props('title') === 'Deshabilitar método de pago')!
+
+  it('apagar no guarda: abre el modal que dice que los cajeros dejan de cobrar con ese medio', async () => {
+    const w = await montar()
+    interruptor(w, 'Habilitado: Efectivo').vm.$emit('update:modelValue', false)
+    await new Promise(r => setTimeout(r, 0))
+
+    expect(patches()).toHaveLength(0)
+    expect(modal(w).props('open')).toBe(true)
+    expect(modal(w).props('message')).toContain('Los cajeros dejarán de poder cobrar con Efectivo')
+  })
+
+  it('confirmar manda PATCH { habilitada: false }', async () => {
+    const w = await montar()
+    interruptor(w, 'Habilitado: Efectivo').vm.$emit('update:modelValue', false)
+    await new Promise(r => setTimeout(r, 0))
+    modal(w).vm.$emit('confirm')
+    await new Promise(r => setTimeout(r, 0))
+
+    expect(patches()).toHaveLength(1)
+    expect(patches()[0]!.body).toEqual({ habilitada: false })
+  })
+
+  it('cancelar no guarda nada', async () => {
+    const w = await montar()
+    interruptor(w, 'Habilitado: Efectivo').vm.$emit('update:modelValue', false)
+    await new Promise(r => setTimeout(r, 0))
+    modal(w).vm.$emit('cancel')
+    await new Promise(r => setTimeout(r, 0))
+
+    expect(patches()).toHaveLength(0)
+  })
+
+  it('encender no pregunta: guarda y el toast trae "Deshacer"', async () => {
+    metodosBackend = [metodo({ metodoPagoId: EFECTIVO, nombre: 'Efectivo', habilitada: false })]
+    const w = await montar()
+    interruptor(w, 'Habilitado: Efectivo').vm.$emit('update:modelValue', true)
+    await new Promise(r => setTimeout(r, 0))
+
+    expect(patches()[0]!.body).toEqual({ habilitada: true })
+    const aviso = toasts.at(-1) as { actions?: { label: string }[] }
+    expect(aviso.actions?.[0]?.label).toBe('Deshacer')
+  })
+
+  it('"Permite vuelto" guarda al instante y "Deshacer" lo devuelve', async () => {
+    const w = await montar()
+    interruptor(w, 'Permite vuelto: Efectivo').vm.$emit('update:modelValue', true)
+    await new Promise(r => setTimeout(r, 0))
+    expect(patches()[0]!.body).toEqual({ permiteVuelto: true })
+
+    const aviso = toasts.at(-1) as { actions?: { onClick: () => void }[] }
+    aviso.actions![0]!.onClick()
+    await new Promise(r => setTimeout(r, 0))
+    expect(patches()[1]!.body).toEqual({ permiteVuelto: false })
+  })
+})

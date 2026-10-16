@@ -8,6 +8,7 @@ definePageMeta({ middleware: ['auth', 'admin'], layout: 'dashboard' })
 
 const config = useRuntimeConfig()
 const toast = useToast()
+const avisarConDeshacer = useAvisoDeshacer()
 const apiUrl = config.public.apiUrl
 const monedasStore = useMonedasStore()
 
@@ -46,7 +47,7 @@ async function toggleHabilitada(m: MonedaDisplayConfig) {
       body: { habilitada: m.habilitada },
     })
     monedasStore.patchMoneda(m.monedaId, { habilitada: m.habilitada })
-    toast.add({ title: m.habilitada ? 'Moneda habilitada' : 'Moneda deshabilitada', color: 'success' })
+    avisarConDeshacer(m.habilitada ? 'Moneda habilitada' : 'Moneda deshabilitada', () => toggleHabilitada(m))
   }
   catch (e: unknown) {
     m.habilitada = prev

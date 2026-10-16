@@ -905,6 +905,8 @@ const ENTEROS: FilaTope[] = [
 ];
 
 const texto = (n: number): string => 'x'.repeat(n);
+/** Un host de red válido de exactamente `n` caracteres (el DTO exige IP o nombre con punto). */
+const hostDe = (n: number): string => `${'a'.repeat(n - 4)}.com`;
 /** Un correo válido de exactamente `n` caracteres. */
 const correoDe = (n: number): string =>
   `${'a'.repeat(60)}@${'b'.repeat(n - 65)}.com`;
@@ -970,14 +972,14 @@ const LARGOS: FilaTope[] = [
     tope: 255,
     metodo: 'post',
     ruta: 'impresoras',
-    cuerpo: (n) => ({ ...impresoraRed(9100), host: texto(n) }),
+    cuerpo: (n) => ({ ...impresoraRed(9100), host: hostDe(n) }),
   },
   {
     campo: 'host',
     tope: 255,
     metodo: 'patch',
     ruta: `impresoras/${ID}`,
-    cuerpo: (n) => ({ host: texto(n) }),
+    cuerpo: (n) => ({ host: hostDe(n) }),
   },
   {
     campo: 'nombreCola',

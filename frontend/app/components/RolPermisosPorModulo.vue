@@ -64,7 +64,7 @@ watch(() => props.modulos, () => {
 
 <template>
   <div
-    v-if="disabled"
+    v-if="disabled && !modulos.length"
     class="py-2 text-sm text-muted"
   >
     {{ disabledMessage }}
@@ -81,6 +81,15 @@ watch(() => props.modulos, () => {
     v-else
     class="space-y-4"
   >
+    <!-- Un rol que no se edita igual muestra qué da: quien se lo concede a alguien tiene que verlo
+         (auditoría UX 07.24). -->
+    <p
+      v-if="disabled"
+      class="text-sm text-muted"
+    >
+      {{ disabledMessage }}
+    </p>
+
     <UInput
       v-model="busqueda"
       icon="i-lucide-search"
@@ -127,6 +136,8 @@ watch(() => props.modulos, () => {
             :key="permiso.moduloAppPermisoId"
             :label="permiso.permisoNombre"
             :model-value="seleccionados.has(permiso.moduloAppPermisoId)"
+            :disabled="disabled"
+            class="min-h-11 items-center"
             @update:model-value="(v: boolean | 'indeterminate') => emit('toggle', permiso.moduloAppPermisoId, v)"
           />
         </div>

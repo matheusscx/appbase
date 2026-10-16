@@ -10,8 +10,10 @@ withDefaults(
 </script>
 
 <template>
-  <div class="flex items-center justify-between">
-    <div>
+  <!-- `flex-wrap`: con una descripción larga o una zona angosta las acciones bajan bajo el título
+       y no se aprietan ("Nueva / impresora"). Auditoría UX 07.5. -->
+  <div data-qa="cabecera" class="flex flex-wrap items-center justify-between gap-x-4 gap-y-3">
+    <div class="min-w-0 flex-1 basis-64">
       <h1 v-if="large" class="text-2xl font-semibold text-default">
         {{ title }}
       </h1>
@@ -22,6 +24,8 @@ withDefaults(
         {{ description }}
       </p>
     </div>
-    <slot name="actions" />
+    <div v-if="$slots.actions" data-qa="cabecera-acciones" class="flex shrink-0 flex-wrap items-center gap-2 whitespace-nowrap">
+      <slot name="actions" />
+    </div>
   </div>
 </template>

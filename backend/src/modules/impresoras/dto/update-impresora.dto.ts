@@ -6,6 +6,7 @@ import {
   IsOptional,
   IsString,
   Max,
+  Matches,
   MaxLength,
   Min,
   ValidateIf,
@@ -14,6 +15,7 @@ import type {
   RolImpresora,
   TipoConexionImpresora,
 } from '../entities/impresora.entity';
+import { HOST_IMPRESORA, HOST_IMPRESORA_MENSAJE } from './host-impresora';
 
 // `@ValidateIf` y no `@IsOptional()` en los campos de columnas NOT NULL:
 // `IsOptional` trata `null` igual que ausente y saltea el validador de abajo, y
@@ -40,6 +42,7 @@ export class UpdateImpresoraDto {
   @IsOptional()
   @IsString()
   @MaxLength(255)
+  @Matches(HOST_IMPRESORA, { message: HOST_IMPRESORA_MENSAJE })
   host?: string;
 
   // Mismo rango que el alta: un puerto TCP.

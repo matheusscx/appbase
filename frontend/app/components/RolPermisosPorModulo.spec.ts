@@ -46,7 +46,10 @@ const stubs = {
       </div>
     `,
   },
-  UCheckbox: true,
+  UCheckbox: {
+    props: ['modelValue', 'disabled', 'label'],
+    template: '<label><input type="checkbox" :checked="modelValue" :disabled="disabled"> {{ label }}</label>',
+  },
 }
 
 describe('RolPermisosPorModulo', () => {
@@ -59,10 +62,37 @@ describe('RolPermisosPorModulo', () => {
     expect(wrapper.text()).toContain('Tu local no tiene módulos contratados.')
   })
 
-  it('deshabilitado muestra su mensaje y no ofrece el buscador', () => {
+  it('deshabilitado muestra su mensaje Y la lista de permisos, con las casillas apagadas (07.24)', async () => {
     const wrapper = mount(RolPermisosPorModulo, {
       props: {
         modulos: MODULOS,
+        seleccionados: new Set(['p-leer']),
+        disabled: true,
+        disabledMessage: 'El rol admin no se edita.',
+      },
+      global: { stubs },
+    })
+
+    expect(wrapper.text()).toContain('El rol admin no se edita.')
+    expect(wrapper.text()).toContain('Ventas')
+    const casillas = wrapper.findAll('input[type="checkbox"]')
+    expect(casillas).toHaveLength(3)
+    expect(casillas.every(c => c.attributes('disabled') !== undefined)).toBe(true)
+    expect((casillas[0]!.element as HTMLInputElement).checked).toBe(true)
+  })
+
+  it('sin deshabilitar, las casillas se pueden tocar', () => {
+    const wrapper = mount(RolPermisosPorModulo, {
+      props: { modulos: MODULOS, seleccionados: new Set<string>() },
+      global: { stubs },
+    })
+    expect(wrapper.findAll('input[type="checkbox"]').every(c => c.attributes('disabled') === undefined)).toBe(true)
+  })
+
+  it('deshabilitado sin módulos solo muestra el mensaje', () => {
+    const wrapper = mount(RolPermisosPorModulo, {
+      props: {
+        modulos: [],
         seleccionados: new Set<string>(),
         disabled: true,
         disabledMessage: 'El rol admin no se edita.',

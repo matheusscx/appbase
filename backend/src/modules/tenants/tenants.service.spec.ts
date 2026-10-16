@@ -1866,6 +1866,44 @@ describe('TenantsService', () => {
     });
   });
 
+  // Auditoría UX 07.20: la pantalla "Quitar del local" tiene que saber, ANTES de pedir el DELETE, si
+  // la cuenta es la credencial de un garzón (el backend exige decidir qué pasa con él).
+  describe('findMembers — garzón vinculado', () => {
+    const fila = (extra: object) => ({
+      usuario_id: 'u-1',
+      nombre: 'Ana',
+      apellido: 'Torres',
+      correo: 'ana@paris.cl',
+      es_totem: false,
+      rol_id: null,
+      rol_nombre: null,
+      pendiente: false,
+      ...extra,
+    });
+
+    it('trae el nombre del garzón vinculado a la cuenta, o null', async () => {
+      dataSource.query.mockResolvedValue([
+        fila({ garzon_nombre: 'Beto' }),
+        fila({ usuario_id: 'u-2', garzon_nombre: null }),
+      ]);
+
+      const res = await service.findMembers('tenant-uuid');
+
+      expect(res.map((m) => m.garzonNombre)).toEqual(['Beto', null]);
+    });
+
+    it('lo resuelve en la misma consulta y solo con garzones vivos del tenant', async () => {
+      dataSource.query.mockResolvedValue([]);
+
+      await service.findMembers('tenant-uuid');
+
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      const [sql] = dataSource.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toMatch(/FROM garzones g[\s\S]*g\.eliminado_el IS NULL/);
+      expect(sql).toMatch(/g\.tenant_id = ut\.tenant_id/);
+    });
+  });
+
   describe('removeMember', () => {
     const TENANT = 'tenant-uuid';
     const BAJA = 'usuario-que-se-va';

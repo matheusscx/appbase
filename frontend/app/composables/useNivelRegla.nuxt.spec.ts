@@ -187,3 +187,23 @@ describe('useNivelRegla — itemsQueLoTienen', () => {
     expect(msg).toBeUndefined()
   })
 })
+
+// Auditoría UX 07.29: "se descuenta línea por línea" es de descuentos; un recargo suma.
+describe('useNivelRegla — textos por tipo de regla', () => {
+  const linea = (tipo?: 'descuento' | 'recargo') =>
+    useNivelRegla(tipo).nivelOptions.find(o => o.value === 'linea')!.description
+
+  it('el descuento sigue diciendo que se descuenta', () => {
+    expect(linea()).toBe('Se asocia a productos del catálogo y se descuenta línea por línea.')
+    expect(linea('descuento')).toContain('se descuenta línea por línea')
+  })
+
+  it('el recargo dice que se suma', () => {
+    expect(linea('recargo')).toBe('Se asocia a productos del catálogo y se suma línea por línea.')
+  })
+
+  it('la opción de venta es igual para los dos', () => {
+    const venta = (t: 'descuento' | 'recargo') => useNivelRegla(t).nivelOptions.find(o => o.value === 'venta')!.description
+    expect(venta('recargo')).toBe(venta('descuento'))
+  })
+})

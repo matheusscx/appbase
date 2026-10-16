@@ -22,6 +22,9 @@ const config = useRuntimeConfig()
 const toast = useToast()
 const apiUrl = config.public.apiUrl
 
+// El interruptor dibuja 36×20; el área que responde al dedo llega a 44 px sin mover el dibujo.
+const AREA_TACTIL_SWITCH = 'relative after:absolute after:-inset-3 after:content-[\'\']'
+
 const categorias = ref<Categoria[]>([])
 const impresorasComanda = ref<Impresora[]>([])
 const impresorasApi = useImpresoras()
@@ -185,7 +188,11 @@ async function guardar() {
   }
 }
 
-async function toggleActivo(cat: Categoria) {
+const avisarConDeshacer = useAvisoDeshacer()
+
+// Guarda al instante, sin confirmar: apagar una categoría no toca el cobro. El aviso trae
+// "Deshacer", que vuelve a llamar con el valor anterior (auditoría UX 07.12).
+async function toggleActivo(cat: Categoria, conDeshacer = true) {
   if (toggling.has(cat.id)) return
   toggling.add(cat.id)
   const prev = cat.activo
@@ -195,7 +202,9 @@ async function toggleActivo(cat: Categoria) {
       method: 'PATCH',
       body: { activo: cat.activo },
     })
-    toast.add({ title: cat.activo ? 'Categoría activada' : 'Categoría desactivada', color: 'success' })
+    const titulo = cat.activo ? 'Categoría activada' : 'Categoría desactivada'
+    if (conDeshacer) avisarConDeshacer(titulo, () => toggleActivo(cat, false))
+    else toast.add({ title: titulo, color: 'success' })
   }
   catch (e: unknown) {
     cat.activo = prev
@@ -285,7 +294,7 @@ const columns: TableColumn<Categoria>[] = [
       <template #actions>
         <div class="flex items-center gap-4">
           <div class="flex items-center gap-2">
-            <USwitch v-model="verEliminados" aria-label="Ver eliminadas" />
+            <USwitch v-model="verEliminados" aria-label="Ver eliminadas" :ui="{ base: AREA_TACTIL_SWITCH }" />
             <span class="text-sm text-muted">Ver eliminadas</span>
           </div>
           <UButton
@@ -298,7 +307,17 @@ const columns: TableColumn<Categoria>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="categorias" :columns="columns" :loading="loading" :error="errorCarga" recurso="las categorías" @reintentar="cargar">
+    <CrudTable
+      :data="categorias"
+      :columns="columns"
+      :loading="loading"
+      :error="errorCarga"
+      recurso="las categorías"
+      vacio="Aún no tienes categorías. Crea la primera para ordenar tu catálogo."
+      vacio-accion="Nueva categoría"
+      @reintentar="cargar"
+      @vacio-accion="abrirCrear"
+    >
       <template #nombre-cell="{ row }">
         <div class="space-y-1">
           <div class="flex items-center gap-2">
@@ -322,6 +341,7 @@ const columns: TableColumn<Categoria>[] = [
               :aria-label="`Activo: ${row.original.nombre}`"
               :model-value="row.original.activo"
               :disabled="toggling.has(row.original.id) || !!row.original.eliminadoEl"
+              :ui="{ base: AREA_TACTIL_SWITCH }"
               @update:model-value="toggleActivo(row.original)"
             />
           </div>
@@ -360,11 +380,6 @@ const columns: TableColumn<Categoria>[] = [
           </div>
         </template>
 
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          No hay categorías registradas.
-        </div>
-      </template>
     </CrudTable>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">

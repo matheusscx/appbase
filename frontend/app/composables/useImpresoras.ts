@@ -315,6 +315,28 @@ export function useImpresoras() {
     return estaciones
   }
 
+  /**
+   * "Imprimir prueba" (auditoría UX 07.17): una hoja corta a un destino que todavía puede no estar
+   * guardado (el formulario abierto). No reclama comandas ni toca el estado del local; si la
+   * impresora no responde, falla con el mismo mensaje que cualquier impresión.
+   */
+  async function imprimirPrueba(destino: {
+    nombre: string
+    tipoConexion: TipoConexionImpresora
+    host: string | null
+    puerto: number | null
+    nombreCola: string | null
+  }): Promise<void> {
+    const lineas = [
+      'PRUEBA DE IMPRESION',
+      destino.nombre,
+      destino.tipoConexion === 'red' ? `${destino.host}:${destino.puerto}` : `Cola: ${destino.nombreCola}`,
+      new Date().toLocaleString('es-CL'),
+      'Si puedes leer esto, la impresora funciona.',
+    ]
+    await imprimirEn({ id: 'prueba', activo: true, ...destino }, lineas, apiUrl)
+  }
+
   /** Primera impresora de boletas activa, o `null` si no hay ninguna (saltear print). */
   async function obtenerImpresoraBoleta(): Promise<ImpresoraOperativa | null> {
     const impresoras = await listarOperativas('boleta')
@@ -374,6 +396,7 @@ export function useImpresoras() {
     crear,
     actualizar,
     eliminar,
+    imprimirPrueba,
     imprimirComanda,
     imprimirPrecuenta,
     imprimirBoleta,

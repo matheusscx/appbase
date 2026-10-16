@@ -7,6 +7,7 @@ import type { RepartidorFila } from '~/types/paqueteria'
 definePageMeta({ middleware: 'admin' })
 
 const toast = useToast()
+const avisarConDeshacer = useAvisoDeshacer()
 const apiUrl = useRuntimeConfig().public.apiUrl
 
 const repartidores = ref<RepartidorFila[]>([])
@@ -111,7 +112,7 @@ async function guardar() {
   }
 }
 
-async function toggleActivo(r: RepartidorFila) {
+async function toggleActivo(r: RepartidorFila, conDeshacer = true) {
   if (toggling.has(r.id)) return
   toggling.add(r.id)
   const prev = r.activo
@@ -121,7 +122,9 @@ async function toggleActivo(r: RepartidorFila) {
       method: 'PATCH',
       body: { activo: r.activo },
     })
-    toast.add({ title: r.activo ? 'Repartidor activado' : 'Repartidor desactivado', color: 'success' })
+    const titulo = r.activo ? 'Repartidor activado' : 'Repartidor desactivado'
+    if (conDeshacer) avisarConDeshacer(titulo, () => toggleActivo(r, false))
+    else toast.add({ title: titulo, color: 'success' })
   }
   catch (e: unknown) {
     r.activo = prev
@@ -183,7 +186,17 @@ const columns: TableColumn<RepartidorFila>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="repartidores" :columns="columns" :loading="loading" :error="errorCarga" recurso="los repartidores" @reintentar="cargar">
+    <CrudTable
+      vacio="Aún no tienes repartidores. Crea el primero para poder armar hojas de ruta."
+      vacio-accion="Nuevo repartidor"
+      @vacio-accion="abrirCrear"
+      :data="repartidores"
+      :columns="columns"
+      :loading="loading"
+      :error="errorCarga"
+      recurso="los repartidores"
+      @reintentar="cargar"
+    >
       <template #nombre-cell="{ row }">
         <CrudListItem
           :title="row.original.nombre"
@@ -223,12 +236,6 @@ const columns: TableColumn<RepartidorFila>[] = [
             @click="pedirEliminar(row.original)"
             class="size-11 justify-center"
           />
-        </div>
-      </template>
-
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          Todavía no hay repartidores. Crea el primero para poder armar hojas de ruta.
         </div>
       </template>
     </CrudTable>

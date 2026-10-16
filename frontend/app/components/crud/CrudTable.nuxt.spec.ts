@@ -72,6 +72,27 @@ describe('CrudTable — filtro sin resultados', () => {
     const w = await montar({ filtrado: true })
     expect(w.find('[data-qa="estado-quitar-filtros"]').exists()).toBe(false)
   })
+
+  // 07.35: un local nuevo parte con todo vacío; el vacío dice por dónde empezar.
+  it('el vacío de verdad ofrece la acción de crear si la pantalla la pasa', async () => {
+    const w = await mountSuspended(CrudTable, {
+      props: { data: [], columns, vacio: 'Aún no tienes categorías.', vacioAccion: 'Nueva categoría', onVacioAccion: () => {} },
+    })
+    const boton = w.find('[data-qa="estado-vacio-accion"]')
+    expect(boton.text()).toContain('Nueva categoría')
+    await boton.trigger('click')
+    expect(w.emitted('vacioAccion')).toHaveLength(1)
+  })
+
+  it('sin `vacioAccion` (p. ej. sin permiso de crear) no hay botón', async () => {
+    const w = await montar({ vacio: 'Aún no tienes categorías.' })
+    expect(w.find('[data-qa="estado-vacio-accion"]').exists()).toBe(false)
+  })
+
+  it('con filtro activo no ofrece crear: el problema es el filtro', async () => {
+    const w = await montar({ filtrado: true, vacioAccion: 'Nueva categoría' })
+    expect(w.find('[data-qa="estado-vacio-accion"]').exists()).toBe(false)
+  })
 })
 
 // Lote 4 (00.9 / 06.26): un slot que aparece después del primer render (p. ej. cuando cargan los

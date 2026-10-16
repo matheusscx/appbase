@@ -35,6 +35,7 @@ function tipoLabel(tipo: TipoMotivoBaja): string {
 
 const config = useRuntimeConfig()
 const toast = useToast()
+const avisarConDeshacer = useAvisoDeshacer()
 const apiUrl = config.public.apiUrl
 
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('motivos-baja')
@@ -187,7 +188,7 @@ async function guardar() {
   }
 }
 
-async function toggleActivo(motivo: MotivoBaja) {
+async function toggleActivo(motivo: MotivoBaja, conDeshacer = true) {
   if (motivo.esFijo || motivo.eliminadoEl || toggling.has(motivo.id)) return
   toggling.add(motivo.id)
   const prev = motivo.activo
@@ -197,10 +198,9 @@ async function toggleActivo(motivo: MotivoBaja) {
       method: 'PATCH',
       body: { activo: motivo.activo },
     })
-    toast.add({
-      title: motivo.activo ? 'Motivo activado' : 'Motivo desactivado',
-      color: 'success',
-    })
+    const titulo = motivo.activo ? 'Motivo activado' : 'Motivo desactivado'
+    if (conDeshacer) avisarConDeshacer(titulo, () => toggleActivo(motivo, false))
+    else toast.add({ title: titulo, color: 'success' })
   }
   catch (e: unknown) {
     motivo.activo = prev
@@ -344,6 +344,9 @@ const columns: TableColumn<MotivoBaja>[] = [
     </CrudPageHeader>
 
     <CrudTable
+      vacio="Aún no tienes motivos de baja. Crea el primero para tipificar las bajas de stock."
+      vacio-accion="Nuevo motivo"
+      @vacio-accion="abrirCrear"
       :data="motivos"
       :columns="columns"
       :loading="loading"
@@ -424,16 +427,6 @@ const columns: TableColumn<MotivoBaja>[] = [
             @click="pedirEliminar(row.original)"
             class="size-11 justify-center"
           />
-        </div>
-      </template>
-
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          <UIcon
-            name="i-lucide-tags"
-            class="w-8 h-8 mx-auto mb-2 opacity-40"
-          />
-          No hay motivos de baja.
         </div>
       </template>
     </CrudTable>

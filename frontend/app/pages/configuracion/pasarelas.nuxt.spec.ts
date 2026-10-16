@@ -25,13 +25,15 @@ mockNuxtImport('useToast', () => {
 })
 
 // Nuxt instala su propia Pinia: el permiso se mockea en el auto-import.
+let conPermisos = true
 mockNuxtImport('usePermissionsStore', () => {
-  return () => ({ esAdmin: true, can: () => true })
+  return () => ({ esAdmin: true, can: () => conPermisos })
 })
 
 interface Llamada { url: string, method: string, body: unknown }
 let llamadas: Llamada[] = []
 let modoGuardado: 'mall' | 'individual' = 'mall'
+let sinConfigs = false
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: unknown }) => {
@@ -39,6 +41,7 @@ mockNuxtImport('useApiFetch', () => {
     llamadas.push({ url, method, body: opts?.body })
     if (method === 'PATCH') return Promise.resolve({ tenantPasarelaId: CONFIG_ID })
     if (url.endsWith('/pasarela/admin/config')) {
+      if (sinConfigs) return Promise.resolve([])
       return Promise.resolve([{
         tenantPasarelaId: CONFIG_ID,
         pasarelaId: 'webpay',
@@ -161,5 +164,74 @@ describe('configuracion/pasarelas — el drawer no manda una credencial vacía',
       color: 'warning',
     })
     wrapper.unmount()
+  })
+})
+
+// Auditoría UX 07.22: sin permiso, los botones no desaparecen: quedan apagados y dicen por qué.
+describe('configuracion/pasarelas — botones sin permiso (07.22)', () => {
+  beforeEach(() => {
+    toasts = []
+    llamadas = []
+    modoGuardado = 'mall'
+  })
+
+  it('sin permisos, "Agregar pasarela", editar y eliminar existen, apagados y con el motivo', async () => {
+    conPermisos = false
+    try {
+      const w = await mountSuspended(Pasarelas)
+      await new Promise(r => setTimeout(r, 0))
+
+      const agregar = w.findAll('button').find(b => b.text().includes('Agregar pasarela'))!
+      expect(agregar.attributes('disabled')).toBeDefined()
+      expect(agregar.attributes('title')).toBe('Necesitas el permiso Crear en Pasarelas')
+
+      const editar = w.find('[aria-label="Editar"]')
+      expect(editar.attributes('disabled')).toBeDefined()
+      expect(editar.attributes('title')).toBe('Necesitas el permiso Actualizar en Pasarelas')
+
+      const eliminar = w.find('[aria-label="Eliminar"]')
+      expect(eliminar.attributes('disabled')).toBeDefined()
+      expect(eliminar.attributes('title')).toBe('Necesitas el permiso Eliminar en Pasarelas')
+    }
+    finally {
+      conPermisos = true
+    }
+  })
+
+  it('con permisos los botones están activos y sin motivo', async () => {
+    const w = await mountSuspended(Pasarelas)
+    await new Promise(r => setTimeout(r, 0))
+    const agregar = w.findAll('button').find(b => b.text().includes('Agregar pasarela'))!
+    expect(agregar.attributes('disabled')).toBeUndefined()
+    expect(agregar.attributes('title')).toBeUndefined()
+    expect(w.find('[aria-label="Editar"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('sin pasarelas, el vacío dice por dónde empezar y su botón abre el alta', async () => {
+    sinConfigs = true
+    try {
+      const w = await mountSuspended(Pasarelas)
+      await new Promise(r => setTimeout(r, 0))
+      expect(w.text()).toContain('Aún no tienes pasarelas. Agrega la primera para cobrar con tarjeta.')
+      const boton = w.find('[data-qa="estado-vacio-accion"]')
+      expect(boton.text()).toContain('Agregar pasarela')
+    }
+    finally {
+      sinConfigs = false
+    }
+  })
+
+  it('sin pasarelas y sin permiso de crear, el vacío no ofrece el botón', async () => {
+    sinConfigs = true
+    conPermisos = false
+    try {
+      const w = await mountSuspended(Pasarelas)
+      await new Promise(r => setTimeout(r, 0))
+      expect(w.find('[data-qa="estado-vacio-accion"]').exists()).toBe(false)
+    }
+    finally {
+      sinConfigs = false
+      conPermisos = true
+    }
   })
 })

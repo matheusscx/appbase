@@ -32,6 +32,7 @@ definePageMeta({ middleware: ['auth', 'admin'], layout: 'dashboard' })
 
 const config = useRuntimeConfig()
 const toast = useToast()
+const avisarConDeshacer = useAvisoDeshacer()
 const apiUrl = config.public.apiUrl
 
 const metodos = ref<MetodoPago[]>([])
@@ -68,17 +69,47 @@ async function cargar() {
   loading.value = false
 }
 
-async function toggleHabilitada(m: MetodoPago) {
+// Apagar un método saca ese medio de todas las cajas del local con un toque: pide confirmación
+// (auditoría UX 07.12, owner 2026-10-16). Encenderlo no saca nada de circulación: guarda y ofrece
+// "Deshacer".
+const apagarPendiente = ref<MetodoPago | null>(null)
+const confirmApagarOpen = ref(false)
+
+function toggleHabilitada(m: MetodoPago) {
+  if (toggling.has(m.metodoPagoId)) return
+  if (m.habilitada) {
+    apagarPendiente.value = m
+    confirmApagarOpen.value = true
+    return
+  }
+  void guardarHabilitada(m, true)
+}
+
+function cancelarApagar() {
+  apagarPendiente.value = null
+  confirmApagarOpen.value = false
+}
+
+async function confirmarApagar() {
+  const m = apagarPendiente.value
+  cancelarApagar()
+  if (m) await guardarHabilitada(m, false)
+}
+
+async function guardarHabilitada(m: MetodoPago, habilitada: boolean) {
   if (toggling.has(m.metodoPagoId)) return
   toggling.add(m.metodoPagoId)
   const prev = m.habilitada
-  m.habilitada = !prev
+  m.habilitada = habilitada
   try {
     await useApiFetch(`${apiUrl}/metodos-pago/${m.metodoPagoId}`, {
       method: 'PATCH',
-      body: { habilitada: m.habilitada },
+      body: { habilitada },
     })
-    toast.add({ title: m.habilitada ? 'Método habilitado' : 'Método deshabilitado', color: 'success' })
+    avisarConDeshacer(
+      habilitada ? 'Método habilitado' : 'Método deshabilitado',
+      () => guardarHabilitada(m, prev),
+    )
   }
   catch (e: unknown) {
     m.habilitada = prev
@@ -100,7 +131,7 @@ async function togglePermiteVuelto(m: MetodoPago) {
       method: 'PATCH',
       body: { permiteVuelto: m.permiteVuelto },
     })
-    toast.add({ title: 'Configuración de vuelto actualizada', color: 'success' })
+    avisarConDeshacer('Configuración de vuelto actualizada', () => togglePermiteVuelto(m))
   }
   catch (e: unknown) {
     m.permiteVuelto = prev
@@ -253,5 +284,15 @@ const columns: TableColumn<MetodoPago>[] = [
         </div>
       </template>
     </CrudTable>
+
+    <CrudModal
+      v-model:open="confirmApagarOpen"
+      title="Deshabilitar método de pago"
+      :message="`Los cajeros dejarán de poder cobrar con ${apagarPendiente?.nombre ?? 'este método'}. ¿Deshabilitarlo?`"
+      confirm-label="Deshabilitar"
+      cancel-label="Volver"
+      @cancel="cancelarApagar"
+      @confirm="confirmarApagar"
+    />
   </div>
 </template>

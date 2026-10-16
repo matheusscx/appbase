@@ -326,9 +326,10 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
     <template v-if="tab === 'config'">
       <div class="flex justify-end">
         <UButton
-          v-if="puedeCrear"
           icon="i-lucide-plus"
           label="Agregar pasarela"
+          :disabled="!puedeCrear"
+          :title="puedeCrear ? undefined : motivoSinPermiso('Crear', 'Pasarelas')"
           @click="abrirCrear"
         />
       </div>
@@ -339,6 +340,9 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
         :loading="loadingConfig"
         :error="errorConfig"
         recurso="las pasarelas"
+        vacio="Aún no tienes pasarelas. Agrega la primera para cobrar con tarjeta."
+        :vacio-accion="puedeCrear ? 'Agregar pasarela' : undefined"
+        @vacio-accion="abrirCrear"
         @reintentar="cargarConfig"
       >
         <template #nombre-cell="{ row }">
@@ -367,7 +371,8 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
         <template #acciones-cell="{ row }">
           <div class="flex justify-end gap-1">
             <UButton
-              v-if="puedeActualizar"
+              :disabled="!puedeActualizar"
+              :title="puedeActualizar ? undefined : motivoSinPermiso('Actualizar', 'Pasarelas')"
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
@@ -376,7 +381,8 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
               class="size-11 justify-center"
             />
             <UButton
-              v-if="puedeEliminar"
+              :disabled="!puedeEliminar"
+              :title="puedeEliminar ? undefined : motivoSinPermiso('Eliminar', 'Pasarelas')"
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
@@ -387,11 +393,6 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
           </div>
         </template>
 
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            Aún no tienes pasarelas configuradas.
-          </div>
-        </template>
       </CrudTable>
     </template>
 
@@ -399,9 +400,10 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
     <template v-else-if="tab === 'keys'">
       <div class="flex justify-end">
         <UButton
-          v-if="puedeCrear"
           icon="i-lucide-plus"
           label="Nueva API key"
+          :disabled="!puedeCrear"
+          :title="puedeCrear ? undefined : motivoSinPermiso('Crear', 'Pasarelas')"
           @click="() => { crearKeyOpen = true }"
         />
       </div>
@@ -412,6 +414,9 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
         :loading="loadingKeys"
         :error="errorKeys"
         recurso="las API keys"
+        vacio="Aún no tienes API keys. Crea una para conectar tus apps externas."
+        :vacio-accion="puedeCrear ? 'Nueva API key' : undefined"
+        @vacio-accion="() => { crearKeyOpen = true }"
         @reintentar="cargarKeys"
       >
         <template #nombre-cell="{ row }">
@@ -440,7 +445,9 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
         <template #acciones-cell="{ row }">
           <div class="flex justify-end gap-1">
             <UButton
-              v-if="!row.original.revocadaEl && puedeEliminar"
+              v-if="!row.original.revocadaEl"
+              :disabled="!puedeEliminar"
+              :title="puedeEliminar ? undefined : motivoSinPermiso('Eliminar', 'Pasarelas')"
               icon="i-lucide-ban"
               color="error"
               variant="ghost"
@@ -451,11 +458,6 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
           </div>
         </template>
 
-        <template #empty>
-          <div class="py-8 text-center text-sm text-muted">
-            Sin API keys. Crea una para conectar tus apps externas.
-          </div>
-        </template>
       </CrudTable>
     </template>
 

@@ -36,6 +36,8 @@ async function elegirFinDelDia(
   await page
     .getByRole('button', { name: 'Guardar cambios' })
     .click()
+  // Cambiar el fin del día pide confirmar: los reportes pasados se recalculan (auditoría UX 07.31).
+  await page.getByRole('dialog').getByRole('button', { name: 'Cambiar el corte' }).click()
   await expect(page.getByText('Datos de empresa actualizados').first()).toBeVisible()
 }
 

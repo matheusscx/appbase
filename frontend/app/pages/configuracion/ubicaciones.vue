@@ -18,6 +18,7 @@ interface Ubicacion {
 
 const config = useRuntimeConfig()
 const toast = useToast()
+const avisarConDeshacer = useAvisoDeshacer()
 const apiUrl = config.public.apiUrl
 
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('ubicaciones')
@@ -172,7 +173,7 @@ async function guardar() {
   }
 }
 
-async function toggleActivo(bodega: Ubicacion) {
+async function toggleActivo(bodega: Ubicacion, conDeshacer = true) {
   if (bodega.eliminadoEl || toggling.has(bodega.id)) return
   toggling.add(bodega.id)
   const prev = bodega.activo
@@ -182,10 +183,9 @@ async function toggleActivo(bodega: Ubicacion) {
       method: 'PATCH',
       body: { activo: bodega.activo },
     })
-    toast.add({
-      title: bodega.activo ? 'Bodega activada' : 'Bodega desactivada',
-      color: 'success',
-    })
+    const titulo = bodega.activo ? 'Bodega activada' : 'Bodega desactivada'
+    if (conDeshacer) avisarConDeshacer(titulo, () => toggleActivo(bodega, false))
+    else toast.add({ title: titulo, color: 'success' })
   }
   catch (e: unknown) {
     bodega.activo = prev
@@ -348,6 +348,9 @@ const columns: TableColumn<Ubicacion>[] = [
     </div>
 
     <CrudTable
+      vacio="Aún no tienes bodegas. Crea la primera para guardar stock fuera del local."
+      vacio-accion="Nueva bodega"
+      @vacio-accion="abrirCrear"
       :data="bodegas"
       :columns="columns"
       :loading="loading"
@@ -410,16 +413,6 @@ const columns: TableColumn<Ubicacion>[] = [
             @click="pedirEliminar(row.original)"
             class="size-11 justify-center"
           />
-        </div>
-      </template>
-
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          <UIcon
-            name="i-lucide-warehouse"
-            class="w-8 h-8 mx-auto mb-2 opacity-40"
-          />
-          No hay bodegas. El local siempre está arriba.
         </div>
       </template>
     </CrudTable>

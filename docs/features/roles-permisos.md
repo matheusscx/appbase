@@ -473,12 +473,13 @@ Las **mutaciones** agregan `TenantAdminGuard` (requiere rol `es_fijo = true` en 
 
 | Método | Ruta | Guard extra | Descripción |
 |---|---|---|---|
-| GET | `/roles` | — | Lista de roles del tenant |
+| GET | `/roles` | — | Lista de roles del tenant, cada uno con `cantidadUsuarios` (membresías vivas; una sola agregación): la pantalla lo dice antes de eliminar |
 | POST | `/roles` | TenantAdmin | Crear rol |
 | PATCH | `/roles/:id` | TenantAdmin | Editar nombre/descripción (bloquea `esFijo` y `esSistema`) |
 | DELETE | `/roles/:id` | TenantAdmin | Soft-delete (bloquea `esFijo` y `esSistema`) |
 | GET | `/roles/modulos-disponibles` | — | Módulos contratados activos + sus permisos |
 | GET | `/roles/:id/permissions` | — | `roles_permisos_modulos` del rol |
+| PUT | `/roles/:id/permissions` | TenantAdmin | Guarda los permisos de **todos los módulos del rol en una transacción** (`{ modulos: [{ moduloTenantId, moduloAppPermisoIds }] }`, `204`). Todo o nada: un módulo ajeno o repetido, o una falla a mitad, no deja nada escrito. Es lo que usa la pantalla (auditoría UX 07.11) |
 | PUT | `/roles/:id/modules/:moduloTenantId/permissions` | TenantAdmin | Setear permisos del rol en un módulo. **Rechaza los roles de sistema** — ver [Roles de sistema](#roles-de-sistema-es_sistema-2026-08-16) |
 | POST | `/roles/:id/users` | TenantAdmin | Asignar rol a un usuario |
 | DELETE | `/roles/:id/users/:userId` | TenantAdmin | Quitar rol a un usuario. `400` si dejaría al tenant sin admin |

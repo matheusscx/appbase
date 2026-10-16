@@ -221,7 +221,7 @@ const eliminarBloqueado = computed(
 )
 
 const eliminarTitulo = computed(() =>
-  eliminarBloqueado.value ? 'No se puede eliminar' : 'Eliminar item',
+  eliminarBloqueado.value ? 'No se puede eliminar' : 'Eliminar producto',
 )
 
 const eliminarMensaje = computed(() => {
@@ -229,11 +229,11 @@ const eliminarMensaje = computed(() => {
   // de sobre qué fila se estaba parado. El fallback cubre solo el imposible
   // teórico: el modal se abre después de fijar el nombre.
   const nombre = confirmDeleteNombre.value
-  const item = nombre ? `"${nombre}"` : 'este item'
-  if (eliminarBloqueado.value) return `El item ${item} está en uso y no se puede eliminar:`
+  const item = nombre ? `"${nombre}"` : 'este producto'
+  if (eliminarBloqueado.value) return `El producto ${item} está en uso y no se puede eliminar:`
   const extras = usoItem.value?.advertencias ?? []
   if (extras.length) {
-    return `${nombre ? `El item ${item}` : 'Este item'} se ofrece como extra en ${extras.map((a) => a.nombre).join(', ')}. Si lo eliminas dejará de estar disponible en esas recetas.`
+    return `${nombre ? `El producto ${item}` : 'Este producto'} se ofrece como extra en ${extras.map((a) => a.nombre).join(', ')}. Si lo eliminas dejará de estar disponible en esas recetas.`
   }
   return `¿Eliminar ${item}? Puedes recuperarlo desde «Ver eliminados».`
 })
@@ -251,8 +251,19 @@ const {
 } = useSimuladorDesfases()
 const stockItem = ref<Item | null>(null)
 const toggling = reactive(new Set<string>())
+// El interruptor dibuja 36×20; el área que responde al dedo llega a 44 px sin mover el dibujo.
+const AREA_TACTIL_SWITCH = 'relative after:absolute after:-inset-3 after:content-[\'\']'
 const filtroTipo = ref('todos')
 const filtroSinCosto = ref(false)
+const TODAS_LAS_CATEGORIAS = 'todas'
+const filtroCategoria = ref(TODAS_LAS_CATEGORIAS)
+const orden = ref<'nombre' | 'precio' | 'stock'>('nombre')
+const sentido = ref<'asc' | 'desc'>('asc')
+const ordenOpts = [
+  { label: 'Ordenar por nombre', value: 'nombre' },
+  { label: 'Ordenar por precio', value: 'precio' },
+  { label: 'Ordenar por stock', value: 'stock' },
+]
 const busqueda = ref('')
 const busquedaActiva = ref('')
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('items')
@@ -269,6 +280,11 @@ watch(busqueda, (value) => {
 
 const listFilters = computed(() => ({
   tipo: filtroTipo.value === 'todos' ? undefined : filtroTipo.value,
+  categoriaId: filtroCategoria.value === TODAS_LAS_CATEGORIAS ? undefined : filtroCategoria.value,
+  // El orden lo pone el servidor: con paginación, ordenar solo la página cambiaría el orden de una
+  // página a otra (auditoría UX 07.33).
+  orden: orden.value,
+  sentido: sentido.value,
   search: busquedaActiva.value || undefined,
   incluirEliminados: verEliminados.value ? 'true' : undefined,
   sinCosto: filtroSinCosto.value ? 'true' : undefined,
@@ -277,12 +293,14 @@ const listFilters = computed(() => ({
 const hayFiltrosActivos = computed(
   () =>
     filtroTipo.value !== 'todos' ||
+    filtroCategoria.value !== TODAS_LAS_CATEGORIAS ||
     !!busquedaActiva.value ||
     filtroSinCosto.value,
 )
 
 function limpiarFiltros() {
   filtroTipo.value = 'todos'
+  filtroCategoria.value = TODAS_LAS_CATEGORIAS
   filtroSinCosto.value = false
   busqueda.value = ''
   busquedaActiva.value = ''
@@ -435,6 +453,12 @@ const tiposOpts: Opt[] = [
 
 const unidadesMedidaStore = useUnidadesMedidaStore()
 const unidadesMedidaOpts = computed(() => unidadesMedidaStore.opts)
+
+// "Sin categoría" es un centinela del formulario, no una categoría que se pueda filtrar.
+const filtrosCategoriaOpts = computed(() => [
+  { label: 'Todas las categorías', value: TODAS_LAS_CATEGORIAS },
+  ...categoriasOpts.value.filter(o => o.value !== SIN_CATEGORIA),
+])
 
 const filtrosTipoOpts = [
   { label: 'Todos', value: 'todos' },
@@ -920,11 +944,11 @@ const costoCalculadoSeReinterpreta = computed(() => {
 })
 
 const drawerTitle = computed(() =>
-  editingId.value ? 'Editar item' : 'Nuevo item',
+  editingId.value ? 'Editar producto' : 'Nuevo producto',
 )
 
 const submitLabel = computed(() =>
-  editingId.value ? 'Guardar cambios' : 'Crear item',
+  editingId.value ? 'Guardar cambios' : 'Crear producto',
 )
 
 // El porcentaje viaja en decimal ('0.19'): se rotula con Decimal, nunca con
@@ -1406,7 +1430,7 @@ async function abrirEditar(item: Item) {
     formDesglosePorUbicacion.value = detalle.desglosePorUbicacion ?? []
     drawerOpen.value = true
   } catch {
-    toast.add({ title: 'Error al cargar detalle del item', color: 'error' })
+    toast.add({ title: 'Error al cargar el detalle del producto', color: 'error' })
   }
 }
 
@@ -1429,7 +1453,7 @@ const { errores, marcar, limpiar } = useErroresCampo()
 async function guardar() {
   // El Enter dentro del formulario también llega acá, no solo el botón que se deshabilita.
   if (errorNombre.value) return
-  if (marcar(form.value.nombre.trim() ? {} : { nombre: 'Escribe el nombre del item' })) return
+  if (marcar(form.value.nombre.trim() ? {} : { nombre: 'Escribe el nombre del producto' })) return
   saving.value = true
   try {
     // `|| undefined` colapsaba todo lo falsy y el campo NO viajaba: el usuario
@@ -1548,7 +1572,7 @@ async function guardar() {
     if (saved.tipo === 'ingrediente') catalogoIngredientes.registrar(saved)
     if (TIPOS_VENDIBLES.includes(saved.tipo)) catalogoVendibles.registrar(saved)
     toast.add({
-      title: isNew ? 'Item creado' : 'Item actualizado',
+      title: isNew ? 'Producto creado' : 'Producto actualizado',
       color: 'success',
     })
 
@@ -1575,7 +1599,7 @@ async function confirmarEliminar(item: Item) {
     confirmDeleteId.value = null
     confirmDeleteNombre.value = null
     toast.add({
-      title: apiErrorMsg(e, 'Error al verificar el uso del item'),
+      title: apiErrorMsg(e, 'Error al verificar el uso del producto'),
       color: 'error',
     })
   } finally {
@@ -1599,7 +1623,7 @@ async function eliminar() {
     else {
       removeItemLocal(id)
     }
-    toast.add({ title: 'Item eliminado', color: 'success' })
+    toast.add({ title: 'Producto eliminado', color: 'success' })
     confirmModalOpen.value = false
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al eliminar')
@@ -1617,7 +1641,7 @@ async function restaurarItem(id: string) {
       item.eliminadoEl = null
       item.eliminadoPorNombre = null
     }
-    toast.add({ title: 'Item restaurado', color: 'success' })
+    toast.add({ title: 'Producto restaurado', color: 'success' })
   } catch (e) {
     // El 400 de colisión de nombre trae el detalle de qué renombrar: se
     // muestra tal cual, sin reemplazarlo por el fallback genérico.
@@ -1631,7 +1655,16 @@ async function restaurarItem(id: string) {
 
 // ── Toggle activo (optimista) ──────────────────────────────────────────────
 
-async function toggleActivo(item: Item) {
+const avisarConDeshacer = useAvisoDeshacer()
+
+// El separador "·" va entre datos de la línea: un ingrediente sin categoría no tiene precio ni
+// categoría antes del stock, y la línea no puede empezar con un punto suelto.
+function hayAntesDeStock(item: Item): boolean {
+  return item.tipo !== 'ingrediente' || !!item.categoriaNombre
+}
+
+// Guarda al instante, sin confirmar, con un aviso que trae "Deshacer" (auditoría UX 07.12).
+async function toggleActivo(item: Item, conDeshacer = true) {
   if (toggling.has(item.id)) return
   toggling.add(item.id)
   const prev = item.activo
@@ -1641,6 +1674,7 @@ async function toggleActivo(item: Item) {
       method: 'PATCH',
       body: { activo: item.activo },
     })
+    if (conDeshacer) avisarConDeshacer(item.activo ? 'Producto activado' : 'Producto pausado', () => toggleActivo(item, false))
   } catch {
     item.activo = prev
     toast.add({ title: 'Error al actualizar estado', color: 'error' })
@@ -1779,7 +1813,7 @@ function onSelectItem(_e: Event, row: Row<Item>) {
 
 const columnsItems: TableColumn<Item>[] = [
   { accessorKey: 'tipo', header: 'Tipo' },
-  { accessorKey: 'nombre', header: 'Item' },
+  { accessorKey: 'nombre', header: 'Producto' },
   { id: 'controles', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 
@@ -1850,10 +1884,17 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       <template #actions>
         <div class="flex items-center gap-4">
           <div class="flex items-center gap-2">
-            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" :ui="{ base: AREA_TACTIL_SWITCH }" />
             <span class="text-sm text-muted">Ver eliminados</span>
           </div>
-          <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">Nuevo item</UButton>
+          <UButton
+            icon="i-lucide-plus"
+            :disabled="!puedeCrear"
+            :title="puedeCrear ? undefined : motivoSinPermiso('Crear', 'Productos')"
+            @click="abrirCrear"
+          >
+            Nuevo producto
+          </UButton>
         </div>
       </template>
     </CrudPageHeader>
@@ -1873,7 +1914,34 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
         class="w-44"
         placeholder="Filtrar por tipo"
       />
-      <UCheckbox v-model="filtroSinCosto" label="Solo sin costo" />
+      <USelectMenu
+        v-model="filtroCategoria"
+        :items="filtrosCategoriaOpts"
+        value-key="value"
+        class="w-52"
+        data-qa="filtro-categoria"
+        aria-label="Filtrar por categoría"
+      />
+      <UCheckbox v-model="filtroSinCosto" label="Solo sin costo" :ui="{ base: AREA_TACTIL_SWITCH }" />
+      <div class="ml-auto flex items-center gap-1">
+        <USelectMenu
+          v-model="orden"
+          :items="ordenOpts"
+          value-key="value"
+          class="w-48"
+          data-qa="orden-por"
+          aria-label="Ordenar la lista"
+        />
+        <UButton
+          :icon="sentido === 'asc' ? 'i-lucide-arrow-up-narrow-wide' : 'i-lucide-arrow-down-wide-narrow'"
+          :aria-label="sentido === 'asc' ? 'Orden ascendente: pasar a descendente' : 'Orden descendente: pasar a ascendente'"
+          color="neutral"
+          variant="ghost"
+          class="size-11 justify-center"
+          data-qa="orden-sentido"
+          @click="() => { sentido = sentido === 'asc' ? 'desc' : 'asc' }"
+        />
+      </div>
       <UButton
         v-if="hayFiltrosActivos"
         label="Limpiar filtros"
@@ -1892,11 +1960,13 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
       :loading="loading"
       :error="error"
       :sin-permiso="sinPermiso"
-      recurso="los items"
-      vacio="No hay items. Crea el primero con el botón de arriba."
-      filtrado-texto="Ningún item coincide con los filtros."
+      recurso="los productos"
+      vacio="Aún no tienes productos. Crea el primero para empezar a vender."
+      :vacio-accion="puedeCrear ? 'Nuevo producto' : undefined"
+      filtrado-texto="Ningún producto coincide con los filtros."
       :filtrado="hayFiltrosActivos"
       @reintentar="fetchItems"
+      @vacio-accion="abrirCrear"
       @quitar-filtros="limpiarFiltros"
       :ui="{ tr: 'cursor-pointer' }"
       @select="onSelectItem"
@@ -1921,13 +1991,10 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             <p v-if="row.original.eliminadoEl" class="text-xs text-muted">
               {{ formatearBorradoPor(row.original) }}
             </p>
-            <div class="text-sm text-muted mt-0.5 flex flex-wrap items-center gap-3">
-              <span>{{
-                row.original.tipo === 'ingrediente'
-                  ? formatMonto('0', row.original.monedaId)
-                  : formatMonto(row.original.precioBase, row.original.monedaId)
-              }}</span>
-              <span v-if="row.original.categoriaNombre">· {{ row.original.categoriaNombre }}</span>
+            <div class="text-sm text-muted mt-0.5 flex flex-wrap items-center gap-3 tabular-nums" data-qa="item-linea">
+              <!-- El ingrediente no se vende: no tiene precio que mostrar (auditoría UX 07.32). -->
+              <span v-if="row.original.tipo !== 'ingrediente'">{{ formatMonto(row.original.precioBase, row.original.monedaId) }}</span>
+              <span v-if="row.original.categoriaNombre">{{ row.original.tipo !== 'ingrediente' ? '· ' : '' }}{{ row.original.categoriaNombre }}</span>
               <span v-if="(row.original.tipo === 'producto' || row.original.tipo === 'ingrediente') && row.original.stock !== null">
                 <!-- "Stock total" y no "Stock" a secas: con bodegas este número
                      es el TOTAL de todas las ubicaciones, y el salón muestra
@@ -1935,7 +2002,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                      20 kg en bodega y 10 en el local, acá dice 30 y el POS
                      puede decir que no hay: los dos números tienen razón, y
                      llamarlos distinto es lo que evita que se lea como un bug. -->
-                · Stock total:
+                {{ hayAntesDeStock(row.original) ? '· ' : '' }}Stock total:
                 <template v-if="row.original.tipo === 'producto' && row.original.modoInventario === 'serie'">{{ formatStock(row.original.stock, null) }} (unidades)</template>
                 <template v-else-if="row.original.tipo === 'producto' && row.original.modoInventario === 'lote'">{{ formatStock(row.original.stock, null) }} (lotes)</template>
                 <template v-else>{{ formatCantidadConUnidad(row.original.stock, row.original.unidadMedida) }}</template>
@@ -1950,7 +2017,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 color="warning"
                 variant="soft"
                 size="xs"
-                title="Este ítem todavía no tiene costo cargado: sus mermas quedan sin valorizar"
+                title="Este producto todavía no tiene costo cargado: sus mermas quedan sin valorizar"
               />
               <UBadge
                 v-if="row.original.tipo === 'producto' && row.original.modoInventario && row.original.modoInventario !== 'cantidad'"
@@ -1981,13 +2048,15 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               :model-value="row.original.activo"
               disabled
               size="sm"
+              :ui="{ base: AREA_TACTIL_SWITCH }"
             />
             <UButton
-              v-if="puedeEliminar"
               icon="i-lucide-rotate-ccw"
               color="neutral"
               variant="ghost"
               size="sm"
+              :disabled="!puedeEliminar"
+              :title="puedeEliminar ? undefined : motivoSinPermiso('Eliminar', 'Productos')"
               @click="() => { confirmRestaurarId = row.original.id; confirmRestaurarModalOpen = true }"
             >
               Restaurar
@@ -1998,17 +2067,19 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               :aria-label="`Activo: ${row.original.nombre}`"
               :model-value="row.original.activo"
               :disabled="toggling.has(row.original.id) || !puedeActualizar"
+              :title="puedeActualizar ? undefined : motivoSinPermiso('Actualizar', 'Productos')"
               size="sm"
+              :ui="{ base: AREA_TACTIL_SWITCH }"
               @update:model-value="toggleActivo(row.original)"
             />
             <UButton
-              :aria-label="`Editar ítem ${row.original.nombre}`"
-              v-if="puedeActualizar"
+              :aria-label="`Editar producto ${row.original.nombre}`"
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
               size="sm"
-              title="Editar"
+              :disabled="!puedeActualizar"
+              :title="puedeActualizar ? 'Editar' : motivoSinPermiso('Actualizar', 'Productos')"
               @click="abrirEditar(row.original)"
               class="size-11 justify-center"
             />
@@ -2061,7 +2132,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             <UFormField label="Nombre" class="col-span-2" required :error="errorNombre ?? errores.nombre">
               <UInput
                 v-model="form.nombre"
-                placeholder="Nombre del item"
+                placeholder="Nombre del producto"
                 class="w-full"
                 autofocus
                 :maxlength="MAX_NOMBRE_ITEM"
@@ -2099,7 +2170,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               color="warning"
               variant="subtle"
               icon="i-lucide-triangle-alert"
-              title="Cambiar la moneda del ítem"
+              title="Cambiar la moneda del producto"
               :description="mensajeCambioMoneda"
               class="col-span-2"
             >
@@ -2570,7 +2641,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 :key="idx"
                 class="grid grid-cols-4 gap-2 items-end"
               >
-                <UFormField label="Item" class="col-span-2">
+                <UFormField label="Producto" class="col-span-2">
                   <AppItemSelect
                     v-model="form.componentes[idx]!.componenteItemId"
                     :catalogo="catalogoVendibles"
@@ -2879,8 +2950,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
 
     <CrudModal
       v-model:open="confirmRestaurarModalOpen"
-      title="Restaurar item"
-      message="¿Restaurar este item? Volverá al catálogo, pero inactivo: reactivarlo es un paso aparte."
+      title="Restaurar producto"
+      message="¿Restaurar este producto? Volverá al catálogo, pero inactivo: reactivarlo es un paso aparte."
       confirm-label="Restaurar"
       confirm-color="neutral"
       @cancel="confirmRestaurarId = null"
@@ -2942,8 +3013,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             color="warning"
             variant="subtle"
             icon="i-lucide-circle-alert"
-            title="Este ítem todavía no tiene costo"
-            description="La compra se va a registrar igual. Pero mientras el ítem no tenga costo, sus mermas no van a quedar valorizadas — y esas no se corrigen después. Puedes cargarle el costo cuando quieras, no hace falta ahora."
+            title="Este producto todavía no tiene costo"
+            description="La compra se va a registrar igual. Pero mientras el producto no tenga costo, sus mermas no van a quedar valorizadas — y esas no se corrigen después. Puedes cargarle el costo cuando quieras, no hace falta ahora."
           />
 
           <!-- Modo cantidad: cantidad + unidad opcional -->

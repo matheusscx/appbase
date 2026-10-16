@@ -21,6 +21,7 @@ interface MemberFake {
   apellido: string
   correo: string
   esTotem: boolean
+  garzonNombre?: string | null
   pendienteConfirmacion: boolean
   roles: { rolId: string, nombre: string }[]
 }
@@ -33,6 +34,10 @@ let respuestaAlta = {
   invitado: false,
   pendienteConfirmacion: false,
 }
+/** Cada llamada que no es una lectura, para afirmar sobre lo que salió. */
+let escrituras: { metodo: string, url: string, query?: Record<string, string>, body?: unknown }[] = []
+/** Lo que responde `DELETE /tenants/members/:id`; si es un Error, lo rechaza. */
+let respuestaBaja: unknown = { garzon: null }
 let toasts: { title?: string, description?: string, color?: string }[] = []
 
 // ── Editor de roles ─────────────────────────────────────────────────────────
@@ -60,8 +65,15 @@ mockNuxtImport('useToast', () => {
 })
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, opts?: { method?: string }) => {
+  return (url: string, opts?: { method?: string, query?: Record<string, string>, body?: unknown }) => {
     if (typeof url !== 'string') return Promise.resolve([])
+    if (url.includes('/tenants/members/') && opts?.method) {
+      escrituras.push({ metodo: opts.method, url, query: opts.query, body: opts.body })
+      if (opts.method === 'DELETE') {
+        return respuestaBaja instanceof Error ? Promise.reject(respuestaBaja) : Promise.resolve(respuestaBaja)
+      }
+      return Promise.resolve({})
+    }
     if (url.includes('/tenants/usuarios') && opts?.method === 'POST')
       return Promise.resolve(respuestaAlta)
     if (url.includes('/tenants/members')) return Promise.resolve(membersBackend)
@@ -103,6 +115,8 @@ function miembro(over: Partial<MemberFake> = {}): MemberFake {
 let montado: { unmount: () => void } | null = null
 
 beforeEach(() => {
+  escrituras = []
+  respuestaBaja = { garzon: null }
   membersBackend = []
   toasts = []
   rolesBackend = [{ id: 'r-1', nombre: 'Cajero' }]
@@ -390,5 +404,166 @@ describe('configuracion/usuarios — un guardado de roles a medias no miente', (
     // Cajero se fue, Supervisor no: eso es lo que la fila tiene que decir.
     expect(wrapper.text()).not.toContain('Cajero')
     expect(wrapper.text()).toContain('Supervisor')
+  })
+})
+
+async function esperar(ms = 40) { await new Promise(r => setTimeout(r, ms)) }
+const botonPor = (wrapper: Awaited<ReturnType<typeof montar>>, titulo: string) =>
+  wrapper.findAll('button').find(b => b.attributes('title') === titulo)
+const enBody = (texto: string) => [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === texto)
+
+// 07.19: marcar una cuenta como tótem cambia cómo entra esa persona al salón; no es un toque suelto.
+describe('configuracion/usuarios — tótem pide confirmación (07.19)', () => {
+  it('marcar abre una confirmación que explica qué es un tótem y no manda nada todavía', async () => {
+    membersBackend = [miembro()]
+    const wrapper = await montar()
+    await botonPor(wrapper, 'Usar esta cuenta como tótem compartido')!.trigger('click')
+    await esperar()
+
+    expect(escrituras).toEqual([])
+    expect(document.body.textContent).toContain('dispositivo compartido')
+    expect(document.body.textContent).toContain('siempre pedirá PIN')
+  })
+
+  it('confirmar manda el PATCH con el estado deseado', async () => {
+    membersBackend = [miembro()]
+    const wrapper = await montar()
+    await botonPor(wrapper, 'Usar esta cuenta como tótem compartido')!.trigger('click')
+    await esperar()
+    enBody('Marcar como tótem')!.click()
+    await esperar()
+
+    expect(escrituras).toEqual([{ metodo: 'PATCH', url: expect.stringContaining('/tenants/members/u-1/totem'), query: undefined, body: { esTotem: true } }])
+  })
+
+  it('Volver cierra sin escribir', async () => {
+    membersBackend = [miembro()]
+    const wrapper = await montar()
+    await botonPor(wrapper, 'Usar esta cuenta como tótem compartido')!.trigger('click')
+    await esperar()
+    enBody('Volver')!.click()
+    await esperar()
+
+    expect(escrituras).toEqual([])
+  })
+
+  it('dejar de ser tótem no pide confirmación: vuelve a lo normal', async () => {
+    membersBackend = [miembro({ esTotem: true })]
+    const wrapper = await montar()
+    await botonPor(wrapper, 'Dejar de usarla como tótem compartido')!.trigger('click')
+    await esperar()
+
+    expect(escrituras.map(e => e.metodo)).toEqual(['PATCH'])
+  })
+
+  it('el botón del tótem queda separado del lápiz por un divisor', async () => {
+    membersBackend = [miembro()]
+    const wrapper = await montar()
+    const divisor = wrapper.find('[data-qa="acciones-divisor"]')
+    expect(divisor.exists()).toBe(true)
+  })
+})
+
+// 07.20: el backend ya sabe dar de baja una membresía; la pantalla no tenía cómo pedirlo.
+describe('configuracion/usuarios — Quitar del local (07.20)', () => {
+  it('abre una confirmación que dice que es reversible, y no manda nada todavía', async () => {
+    membersBackend = [miembro()]
+    const wrapper = await montar()
+    await botonPor(wrapper, 'Quitar del local')!.trigger('click')
+    await esperar()
+
+    expect(escrituras).toEqual([])
+    expect(document.body.textContent).toContain('Ana Torres')
+    expect(document.body.textContent).toContain('volver a invitar')
+  })
+
+  it('confirmar manda DELETE a la membresía y quita la fila', async () => {
+    membersBackend = [miembro(), miembro({ usuarioId: 'u-2', nombre: 'Beto', correo: 'b@example.com' })]
+    const wrapper = await montar()
+    await botonPor(wrapper, 'Quitar del local')!.trigger('click')
+    await esperar()
+    enBody('Quitar del local')!.click()
+    await esperar()
+
+    expect(escrituras).toHaveLength(1)
+    expect(escrituras[0]).toMatchObject({ metodo: 'DELETE' })
+    expect(escrituras[0]!.url).toContain('/tenants/members/u-1')
+    expect(escrituras[0]!.query).toBeUndefined()
+    expect(wrapper.text()).not.toContain('Ana')
+    expect(wrapper.text()).toContain('Beto')
+  })
+
+  it('si la cuenta es la credencial de un garzón, hay que decidir qué pasa con él antes de confirmar', async () => {
+    membersBackend = [miembro({ garzonNombre: 'Luis' })]
+    const wrapper = await montar()
+    await botonPor(wrapper, 'Quitar del local')!.trigger('click')
+    await esperar()
+
+    expect(document.body.textContent).toContain('Luis')
+    expect(document.body.textContent).toContain('PIN')
+    expect(enBody('Quitar del local')!.hasAttribute('disabled')).toBe(true)
+  })
+
+  it('elegir que el garzón sigue manda garzon=sigue y muestra el PIN nuevo una vez', async () => {
+    membersBackend = [miembro({ garzonNombre: 'Luis' })]
+    respuestaBaja = { garzon: { id: 'g1', nombre: 'Luis', accion: 'desvinculado', pin: '4821', advertencias: [] } }
+    const wrapper = await montar()
+    await botonPor(wrapper, 'Quitar del local')!.trigger('click')
+    await esperar()
+    const opcion = [...document.body.querySelectorAll<HTMLElement>('[role="radio"]')].find(o => o.getAttribute('aria-label')?.includes('sigue trabajando'))!
+    opcion.click()
+    await esperar()
+    enBody('Quitar del local')!.click()
+    await esperar()
+
+    expect(escrituras[0]!.query).toEqual({ garzon: 'sigue' })
+    expect(document.body.textContent).toContain('4821')
+  })
+
+  it('elegir que no sigue manda garzon=no-sigue', async () => {
+    membersBackend = [miembro({ garzonNombre: 'Luis' })]
+    respuestaBaja = { garzon: { id: 'g1', nombre: 'Luis', accion: 'desactivado', pin: null, advertencias: [] } }
+    const wrapper = await montar()
+    await botonPor(wrapper, 'Quitar del local')!.trigger('click')
+    await esperar()
+    const opcion = [...document.body.querySelectorAll<HTMLElement>('[role="radio"]')].find(o => o.getAttribute('aria-label')?.includes('ya no trabaja'))!
+    opcion.click()
+    await esperar()
+    enBody('Quitar del local')!.click()
+    await esperar()
+
+    expect(escrituras[0]!.query).toEqual({ garzon: 'no-sigue' })
+  })
+
+  it('el rechazo del backend (el último administrador) llega tal cual y la fila queda', async () => {
+    membersBackend = [miembro()]
+    respuestaBaja = errorApi('No se puede dar de baja a esa persona: es la última con rol de administrador.')
+    const wrapper = await montar()
+    await botonPor(wrapper, 'Quitar del local')!.trigger('click')
+    await esperar()
+    enBody('Quitar del local')!.click()
+    await esperar()
+
+    expect(toasts.some(t => t.color === 'error' && t.title?.includes('última con rol de administrador'))).toBe(true)
+    expect(wrapper.text()).toContain('Ana')
+  })
+
+  it('quien todavía no aceptó no se puede quitar (no es miembro)', async () => {
+    membersBackend = [miembro({ pendienteConfirmacion: true })]
+    const wrapper = await montar()
+    const quitar = wrapper.findAll('button').find(b => b.attributes('aria-label')?.includes('Quitar del local') || b.attributes('title')?.includes('Quitar del local'))
+    expect(quitar?.attributes('disabled')).toBeDefined()
+  })
+})
+
+// 07.35: un local nuevo parte sin personas; el vacío dice por dónde empezar.
+describe('configuracion/usuarios — el vacío dice por dónde empezar (07.35)', () => {
+  it('sin usuarios ofrece crear el primero', async () => {
+    membersBackend = []
+    const wrapper = await montar()
+    const accion = wrapper.find('[data-qa="estado-vacio-accion"]')
+    expect(accion.exists()).toBe(true)
+    expect(accion.text()).toContain('Nuevo usuario')
+    expect(wrapper.text()).toContain('Aún no hay personas en tu local')
   })
 })

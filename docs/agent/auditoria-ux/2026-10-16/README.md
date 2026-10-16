@@ -719,39 +719,39 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
 | ☑ | [07.3](07-configuracion.md) | P2 | Mientras carga o si falla, Configuración dice "No hay X registrados" — **hecho 2026-10-16** | agente |
-| ☐ | [07.4](07-configuracion.md) | P2 | El menú de Configuración tiene 28 entradas y casi la mitad queda bajo el pliegue | agente |
-| ☐ | [07.5](07-configuracion.md) | P2 | La zona de trabajo es angosta y "Nuevo X" y "Ver eliminados" se parten | agente |
-| ☐ | [07.6](07-configuracion.md) | P2 | A 768 el panel lateral de Items trunca valores y parte las etiquetas | agente |
-| ☐ | [07.7](07-configuracion.md) | P2 | Los campos de texto de Configuración miden 167 px aunque haya espacio libre | agente |
+| ☑ | [07.4](07-configuracion.md) | P2 | El menú de Configuración tiene 28 entradas y casi la mitad queda bajo el pliegue — **hecho 2026-10-16** | agente |
+| ☑ | [07.5](07-configuracion.md) | P2 | La zona de trabajo es angosta y "Nuevo X" y "Ver eliminados" se parten — **hecho 2026-10-16** | agente |
+| ☑ | [07.6](07-configuracion.md) | P2 | A 768 el panel lateral de Items trunca valores y parte las etiquetas — **hecho 2026-10-16** | agente |
+| ☑ | [07.7](07-configuracion.md) | P2 | Los campos de texto de Configuración miden 167 px aunque haya espacio libre — **hecho 2026-10-16** | agente |
 | ☑ | [07.8](07-configuracion.md) | P2 | 69 interruptores y 35 botones de ícono en Configuración no tienen nombre accesible — **hecho 2026-10-16** | agente |
-| ☐ | [07.9](07-configuracion.md) | P2 | Eliminar un rol usa el diálogo del navegador y no dice cuántos lo tienen | agente + owner |
+| ☑ | [07.9](07-configuracion.md) | P2 | Eliminar un rol usa el diálogo del navegador y no dice cuántos lo tienen — **hecho 2026-10-16** | agente + owner |
 | ☑ | [07.10](07-configuracion.md) | P2 | "Crear" un rol con el nombre vacío no hace nada ni avisa — **hecho 2026-10-16** | agente |
-| ☐ | [07.11](07-configuracion.md) | P2 | Guardar permisos de un rol manda hasta 16 guardados seguidos y puede quedar a medias | owner |
-| ☐ | [07.12](07-configuracion.md) | P2 | Apagar "Efectivo" en Métodos de pago se hace con un toque, sin confirmar | owner |
-| ☐ | [07.13](07-configuracion.md) | P2 | Escape o un clic al lado cierra el panel de Items y se pierde lo escrito | agente |
+| ☑ | [07.11](07-configuracion.md) | P2 | Guardar permisos de un rol manda hasta 16 guardados seguidos y puede quedar a medias — **hecho 2026-10-16** | owner |
+| ☑ | [07.12](07-configuracion.md) | P2 | Apagar "Efectivo" en Métodos de pago se hace con un toque, sin confirmar — **hecho 2026-10-16** (método de pago, descuento y recargo piden confirmación al apagar; impuestos va en el frente fiscal; el resto guarda con "Deshacer") | owner |
+| ☑ | [07.13](07-configuracion.md) | P2 | Escape o un clic al lado cierra el panel de Items y se pierde lo escrito — **hecho 2026-10-16** | agente |
 | ☐ | [07.14](07-configuracion.md) | P2 | Para crear un IVA de 19% hay que escribir 0.19 | owner |
 | ☑ | [07.15](07-configuracion.md) | P2 | La lista de descuentos redondea 2,5% a "3%" y muestra montos fijos como "5000.0000" — **hecho 2026-10-16** | agente |
-| ☐ | [07.16](07-configuracion.md) | P2 | Los chips y avisos verde y ámbar de Configuración no tienen contraste suficiente *(ver 00.8)* | agente |
-| ☐ | [07.17](07-configuracion.md) | P2 | Una impresora se da de alta sin poder probarla ni validar el host | owner |
-| ☐ | [07.18](07-configuracion.md) | P2 | Editar o eliminar una mesa solo se puede con doble clic en el plano — **parcial 2026-10-16** (Enter/Espacio sobre la mesa abren su edición y la mesa se alcanza con Tab; queda el botón "Editar mesa" en la barra del plano y el doble toque en tablet) | agente |
-| ☐ | [07.19](07-configuracion.md) | P2 | El ícono "tótem" de Usuarios cambia cómo entra la persona al salón, con un toque | agente + owner |
-| ☐ | [07.20](07-configuracion.md) | P2 | Usuarios no permite quitar a alguien del local, aunque el sistema sabe hacerlo | owner |
+| ☑ | [07.16](07-configuracion.md) | P2 | Los chips y avisos verde y ámbar de Configuración no tienen contraste suficiente *(ver 00.8)* — **hecho 2026-10-16** (resuelto por el lote 00.8: los tonos de estado pasan 4,5:1) | agente |
+| ☑ | [07.17](07-configuracion.md) | P2 | Una impresora se da de alta sin poder probarla ni validar el host — **hecho 2026-10-16** | owner |
+| ☑ | [07.18](07-configuracion.md) | P2 | Editar o eliminar una mesa solo se puede con doble clic en el plano — **hecho 2026-10-16** | agente |
+| ☑ | [07.19](07-configuracion.md) | P2 | El ícono "tótem" de Usuarios cambia cómo entra la persona al salón, con un toque — **hecho 2026-10-16** | agente + owner |
+| ☑ | [07.20](07-configuracion.md) | P2 | Usuarios no permite quitar a alguien del local, aunque el sistema sabe hacerlo — **hecho 2026-10-16** | owner |
 | ☑ | [07.21](07-configuracion.md) | P2 | "Crear" usuario queda gris sin decir qué falta y un correo malo no se marca — **hecho 2026-10-16** | agente |
-| ☐ | [07.22](07-configuracion.md) | P2 | Quien no es administrador y abre una pantalla de admin vuelve a Perfil sin aviso — **parcial 2026-10-16** (hecho el aviso del rebote: "Esa pantalla es solo para administradores"; falta dejar deshabilitados con el motivo los botones que hoy desaparecen sin permiso, que toca todas las pantallas de Configuración y sus specs) | agente |
-| ☐ | [07.23](07-configuracion.md) | P2 | En desarrollo, el menú de Configuración muestra el ícono de otra entrada | agente |
-| ☐ | [07.24](07-configuracion.md) | P3 | El panel de un rol fijo no muestra los permisos que da | agente |
-| ☐ | [07.25](07-configuracion.md) | P3 | Las insignias de Configuración miden 8 a 10 px de texto | agente |
-| ☐ | [07.26](07-configuracion.md) | P3 | Los botones de fila de Configuración miden 28 a 32 px y están pegados — **parcial 2026-10-16** (lápiz, basurero y compañía a 44 px en todo Configuración, con una invariante; quedan los interruptores, las entradas del menú, las casillas y el "Saltar al contenido") | agente |
+| ☑ | [07.22](07-configuracion.md) | P2 | Quien no es administrador y abre una pantalla de admin vuelve a Perfil sin aviso — **hecho 2026-10-16** | agente |
+| ☐ | [07.23](07-configuracion.md) | P2 | En desarrollo, el menú de Configuración muestra el ícono de otra entrada — *2026-10-16: no reproducible sin navegador; el `npm run build` pasa y los íconos son `i-lucide-*` correctos. Queda por mirar a ojo en el dev server* | agente |
+| ☑ | [07.24](07-configuracion.md) | P3 | El panel de un rol fijo no muestra los permisos que da — **hecho 2026-10-16** | agente |
+| ☑ | [07.25](07-configuracion.md) | P3 | Las insignias de Configuración miden 8 a 10 px de texto — **hecho 2026-10-16** (resuelto por los lotes 01.17 y 05.17: ninguna insignia baja de 12 px) | agente |
+| ☑ | [07.26](07-configuracion.md) | P3 | Los botones de fila de Configuración miden 28 a 32 px y están pegados — **hecho 2026-10-16** | agente |
 | ☑ | [07.27](07-configuracion.md) | P3 | "Tenant" aparece en diez textos de Configuración — **hecho 2026-10-16** | agente |
 | ☑ | [07.28](07-configuracion.md) | P3 | Voseo en 41 líneas de Configuración *(lote 00.3)* — **hecho 2026-10-16** | agente |
-| ☐ | [07.29](07-configuracion.md) | P3 | "Nuevo recargo" usa una frase de descuentos ("se descuenta línea por línea") | agente |
-| ☐ | [07.30](07-configuracion.md) | P3 | El menú y los títulos de Configuración usan nombres distintos para lo mismo | agente + owner |
-| ☐ | [07.31](07-configuracion.md) | P3 | Empresa: Nombre y Correo no se marcan como requeridos y "Fin del día" no confirma | owner |
-| ☐ | [07.32](07-configuracion.md) | P3 | En Items el stock sale con cuatro decimales y los costos con otra letra | agente |
-| ☐ | [07.33](07-configuracion.md) | P3 | Items no filtra por categoría ni ordena por precio o stock | owner |
-| ☐ | [07.34](07-configuracion.md) | P3 | Entrar a Configuración cae en Perfil, no en lo que el dueño viene a configurar | owner |
-| ☐ | [07.35](07-configuracion.md) | P3 | Los vacíos de Configuración dicen "No hay X" sin decir cómo empezar | agente |
-| ☐ | [07.36](07-configuracion.md) | P3 | El pie de los modales dibuja una doble línea sobre los botones *(ver 00.1)* | agente |
+| ☑ | [07.29](07-configuracion.md) | P3 | "Nuevo recargo" usa una frase de descuentos ("se descuenta línea por línea") — **hecho 2026-10-16** | agente |
+| ☑ | [07.30](07-configuracion.md) | P3 | El menú y los títulos de Configuración usan nombres distintos para lo mismo — **hecho 2026-10-16** | agente + owner |
+| ☑ | [07.31](07-configuracion.md) | P3 | Empresa: Nombre y Correo no se marcan como requeridos y "Fin del día" no confirma — **hecho 2026-10-16** | owner |
+| ☑ | [07.32](07-configuracion.md) | P3 | En Items el stock sale con cuatro decimales y los costos con otra letra — **hecho 2026-10-16** | agente |
+| ☑ | [07.33](07-configuracion.md) | P3 | Items no filtra por categoría ni ordena por precio o stock — **hecho 2026-10-16** | owner |
+| ☑ | [07.34](07-configuracion.md) | P3 | Entrar a Configuración cae en Perfil, no en lo que el dueño viene a configurar — **hecho 2026-10-16** | owner |
+| ☑ | [07.35](07-configuracion.md) | P3 | Los vacíos de Configuración dicen "No hay X" sin decir cómo empezar — **hecho 2026-10-16** | agente |
+| ☑ | [07.36](07-configuracion.md) | P3 | El pie de los modales dibuja una doble línea sobre los botones *(ver 00.1)* — **hecho 2026-10-16** | agente |
 
 ### 08 · Ingreso y cuenta
 

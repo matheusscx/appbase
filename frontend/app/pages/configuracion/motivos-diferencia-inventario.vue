@@ -18,6 +18,7 @@ interface MotivoDiferenciaInventario {
 
 const config = useRuntimeConfig()
 const toast = useToast()
+const avisarConDeshacer = useAvisoDeshacer()
 const apiUrl = config.public.apiUrl
 
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('motivos-diferencia-inventario')
@@ -164,7 +165,7 @@ async function guardar() {
   }
 }
 
-async function toggleActivo(motivo: MotivoDiferenciaInventario) {
+async function toggleActivo(motivo: MotivoDiferenciaInventario, conDeshacer = true) {
   if (motivo.esFijo || motivo.eliminadoEl || toggling.has(motivo.id)) return
   toggling.add(motivo.id)
   const prev = motivo.activo
@@ -174,10 +175,9 @@ async function toggleActivo(motivo: MotivoDiferenciaInventario) {
       method: 'PATCH',
       body: { activo: motivo.activo },
     })
-    toast.add({
-      title: motivo.activo ? 'Motivo activado' : 'Motivo desactivado',
-      color: 'success',
-    })
+    const titulo = motivo.activo ? 'Motivo activado' : 'Motivo desactivado'
+    if (conDeshacer) avisarConDeshacer(titulo, () => toggleActivo(motivo, false))
+    else toast.add({ title: titulo, color: 'success' })
   }
   catch (e: unknown) {
     motivo.activo = prev
@@ -320,6 +320,9 @@ const columns: TableColumn<MotivoDiferenciaInventario>[] = [
     </CrudPageHeader>
 
     <CrudTable
+      vacio="Aún no tienes motivos de diferencia de inventario. Crea el primero para explicar los descuadres de stock."
+      vacio-accion="Nuevo motivo"
+      @vacio-accion="abrirCrear"
       :data="motivos"
       :columns="columns"
       :loading="loading"
@@ -391,16 +394,6 @@ const columns: TableColumn<MotivoDiferenciaInventario>[] = [
             @click="pedirEliminar(row.original)"
             class="size-11 justify-center"
           />
-        </div>
-      </template>
-
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          <UIcon
-            name="i-lucide-clipboard-check"
-            class="w-8 h-8 mx-auto mb-2 opacity-40"
-          />
-          No hay motivos de diferencia de inventario.
         </div>
       </template>
     </CrudTable>

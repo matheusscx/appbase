@@ -69,6 +69,9 @@ interface RecetaUsando {
   opciones: RecetaUsandoOpcion[]
 }
 
+// El interruptor dibuja 36×20; el área que responde al dedo llega a 44 px sin mover el dibujo.
+const AREA_TACTIL_SWITCH = 'relative after:absolute after:-inset-3 after:content-[\'\']'
+
 const config = useRuntimeConfig()
 const toast = useToast()
 const { formatMonto } = useFormatters()
@@ -405,7 +408,7 @@ function validarForm(): string | null {
   if (!form.value.nombre.trim()) return 'El nombre es obligatorio'
   if (!form.value.opciones.length) return 'Agrega al menos una opción'
   for (const o of form.value.opciones) {
-    if (!o.itemId) return 'Selecciona un item para cada opción'
+    if (!o.itemId) return 'Selecciona un producto para cada opción'
     if (o.cantidad) {
       let cantidad: Decimal
       try {
@@ -419,7 +422,7 @@ function validarForm(): string | null {
     if (!o.precioExtra) return 'Completa el precio extra de cada opción (puede ser 0)'
     const familia = familiaDeItem(o.itemId)
     // Ítem sin resolver (falló el pedido por id): no se valida a ciegas ni se saltea en silencio.
-    if (!familia) return 'No se pudo cargar un ítem de las opciones: cierra y vuelve a abrir el grupo'
+    if (!familia) return 'No se pudo cargar un producto de las opciones: cierra y vuelve a abrir el grupo'
     if (familia === 'ingrediente' && !o.unidadCodigo) {
       return 'Las opciones ingrediente requieren unidad de medida'
     }
@@ -569,7 +572,7 @@ const columns: TableColumn<Grupo>[] = [
   { accessorKey: 'nombre', header: 'Nombre' },
   { id: 'familia', header: 'Familia' },
   { id: 'opciones', header: 'Opciones', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { id: 'uso', header: 'Items que lo usan', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'uso', header: 'Productos que lo usan', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 
@@ -590,7 +593,7 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
       <template #actions>
         <div class="flex items-center gap-4">
           <div class="flex items-center gap-2">
-            <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+            <USwitch v-model="verEliminados" aria-label="Ver eliminados" :ui="{ base: AREA_TACTIL_SWITCH }" />
             <span class="text-sm text-muted">Ver eliminados</span>
           </div>
           <UButton
@@ -603,7 +606,17 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="grupos" :columns="columns" :loading="loading" :error="errorCarga" recurso="los grupos de modificadores" @reintentar="cargar">
+    <CrudTable
+      :data="grupos"
+      :columns="columns"
+      :loading="loading"
+      :error="errorCarga"
+      recurso="los grupos de modificadores"
+      vacio="Aún no tienes grupos de modificadores. Crea el primero para dejar que el cliente personalice un producto."
+      vacio-accion="Nuevo grupo"
+      @reintentar="cargar"
+      @vacio-accion="abrirCrear"
+    >
       <template #nombre-cell="{ row }">
         <div class="min-w-0">
           <div class="flex items-center gap-2">
@@ -681,11 +694,6 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
         </div>
       </template>
 
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          No hay grupos de modificadores registrados.
-        </div>
-      </template>
     </CrudTable>
 
     <AppDrawer v-model:open="drawerOpen" width="50%">

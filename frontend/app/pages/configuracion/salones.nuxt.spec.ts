@@ -198,10 +198,16 @@ function respuestaGet(incluirEliminados: boolean) {
     }))
 }
 
+/** POST/PATCH de alta y edición (no layout ni restaurar): lo que la validación debe evitar. */
+let escrituras: string[] = []
+
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: unknown }) => {
     if (typeof url !== 'string') return Promise.resolve([])
     const method = opts?.method ?? 'GET'
+    if ((method === 'POST' || method === 'PATCH') && !url.endsWith('/restaurar') && !url.endsWith('/layout')) {
+      escrituras.push(`${method} ${url}`)
+    }
 
     // POST /salones/:id/restaurar — endpoint de SALONES, cascada acotada al
     // `eliminadoEl` exacto que dejó ese borrado.
@@ -305,15 +311,16 @@ async function montar() {
   return wrapper
 }
 
+/** Sin permiso el botón sigue ahí, apagado y con el motivo (auditoría UX 07.22): "tiene" = habilitado. */
 function tieneBoton(wrapper: Awaited<ReturnType<typeof montar>>, texto: string) {
-  return wrapper.findAll('button').some(b => b.text().includes(texto))
+  return wrapper.findAll('button').some(b => b.text().includes(texto) && b.attributes('disabled') === undefined)
 }
 
 function cuentaPorTitulo(
   wrapper: Awaited<ReturnType<typeof montar>>,
-  title: string,
+  nombre: string,
 ) {
-  return wrapper.findAll(`[title="${title}"]`).length
+  return wrapper.findAll(`button[aria-label="${nombre}"]:not([disabled])`).length
 }
 
 async function activarVerEliminados(wrapper: Awaited<ReturnType<typeof montar>>) {
@@ -410,6 +417,7 @@ function reset() {
   restaurarMesaRetenido = null
   deleteRetenido = null
   toasts = []
+  escrituras = []
   patchesLayout = []
   retenerLayout = false
   layoutEnVuelo = []
@@ -433,6 +441,23 @@ describe('salones — cada control con el permiso de SU endpoint', () => {
     expect(cuentaPorTitulo(wrapper, 'Eliminar salón')).toBe(0)
     expect(wrapper.find('[aria-label="Ver eliminados"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Salón Principal')
+
+    wrapper.unmount()
+  })
+
+  it('sin permiso, los botones quedan apagados y dicen qué permiso falta (no desaparecen)', async () => {
+    esAdmin = false
+    permisos = ['Salones:Leer']
+
+    const wrapper = await montar()
+
+    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nuevo salón'))
+    expect(nuevo?.attributes('title')).toBe('Necesitas el permiso Crear en Salones')
+    const mesa = wrapper.findAll('button').find(b => b.text().includes('Agregar mesa'))
+    expect(mesa?.attributes('title')).toBe('Necesitas el permiso Crear en Salones')
+    expect(wrapper.find('button[aria-label="Editar salón"]').attributes('title')).toBe('Necesitas el permiso Actualizar en Salones')
+    expect(wrapper.find('button[aria-label="Eliminar salón"]').attributes('title')).toBe('Necesitas el permiso Eliminar en Salones')
+    expect(wrapper.find('button[aria-label="Editar mesa"]').attributes('title')).toBe('Necesitas el permiso Actualizar en Salones')
 
     wrapper.unmount()
   })
@@ -544,7 +569,7 @@ describe('salones — papelera: eliminar salón respeta el toggle', () => {
     await confirmarEnModal('Eliminar')
 
     expect(wrapper.text()).not.toContain('Salón Principal')
-    expect(wrapper.text()).toContain('No hay salones')
+    expect(wrapper.text()).toContain('Aún no tienes salones')
 
     wrapper.unmount()
   })
@@ -1149,6 +1174,86 @@ describe('salones — plano: la mesa que otra sesión borró', () => {
     expect(enPlano(wrapper, 'mesa-b')).toBe(true)
     expect(avisosDeSacar()).toEqual([])
 
+    wrapper.unmount()
+  })
+})
+
+// 07.2 / 07.18 / 07.35
+describe('salones — formularios validan, editar mesa sin doble clic, vacío con acción', () => {
+  const espera = (ms = 30) => new Promise(r => setTimeout(r, ms))
+  const errores = (form: string) =>
+    [...document.querySelectorAll(`#${form} [data-slot="error"]`)].map(e => e.textContent?.trim())
+  async function enviar(form: string) {
+    document.querySelector(`#${form}`)!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await espera()
+  }
+
+  beforeEach(() => {
+    salonesBackend = [salon({ mesas: [mesa()] })]
+    reset()
+    esAdmin = true
+    permisos = ADMIN_SALONES
+    document.body.innerHTML = ''
+  })
+
+  it('una mesa sin nombre se marca junto al campo y no se manda', async () => {
+    const wrapper = await montar()
+    await wrapper.findAll('button').find(b => b.text().includes('Agregar mesa'))!.trigger('click')
+    await espera()
+    await enviar('mesa-form')
+
+    expect(escrituras).toEqual([])
+    expect(errores('mesa-form')).toEqual(['Escribe el nombre de la mesa, por ejemplo Mesa 1'])
+    wrapper.unmount()
+  })
+
+  it('un salón sin nombre se marca junto al campo y no se manda', async () => {
+    const wrapper = await montar()
+    await wrapper.findAll('button').find(b => b.text().includes('Nuevo salón'))!.trigger('click')
+    await espera()
+    await enviar('salon-form')
+
+    expect(escrituras).toEqual([])
+    expect(errores('salon-form')).toEqual(['Escribe el nombre del salón, por ejemplo Terraza'])
+    wrapper.unmount()
+  })
+
+  it('"Editar mesa" en la barra del plano deja elegir la mesa y abre su edición', async () => {
+    const wrapper = await montar()
+    const boton = wrapper.find('button[aria-label="Editar mesa"]')
+    expect(boton.exists()).toBe(true)
+    expect(boton.attributes('disabled')).toBeUndefined()
+    await boton.trigger('click')
+    await espera(50)
+
+    const opcion = [...document.body.querySelectorAll('[role="menuitem"]')].find(o => o.textContent?.includes('Mesa 1')) as HTMLElement
+    expect(opcion, 'la mesa figura en el menú').toBeTruthy()
+    opcion.click()
+    await espera(50)
+
+    expect(document.querySelector('#mesa-form')).toBeTruthy()
+    expect((document.querySelector('#mesa-form input') as HTMLInputElement).value).toBe('Mesa 1')
+    wrapper.unmount()
+  })
+
+  it('sin mesas, "Editar mesa" está apagado y dice que no hay', async () => {
+    salonesBackend = [salon()]
+    const wrapper = await montar()
+    const boton = wrapper.find('button[aria-label="Editar mesa"]')
+    expect(boton.attributes('disabled')).toBeDefined()
+    expect(boton.attributes('title')).toBe('Este salón todavía no tiene mesas')
+    wrapper.unmount()
+  })
+
+  it('sin salones, el vacío ofrece crear el primero', async () => {
+    salonesBackend = []
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Aún no tienes salones')
+    const crear = wrapper.find('[data-qa="salones-vacio-accion"]')
+    expect(crear.exists()).toBe(true)
+    await crear.trigger('click')
+    await espera()
+    expect(document.querySelector('#salon-form')).toBeTruthy()
     wrapper.unmount()
   })
 })

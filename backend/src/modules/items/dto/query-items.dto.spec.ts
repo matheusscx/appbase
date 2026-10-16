@@ -150,8 +150,33 @@ describe('QueryItemsDto.orden', () => {
     expect(await validate(dto)).toHaveLength(0);
   });
 
+  it.each(['precio', 'stock'])(
+    'orden=%s pasa (columnas de la lista de Productos)',
+    async (orden) => {
+      const dto = plainToInstance(QueryItemsDto, { orden });
+
+      expect(await validate(dto)).toHaveLength(0);
+      expect(dto.orden).toBe(orden);
+    },
+  );
+
+  it.each(['asc', 'desc'])('sentido=%s pasa', async (sentido) => {
+    const dto = plainToInstance(QueryItemsDto, { orden: 'precio', sentido });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.sentido).toBe(sentido);
+  });
+
+  it('un sentido desconocido es un error de validación', async () => {
+    const dto = plainToInstance(QueryItemsDto, { sentido: 'arriba' });
+
+    const errores = await validate(dto);
+    expect(errores).toHaveLength(1);
+    expect(errores[0].property).toBe('sentido');
+  });
+
   it('un orden desconocido es un error de validación', async () => {
-    const dto = plainToInstance(QueryItemsDto, { orden: 'precio' });
+    const dto = plainToInstance(QueryItemsDto, { orden: 'color' });
 
     const errores = await validate(dto);
     expect(errores).toHaveLength(1);

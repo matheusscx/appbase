@@ -8,7 +8,7 @@ export const shellUi = {
     description: 'text-sm text-muted !mt-2',
   },
   modal: {
-    content: 'bg-default flex flex-col focus:outline-none text-default divide-none',
+    content: 'bg-default flex flex-col focus:outline-none text-default divide-y-0',
     header: 'relative flex flex-col items-start gap-2 px-6 pt-4 pb-4 sm:px-6 sm:pt-4 sm:pb-4 min-h-(--ui-header-height)',
     body: 'flex-1 px-6 py-4 space-y-4 sm:px-6 sm:py-4',
     footer: 'px-6 pt-0 pb-4 sm:px-6 sm:pb-4',

@@ -112,6 +112,10 @@ let postsPromocion: Record<string, unknown>[] = []
  */
 let postPromocionFalla = false
 
+interface ToastCapturado { title?: string, actions?: { label: string, onClick: () => void }[] }
+let toasts: ToastCapturado[] = []
+mockNuxtImport('useToast', () => () => ({ add: (t: ToastCapturado) => { toasts.push(t) } }))
+
 mockNuxtImport('useApiFetch', () => {
   return (
     url: string,
@@ -570,6 +574,32 @@ describe('configuracion/promociones — editar con ítems fuera de la primera b�
     expect(selectItems, 'selector de ítems').toBeTruthy()
     expect(selectItems!.props('items')).toEqual([{ value: 'item-lejano', label: 'Item Lejano (Postres)' }])
 
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 07.12: pausar una promoción guarda al instante y el aviso trae "Deshacer".
+describe('configuracion/promociones — pausar con Deshacer', () => {
+  beforeEach(() => {
+    toasts = []
+    reset()
+    promocionesBackend = [promo({ id: 'p-1', nombre: 'Happy hour', activo: true })]
+  })
+
+  it('el interruptor pausa y "Deshacer" la reactiva', async () => {
+    const wrapper = await montar()
+    const sw = wrapper.find('tbody button[role="switch"]')
+    expect(sw.exists()).toBe(true)
+    const antes = promocionesBackend[0]!.activo
+    await sw.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(promocionesBackend[0]!.activo).toBe(!antes)
+
+    const aviso = toasts.at(-1)!
+    expect(aviso.actions?.[0]?.label).toBe('Deshacer')
+    aviso.actions![0]!.onClick()
+    await new Promise(r => setTimeout(r, 20))
+    expect(promocionesBackend[0]!.activo).toBe(antes)
     wrapper.unmount()
   })
 })

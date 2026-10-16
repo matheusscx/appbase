@@ -1461,3 +1461,15 @@ externo y el lector de pantalla existen. Lo que sigue lo hace cumplir `invariant
   Lo destructivo (el basurero) va **apartado** de lo frecuente (`ms-2` o más). En `pages/configuracion/`
   la invariante exige `size-11` en todo botón de solo ícono; una excepción lleva su porqué en la lista.
 - jsdom no mide píxeles: los specs afirman las clases (`size-11`, `min-h-11`), no la caja.
+
+---
+
+## 21. Paneles, vacíos y avisos de Configuración (auditoría UX, grupo 07)
+
+- **`AppDrawer` pregunta antes de tirar lo tipeado**: detecta `input`/`change` del cuerpo; Escape, un clic al lado, la X o un botón cuyo texto es "Cancelar" piden "Tienes cambios sin guardar. ¿Salir sin guardar?". El cierre programático tras guardar (`open = false`) no pregunta. Un panel reabierto parte limpio. El ancho en porcentaje tiene piso de 28 rem y las grillas `grid-cols-2` pasan a una columna si el panel mide menos de 28 rem.
+- **Vacío con salida**: `CrudTable` acepta `vacio` (frase que dice por dónde empezar) y `vacio-accion` + `@vacio-accion` (botón de crear). Pasa `vacio-accion` solo si la persona puede crear.
+- **Botón sin permiso**: queda `:disabled` con `:title="motivoSinPermiso('Crear', 'Impresoras')"` (`utils/motivo-sin-permiso.ts`), no desaparece. Sigue siendo UX: el candado es el guard del backend. Los controles de papelera que darían 403 pueden seguir escondidos.
+- **Interruptor que guarda al instante**: toast con "Deshacer" (`useAvisoDeshacer`). Lo que toca los cobros (método de pago, descuento, recargo) pide confirmación con `CrudModal` al **apagar**.
+- **Campos**: dentro de un `UFormField` el control llena el ancho (`app.config.ts`, `formField`). Interruptores y casillas llevan un área táctil de 44 px (pseudo-elemento) sin agrandar el dibujo.
+- **Menú de Configuración**: grupos y gates en `useMenuConfiguracion`; el índice `/configuracion` y el menú lo comparten.
+

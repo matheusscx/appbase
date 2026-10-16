@@ -2087,3 +2087,22 @@ describe('configuracion/descuentos — el alta vacía se marca junto a los campo
     wrapper.unmount()
   })
 })
+
+// Auditoría UX 07.35: el vacío dice por dónde empezar y ofrece crear el primero.
+describe('configuracion/descuentos — lista vacía', () => {
+  beforeEach(() => {
+    descuentosBackend = []
+    reset()
+  })
+
+  it('dice qué hacer y su botón abre el drawer de alta', async () => {
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Aún no tienes descuentos. Crea el primero para usarlo al cobrar.')
+    const boton = wrapper.find('[data-qa="estado-vacio-accion"]')
+    expect(boton.text()).toContain('Nuevo descuento')
+    await boton.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(dialogo()).not.toBeNull()
+    wrapper.unmount()
+  })
+})

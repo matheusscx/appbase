@@ -22,6 +22,7 @@ import { CreateRolDto } from './dto/create-rol.dto';
 import { UpdateRolDto } from './dto/update-rol.dto';
 import { AssignUserDto } from './dto/assign-user.dto';
 import { SetPermissionsDto } from './dto/set-permissions.dto';
+import { SetAllPermissionsDto } from './dto/set-all-permissions.dto';
 import { JwtUser } from '../../common/interfaces/jwt-user.interface';
 
 @UseGuards(JwtAuthGuard, TenantGuard)
@@ -94,6 +95,23 @@ export class RolesController {
   findPermissions(@Param('id', ParseUUIDPipe) id: string, @Req() req: Request) {
     const user = req.user as JwtUser;
     return this.rolesService.findPermissions(id, user.tenantId!);
+  }
+
+  /**
+   * Guarda los permisos de todos los módulos del rol de una vez, en una
+   * transacción (auditoría UX 07.11). Mismo guard que el `PUT` por módulo de
+   * abajo: es administración de roles.
+   */
+  @Put(':id/permissions')
+  @UseGuards(TenantAdminGuard)
+  @HttpCode(HttpStatus.NO_CONTENT)
+  setAllPermissions(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Req() req: Request,
+    @Body() dto: SetAllPermissionsDto,
+  ) {
+    const user = req.user as JwtUser;
+    return this.rolesService.setAllPermissions(id, user.tenantId!, dto.modulos);
   }
 
   @Put(':id/modules/:moduloTenantId/permissions')

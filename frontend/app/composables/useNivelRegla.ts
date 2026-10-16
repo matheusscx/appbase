@@ -36,7 +36,7 @@ interface ItemDeUso {
  * dos etiquetas abstractas ("línea" / "venta") no lo logra, de ahí el texto de
  * ayuda con el caso concreto.
  */
-export function useNivelRegla() {
+export function useNivelRegla(tipo: 'descuento' | 'recargo' = 'descuento') {
   // En el setup del composable, no dentro de la función async: es el patrón que
   // usan `usePausaRegla` y las dos pantallas, y evita la única llamada a un
   // composable de Nuxt fuera de setup que tenía este archivo.
@@ -47,7 +47,8 @@ export function useNivelRegla() {
     {
       label: 'A cada ítem',
       value: 'linea',
-      description: 'Se asocia a productos del catálogo y se descuenta línea por línea.',
+      // Un recargo no descuenta nada: suma (auditoría UX 07.29).
+      description: `Se asocia a productos del catálogo y se ${tipo === 'recargo' ? 'suma' : 'descuenta'} línea por línea.`,
     },
     {
       label: 'Al total de la venta',

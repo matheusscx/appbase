@@ -75,10 +75,19 @@ export class QueryItemsDto extends PaginationQueryDto {
    * nombre, después id), calculado en el servidor porque depende de la
    * disponibilidad de cada ítem y paginar con el orden en el cliente lo cambiaba
    * entre páginas. Sin el parámetro (o `nombre`), el de siempre.
+   *
+   * `nombre`, `precio` y `stock` son las columnas ordenables de la lista de Productos de
+   * Configuración (auditoría UX 07.33), siempre con `sentido`. Se ordena en el servidor y no en el
+   * cliente: con paginación, ordenar la página cambiaría el orden de una página a otra.
    */
   @IsOptional()
-  @IsIn(['nombre', 'disponibilidad'])
-  orden?: 'nombre' | 'disponibilidad';
+  @IsIn(['nombre', 'disponibilidad', 'precio', 'stock'])
+  orden?: 'nombre' | 'disponibilidad' | 'precio' | 'stock';
+
+  /** Sentido del orden por columna; sin él, ascendente. No aplica a `disponibilidad`. */
+  @IsOptional()
+  @IsIn(['asc', 'desc'])
+  sentido?: 'asc' | 'desc';
 
   @IsOptional()
   @IsUUID()

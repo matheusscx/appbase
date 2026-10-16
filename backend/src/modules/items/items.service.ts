@@ -872,6 +872,23 @@ export class ItemsService {
     return { localId, hoy };
   }
 
+  /**
+   * El `ORDER BY` de la lista. Lista blanca: el cliente manda una palabra y el SQL sale de acá,
+   * nunca del texto recibido. Siempre cierra con nombre e id para que la paginación sea estable
+   * cuando varias filas empatan (el stock 0 y el mismo precio son lo normal).
+   * El stock de lo que no lo lleva (servicio, suscripción) es `NULL` y va al final en ambos sentidos.
+   */
+  private ordenSql(query: QueryItemsDto): string {
+    const sentido = query.sentido === 'desc' ? 'DESC' : 'ASC';
+    const columna =
+      query.orden === 'precio'
+        ? `i.precio_base ${sentido}`
+        : query.orden === 'stock'
+          ? `s.total ${sentido} NULLS LAST`
+          : `i.nombre ${sentido}`;
+    return `${columna}, i.nombre ASC, i.item_id ASC`;
+  }
+
   async findAll(
     tenantId: string,
     query: QueryItemsDto,
@@ -932,7 +949,7 @@ export class ItemsService {
     const rows: ItemRow[] = await this.db.query(
       this.baseQuery({ localIdx, hoyIdx }) +
         where +
-        ` ORDER BY i.nombre ASC LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
+        ` ORDER BY ${this.ordenSql(query)} LIMIT $${limitIdx} OFFSET $${offsetIdx}`,
       listParams,
     );
 

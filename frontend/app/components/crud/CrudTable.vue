@@ -22,9 +22,14 @@ const props = defineProps<{
   filtradoTexto?: string
   /** Deja la primera columna fija a la izquierda: en una tabla ancha el nombre no se pierde al deslizar. */
   fijarPrimera?: boolean
+  /**
+   * Rótulo del botón del vacío de verdad ("Nueva categoría"): el vacío dice por dónde empezar
+   * (auditoría UX 07.35). La pantalla solo lo pasa si la persona puede crear.
+   */
+  vacioAccion?: string
 }>()
 
-const emit = defineEmits<{ reintentar: [], quitarFiltros: [] }>()
+const emit = defineEmits<{ reintentar: [], quitarFiltros: [], vacioAccion: [] }>()
 // El botón "Quitar filtros" solo se ofrece si la pantalla escucha el evento.
 const escuchaQuitarFiltros = !!getCurrentInstance()?.vnode.props?.onQuitarFiltros
 
@@ -93,7 +98,9 @@ function nombresDeSlots() {
           :filtrado="filtrado"
           :filtrado-texto="filtradoTexto"
           :sin-quitar-filtros="!escuchaQuitarFiltros"
+          :vacio-accion="vacioAccion"
           @quitar-filtros="emit('quitarFiltros')"
+          @vacio-accion="emit('vacioAccion')"
         />
       </template>
     </UTable>
