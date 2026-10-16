@@ -142,10 +142,7 @@ async function onDescartar(items: DescartarDesfaseItem[]) {
 
     <template #body>
       <div class="w-full space-y-6">
-        <CrudPageHeader
-          title="Costos desfasados"
-          description="Recetas y combos cuyo costo difiere del registrado. Aplica el nuevo costo o descarta el aviso."
-        />
+        <CrudPageHeader title="Costos desfasados" />
 
         <DesfasesPanel
           :filas="filas"
@@ -153,6 +150,7 @@ async function onDescartar(items: DescartarDesfaseItem[]) {
           :error="error"
           :sin-permiso="sinPermiso"
           @reintentar="cargar"
+          @cerrar="navigateTo('/')"
           @aplicar="onAplicar"
           @descartar="onDescartar"
         />

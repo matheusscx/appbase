@@ -28,7 +28,7 @@ Los combos entraron el 2026-08-18: hasta entonces `item_combo.costo_actual` solo
 - Detección al vuelo (sin tabla de pendientes), para recetas **y** combos.
 - Endpoints de lectura y acción bajo `/desfases` e `/items`.
 - Modal post-cambio de costo en `configuracion/items.vue`.
-- Bandeja `/desfases` con el mismo panel de simulación, columna Tipo (receta/combo).
+- Bandeja `/desfases` con el mismo panel de simulación, columna Tipo (receta/combo). **El panel abre sin ninguna fila marcada** (owner, 2026-10-16, auditoría UX 04.4): aplicar cambia el costo registrado y descartar archiva el aviso, así que la persona elige fila por fila o con "Seleccionar todas". En la página, "Después" lleva a Inicio.
 - Unit tests en `items.service.spec.ts` + E2E `simulador-costos.e2e-spec.ts`.
 
 **NOT included (future):**

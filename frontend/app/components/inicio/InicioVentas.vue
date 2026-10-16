@@ -47,14 +47,14 @@ const hayDevuelto = computed(() => !new Decimal(props.ventas.cobradoDesglose.dev
         <p class="text-xs text-muted">
           Vendido
         </p>
-        <p class="text-lg font-semibold text-highlighted">
+        <p class="text-3xl font-semibold leading-tight text-highlighted" data-qa="hoy-vendido">
           {{ formatMonto(ventas.vendido.hoy) }}
         </p>
         <p v-if="hayNotas" class="text-xs text-muted">
           bruto {{ formatMonto(ventas.vendidoDesglose.bruto) }}
           · notas de crédito −{{ formatMonto(ventas.vendidoDesglose.notasCredito) }}
         </p>
-        <p class="text-xs text-muted">
+        <p v-if="ventas.vendido.variacion !== null" class="text-xs text-muted">
           vs. {{ diaLabel }} pasado: {{ formatPorcentaje(ventas.vendido.variacion, 0) }}
         </p>
       </div>
@@ -62,14 +62,14 @@ const hayDevuelto = computed(() => !new Decimal(props.ventas.cobradoDesglose.dev
         <p class="text-xs text-muted">
           Cobrado
         </p>
-        <p class="text-lg font-semibold text-highlighted">
+        <p class="text-3xl font-semibold leading-tight text-highlighted" data-qa="hoy-cobrado">
           {{ formatMonto(ventas.cobrado.hoy) }}
         </p>
         <p v-if="hayDevuelto" class="text-xs text-muted">
           cobrado {{ formatMonto(ventas.cobradoDesglose.cobrado) }}
           · devuelto −{{ formatMonto(ventas.cobradoDesglose.devuelto) }}
         </p>
-        <p class="text-xs text-muted">
+        <p v-if="ventas.cobrado.variacion !== null" class="text-xs text-muted">
           vs. {{ diaLabel }} pasado: {{ formatPorcentaje(ventas.cobrado.variacion, 0) }}
         </p>
       </div>
@@ -83,7 +83,7 @@ const hayDevuelto = computed(() => !new Decimal(props.ventas.cobradoDesglose.dev
         <p class="text-sm font-medium text-default">
           {{ ventas.cantidad.hoy }}
         </p>
-        <p class="text-xs text-muted">
+        <p v-if="ventas.cantidad.variacion !== null" class="text-xs text-muted">
           vs. {{ diaLabel }} pasado: {{ formatPorcentaje(ventas.cantidad.variacion, 0) }}
         </p>
       </div>
@@ -94,7 +94,7 @@ const hayDevuelto = computed(() => !new Decimal(props.ventas.cobradoDesglose.dev
         <p class="text-sm font-medium text-default">
           {{ formatMonto(ventas.ticketPromedio.hoy) }}
         </p>
-        <p class="text-xs text-muted">
+        <p v-if="ventas.ticketPromedio.variacion !== null" class="text-xs text-muted">
           vs. {{ diaLabel }} pasado: {{ formatPorcentaje(ventas.ticketPromedio.variacion, 0) }}
         </p>
       </div>

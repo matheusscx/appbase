@@ -117,16 +117,17 @@ function precioPrefill(f: DesfaseItemDto): string {
 }
 
 function initFromFilas(filas: DesfaseItemDto[]) {
-  const nextSelected = new Set<string>()
+  // Sin ninguna fila marcada: aplicar cambia el costo registrado (y con él el margen y el precio
+  // sugerido), y descartar archiva el aviso; las dos las elige la persona fila por fila o con
+  // "Seleccionar todas" (auditoría UX 04.4, decidido por el owner).
   const nextState: Record<string, RowState> = {}
   for (const f of filas) {
-    nextSelected.add(f.itemId)
     nextState[f.itemId] = {
       actualizarPrecio: false,
       precioEditado: precioPrefill(f),
     }
   }
-  selected.value = nextSelected
+  selected.value = new Set()
   rowState.value = nextState
 }
 
@@ -255,23 +256,25 @@ function onDescartar() {
 <template>
   <div class="flex flex-col gap-4">
     <p class="text-sm text-muted">
-      Estos items tienen un costo distinto al registrado. Puedes aplicar el nuevo costo,
-      descartar el aviso o revisar más tarde.
+      Estos ítems tienen un costo distinto al registrado. Marca los que quieras: puedes aplicar el
+      nuevo costo, descartar el aviso o revisar más tarde.
     </p>
 
     <div class="overflow-x-auto rounded-lg border border-default">
       <table class="w-full min-w-[44rem] text-sm">
         <thead class="bg-elevated text-left text-muted">
           <tr class="border-b border-default">
-            <th class="w-10 px-3 py-2">
-              <UCheckbox
-                :model-value="allSelected ? true : someSelected ? 'indeterminate' : false"
-                aria-label="Seleccionar todas"
-                @update:model-value="toggleAll"
-              />
+            <th class="w-14 px-1 py-0">
+              <label class="flex min-h-11 min-w-11 cursor-pointer items-center justify-center" data-qa="desfase-casilla">
+                <UCheckbox
+                  :model-value="allSelected ? true : someSelected ? 'indeterminate' : false"
+                  aria-label="Seleccionar todas"
+                  @update:model-value="toggleAll"
+                />
+              </label>
             </th>
             <th class="px-3 py-2 font-medium">Tipo</th>
-            <th class="px-3 py-2 font-medium">Item</th>
+            <th class="px-3 py-2 font-medium">Ítem</th>
             <th class="px-3 py-2 font-medium text-right">Costo</th>
             <th class="px-3 py-2 font-medium text-right">Margen</th>
             <th class="px-3 py-2 font-medium">Precio</th>
@@ -301,12 +304,14 @@ function onDescartar() {
             :key="fila.itemId"
             :class="isHighlighted(fila) ? 'bg-elevated' : 'bg-default'"
           >
-            <td class="px-3 py-3 align-top">
-              <UCheckbox
-                :model-value="selected.has(fila.itemId)"
-                :aria-label="`Seleccionar ${fila.nombre}`"
-                @update:model-value="(v) => toggleOne(fila.itemId, v)"
-              />
+            <td class="px-1 py-0 align-top">
+              <label class="flex min-h-11 min-w-11 cursor-pointer items-center justify-center" data-qa="desfase-casilla">
+                <UCheckbox
+                  :model-value="selected.has(fila.itemId)"
+                  :aria-label="`Seleccionar ${fila.nombre}`"
+                  @update:model-value="(v) => toggleOne(fila.itemId, v)"
+                />
+              </label>
             </td>
             <td class="px-3 py-3 align-top">
               <UBadge

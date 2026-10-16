@@ -74,6 +74,16 @@ const FILAS = [
   },
 ]
 
+const CAJAS = '[role=checkbox], input[type=checkbox], button[role=checkbox]'
+
+/** Tilda "Seleccionar todas" (la primera caja): la bandeja abre sin nada elegido (04.4). */
+async function seleccionarTodas(wrapper: {
+  findAll: (s: string) => { trigger: (e: string) => Promise<unknown> }[]
+}) {
+  await wrapper.findAll(CAJAS)[0]!.trigger('click')
+  await new Promise(r => setTimeout(r, 0))
+}
+
 function textos(wrapper: { findAll: (s: string) => { text: () => string }[] }) {
   return wrapper.findAll('button').map(b => b.text())
 }
@@ -211,6 +221,7 @@ describe('DesfasesPanel — descartar manda el costo que se está mostrando', ()
       props: { filas: FILAS as never },
     })
 
+    await seleccionarTodas(wrapper)
     const boton = wrapper.findAll('button').find(b => b.text().includes('Descartar'))
     expect(boton).toBeDefined()
     await boton!.trigger('click')
@@ -267,7 +278,8 @@ describe('DesfasesPanel — la sugerencia se aplica en la escala de la moneda', 
   async function marcarYAplicar(wrapper: {
     findAll: (s: string) => { text: () => string, trigger: (e: string) => Promise<unknown> }[]
   }) {
-    const cajas = wrapper.findAll('[role=checkbox], input[type=checkbox], button[role=checkbox]')
+    await seleccionarTodas(wrapper)
+    const cajas = wrapper.findAll(CAJAS)
     await cajas[cajas.length - 1]!.trigger('click')
     await new Promise(r => setTimeout(r, 0))
     const boton = wrapper.findAll('button').find(b => b.text().includes('Aplicar'))
@@ -351,7 +363,8 @@ describe('DesfasesPanel — la sugerencia se aplica en la escala de la moneda', 
     // Se marca "Actualizar precio" ANTES de que llegue la moneda, que es lo que hace
     // discriminante al ancla de abajo: el campo se deshabilita por dos motivos —la
     // casilla apagada y la moneda sin resolver— y este click descarta el primero.
-    const cajas = wrapper.findAll('[role=checkbox], input[type=checkbox], button[role=checkbox]')
+    await seleccionarTodas(wrapper)
+    const cajas = wrapper.findAll(CAJAS)
     await cajas[cajas.length - 1]!.trigger('click')
     await new Promise(r => setTimeout(r, 0))
 
@@ -393,8 +406,9 @@ describe('DesfasesPanel — la sugerencia se aplica en la escala de la moneda', 
       props: { filas: [FILA_CON_SUGERENCIA, otra] as never },
     })
 
-    // Destildar la primera fila mientras la moneda todavía no llegó.
-    const cajas = wrapper.findAll('[role=checkbox], input[type=checkbox], button[role=checkbox]')
+    // Elegir las dos filas y destildar la primera mientras la moneda todavía no llegó.
+    await seleccionarTodas(wrapper)
+    const cajas = wrapper.findAll(CAJAS)
     await cajas[1]!.trigger('click')
     await new Promise(r => setTimeout(r, 0))
 
@@ -434,5 +448,61 @@ describe('DesfasesPanel — una lectura fallida no es "Sin costos desfasados" (l
     permisos = ['Items:Leer']
     const wrapper = await mountSuspended(DesfasesPanel, { props: { filas: [] } })
     expect(wrapper.text()).toContain('Sin costos desfasados.')
+  })
+})
+
+describe('DesfasesPanel — abre sin nada elegido y es cómodo de tocar (04.4, 04.16, 04.22)', () => {
+  it('ninguna fila viene marcada y Aplicar y Descartar esperan a que la persona elija', async () => {
+    esAdmin = true
+    permisos = ITEMS_COMPLETO
+    const wrapper = await mountSuspended(DesfasesPanel, { props: { filas: FILAS as never } })
+
+    const cajas = wrapper.findAll(CAJAS)
+    expect(cajas.length).toBeGreaterThan(1)
+    for (const c of cajas) {
+      expect(c.attributes('aria-checked') ?? c.attributes('data-state')).toMatch(/false|unchecked/)
+    }
+    const aplicar = wrapper.findAll('button').find(b => b.text().includes('Aplicar'))
+    const descartar = wrapper.findAll('button').find(b => b.text().includes('Descartar'))
+    expect(aplicar!.attributes('disabled')).toBeDefined()
+    expect(descartar!.attributes('disabled')).toBeDefined()
+
+    // Sin elegir nada, un clic no emite nada.
+    await aplicar!.trigger('click')
+    expect(wrapper.emitted('aplicar')).toBeFalsy()
+
+    wrapper.unmount()
+  })
+
+  it('recargar las filas (después de aplicar) tampoco deja nada marcado', async () => {
+    esAdmin = true
+    permisos = ITEMS_COMPLETO
+    const wrapper = await mountSuspended(DesfasesPanel, { props: { filas: FILAS as never } })
+    await seleccionarTodas(wrapper)
+    await wrapper.setProps({ filas: [{ ...FILAS[0], itemId: 'receta-9', nombre: 'Otra' }] as never })
+    await new Promise(r => setTimeout(r, 0))
+    const aplicar = wrapper.findAll('button').find(b => b.text().includes('Aplicar'))
+    expect(aplicar!.attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+
+  it('cada casilla de selección tiene un área de toque de 44 px', async () => {
+    esAdmin = true
+    permisos = ITEMS_COMPLETO
+    const wrapper = await mountSuspended(DesfasesPanel, { props: { filas: FILAS as never } })
+    const marcos = wrapper.findAll('label[data-qa="desfase-casilla"]')
+    // "Seleccionar todas" + una fila.
+    expect(marcos).toHaveLength(2)
+    for (const m of marcos) expect(m.classes()).toContain('min-h-11')
+    wrapper.unmount()
+  })
+
+  it('un solo texto de ayuda, y "ítems" lleva tilde', async () => {
+    esAdmin = true
+    permisos = ITEMS_COMPLETO
+    const wrapper = await mountSuspended(DesfasesPanel, { props: { filas: FILAS as never } })
+    expect(wrapper.text()).not.toMatch(/\bitems?\b/i)
+    expect(wrapper.text()).toContain('Ítem')
+    wrapper.unmount()
   })
 })

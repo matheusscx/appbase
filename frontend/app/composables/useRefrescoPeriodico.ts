@@ -1,4 +1,11 @@
-import type { Ref } from 'vue'
+import type { InjectionKey, Ref } from 'vue'
+
+/**
+ * Hora de la última carga exitosa de CUALQUIER bloque de la zona. Si la zona la provee
+ * (`InicioAhora.vue`), cada bloque la avanza al cargar y la zona muestra UNA hora en su título,
+ * en vez de una por tarjeta (auditoría UX 04.12). Sin zona, no pasa nada.
+ */
+export const ACTUALIZADO_DE_LA_ZONA: InjectionKey<Ref<Date | null>> = Symbol('actualizado-de-la-zona')
 
 export interface UseRefrescoPeriodicoOpts {
   intervaloMs?: number
@@ -45,6 +52,7 @@ export function useRefrescoPeriodico<T>(
   const actualizadoEl = ref<Date | null>(null)
   const sinConexion = ref(false)
   const oculto = ref(false)
+  const horaDeLaZona = hasInjectionContext() ? inject(ACTUALIZADO_DE_LA_ZONA, null) : null
 
   let intervalId: ReturnType<typeof setInterval> | null = null
 
@@ -63,6 +71,7 @@ export function useRefrescoPeriodico<T>(
       const resultado = await cargar()
       datos.value = resultado
       actualizadoEl.value = new Date()
+      if (horaDeLaZona) horaDeLaZona.value = actualizadoEl.value
       sinConexion.value = false
     }
     catch (e: unknown) {

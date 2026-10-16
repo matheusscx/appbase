@@ -158,7 +158,7 @@ test('el aprobador llega por el menú y ve lo que falta, en cantidad y en plata'
   await page.waitForURL('**/reportes/varianza')
   await filtrarPorLaBodega(page, ubicaciones)
 
-  const fila = page.locator('tbody tr', { hasText: nombre })
+  const fila = page.locator('table:not([data-qa="grafica-tabla"]) tbody tr', { hasText: nombre })
   await expect(fila).toBeVisible()
   // 3 unidades sin explicación, valorizadas a $250 = $750.
   await expect(fila).toContainText('$750')
@@ -241,7 +241,7 @@ test('el aviso de sin costo filtra la tabla a los que perdieron sin costo', asyn
   await expect(aviso).toContainText(`${cuerpo.meta.total} producto`)
 
   await expect(link).toHaveText('Ver todos')
-  await expect(page.locator('tbody tr', { hasText: nombre })).toContainText('Sin costo')
+  await expect(page.locator('table:not([data-qa="grafica-tabla"]) tbody tr', { hasText: nombre })).toContainText('Sin costo')
 
   expect(errores, 'ninguna llamada de la carga debe fallar para este rol').toEqual([])
 })

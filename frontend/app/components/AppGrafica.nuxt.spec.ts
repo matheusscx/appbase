@@ -155,4 +155,27 @@ describe('AppGrafica', () => {
     expect(html).not.toContain('<img')
     expect(html).toContain('&lt;img')
   })
+
+  // Auditoría UX 04.21: el valor de cada barra estaba solo en el tooltip, que aparece con el mouse.
+  it('con datos, una tabla para lector de pantalla trae el valor de cada serie por categoría', async () => {
+    const wrapper = await montar({})
+    const tabla = wrapper.find('table[data-qa="grafica-tabla"]')
+    expect(tabla.exists()).toBe(true)
+    expect(tabla.classes()).toContain('sr-only')
+    const filas = tabla.findAll('tbody tr')
+    expect(filas).toHaveLength(2)
+    expect(filas[0]!.text()).toContain('Harina')
+    expect(filas[0]!.text()).toContain('Sin explicación: $750')
+    expect(filas[0]!.text()).toContain('Merma: $250')
+    expect(filas[1]!.text()).toContain('Queso')
+    wrapper.unmount()
+  })
+
+  it('cargando, vacío o fallo: no hay tabla', async () => {
+    for (const p of [{ cargando: true }, { vacio: true }, { fallo: true }]) {
+      const wrapper = await montar(p)
+      expect(wrapper.find('[data-qa="grafica-tabla"]').exists()).toBe(false)
+      wrapper.unmount()
+    }
+  })
 })

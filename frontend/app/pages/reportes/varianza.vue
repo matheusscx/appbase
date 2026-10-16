@@ -377,6 +377,7 @@ const columns: TableColumn<VarianzaFila>[] = [
           <USwitch
             v-model="soloConVarianza"
             label="Solo con diferencia"
+            class="min-h-11 items-center"
             data-qa="varianza-solo-con-diferencia"
           />
         </div>

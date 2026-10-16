@@ -23,7 +23,7 @@
 // forma exacta de `ResumenNegocioHoy` (`~/types/resumen-negocio.ts`, copiada
 // campo por campo de `resumen-negocio.service.ts`) — el mock de `useApiFetch`
 // contesta 200 a lo que sea, así que un DTO inventado no se vería acá.
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import InicioHoy from './InicioHoy.vue'
 import Index from '~/pages/index.vue'
@@ -249,16 +249,43 @@ describe('zona "Hoy" — tarjetas como links reales', () => {
 })
 
 describe('zona "Hoy" — formato', () => {
-  it('variación null (Cobrado) se muestra "—"', async () => {
+  it('la variación se escribe donde hay dato; donde es null (Cobrado) no hay línea (04.24)', async () => {
     const wrapper = await montarHoy()
 
-    // vendido: 21%, cantidad: 20%, ticketPromedio: 1% — todos calculables,
-    // así que el único "—" de una variación en el bloque es el de cobrado.
+    // vendido: 21%, cantidad: 20%, ticketPromedio: 1%; cobrado es null y no repite "vs. viernes pasado: —".
     expect(wrapper.text()).toContain('vs. viernes pasado: 21%')
-    expect(wrapper.text()).toContain('vs. viernes pasado: —')
     expect(wrapper.text()).toContain('vs. viernes pasado: 20%')
     expect(wrapper.text()).toContain('vs. viernes pasado: 1%')
+    expect(wrapper.text()).not.toContain('vs. viernes pasado: —')
+    expect(wrapper.text().split('vs. viernes pasado').length - 1).toBe(3)
 
+    wrapper.unmount()
+  })
+
+  it('Vendido, Cobrado y Por cobrar llevan la cifra grande (30 px) y el rótulo chico (04.11)', async () => {
+    const wrapper = await montarHoy()
+    for (const qa of ['hoy-vendido', 'hoy-cobrado', 'hoy-por-cobrar']) {
+      const cifra = wrapper.find(`[data-qa="${qa}"]`)
+      expect(cifra.exists(), qa).toBe(true)
+      expect(cifra.classes(), qa).toContain('text-3xl')
+    }
+    expect(wrapper.find('[data-qa="hoy-por-cobrar"]').text()).toBe('$145.000')
+    expect(wrapper.text()).toContain('7 ventas por cobrar')
+
+    wrapper.unmount()
+  })
+
+  it('Pérdidas no parte "tipo" y "N platos" en dos renglones: el renglón puede bajar entero (04.26)', async () => {
+    const wrapper = await montarHoy()
+    const fila = wrapper.find('[data-qa="perdida-anulacion-merma"]')
+    expect(fila.exists()).toBe(true)
+    expect(fila.classes()).toContain('flex-wrap')
+    wrapper.unmount()
+  })
+
+  it('las tarjetas miden lo suyo: ninguna grilla de Hoy iguala los altos (04.26)', async () => {
+    const wrapper = await montarHoy()
+    expect(wrapper.find('[data-qa="hoy-grilla"]').classes()).toContain('items-start')
     wrapper.unmount()
   })
 
@@ -412,6 +439,52 @@ describe('zona "Hoy" — un fallo no se queda en "Cargando…" (lote 7, 04.7)', 
     expect(wrapper.text()).not.toContain('Cargando…')
     expect(wrapper.find('[data-qa="inicio-reintentar"]').exists()).toBe(true)
     expect(toasts).toEqual([])
+
+    wrapper.unmount()
+  })
+})
+
+describe('zona "Hoy" — dice de qué hora es y se refresca sola (04.3)', () => {
+  afterEach(() => { vi.useRealTimers() })
+
+  it('junto a "Actualizar" dice "Actualizado hh:mm"', async () => {
+    const wrapper = await montarHoy()
+    expect(wrapper.find('[data-qa="hoy-actualizado"]').text()).toMatch(/Actualizado \d{2}:\d{2}/)
+    wrapper.unmount()
+  })
+
+  it('cada 60 s vuelve a pedir el resumen, sin tocar nada', async () => {
+    vi.useFakeTimers({ toFake: ['setInterval', 'clearInterval'] })
+    const wrapper = await montarHoy()
+    expect(llamadas.length).toBe(1)
+
+    vi.advanceTimersByTime(60_000)
+    await new Promise(r => setTimeout(r, 20))
+    expect(llamadas.length).toBe(2)
+
+    wrapper.unmount()
+  })
+
+  it('si la última carga falló y hay números viejos, los marca como atrasados con su hora', async () => {
+    const wrapper = await montarHoy()
+    expect(wrapper.find('[data-qa="hoy-atrasado"]').exists()).toBe(false)
+
+    falla500 = true
+    const boton = wrapper.findAll('button').find(b => b.text().includes('Actualizar'))
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    const aviso = wrapper.find('[data-qa="hoy-atrasado"]')
+    expect(aviso.exists()).toBe(true)
+    expect(aviso.text()).toMatch(/No pudimos actualizar. Estos números son de las \d{2}:\d{2}/)
+    // Los números viejos siguen a la vista.
+    expect(wrapper.text()).toContain('$850.000')
+
+    // Y cuando una carga sale bien, la marca se va.
+    falla500 = false
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(wrapper.find('[data-qa="hoy-atrasado"]').exists()).toBe(false)
 
     wrapper.unmount()
   })

@@ -48,10 +48,10 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☑ | [03.1](03-caja.md) | P1 | En la tablet, "Ver cierre" y "Marcar visto" de Pendientes quedan fuera de vista — **hecho 2026-10-16** (la forma cambió; a 768 no se pudo medir: la base sembrada no tiene cierres pendientes) | medido | agente |
 | ☑ | [03.2](03-caja.md) | P1 | En el historial de cajas a 768, la columna "Diferencia" queda fuera de vista — **hecho 2026-10-16** (la forma cambió; a 768 no se pudo medir: la base sembrada no tiene historial) | medido | agente |
 | ☐ | [03.3](03-caja.md) | P1 | "Enviar conteo" congela el conteo sin pedir confirmar el número tecleado | medido | agente + owner |
-| ☐ | [04.1](04-inicio-y-reportes.md) | P1 | Inicio llama "Efectivo", en verde, a la suma de diferencias de cierre | medido | agente + owner |
-| ☐ | [04.2](04-inicio-y-reportes.md) | P1 | En Inicio, "Vendido" queda pegado al borde y lo demás bajo el pliegue | medido | agente + owner |
-| ☐ | [04.3](04-inicio-y-reportes.md) | P1 | "Hoy" no dice de qué hora son sus números y se queda viejo | medido | agente + owner |
-| ☐ | [04.4](04-inicio-y-reportes.md) | P1 | "Costos desfasados" abre todo marcado y aplica a todas las recetas de un toque | medido | owner |
+| ☑ | [04.1](04-inicio-y-reportes.md) | P1 | Inicio llama "Efectivo", en verde, a la suma de diferencias de cierre — **hecho 2026-10-16** | medido | agente + owner |
+| ☑ | [04.2](04-inicio-y-reportes.md) | P1 | En Inicio, "Vendido" queda pegado al borde y lo demás bajo el pliegue — **hecho 2026-10-16** (medido en navegador: las cifras de Vendido, Cobrado y Por cobrar terminan en 774/774/676 px de 800 a 1280×800 y en 961/961/862 de 1024 a 768×1024; el resto de la tarjeta de Ventas queda bajo el pliegue) | medido | agente + owner |
+| ☑ | [04.3](04-inicio-y-reportes.md) | P1 | "Hoy" no dice de qué hora son sus números y se queda viejo — **hecho 2026-10-16** | medido | agente + owner |
+| ☑ | [04.4](04-inicio-y-reportes.md) | P1 | "Costos desfasados" abre todo marcado y aplica a todas las recetas de un toque — **hecho 2026-10-16** | medido | owner |
 | ☐ | [05.1](05-inventario.md) | P1 | El aprobador de un recuento sin causas puede apretar "Aplicar" y queda sin salida | medido | agente + owner |
 | ☑ | [05.2](05-inventario.md) | P1 | Un traslado con una línea incompleta guarda solo las otras y avisa "Traslado registrado" *(es 00.10)* — **hecho 2026-10-16** | medido | agente |
 | ☑ | [06.1](06-compras-y-terceros.md) | P1 | Guardar o confirmar una compra descarta en silencio las líneas sin cantidad *(es 00.10)* — **hecho 2026-10-16** | medido | agente |
@@ -627,27 +627,27 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
 | ☑ | [04.5](04-inicio-y-reportes.md) | P2 | La cifra de efectivo en Inicio es verde claro, con poco contraste y otra letra — **hecho 2026-10-16** *(ver 00.8)* | agente |
-| ☐ | [04.6](04-inicio-y-reportes.md) | P2 | Las alertas de Inicio (stock bajo, pagos sin venta) usan colores sin contraste suficiente *(ver 00.8)* | agente |
+| ☑ | [04.6](04-inicio-y-reportes.md) | P2 | Las alertas de Inicio (stock bajo, pagos sin venta) usan colores sin contraste suficiente — **resuelto por el lote 0 (00.8, tokens de estado)** *(ver 00.8)* | agente |
 | ☑ | [04.7](04-inicio-y-reportes.md) | P2 | Si Inicio falla, las tarjetas dicen "Cargando" y "Sin conexión" a la vez — **hecho 2026-10-16** | agente |
 | ☑ | [04.8](04-inicio-y-reportes.md) | P2 | Un usuario sin permisos ve Inicio con "Bienvenido", "Ahora" y nada más — **hecho 2026-10-16** | agente |
 | ☑ | [04.9](04-inicio-y-reportes.md) | P2 | Inicio muestra cantidades crudas ("2.0000") y plurales mal ("1 mermas") — **hecho 2026-10-16** | agente |
-| ☐ | [04.10](04-inicio-y-reportes.md) | P2 | Las tarjetas de Inicio llevan a listas completas, no a lo que prometen | agente + owner |
-| ☐ | [04.11](04-inicio-y-reportes.md) | P2 | En Inicio todas las cifras pesan igual: Vendido y Cobrado no destacan | agente + owner |
-| ☐ | [04.12](04-inicio-y-reportes.md) | P2 | "Actualizado" repetido cinco veces empuja "Hoy" bajo el pliegue *(ver 00.1)* | agente |
-| ☐ | [04.13](04-inicio-y-reportes.md) | P2 | La tarjeta de cierres no muestra cuántos descuadres graves siguen sin revisar | agente |
-| ☐ | [04.17](04-inicio-y-reportes.md) | P2 | En /desfases el botón "Después" no hace nada | agente |
+| ☐ | [04.10](04-inicio-y-reportes.md) | P2 | Las tarjetas de Inicio llevan a listas completas, no a lo que prometen — **parcial 2026-10-16** (Cierres con descuadre va a `/cajas/pendientes-revision`; falta Por cobrar → ventas pendientes y parciales: `/ventas` filtra por un solo estado y necesita un filtro múltiple en esa pantalla, de otro grupo) | agente + owner |
+| ☑ | [04.11](04-inicio-y-reportes.md) | P2 | En Inicio todas las cifras pesan igual: Vendido y Cobrado no destacan — **hecho 2026-10-16** | agente + owner |
+| ☑ | [04.12](04-inicio-y-reportes.md) | P2 | "Actualizado" repetido cinco veces empuja "Hoy" bajo el pliegue — **hecho 2026-10-16** *(ver 00.1)* | agente |
+| ☑ | [04.13](04-inicio-y-reportes.md) | P2 | La tarjeta de cierres no muestra cuántos descuadres graves siguen sin revisar — **hecho 2026-10-16** | agente |
+| ☑ | [04.17](04-inicio-y-reportes.md) | P2 | En /desfases el botón "Después" no hace nada — **hecho 2026-10-16** | agente |
 | ☑ | [04.18](04-inicio-y-reportes.md) | P2 | Si /desfases falla, la tabla dice "Sin costos desfasados", como si todo estuviera al día — **hecho 2026-10-16** | agente |
 | ☑ | [04.19](04-inicio-y-reportes.md) | P2 | Si Varianza falla salen tres avisos iguales y la tabla dice "ningún producto" — **hecho 2026-10-16** | agente |
-| ☐ | [04.21](04-inicio-y-reportes.md) | P2 | La gráfica de Varianza distingue series solo por color y el ámbar no se lee *(ver 00.8)* | agente |
-| ☐ | [04.14](04-inicio-y-reportes.md) | P3 | La tarjeta Cajas no dice cuántas hay abiertas ni desde qué hora | agente |
+| ☐ | [04.21](04-inicio-y-reportes.md) | P2 | La gráfica de Varianza distingue series solo por color y el ámbar no se lee — **parcial 2026-10-16** (el ámbar ya contrasta por el lote 0 y la gráfica trae una tabla para lector de pantalla; falta el valor visible en la barra para tablet) *(ver 00.8)* | agente |
+| ☑ | [04.14](04-inicio-y-reportes.md) | P3 | La tarjeta Cajas no dice cuántas hay abiertas ni desde qué hora — **hecho 2026-10-16** | agente |
 | ☑ | [04.15](04-inicio-y-reportes.md) | P3 | Ctrl/Cmd+clic en una tarjeta de Inicio no abre pestaña nueva — **hecho 2026-10-16** | agente |
-| ☐ | [04.16](04-inicio-y-reportes.md) | P3 | En la tablet, "Actualizar" y los enlaces de Pérdidas miden 16 a 24 px — **parcial 2026-10-16** ("Actualizar" y los enlaces de Pérdidas a 44 px; quedan las casillas de Desfases y el interruptor, el calendario y el "i" de Varianza) | agente |
+| ☐ | [04.16](04-inicio-y-reportes.md) | P3 | En la tablet, "Actualizar" y los enlaces de Pérdidas miden 16 a 24 px — **parcial 2026-10-16** ("Actualizar" y los enlaces de Pérdidas a 44 px, casillas de Desfases con área de 44 px e interruptor de Varianza; quedan el ícono de calendario de `AppDateInput` y el "i" de `DiaNegocioNota`, componentes compartidos por toda la app) | agente |
 | ☑ | [04.20](04-inicio-y-reportes.md) | P3 | Jerga en la tabla de Varianza y columnas clave fuera de vista a 768 — **hecho 2026-10-16** | agente + owner |
-| ☐ | [04.22](04-inicio-y-reportes.md) | P3 | "Costos desfasados" repite el mismo texto dos veces y escribe "items" sin tilde | agente |
+| ☑ | [04.22](04-inicio-y-reportes.md) | P3 | "Costos desfasados" repite el mismo texto dos veces y escribe "items" sin tilde — **hecho 2026-10-16** | agente |
 | ☑ | [04.23](04-inicio-y-reportes.md) | P3 | Voseo en Inicio y Reportes *(lote 00.3)* — **hecho 2026-10-16** | agente |
-| ☐ | [04.24](04-inicio-y-reportes.md) | P3 | Cuatro líneas seguidas dicen "vs. viernes pasado: —" | agente |
+| ☑ | [04.24](04-inicio-y-reportes.md) | P3 | Cuatro líneas seguidas dicen "vs. viernes pasado: —" — **hecho 2026-10-16** | agente |
 | ☑ | [04.25](04-inicio-y-reportes.md) | P3 | "Bienvenido, Admin" va en masculino y el ícono de check no significa nada — **hecho 2026-10-16** | owner |
-| ☐ | [04.26](04-inicio-y-reportes.md) | P3 | Con datos, Pérdidas parte los textos en dos renglones y Ventas deja un hueco | owner |
+| ☑ | [04.26](04-inicio-y-reportes.md) | P3 | Con datos, Pérdidas parte los textos en dos renglones y Ventas deja un hueco — **hecho 2026-10-16** (cada tarjeta mide lo suyo; las cantidades ya salían sin decimales por el lote 6) | owner |
 
 ### 05 · Inventario
 

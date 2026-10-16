@@ -663,3 +663,13 @@ describe('varianza — un 500 no se ve como "ningún producto con diferencia" (l
     wrapper.unmount()
   })
 })
+
+describe('varianza — controles a 44 px (04.16)', () => {
+  it('el interruptor "Solo con diferencia" mide 44 px de alto', async () => {
+    const wrapper = await montar()
+    const interruptor = wrapper.find('[data-qa="varianza-solo-con-diferencia"]')
+    expect(interruptor.exists()).toBe(true)
+    expect(interruptor.element.closest(".min-h-11"), interruptor.element.parentElement?.outerHTML).not.toBeNull()
+    wrapper.unmount()
+  })
+})

@@ -37,9 +37,12 @@ const { formatMonto, formatCostoPorMoneda } = useFormatters()
         </p>
         <ul v-if="perdidas.anulaciones.length > 0" class="space-y-2">
           <li v-for="grupo in perdidas.anulaciones" :key="grupo.tipo" class="text-sm">
-            <div class="flex items-center justify-between gap-2">
+            <div
+              class="flex flex-wrap items-center justify-between gap-x-2"
+              :data-qa="`perdida-anulacion-${grupo.tipo}`"
+            >
               <span class="text-default font-medium">{{ tipoMotivoBajaLabel(grupo.tipo) }}</span>
-              <span class="text-muted">{{ formatStockCantidad(grupo.platos, true) }} {{ Number(grupo.platos) === 1 ? 'plato' : 'platos' }}</span>
+              <span class="whitespace-nowrap text-muted">{{ formatStockCantidad(grupo.platos, true) }} {{ Number(grupo.platos) === 1 ? 'plato' : 'platos' }}</span>
             </div>
             <div class="flex items-center justify-between gap-2 text-xs text-muted">
               <span>Precio de carta: {{ formatMonto(grupo.precioCarta) }}</span>

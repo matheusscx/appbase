@@ -126,8 +126,34 @@ const alto = computed(() => Math.max(160, props.categorias.length * 32 + 40))
         </span>
       </div>
 
+      <!-- El número de cada barra, para teclado y lector de pantalla: el tooltip solo aparece con el
+           mouse (auditoría UX 04.21). La gráfica se esconde del lector para no leerlo dos veces. -->
+      <table data-qa="grafica-tabla" class="sr-only">
+        <caption>Valores de la gráfica</caption>
+        <thead>
+          <tr>
+            <th scope="col">
+              Producto
+            </th>
+            <th v-for="s in series" :key="s.nombre" scope="col">
+              {{ s.nombre }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="f in filas" :key="f.indice">
+            <th scope="row">
+              {{ f.categoria }}
+            </th>
+            <td v-for="(v, i) in f.valores" :key="i">
+              {{ series[i]!.nombre }}: {{ formato(v, f.indice) }}
+            </td>
+          </tr>
+        </tbody>
+      </table>
+
       <ClientOnly>
-        <VisXYContainer :data="filas" :height="alto">
+        <VisXYContainer aria-hidden="true" :data="filas" :height="alto">
           <VisStackedBar
             :x="x"
             :y="y"

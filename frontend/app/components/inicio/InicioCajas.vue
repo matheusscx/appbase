@@ -10,11 +10,12 @@ type CajonAbierto = CajonEstado & { sesion: NonNullable<CajonEstado['sesion']> }
 
 const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
-const { formatHora } = useFormatters()
 
-const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
+const { datos, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
   () => useApiFetch<CajonEstado[]>(`${apiUrl}/caja/cajones-estado`),
 )
+
+const { formatHora } = useFormatters()
 
 const abiertos = computed<CajonAbierto[]>(() =>
   (datos.value ?? []).filter((c): c is CajonAbierto => c.sesion !== null),
@@ -36,7 +37,11 @@ const abiertos = computed<CajonAbierto[]>(() =>
       </div>
     </template>
 
-    <div v-if="datos">
+    <div v-if="datos" class="space-y-2">
+      <p class="text-3xl font-semibold leading-tight text-highlighted" data-qa="cajas-abiertas">
+        {{ abiertos.length }} {{ abiertos.length === 1 ? 'abierta' : 'abiertas' }}
+        <span class="text-sm font-normal text-muted">de {{ datos.length }}</span>
+      </p>
       <p v-if="abiertos.length === 0" class="text-sm text-muted">
         Ninguna caja abierta.
       </p>
@@ -46,8 +51,8 @@ const abiertos = computed<CajonAbierto[]>(() =>
           :key="cajon.cajonId"
           class="flex items-center justify-between gap-2 text-sm"
         >
-          <span class="text-default truncate">{{ cajon.nombre }}</span>
-          <span class="text-muted truncate">{{ cajon.sesion.usuarioNombre }}</span>
+          <span class="text-default truncate">{{ cajon.nombre }} · {{ cajon.sesion.usuarioNombre }}</span>
+          <span class="text-muted shrink-0">desde las {{ formatHora(new Date(cajon.sesion.fechaApertura)) }}</span>
         </li>
       </ul>
     </div>
@@ -61,11 +66,5 @@ const abiertos = computed<CajonAbierto[]>(() =>
       title="No pudimos actualizar — se vuelve a intentar en el próximo ciclo"
       class="mt-3"
     />
-
-    <template v-if="actualizadoEl" #footer>
-      <p class="text-xs text-muted">
-        Actualizado {{ formatHora(actualizadoEl) }}
-      </p>
-    </template>
   </UCard>
 </template>

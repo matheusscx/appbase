@@ -16,6 +16,11 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Index from '~/pages/index.vue'
 
+const CLP = {
+  monedaId: 'clp-1', nombre: 'Peso chileno', codigoIso: 'CLP', simbolo: '$', decimales: 0,
+  separadorDecimal: ',', separadorMiles: '.', locale: 'es-CL', habilitada: true, esOficial: true, valorDelDia: null,
+}
+
 let permisos: string[] = []
 let esAdmin = false
 
@@ -48,7 +53,7 @@ const CAJONES_ESTADO = [
 ]
 
 /** `ResumenDescuadresDia` — forma real de `caja.service.ts` `resumenDescuadresDia()`. */
-const RESUMEN_DESCUADRES = {
+const RESUMEN_BASE = {
   fecha: '2026-09-18',
   cierres: 4,
   conDescuadre: 3,
@@ -57,6 +62,7 @@ const RESUMEN_DESCUADRES = {
   altoSinRevisar: 1,
   efectivoSuma: '-9500.0000',
 }
+let RESUMEN_DESCUADRES = RESUMEN_BASE
 
 let llamadas: string[] = []
 /** Fragmentos de URL que en este test deben responder 403 en vez de 200. */
@@ -88,6 +94,7 @@ async function montar() {
 }
 
 beforeEach(() => {
+  RESUMEN_DESCUADRES = RESUMEN_BASE
   llamadas = []
   permisos = []
   esAdmin = false
@@ -164,8 +171,9 @@ describe('zona "Ahora" — con permiso, pide y muestra', () => {
 
     const hrefs = wrapper.findAll('a').map(a => a.attributes('href'))
     expect(hrefs).toContain('/salones')
-    // Cajas y Cierres del día comparten destino: la bandeja de cajas.
-    expect(hrefs.filter(h => h === '/cajas')).toHaveLength(2)
+    // Cajas va a los cajones; Cierres con descuadre, a la bandeja de cierres por revisar (04.10).
+    expect(hrefs.filter(h => h === '/cajas')).toHaveLength(1)
+    expect(hrefs).toContain('/cajas/pendientes-revision')
 
     wrapper.unmount()
   })
@@ -259,6 +267,96 @@ describe('inicio — sin ninguna tarjeta que mostrar (lote 7, 04.8)', () => {
     expect(wrapper.text()).not.toContain('Tu rol no tiene resumen del día')
     expect(wrapper.text()).toContain('Ahora')
 
+    wrapper.unmount()
+  })
+})
+
+describe('zona "Ahora" — cierres: una diferencia con signo, no "Efectivo" en verde (04.1, 04.13, 04.10)', () => {
+  async function montarCierres() {
+    permisos = ['Cajas:Leer']
+    const wrapper = await mountSuspended(Index)
+    useMonedasStore().hydrate([CLP], 'tenant-1')
+    await new Promise(r => setTimeout(r, 20))
+    return wrapper
+  }
+
+  it('un faltante dice "faltan $9.500" bajo "Diferencia en efectivo", en rojo', async () => {
+    const wrapper = await montarCierres()
+    const texto = wrapper.text()
+    expect(texto).toContain('Diferencia en efectivo')
+    expect(texto).toContain('faltan $9.500')
+    expect(texto).not.toMatch(/\bEfectivo\b/)
+    const cifra = wrapper.find('[data-qa="cierres-diferencia"]')
+    expect(cifra.classes()).toContain('text-error')
+    wrapper.unmount()
+  })
+
+  it('un sobrante dice "sobran $1.234" y va en tono de alerta, nunca en verde de éxito', async () => {
+    RESUMEN_DESCUADRES = { ...RESUMEN_BASE, efectivoSuma: '1234.0000' }
+    const wrapper = await montarCierres()
+    expect(wrapper.text()).toContain('sobran $1.234')
+    const cifra = wrapper.find('[data-qa="cierres-diferencia"]')
+    expect(cifra.classes()).toContain('text-warning')
+    expect(cifra.classes()).not.toContain('text-success')
+    wrapper.unmount()
+  })
+
+  it('sin diferencia dice "sin diferencia" y va apagado', async () => {
+    RESUMEN_DESCUADRES = { ...RESUMEN_BASE, efectivoSuma: '0.0000', conDescuadre: 0, altoSinRevisar: 0 }
+    const wrapper = await montarCierres()
+    expect(wrapper.text()).toContain('sin diferencia')
+    expect(wrapper.find('[data-qa="cierres-diferencia"]').classes()).toContain('text-muted')
+    wrapper.unmount()
+  })
+
+  it('con descuadres graves sin revisar lo dice: "1 sin revisar"; con 0 no aparece', async () => {
+    let wrapper = await montarCierres()
+    expect(wrapper.text()).toContain('1 sin revisar')
+    wrapper.unmount()
+
+    RESUMEN_DESCUADRES = { ...RESUMEN_BASE, altoSinRevisar: 0 }
+    wrapper = await montarCierres()
+    expect(wrapper.text()).not.toContain('sin revisar')
+    wrapper.unmount()
+  })
+
+  it('con descuadre la tarjeta lleva a la bandeja de cierres por revisar; sin descuadre, a los cajones', async () => {
+    let wrapper = await montarCierres()
+    expect(wrapper.findAll('a').map(a => a.attributes('href'))).toContain('/cajas/pendientes-revision')
+    wrapper.unmount()
+
+    RESUMEN_DESCUADRES = { ...RESUMEN_BASE, conDescuadre: 0, altoSinRevisar: 0, efectivoSuma: '0.0000' }
+    wrapper = await montarCierres()
+    expect(wrapper.findAll('a').map(a => a.attributes('href'))).not.toContain('/cajas/pendientes-revision')
+    wrapper.unmount()
+  })
+})
+
+describe('zona "Ahora" — una sola hora, compacta (04.12, 04.2)', () => {
+  it('"Actualizado hh:mm" aparece una vez en la zona, no una por tarjeta', async () => {
+    permisos = ['Salones:Ver todas', 'Cajas:Leer']
+    const wrapper = await montar()
+    const veces = wrapper.text().split('Actualizado').length - 1
+    expect(veces).toBe(1)
+    expect(wrapper.find('[data-qa="ahora-actualizado"]').text()).toMatch(/Actualizado \d{2}:\d{2}/)
+    wrapper.unmount()
+  })
+
+  it('cada tarjeta mide lo suyo: la grilla no iguala los altos (04.26)', async () => {
+    permisos = ['Salones:Ver todas']
+    const wrapper = await montar()
+    const grilla = wrapper.find('[data-qa="ahora-grilla"]')
+    expect(grilla.classes()).toContain('items-start')
+    wrapper.unmount()
+  })
+})
+
+describe('zona "Ahora" — cajas dice cuántas hay abiertas y desde cuándo (04.14)', () => {
+  it('"1 abierta de 2" y la hora de apertura de cada caja', async () => {
+    permisos = ['Cajas:Leer']
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('1 abierta de 2')
+    expect(wrapper.text()).toMatch(/desde las \d{2}:\d{2}/)
     wrapper.unmount()
   })
 })

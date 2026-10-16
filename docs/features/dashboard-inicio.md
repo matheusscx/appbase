@@ -17,8 +17,9 @@ arriba de la otra.
 notas de crédito y de lo devuelto), cantidad de ventas, ticket promedio (cada uno con el
 valor de hoy, el del mismo día de la semana pasada y la variación), vendido por canal
 (físico/online), lo que hay por cobrar de cualquier fecha, las pérdidas del día
-(anulaciones y mermas, cada una por su lado) y lo más vendido de hoy. La consume la zona **"Hoy"** del frontend, que carga una vez y se
-refresca con un botón manual.
+(anulaciones y mermas, cada una por su lado) y lo más vendido de hoy. La consume la zona **"Hoy"** del frontend, que carga al abrir, se
+refresca sola cada 60 s (con la pestaña visible, igual que "Ahora"; owner, 2026-10-16, auditoría UX 04.3),
+dice "Actualizado hh:mm" y tiene además un botón manual.
 
 La zona **"Ahora"** es el turno en vivo — salón (mesas ocupadas, cuentas abiertas),
 cajas (cajones con sesión abierta, sin montos) y cierres del día (cuántos, con
@@ -42,8 +43,8 @@ filtros — el detalle sigue viviendo en `/ventas`.
   y mermas, con `MermasService.resumen` nuevo) y `masVendidos` (hasta 5 ítems).
 - Incluido en Task 4: el frontend de la zona "Ahora" (el turno en vivo, con refresco
   periódico) — ver más abajo.
-- Incluido en Task 5: el frontend de la zona "Hoy" (la plata del día, sin refresco
-  periódico) — ver más abajo.
+- Incluido en Task 5: el frontend de la zona "Hoy" (la plata del día, con el mismo
+  refresco periódico desde el 2026-10-16) — ver más abajo.
 - Incluido el 2026-10-01 (frente propio, por ser fiscal): el vendido, el cobrado, por
   cobrar y lo más vendido restan las notas de crédito — ver "Las reglas de plata".
 - NO incluido (fuera de alcance de la spec): plata de cuentas abiertas, un total de pérdidas
@@ -325,9 +326,9 @@ const { datos, actualizadoEl, sinConexion, oculto } = useRefrescoPeriodico(
 
 | Bloque | Fuente | Qué muestra | Link |
 |---|---|---|---|
-| `InicioSalon.vue` | `GET /salones/ocupacion` | "14 de 20 mesas ocupadas · 16 cuentas abiertas" | `/salones` |
-| `InicioCajas.vue` | `GET /caja/cajones-estado` | Cajones **con sesión abierta**: nombre y quién la tiene, **sin montos** — el modo ciego ya decide quién ve el esperado, el dashboard no lo repite | `/cajas` (bandeja) |
-| `InicioCierres.vue` | `GET /caja/resumen-descuadres-dia` | Cierres del día, cuántos con descuadre, y la suma con signo del efectivo (`formatMonto`, coloreado igual que `CajaPendientesRevision.vue`) | `/cajas` (bandeja) |
+| `InicioSalon.vue` | `GET /salones/ocupacion` | Cifra grande "14 de 20" con "mesas ocupadas" chico, y "16 cuentas abiertas" | `/salones` |
+| `InicioCajas.vue` | `GET /caja/cajones-estado` | "1 abierta de 2" y, por cada cajón **con sesión abierta**, nombre, quién la tiene y "desde las hh:mm", **sin montos** — el modo ciego ya decide quién ve el esperado, el dashboard no lo repite | `/cajas` (bandeja) |
+| `InicioCierres.vue` | `GET /caja/resumen-descuadres-dia` | Cierres del día, cuántos con descuadre y la **"Diferencia en efectivo"**: `efectivoSuma` es la suma con signo de las diferencias de cada cierre, no efectivo juntado, y se escribe "sobran $1.234" (tono de alerta) o "faltan $2.300" (rojo); nunca en verde, porque un sobrante también es un cierre que no cuadró. Con `altoSinRevisar > 0` suma "N sin revisar" | `/cajas/pendientes-revision` si hay descuadre, `/cajas` si no |
 
 `InicioCajas` reusa el tipo `CajonEstado` de `~/stores/caja` (sin usar el store: no
 tiene sentido pisar su `cajonesEstado` compartido desde un bloque de lectura del
@@ -343,15 +344,18 @@ devolvía el dato sin tocar estado del store.
 frontend no comparten workspace). `AnulacionPorTipo['tipo']` importa `TipoMotivoBaja`
 de `useSalones.ts` en vez de duplicarlo una cuarta vez.
 
+**`InicioAhora.vue`** es el marco de la zona "Ahora": el título, UNA hora ("Actualizado hh:mm", la última carga exitosa de cualquiera de sus tarjetas, que `useRefrescoPeriodico` le avanza por `provide`/`inject`) y la grilla con `items-start`, para que cada tarjeta mida lo suyo. Las tarjetas ya no llevan pie con su propia hora (04.12 y 04.2).
+
 **`InicioHoy.vue`** es la zona completa: `index.vue` la monta con
 `permissionsStore.can('Resumen del negocio', 'Leer')`,
-igual que los bloques de "Ahora", y no repite el chequeo. A diferencia de "Ahora", NO
-usa `useRefrescoPeriodico` — carga UNA vez al invocarse (mismo criterio: sin
-`onMounted`, se prueba con un spec plano) y tiene un botón "Actualizar" manual que
-vuelve a llamar la misma función, sin `setInterval` (spec § 6, "'Hoy' carga una vez").
+igual que los bloques de "Ahora", y no repite el chequeo. Usa `useRefrescoPeriodico`, como "Ahora"
+(owner, 2026-10-16; antes "carga una vez", spec § 6): refresca cada 60 s con la pestaña visible, muestra
+"Actualizado hh:mm" junto al botón "Actualizar" (que pide al instante) y, si una carga falla con números
+viejos a la vista, los marca "No pudimos actualizar. Estos números son de las hh:mm." Sin reintento adelantado.
 Un 403 esconde la zona ENTERA (`v-if="!oculto"`) sin aviso de error — misma red que
-en "Ahora". Un fallo que no es 403
-muestra un toast (`apiErrorMsg`) y no oculta nada.
+en "Ahora". Sin datos y con fallo, el bloque dice que no pudo cargar y ofrece Reintentar.
+Las cifras principales (Vendido, Cobrado, Por cobrar) van en 30 px con el rótulo chico arriba; la
+variación "vs. <día> pasado" solo se escribe donde hay dato.
 
 `InicioHoy` pasa `datos.ventas`/`datos.porCobrar`/`datos.perdidas`/`datos.masVendidos`
 por props a cuatro bloques, todos con la misma UNA llamada:
@@ -490,7 +494,7 @@ criterio que "Ahora": la página es la que decide si monta el bloque); el resto 
   pide una vez.
 - Al montar `InicioHoy` directo: UNA sola llamada; "Actualizar" (botón encontrado por
   texto, no por atributo) dispara una segunda.
-- `variacion: null` (Cobrado, en el fixture) rinde "vs. viernes pasado: —", mientras
+- `variacion: null` (Cobrado, en el fixture) no escribe línea de variación, mientras
   que Vendido/Cantidad/Ticket promedio (con variaciones reales, todas distintas entre
   sí) rinden sus porcentajes — así un mutante que cruce dos campos se nota.
 - `perdidas.mermas.sinValorizar`: aviso "2 sin costo cargado" con 2, ausente con 0. La

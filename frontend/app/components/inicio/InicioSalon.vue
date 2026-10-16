@@ -12,9 +12,8 @@ interface OcupacionSalones {
 
 const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
-const { formatHora } = useFormatters()
 
-const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
+const { datos, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
   () => useApiFetch<OcupacionSalones>(`${apiUrl}/salones/ocupacion`),
 )
 </script>
@@ -34,10 +33,15 @@ const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeri
       </div>
     </template>
 
-    <p v-if="datos" class="flex flex-wrap gap-x-3 text-lg font-medium text-highlighted">
-      <span class="whitespace-nowrap">{{ datos.mesasOcupadas }} de {{ datos.mesasTotal }} {{ datos.mesasTotal === 1 ? 'mesa ocupada' : 'mesas ocupadas' }}</span>
-      <span class="whitespace-nowrap">{{ datos.cuentasAbiertas }} {{ datos.cuentasAbiertas === 1 ? 'cuenta abierta' : 'cuentas abiertas' }}</span>
-    </p>
+    <div v-if="datos" class="space-y-1">
+      <p class="text-3xl font-semibold leading-tight text-highlighted">
+        {{ datos.mesasOcupadas }} de {{ datos.mesasTotal }}
+        <span class="text-sm font-normal text-muted">{{ datos.mesasTotal === 1 ? 'mesa ocupada' : 'mesas ocupadas' }}</span>
+      </p>
+      <p class="text-sm text-default">
+        {{ datos.cuentasAbiertas }} {{ datos.cuentasAbiertas === 1 ? 'cuenta abierta' : 'cuentas abiertas' }}
+      </p>
+    </div>
     <InicioSinDatos v-else :fallo="sinConexion" @reintentar="refrescar" />
 
     <UAlert
@@ -48,11 +52,5 @@ const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeri
       title="No pudimos actualizar — se vuelve a intentar en el próximo ciclo"
       class="mt-3"
     />
-
-    <template v-if="actualizadoEl" #footer>
-      <p class="text-xs text-muted">
-        Actualizado {{ formatHora(actualizadoEl) }}
-      </p>
-    </template>
   </UCard>
 </template>

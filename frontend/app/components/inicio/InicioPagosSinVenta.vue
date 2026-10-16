@@ -15,11 +15,10 @@ interface ListadoOrdenes {
 
 const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
-const { formatHora } = useFormatters()
 
 const DESTINO = '/ordenes?sinVenta=true'
 
-const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
+const { datos, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
   () => useApiFetch<ListadoOrdenes>(`${apiUrl}/pasarela/admin/ordenes?sinVenta=true&pageSize=1`),
 )
 </script>
@@ -44,7 +43,7 @@ const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeri
         Ningún pago online sin venta.
       </p>
       <template v-else>
-        <p class="text-2xl font-semibold text-warning" data-qa="pagos-sin-venta-total">
+        <p class="text-3xl font-semibold leading-tight text-warning" data-qa="pagos-sin-venta-total">
           {{ datos.meta.total }}
           <span class="text-sm font-normal text-muted">cobrados sin registrar</span>
         </p>
@@ -63,11 +62,5 @@ const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeri
       title="No pudimos actualizar — se vuelve a intentar en el próximo ciclo"
       class="mt-3"
     />
-
-    <template v-if="actualizadoEl" #footer>
-      <p class="text-xs text-muted">
-        Actualizado {{ formatHora(actualizadoEl) }}
-      </p>
-    </template>
   </UCard>
 </template>

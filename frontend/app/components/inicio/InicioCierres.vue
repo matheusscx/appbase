@@ -6,34 +6,43 @@
 import Decimal from 'decimal.js'
 
 const cajaStore = useCajaStore()
-const { formatMonto, formatHora } = useFormatters()
+const { formatMonto } = useFormatters()
 
-const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
+const { datos, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
   () => cajaStore.cargarResumenDescuadresDia(),
 )
 
 /**
- * El signo del efectivo del día. Fuera de `components/caja/` (este bloque vive
- * en `components/inicio/`) no aplica la excepción de colores financieros que
- * `DESIGN-SYSTEM.md` reserva para ese módulo — tokens semánticos, como
- * `DesfasesPanel.vue` (`text-success`/`text-error`), no los literales de
- * `CajaPendientesRevision.vue`.
+ * La diferencia de efectivo de los cierres del día, con su signo en palabras. `efectivoSuma` no es
+ * efectivo que se juntó: es la suma de las diferencias (sobrante +, faltante −) de cada cierre
+ * (auditoría UX 04.1). Un sobrante también es un cierre que no cuadró, así que ninguno de los dos
+ * va en verde de éxito: el faltante en rojo, el sobrante en tono de alerta. Es presentación de la
+ * cifra que ya calculó el backend; no se hace ninguna cuenta, solo se le mira el signo.
  */
-function claseMonto(val: string | null): string {
-  if (val == null) return 'text-muted'
+const diferencia = computed(() => {
+  const val = datos.value?.efectivoSuma
+  if (val == null) return { texto: '—', clase: 'text-muted' }
   const d = new Decimal(val)
-  if (d.isZero()) return 'text-muted'
-  return d.gt(0) ? 'text-success' : 'text-error'
-}
+  if (d.isZero()) return { texto: 'sin diferencia', clase: 'text-muted' }
+  const monto = formatMonto(d.abs().toString())
+  return d.gt(0)
+    ? { texto: `sobran ${monto}`, clase: 'text-warning' }
+    : { texto: `faltan ${monto}`, clase: 'text-error' }
+})
+
+// Con descuadre, el dueño quiere la bandeja de cierres por revisar, no los cajones (04.10).
+const destino = computed(() =>
+  (datos.value?.conDescuadre ?? 0) > 0 ? '/cajas/pendientes-revision' : '/cajas',
+)
 </script>
 
 <template>
   <UCard
     v-if="!oculto"
     as="a"
-    href="/cajas"
+    :href="destino"
     class="cursor-pointer transition hover:ring-2 hover:ring-primary-500"
-    @click="seguirEnlaceInterno($event, '/cajas')"
+    @click="seguirEnlaceInterno($event, destino)"
   >
     <template #header>
       <div class="flex items-center justify-between gap-2">
@@ -42,12 +51,12 @@ function claseMonto(val: string | null): string {
       </div>
     </template>
 
-    <div v-if="datos" class="grid grid-cols-3 gap-4">
+    <div v-if="datos" class="grid grid-cols-2 gap-x-4 gap-y-3">
       <div>
         <p class="text-xs text-muted">
           Cierres
         </p>
-        <p class="text-lg font-semibold text-default">
+        <p class="text-3xl font-semibold leading-tight text-highlighted">
           {{ datos.cierres }}
         </p>
       </div>
@@ -55,16 +64,22 @@ function claseMonto(val: string | null): string {
         <p class="text-xs text-muted">
           Con descuadre
         </p>
-        <p class="text-lg font-semibold text-default">
+        <p
+          class="text-3xl font-semibold leading-tight"
+          :class="datos.conDescuadre > 0 ? 'text-warning' : 'text-highlighted'"
+        >
           {{ datos.conDescuadre }}
         </p>
       </div>
-      <div>
+      <div class="col-span-2">
         <p class="text-xs text-muted">
-          Efectivo
+          Diferencia en efectivo
         </p>
-        <p class="text-lg font-semibold" :class="claseMonto(datos.efectivoSuma)">
-          {{ formatMonto(datos.efectivoSuma) }}
+        <p class="text-lg font-semibold" :class="diferencia.clase" data-qa="cierres-diferencia">
+          {{ diferencia.texto }}
+        </p>
+        <p v-if="datos.altoSinRevisar > 0" class="text-sm font-medium text-error" data-qa="cierres-sin-revisar">
+          {{ datos.altoSinRevisar }} sin revisar
         </p>
       </div>
     </div>
@@ -78,11 +93,5 @@ function claseMonto(val: string | null): string {
       title="No pudimos actualizar — se vuelve a intentar en el próximo ciclo"
       class="mt-3"
     />
-
-    <template v-if="actualizadoEl" #footer>
-      <p class="text-xs text-muted">
-        Actualizado {{ formatHora(actualizadoEl) }}
-      </p>
-    </template>
   </UCard>
 </template>

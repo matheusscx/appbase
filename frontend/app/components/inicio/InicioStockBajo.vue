@@ -15,9 +15,8 @@ interface StockBajoResumen {
 
 const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
-const { formatHora } = useFormatters()
 
-const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
+const { datos, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
   () => useApiFetch<StockBajoResumen>(`${apiUrl}/inventario/stock-bajo/resumen`),
 )
 </script>
@@ -42,7 +41,7 @@ const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeri
         Nada bajo el mínimo.
       </p>
       <template v-else>
-        <p class="text-2xl font-semibold text-warning" data-qa="stock-bajo-total">
+        <p class="text-3xl font-semibold leading-tight text-warning" data-qa="stock-bajo-total">
           {{ datos.total }}
           <span class="text-sm font-normal text-muted">bajo el mínimo</span>
         </p>
@@ -69,11 +68,5 @@ const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeri
       title="No pudimos actualizar — se vuelve a intentar en el próximo ciclo"
       class="mt-3"
     />
-
-    <template v-if="actualizadoEl" #footer>
-      <p class="text-xs text-muted">
-        Actualizado {{ formatHora(actualizadoEl) }}
-      </p>
-    </template>
   </UCard>
 </template>

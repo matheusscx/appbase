@@ -196,7 +196,8 @@ test('si no puede actualizar avisa y conserva el último dato', async ({ page })
   await page.goto('/')
   const salon = tarjeta(page, '/salones', /mesas ocupadas/)
   await expect(salon).toBeVisible()
-  const dato = await salon.getByText(/mesas ocupadas/).innerText()
+  // La cifra grande y su rótulo viven en un solo <p>: "14 de 20 mesas ocupadas".
+  const dato = (await salon.locator('p', { hasText: /mesas ocupadas/ }).first().innerText()).replace(/\s+/g, ' ')
 
   await page.route('**/api/salones/ocupacion', route => route.abort())
   const fallo = page.waitForEvent('requestfailed', r => r.url().includes('/api/salones/ocupacion'))
@@ -204,7 +205,7 @@ test('si no puede actualizar avisa y conserva el último dato', async ({ page })
   await fallo
 
   await expect(salon.getByText(/No pudimos actualizar/)).toBeVisible()
-  await expect(salon.getByText(dato)).toBeVisible()
+  await expect(salon.locator('p', { hasText: /mesas ocupadas/ }).first()).toContainText(dato)
 })
 
 test('el encargado de salón ve el turno y no el día del dueño', async ({ browser }) => {
