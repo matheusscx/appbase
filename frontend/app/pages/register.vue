@@ -101,6 +101,8 @@ async function onGoogle() {
             placeholder="Tu nombre"
             autocomplete="given-name"
             :disabled="store.loading"
+            size="xl"
+            :ui="{ base: 'min-h-11' }"
             class="w-full"
           />
         </UFormField>
@@ -112,6 +114,8 @@ async function onGoogle() {
             placeholder="tu@email.com"
             autocomplete="email"
             :disabled="store.loading"
+            size="xl"
+            :ui="{ base: 'min-h-11' }"
             class="w-full"
           />
         </UFormField>
@@ -123,17 +127,21 @@ async function onGoogle() {
             placeholder="Mínimo 6 caracteres"
             autocomplete="new-password"
             :disabled="store.loading"
+            size="xl"
+            :ui="{ base: 'min-h-11' }"
             class="w-full"
           >
             <template #trailing>
-              <button
-                type="button"
-                tabindex="-1"
-                class="text-muted hover:text-default transition-colors"
-                @click="showPassword = !showPassword"
-              >
-                <UIcon :name="showPassword ? 'i-lucide-eye-off' : 'i-lucide-eye'" class="w-4 h-4" />
-              </button>
+              <UButton
+                :icon="showPassword ? 'i-lucide-eye-off' : 'i-lucide-eye'"
+                color="neutral"
+                variant="link"
+                size="xl"
+                class="size-11 justify-center"
+                :aria-label="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+                :aria-pressed="showPassword"
+                @click="() => { showPassword = !showPassword }"
+              />
             </template>
           </UInput>
         </UFormField>
@@ -141,6 +149,8 @@ async function onGoogle() {
         <UButton
           type="submit"
           block
+          size="xl"
+          class="min-h-11"
           :loading="store.loading"
           :disabled="store.loading || !state.nombre || !state.correo || !state.password"
         >
@@ -155,7 +165,7 @@ async function onGoogle() {
       ¿Ya tienes cuenta?
       <NuxtLink
         to="/login"
-        class="text-primary hover:underline font-medium"
+        class="inline-flex min-h-11 items-center text-primary hover:underline font-medium"
       >
         Iniciar sesión
       </NuxtLink>

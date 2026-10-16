@@ -1,5 +1,6 @@
 import type { Locator } from '@playwright/test'
 import { test, expect } from '../support/sesion'
+import { DISPARADOR_DE_SELECTOR } from '../support/ui'
 import { api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
 
 /**
@@ -79,7 +80,7 @@ test('el formulario de la vista de personal ofrece su motivo, no los de merma, y
   const drawer = page.getByRole('dialog')
   await expect(drawer).toContainText('regístralo como cortesía')
 
-  await campo(drawer, /^Motivo$/).getByRole('button', { name: 'Show popup' }).click()
+  await campo(drawer, /^Motivo$/).locator(DISPARADOR_DE_SELECTOR).click()
   await expect(page.getByRole('option', { name: MOTIVO_PERSONAL, exact: true })).toBeVisible()
   await expect(page.getByRole('option', { name: 'Vencimiento', exact: true })).toHaveCount(0)
 })

@@ -85,8 +85,12 @@ async function abrir() {
       <UCard
         v-for="cajon in cajaStore.cajonesDisponibles"
         :key="cajon.cajonId"
-        class="cursor-pointer transition hover:ring-2 hover:ring-primary-500"
+        class="cursor-pointer transition hover:ring-2 hover:ring-primary-500 outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+        role="button"
+        tabindex="0"
         @click="abrirDrawer(cajon)"
+        @keydown.enter.self.prevent="abrirDrawer(cajon)"
+        @keydown.space.self.prevent="abrirDrawer(cajon)"
       >
         <template #header>
           <div class="flex items-center gap-2">

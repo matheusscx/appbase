@@ -18,6 +18,14 @@ onMounted(async () => {
   }
 })
 
+type Cajon = (typeof cajaStore.cajonesEstado)[number]
+
+function entrar(cajon: Cajon) {
+  navigateTo(cajon.sesion
+    ? `/cajas/${cajon.sesion.cajaId}`
+    : `/cajas/historial?cajonId=${cajon.cajonId}`)
+}
+
 const cajonesOrdenados = computed(() =>
   [...cajaStore.cajonesEstado].sort((a, b) => {
     const ocupA = a.sesion ? 1 : 0
@@ -46,10 +54,12 @@ const cajonesOrdenados = computed(() =>
       <UCard
         v-for="cajon in cajonesOrdenados"
         :key="cajon.cajonId"
-        class="cursor-pointer transition hover:ring-2 hover:ring-primary-500"
-        @click="cajon.sesion
-          ? navigateTo(`/cajas/${cajon.sesion.cajaId}`)
-          : navigateTo(`/cajas/historial?cajonId=${cajon.cajonId}`)"
+        class="cursor-pointer transition hover:ring-2 hover:ring-primary-500 outline-none focus-visible:ring-2 focus-visible:ring-primary-500"
+        role="button"
+        tabindex="0"
+        @click="entrar(cajon)"
+        @keydown.enter.self.prevent="entrar(cajon)"
+        @keydown.space.self.prevent="entrar(cajon)"
       >
         <template #header>
           <div class="flex items-center justify-between gap-2">

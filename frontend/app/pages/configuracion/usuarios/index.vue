@@ -356,6 +356,7 @@ const columns: TableColumn<Member>[] = [
         <template #acciones-cell="{ row }">
           <div class="flex items-center justify-end gap-1">
             <UButton
+              :aria-label="row.original.pendienteConfirmacion ? 'Se puede configurar cuando acepte sumarse' : row.original.esTotem ? 'Dejar de usarla como tótem compartido' : 'Usar esta cuenta como tótem compartido'"
               :icon="row.original.esTotem ? 'i-lucide-monitor-off' : 'i-lucide-monitor'"
               color="neutral"
               variant="ghost"
@@ -367,8 +368,10 @@ const columns: TableColumn<Member>[] = [
                   ? 'Dejar de usarla como tótem compartido'
                   : 'Usar esta cuenta como tótem compartido'"
               @click="alternarTotem(row.original)"
+              class="size-11 justify-center"
             />
             <UButton
+              :aria-label="row.original.pendienteConfirmacion ? 'Sus roles se pueden editar cuando acepte sumarse' : 'Editar roles'"
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
@@ -377,6 +380,7 @@ const columns: TableColumn<Member>[] = [
                 ? 'Sus roles se pueden editar cuando acepte sumarse'
                 : 'Editar roles'"
               @click="abrirEdicion(row.original)"
+              class="size-11 justify-center"
             />
           </div>
         </template>

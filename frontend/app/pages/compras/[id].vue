@@ -1120,7 +1120,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
           <div class="space-y-3">
             <div class="flex items-center justify-between">
               <span class="text-sm font-medium text-default">Líneas</span>
-              <UButton size="xs" variant="ghost" icon="i-lucide-plus" @click="agregarLinea">
+              <UButton size="md" class="min-h-11" variant="ghost" icon="i-lucide-plus" @click="agregarLinea">
                 Agregar línea
               </UButton>
             </div>
@@ -1294,6 +1294,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
                 :items="pagoOpciones"
                 value-key="value"
                 orientation="horizontal"
+                :ui="{ item: 'items-center', label: 'py-3 cursor-pointer' }"
                 data-qa="compra-pago-si-no"
               />
               <div v-if="pagarAhora" class="mt-3 flex flex-col gap-3">

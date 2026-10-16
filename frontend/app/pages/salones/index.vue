@@ -3089,6 +3089,8 @@ async function cerrarCuentaConPin(
                 icon="i-lucide-log-in"
                 color="neutral"
                 variant="soft"
+                size="xl"
+                class="min-h-11"
                 :loading="cargandoTurnos"
                 @click="abrirEntrarTurno"
               >
@@ -3098,6 +3100,8 @@ async function cerrarCuentaConPin(
                 icon="i-lucide-log-out"
                 color="neutral"
                 variant="outline"
+                size="xl"
+                class="min-h-11"
                 @click="salirDeTurno"
               >
                 Salir de turno
@@ -3169,6 +3173,8 @@ async function cerrarCuentaConPin(
               </UButton>
               <UButton
                 icon="i-lucide-plus"
+                size="xl"
+                class="min-h-11"
                 :loading="abriendoCuenta"
                 @click="nuevaCuenta"
               >
@@ -3205,9 +3211,13 @@ async function cerrarCuentaConPin(
               <UCard
                 v-for="cuenta in cuentas"
                 :key="cuenta.id"
-                class="cursor-pointer transition-colors hover:bg-muted"
+                class="cursor-pointer transition-colors hover:bg-muted outline-none focus-visible:ring-2 focus-visible:ring-primary"
                 :class="fusionMode && seleccionadasFusion.includes(cuenta.id) ? 'ring-2 ring-primary' : ''"
+                role="button"
+                tabindex="0"
                 @click="abrirCuenta(cuenta)"
+                @keydown.enter.self.prevent="abrirCuenta(cuenta)"
+                @keydown.space.self.prevent="abrirCuenta(cuenta)"
               >
                 <div class="flex items-center justify-between">
                   <div class="flex items-center gap-2">
@@ -3260,6 +3270,8 @@ async function cerrarCuentaConPin(
                   icon="i-lucide-user-check"
                   color="neutral"
                   variant="soft"
+                  size="xl"
+                  class="min-h-11"
                   :loading="transfiriendo"
                   @click="tomarCuenta"
                 />
@@ -3269,6 +3281,8 @@ async function cerrarCuentaConPin(
                   icon="i-lucide-arrow-right-left"
                   color="neutral"
                   variant="ghost"
+                  size="xl"
+                  class="min-h-11"
                   @click="abrirTransferenciaAdmin"
                 />
                 <UButton
@@ -3276,6 +3290,8 @@ async function cerrarCuentaConPin(
                   icon="i-lucide-history"
                   color="neutral"
                   variant="ghost"
+                  size="xl"
+                  class="min-h-11"
                   @click="abrirHistorial"
                 />
               </div>
@@ -3368,19 +3384,23 @@ async function cerrarCuentaConPin(
                     />
                     <UButton
                       v-if="yaEnviadaACocina(linea) && puedeAnularLinea"
+                      :aria-label="`Anular ${linea.nombre}`"
                       icon="i-lucide-ban"
                       color="warning"
                       variant="ghost"
-                      size="xs"
+                      size="xl"
+                      class="size-11 justify-center"
                       title="Anular (cortesía, merma, comida del personal o no se llegó a hacer)"
                       :disabled="cuentaActivaEnCobro"
                       @click="abrirAnularLinea(linea)"
                     />
                     <UButton
+                      :aria-label="`Quitar ${linea.nombre}`"
                       icon="i-lucide-trash-2"
                       color="error"
                       variant="ghost"
-                      size="xs"
+                      size="xl"
+                      class="ms-3 size-11 justify-center"
                       :disabled="yaEnviadaACocina(linea) || cuentaActivaEnCobro"
                       :title="yaEnviadaACocina(linea)
                         ? 'Ya se despachó a cocina: regístralo como merma o cortesía para que quede el rastro'

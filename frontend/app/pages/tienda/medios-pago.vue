@@ -154,7 +154,9 @@ const columns: TableColumn<Tarjeta>[] = [
             <div class="flex justify-end">
               <button
                 type="button"
-                class="p-1 rounded transition-colors hover:bg-muted"
+                class="inline-flex size-11 items-center justify-center rounded transition-colors hover:bg-muted"
+                :aria-label="`Tarjeta preferida: ${row.original.marca ?? 'Tarjeta'} ${row.original.last4 ?? ''}`.trim()"
+                :aria-pressed="!!row.original.preferida"
                 @click="preferir(row.original)"
               >
                 <UIcon
@@ -168,6 +170,7 @@ const columns: TableColumn<Tarjeta>[] = [
 
           <template #acciones-cell="{ row }">
             <UButton
+              :aria-label="`Eliminar la tarjeta ${row.original.marca ?? ''} ${row.original.last4 ?? ''}`.trim()"
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"

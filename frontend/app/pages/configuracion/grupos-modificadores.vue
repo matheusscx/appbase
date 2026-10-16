@@ -661,18 +661,22 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
         </div>
         <div v-else class="flex justify-end gap-2">
           <UButton
+            :aria-label="`Editar grupo de modificadores ${row.original.nombre}`"
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
             title="Editar"
             @click="abrirEditar(row.original)"
+            class="size-11 justify-center"
           />
           <UButton
+            :aria-label="`Eliminar grupo de modificadores ${row.original.nombre}`"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
             title="Eliminar"
             @click="pedirEliminar(row.original)"
+            class="size-11 justify-center"
           />
         </div>
       </template>
@@ -770,11 +774,13 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
                   <UInput v-model="op.precioExtra" inputmode="decimal" placeholder="0" class="w-full" />
                 </UFormField>
                 <UButton
+                  :aria-label="`Quitar opción ${idx + 1}`"
                   color="error"
                   variant="ghost"
                   icon="i-lucide-trash-2"
                   size="sm"
                   @click="eliminarOpcion(idx)"
+                  class="size-11 justify-center"
                 />
               </div>
             </div>

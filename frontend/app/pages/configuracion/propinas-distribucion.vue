@@ -288,6 +288,7 @@ async function guardar() {
                 />
               </UFormField>
               <UButton
+                :aria-label="`Quitar el grupo ${index + 1}`"
                 v-if="puedeConfigurar && grupos.length > 1"
                 icon="i-lucide-trash-2"
                 color="neutral"
@@ -402,6 +403,7 @@ async function guardar() {
                 />
               </UFormField>
               <UButton
+                :aria-label="`Quitar el peso ${pi + 1}`"
                 v-if="puedeConfigurar"
                 icon="i-lucide-x"
                 color="neutral"

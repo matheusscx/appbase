@@ -92,7 +92,7 @@ const gridClass = computed(() =>
     </div>
 
     <div class="mt-8 text-center">
-      <UButton variant="ghost" color="neutral" size="sm" @click="authStore.logout()">
+      <UButton variant="ghost" color="neutral" size="xl" class="min-h-11" @click="authStore.logout()">
         Cerrar sesión
       </UButton>
     </div>

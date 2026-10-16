@@ -394,6 +394,7 @@ const columns: TableColumn<Promocion>[] = [
       <template #activo-cell="{ row }">
         <div class="flex justify-end">
           <USwitch
+            :aria-label="`Activo: ${row.original.nombre}`"
             :model-value="row.original.activo"
             :disabled="toggling.has(row.original.id)"
             @update:model-value="toggleActivo(row.original)"
@@ -404,18 +405,22 @@ const columns: TableColumn<Promocion>[] = [
       <template #acciones-cell="{ row }">
         <div class="flex justify-end gap-2">
           <UButton
+            :aria-label="`Editar promoción ${row.original.nombre}`"
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
             title="Editar"
             @click="abrirEditar(row.original)"
+            class="size-11 justify-center"
           />
           <UButton
+            :aria-label="`Eliminar promoción ${row.original.nombre}`"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
             title="Eliminar"
             @click="pedirEliminar(row.original)"
+            class="size-11 justify-center"
           />
         </div>
       </template>
@@ -503,12 +508,14 @@ const columns: TableColumn<Promocion>[] = [
               <div v-if="cfg.scopesMultiples" class="flex items-center justify-between">
                 <span class="text-xs font-medium text-muted">Componente {{ i + 1 }}</span>
                 <UButton
+                  :aria-label="`Quitar alcance ${i + 1}`"
                   v-if="form.scopes.length > 1"
                   icon="i-lucide-trash-2"
                   color="error"
                   variant="ghost"
                   size="xs"
                   @click="eliminarSlot(i)"
+                  class="size-11 justify-center"
                 />
               </div>
 

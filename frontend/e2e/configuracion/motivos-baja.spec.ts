@@ -1,5 +1,6 @@
 import type { Locator } from '@playwright/test'
 import { test, expect } from '../support/sesion'
+import { DISPARADOR_DE_SELECTOR } from '../support/ui'
 import { API, api, crearProducto, limpiarItems, tokenDe, TENANTS } from '../support/api'
 
 /**
@@ -162,7 +163,7 @@ test('el selector de Mermas no ofrece los motivos que no son merma', async ({ pa
   const drawer = page.getByRole('dialog')
   // Por etiqueta y no por posición: si la pantalla suma un campo debajo, un `.last()` abriría
   // otro popup y las dos aserciones de ausencia pasarían vacías.
-  await campo(drawer, /^Motivo$/).getByRole('button', { name: 'Show popup' }).click()
+  await campo(drawer, /^Motivo$/).locator(DISPARADOR_DE_SELECTOR).click()
 
   // El backend filtra por `tipo=merma`: ni los fijos que no son merma ni el que creó este
   // archivo por API llegan a la lista.

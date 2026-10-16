@@ -197,6 +197,7 @@ function onSeriesChange(texto: string) {
     <div class="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
       <UFormField label="Producto" class="md:col-span-4" :error="errorProducto">
         <AppItemSelect
+          aria-label="Producto"
           :model-value="linea.itemId || null"
           :catalogo="catalogo"
           placeholder="Selecciona un producto"
@@ -218,6 +219,7 @@ function onSeriesChange(texto: string) {
       <UFormField label="Unidad" class="md:col-span-2">
         <div class="flex items-center gap-1">
           <USelect
+            aria-label="Unidad"
             :model-value="valorUnidadActual"
             :items="opcionesUnidad"
             :disabled="!linea.itemId"
@@ -225,10 +227,12 @@ function onSeriesChange(texto: string) {
             @update:model-value="(v: string) => onCambiarUnidad(v)"
           />
           <UButton
+            aria-label="Editar presentación"
             v-if="linea.presentacionId"
             icon="i-lucide-pencil"
             variant="ghost"
-            size="sm"
+            size="xl"
+            class="size-11 shrink-0 justify-center"
             :data-qa="`compra-presentacion-editar-${linea.key}`"
             @click="emit('editar-presentacion')"
           />
@@ -249,10 +253,12 @@ function onSeriesChange(texto: string) {
           {{ totalLineaTexto }}
         </span>
         <UButton
+          aria-label="Quitar línea"
           color="error"
           variant="ghost"
           icon="i-lucide-trash-2"
-          size="sm"
+          size="xl"
+          class="size-11 justify-center"
           @click="emit('quitar')"
         />
       </div>

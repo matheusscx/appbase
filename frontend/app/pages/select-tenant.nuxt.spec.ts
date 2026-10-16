@@ -46,4 +46,13 @@ describe('select-tenant', () => {
     await vi.waitFor(() => expect(wrapper.findAll('button.group').length).toBe(1))
     expect(navigateTo).not.toHaveBeenCalled()
   })
+
+  // Auditoría UX 08.8: "Cerrar sesión" medía 96×28.
+  it('"Cerrar sesión" mide 44 px para el dedo', async () => {
+    tenants.lista = [{ tenantId: 't1', nombre: 'Local Uno' }]
+    const wrapper = await mountSuspended(SelectTenant)
+    const boton = wrapper.findAll('button').find(b => b.text() === 'Cerrar sesión')
+    expect(boton).toBeTruthy()
+    expect(boton!.classes().join(' ')).toMatch(/(^|\s)min-h-11(\s|$)/)
+  })
 })

@@ -146,6 +146,7 @@ const columns: TableColumn<MonedaDisplayConfig>[] = [
         <template #habilitada-cell="{ row }">
           <div class="flex justify-end">
             <USwitch
+              :aria-label="`Habilitada: ${row.original.nombre}`"
               :model-value="row.original.habilitada"
               :disabled="row.original.esOficial || toggling.has(row.original.monedaId)"
               @update:model-value="toggleHabilitada(row.original)"

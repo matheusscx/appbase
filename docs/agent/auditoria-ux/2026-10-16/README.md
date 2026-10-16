@@ -42,7 +42,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☐ | [01.1](01-pos-y-ventas.md) | P1 | Tras cobrar, el carrito vendido sigue en pantalla 5 a 10 s y borra lo que agregas | medido | agente |
 | ☐ | [01.2](01-pos-y-ventas.md) | P1 | El cobro trae la propina de 10% ya sumada, y el carrito no la muestra | medido | owner |
 | ☐ | [02.2](02-salones-y-mesas.md) | P1 | Garzón y encargado no pueden cobrar mesas y el aviso pide abrir caja | medido | owner |
-| ☐ | [02.3](02-salones-y-mesas.md) | P1 | En tablet, los botones de la cuenta son chicos y quitan productos sin querer | medido | agente |
+| ☐ | [02.3](02-salones-y-mesas.md) | P1 | En tablet, los botones de la cuenta son chicos y quitan productos sin querer — **parcial 2026-10-16** ("+"/"−" de cantidad a 44 px y el basurero apartado, "Entrar/Salir de turno", "Nueva cuenta", "Tomar cuenta" y "Ver historial"; quedan fuera los botones del pie de la cuenta (cobrar, frente de plata) y el interruptor "Incluir") | medido | agente |
 | ☐ | [02.4](02-salones-y-mesas.md) | P1 | La cuenta no muestra qué líneas salieron a cocina y cuáles no | medido | agente |
 | ☐ | [02.5](02-salones-y-mesas.md) | P1 | Si la comanda no se imprime, la línea queda "enviada" y no se reimprime | medido en parte | owner |
 | ☑ | [03.1](03-caja.md) | P1 | En la tablet, "Ver cierre" y "Marcar visto" de Pendientes quedan fuera de vista — **hecho 2026-10-16** (la forma cambió; a 768 no se pudo medir: la base sembrada no tiene cierres pendientes) | medido | agente |
@@ -525,8 +525,8 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [01.5](01-pos-y-ventas.md) | P2 | Tras cobrar no queda en pantalla el vuelto ni el total | agente |
 | ☐ | [01.6](01-pos-y-ventas.md) | P2 | "Total a pagar" y "Vuelto" se ven del mismo tamaño que el resto | agente |
 | ☐ | [01.7](01-pos-y-ventas.md) | P2 | Los botones del cobro miden menos de 44 px y cuestan con el dedo | agente |
-| ☐ | [01.8](01-pos-y-ventas.md) | P2 | Botones de solo ícono y selectores no tienen nombre para el lector de pantalla | agente |
-| ☐ | [01.9](01-pos-y-ventas.md) | P2 | Las tarjetas del catálogo no se pueden usar con teclado | agente |
+| ☑ | [01.8](01-pos-y-ventas.md) | P2 | Botones de solo ícono y selectores no tienen nombre para el lector de pantalla — **hecho 2026-10-16** | agente |
+| ☑ | [01.9](01-pos-y-ventas.md) | P2 | Las tarjetas del catálogo no se pueden usar con teclado — **hecho 2026-10-16** | agente |
 | ☑ | [01.10](01-pos-y-ventas.md) | P2 | Si el catálogo no carga, el aviso es jerga y el panel dice "no hay ítems" — **hecho 2026-10-16** | agente |
 | ☑ | [01.11](01-pos-y-ventas.md) | P2 | Una búsqueda sin resultados dice lo mismo que un catálogo vacío — **hecho 2026-10-16** | agente |
 | ☐ | [01.12](01-pos-y-ventas.md) | P2 | Si el cálculo falla, el carrito deja el total viejo como si fuera bueno | agente |
@@ -561,7 +561,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [02.8](02-salones-y-mesas.md) | P2 | En el cobro de una mesa, el vuelto va en la letra más chica | agente |
 | ☐ | [02.9](02-salones-y-mesas.md) | P2 | La propina del 10% viene sumada al cobrar y no hay atajos para sacarla | owner |
 | ☐ | [02.10](02-salones-y-mesas.md) | P2 | La cuenta suma sin IVA, el total lleva IVA y nadie explica la diferencia | owner |
-| ☐ | [02.11](02-salones-y-mesas.md) | P2 | Las mesas no se pueden elegir con teclado ni lector de pantalla | agente |
+| ☑ | [02.11](02-salones-y-mesas.md) | P2 | Las mesas no se pueden elegir con teclado ni lector de pantalla — **hecho 2026-10-16** | agente |
 | ☐ | [02.12](02-salones-y-mesas.md) | P2 | Una mesa ocupada no muestra monto, hora ni garzón | agente |
 | ☐ | [02.13](02-salones-y-mesas.md) | P2 | El panel de la mesa no tiene botón de cerrar | agente |
 | ☐ | [02.14](02-salones-y-mesas.md) | P2 | A 768 la cuenta queda abajo y caben solo 4 líneas | agente |
@@ -584,7 +584,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [02.31](02-salones-y-mesas.md) | P3 | "Cantidad a anular" arranca vacía aunque solo se puede anular una unidad | agente |
 | ☐ | [02.32](02-salones-y-mesas.md) | P3 | Anulaciones: "Personal" y "Comida del personal" nombran lo mismo; tarjetas en cero repetidas | agente |
 | ☐ | [02.33](02-salones-y-mesas.md) | P3 | "¿Te pidieron firmar un cierre?" pesa igual que acciones de uso diario | agente |
-| ☐ | [02.34](02-salones-y-mesas.md) | P3 | La tecla borrar del PIN no tiene nombre para el lector de pantalla | agente |
+| ☑ | [02.34](02-salones-y-mesas.md) | P3 | La tecla borrar del PIN no tiene nombre para el lector de pantalla — **hecho 2026-10-16** | agente |
 | ☐ | [02.35](02-salones-y-mesas.md) | P3 | Si falla cargar garzones y turnos, los filtros quedan vacíos sin aviso | agente |
 
 ### 03 · Caja
@@ -600,8 +600,8 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [03.8](03-caja.md) | P2 | Las cifras de plata en verde y rojo no tienen contraste suficiente — **hecho 2026-10-16** | agente |
 | ☑ | [03.9](03-caja.md) | P2 | Los botones sólidos verde, rojo y ámbar de caja no tienen contraste con letra blanca — **hecho 2026-10-16** *(ver 00.8)* | agente + owner |
 | ☐ | [03.10](03-caja.md) | P2 | El texto ámbar de caja ("Sin justificar", avisos) no tiene contraste suficiente *(ver 00.8)* | agente |
-| ☐ | [03.11](03-caja.md) | P2 | Las tarjetas de cajón no se pueden usar con teclado | agente |
-| ☐ | [03.12](03-caja.md) | P2 | Los dos campos de fecha de la tendencia no dicen "Desde" ni "Hasta" | agente |
+| ☑ | [03.11](03-caja.md) | P2 | Las tarjetas de cajón no se pueden usar con teclado — **hecho 2026-10-16** | agente |
+| ☑ | [03.12](03-caja.md) | P2 | Los dos campos de fecha de la tendencia no dicen "Desde" ni "Hasta" — **hecho 2026-10-16** | agente |
 | ☑ | [03.13](03-caja.md) | P2 | Los datos que faltan en caja se avisan con un toast, no junto al campo — **hecho 2026-10-16** | agente |
 | ☑ | [03.14](03-caja.md) | P2 | "Enviar conteo" y "Confirmar cierre" quedan apagados sin decir qué falta — **hecho 2026-10-16** | agente |
 | ☐ | [03.15](03-caja.md) | P2 | El estado de caja sale crudo: "EN_CONCILIACION", "cerrada" a 10 px | agente |
@@ -614,7 +614,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [03.22](03-caja.md) | P3 | Sin movimientos el resumen pinta "+ $0" en verde y "- $0" en rojo | agente |
 | ☐ | [03.23](03-caja.md) | P3 | Una frase de caja termina con doble punto después de la fecha | agente |
 | ☐ | [03.24](03-caja.md) | P3 | El panel de apertura de caja mide 40% y corta el campo "Comentario" | agente |
-| ☐ | [03.25](03-caja.md) | P3 | El selector Entrada/Salida no anuncia cuál está elegido | agente |
+| ☑ | [03.25](03-caja.md) | P3 | El selector Entrada/Salida no anuncia cuál está elegido — **hecho 2026-10-16** | agente |
 | ☐ | [03.26](03-caja.md) | P3 | "Marcar visto" actúa al primer toque y no se puede deshacer | agente |
 | ☑ | [03.27](03-caja.md) | P3 | Entrar a "Mi caja" sin permiso lleva a Ventas con tres avisos, uno en voseo — **hecho 2026-10-16** | agente |
 | ☐ | [03.28](03-caja.md) | P3 | Idea: fondo sugerido por caja y atajos para los conceptos de movimiento | owner |
@@ -640,8 +640,8 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [04.19](04-inicio-y-reportes.md) | P2 | Si Varianza falla salen tres avisos iguales y la tabla dice "ningún producto" — **hecho 2026-10-16** | agente |
 | ☐ | [04.21](04-inicio-y-reportes.md) | P2 | La gráfica de Varianza distingue series solo por color y el ámbar no se lee *(ver 00.8)* | agente |
 | ☐ | [04.14](04-inicio-y-reportes.md) | P3 | La tarjeta Cajas no dice cuántas hay abiertas ni desde qué hora | agente |
-| ☐ | [04.15](04-inicio-y-reportes.md) | P3 | Ctrl/Cmd+clic en una tarjeta de Inicio no abre pestaña nueva | agente |
-| ☐ | [04.16](04-inicio-y-reportes.md) | P3 | En la tablet, "Actualizar" y los enlaces de Pérdidas miden 16 a 24 px | agente |
+| ☑ | [04.15](04-inicio-y-reportes.md) | P3 | Ctrl/Cmd+clic en una tarjeta de Inicio no abre pestaña nueva — **hecho 2026-10-16** | agente |
+| ☐ | [04.16](04-inicio-y-reportes.md) | P3 | En la tablet, "Actualizar" y los enlaces de Pérdidas miden 16 a 24 px — **parcial 2026-10-16** ("Actualizar" y los enlaces de Pérdidas a 44 px; quedan las casillas de Desfases y el interruptor, el calendario y el "i" de Varianza) | agente |
 | ☑ | [04.20](04-inicio-y-reportes.md) | P3 | Jerga en la tabla de Varianza y columnas clave fuera de vista a 768 — **hecho 2026-10-16** | agente + owner |
 | ☐ | [04.22](04-inicio-y-reportes.md) | P3 | "Costos desfasados" repite el mismo texto dos veces y escribe "items" sin tilde | agente |
 | ☑ | [04.23](04-inicio-y-reportes.md) | P3 | Voseo en Inicio y Reportes *(lote 00.3)* — **hecho 2026-10-16** | agente |
@@ -668,10 +668,10 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [05.13](05-inventario.md) | P2 | A 768 faltan columnas en traslados y mermas y el selector de causa se corta — **hecho 2026-10-16** (medido a 768: traslados y mermas entran, 672 de 672 px) | agente |
 | ☐ | [05.14](05-inventario.md) | P2 | El menú dice "Stock" pero la pantalla es una lista de movimientos, no el saldo | agente + owner |
 | ☑ | [05.15](05-inventario.md) | P2 | Un stock mínimo inválido muestra un aviso técnico a medias en inglés — **hecho 2026-10-16** | agente |
-| ☐ | [05.16](05-inventario.md) | P2 | Los dos campos de fecha de Mermas no dicen "Desde" ni "Hasta" | agente |
+| ☑ | [05.16](05-inventario.md) | P2 | Los dos campos de fecha de Mermas no dicen "Desde" ni "Hasta" — **hecho 2026-10-16** | agente |
 | ☑ | [05.17](05-inventario.md) | P2 | En el kardex y Mermas, cantidades e insignias verde, ámbar y rojo se leen mal — **hecho 2026-10-16** (colores e insignias; el placeholder no) *(ver 00.8)* | owner |
-| ☐ | [05.18](05-inventario.md) | P2 | Los botones de Inventario miden 20 a 28 px en la tablet | agente |
-| ☐ | [05.19](05-inventario.md) | P2 | Los selectores de Inventario se anuncian "Show popup" y el tacho no tiene nombre | agente |
+| ☑ | [05.18](05-inventario.md) | P2 | Los botones de Inventario miden 20 a 28 px en la tablet — **hecho 2026-10-16** | agente |
+| ☐ | [05.19](05-inventario.md) | P2 | Los selectores de Inventario se anuncian "Show popup" y el tacho no tiene nombre — **parcial 2026-10-16** (el tacho de quitar línea y los selectores de Inventario y Mermas tienen nombre; queda la casilla de cada serie en traslados, que sigue sin atarse a su texto) | agente |
 | ☑ | [05.20](05-inventario.md) | P2 | Si falla cargar una lista de inventario, la tabla dice "no hay nada" — **hecho 2026-10-16** | agente |
 | ☑ | [05.21](05-inventario.md) | P3 | Voseo en Inventario *(lote 00.3)* — **hecho 2026-10-16** | agente |
 | ☑ | [05.22](05-inventario.md) | P3 | Jerga y códigos internos en pantalla: "tenant", "kardex" y el id de cada movimiento — **hecho 2026-10-16** | agente |
@@ -687,7 +687,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 |---|---|---|---|---|
 | ☑ | [06.5](06-compras-y-terceros.md) | P2 | En la cabecera de la compra, lo que falta apaga "Guardar borrador" sin decir qué — **hecho 2026-10-16** | agente |
 | ☐ | [06.7](06-compras-y-terceros.md) | P2 | "Pagos" de Por pagar dice "Sin pagos registrados" aunque se acabe de pagar | agente |
-| ☐ | [06.8](06-compras-y-terceros.md) | P2 | Los botones de la línea de compra no tienen nombre y quitar no se deshace | agente |
+| ☐ | [06.8](06-compras-y-terceros.md) | P2 | Los botones de la línea de compra no tienen nombre y quitar no se deshace — **parcial 2026-10-16** (papelera, lápiz y selectores con nombre y a 44 px; queda el "Deshacer" del toast al quitar una línea) | agente |
 | ☐ | [06.9](06-compras-y-terceros.md) | P2 | La fecha de una compra sale en tres formatos distintos | agente |
 | ☑ | [06.10](06-compras-y-terceros.md) | P2 | Sin permiso, Nueva compra y el detalle de compra quedan en blanco — **hecho 2026-10-16** | agente |
 | ☐ | [06.11](06-compras-y-terceros.md) | P2 | Sin permiso de Terceros, la pantalla dice "No hay terceros registrados" — **parcial 2026-10-16** (hecha la mitad de pantalla: sin permiso dice "Sin acceso a los terceros", no el vacío falso; falta que quien carga compras pueda crear el proveedor, que es el frente de permisos del backend) | agente + owner |
@@ -699,15 +699,15 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [06.17](06-compras-y-terceros.md) | P2 | Un filtro de compras sin resultados dice "No hay compras registradas" — **hecho 2026-10-16** | agente |
 | ☐ | [06.18](06-compras-y-terceros.md) | P2 | Tras pagar, el aviso no dice monto ni medio y "Pagar" sigue activo sin deuda | agente |
 | ☐ | [06.19](06-compras-y-terceros.md) | P2 | El documento se lee "FacturaAUDIT-001", sin espacio entre tipo y folio | agente |
-| ☐ | [06.20](06-compras-y-terceros.md) | P2 | Los botones de uso frecuente de Compras miden 16 a 32 px en la tablet | agente |
+| ☐ | [06.20](06-compras-y-terceros.md) | P2 | Los botones de uso frecuente de Compras miden 16 a 32 px en la tablet — **parcial 2026-10-16** ("Corregir", "Corregir total o vencimiento", "Cargar descuento", "Agregar línea", la papelera y el radio "Sí, la pagué" a 44 px; queda el interruptor de Terceros) | agente |
 | ☐ | [06.22](06-compras-y-terceros.md) | P2 | En Por pagar, "Pagar" no se ve hasta tocar una fila de proveedor | agente |
 | ☐ | [06.23](06-compras-y-terceros.md) | P2 | El modal "¿Confirmar la recepción?" no muestra qué productos entran ni a qué costo | agente |
 | ☑ | [06.26](06-compras-y-terceros.md) | P2 | La columna "Pago" de la lista de compras sale vacía al recargar *(causa en 00.9)* — **hecho 2026-10-16** | agente |
-| ☐ | [06.21](06-compras-y-terceros.md) | P3 | Las filas de Compras no son enlaces: no abren en otra pestaña | agente |
+| ☑ | [06.21](06-compras-y-terceros.md) | P3 | Las filas de Compras no son enlaces: no abren en otra pestaña — **hecho 2026-10-16** | agente |
 | ☑ | [06.24](06-compras-y-terceros.md) | P3 | Voseo en Compras y Terceros *(lote 00.3)* — **hecho 2026-10-16** | agente |
 | ☑ | [06.25](06-compras-y-terceros.md) | P3 | El menú dice "Recepciones" y la pantalla dice "Compras" — **hecho 2026-10-16** | owner |
 | ☐ | [06.27](06-compras-y-terceros.md) | P3 | La insignia verde, "Confirmar recepción" y el placeholder de Compras se leen mal *(ver 00.8)* | agente |
-| ☐ | [06.28](06-compras-y-terceros.md) | P3 | El interruptor "Activo" de Terceros no tiene nombre y la lista no tiene buscador | agente |
+| ☑ | [06.28](06-compras-y-terceros.md) | P3 | El interruptor "Activo" de Terceros no tiene nombre y la lista no tiene buscador — **hecho 2026-10-16** | agente |
 | ☑ | [06.29](06-compras-y-terceros.md) | P3 | "Tercero" en pantalla (el local dice proveedor) y una ayuda que cita la especificación — **hecho 2026-10-16** | agente + owner |
 | ☐ | [06.30](06-compras-y-terceros.md) | P3 | Salir de "Nueva compra" con datos tipeados no avisa que se pierden | agente |
 | ☐ | [06.31](06-compras-y-terceros.md) | P3 | En la compra confirmada, "Total del documento" y "Total" repiten el mismo monto | agente |
@@ -723,7 +723,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [07.5](07-configuracion.md) | P2 | La zona de trabajo es angosta y "Nuevo X" y "Ver eliminados" se parten | agente |
 | ☐ | [07.6](07-configuracion.md) | P2 | A 768 el panel lateral de Items trunca valores y parte las etiquetas | agente |
 | ☐ | [07.7](07-configuracion.md) | P2 | Los campos de texto de Configuración miden 167 px aunque haya espacio libre | agente |
-| ☐ | [07.8](07-configuracion.md) | P2 | 69 interruptores y 35 botones de ícono en Configuración no tienen nombre accesible | agente |
+| ☑ | [07.8](07-configuracion.md) | P2 | 69 interruptores y 35 botones de ícono en Configuración no tienen nombre accesible — **hecho 2026-10-16** | agente |
 | ☐ | [07.9](07-configuracion.md) | P2 | Eliminar un rol usa el diálogo del navegador y no dice cuántos lo tienen | agente + owner |
 | ☑ | [07.10](07-configuracion.md) | P2 | "Crear" un rol con el nombre vacío no hace nada ni avisa — **hecho 2026-10-16** | agente |
 | ☐ | [07.11](07-configuracion.md) | P2 | Guardar permisos de un rol manda hasta 16 guardados seguidos y puede quedar a medias | owner |
@@ -733,7 +733,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [07.15](07-configuracion.md) | P2 | La lista de descuentos redondea 2,5% a "3%" y muestra montos fijos como "5000.0000" — **hecho 2026-10-16** | agente |
 | ☐ | [07.16](07-configuracion.md) | P2 | Los chips y avisos verde y ámbar de Configuración no tienen contraste suficiente *(ver 00.8)* | agente |
 | ☐ | [07.17](07-configuracion.md) | P2 | Una impresora se da de alta sin poder probarla ni validar el host | owner |
-| ☐ | [07.18](07-configuracion.md) | P2 | Editar o eliminar una mesa solo se puede con doble clic en el plano | agente |
+| ☐ | [07.18](07-configuracion.md) | P2 | Editar o eliminar una mesa solo se puede con doble clic en el plano — **parcial 2026-10-16** (Enter/Espacio sobre la mesa abren su edición y la mesa se alcanza con Tab; queda el botón "Editar mesa" en la barra del plano y el doble toque en tablet) | agente |
 | ☐ | [07.19](07-configuracion.md) | P2 | El ícono "tótem" de Usuarios cambia cómo entra la persona al salón, con un toque | agente + owner |
 | ☐ | [07.20](07-configuracion.md) | P2 | Usuarios no permite quitar a alguien del local, aunque el sistema sabe hacerlo | owner |
 | ☑ | [07.21](07-configuracion.md) | P2 | "Crear" usuario queda gris sin decir qué falta y un correo malo no se marca — **hecho 2026-10-16** | agente |
@@ -741,7 +741,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [07.23](07-configuracion.md) | P2 | En desarrollo, el menú de Configuración muestra el ícono de otra entrada | agente |
 | ☐ | [07.24](07-configuracion.md) | P3 | El panel de un rol fijo no muestra los permisos que da | agente |
 | ☐ | [07.25](07-configuracion.md) | P3 | Las insignias de Configuración miden 8 a 10 px de texto | agente |
-| ☐ | [07.26](07-configuracion.md) | P3 | Los botones de fila de Configuración miden 28 a 32 px y están pegados | agente |
+| ☐ | [07.26](07-configuracion.md) | P3 | Los botones de fila de Configuración miden 28 a 32 px y están pegados — **parcial 2026-10-16** (lápiz, basurero y compañía a 44 px en todo Configuración, con una invariante; quedan los interruptores, las entradas del menú, las casillas y el "Saltar al contenido") | agente |
 | ☑ | [07.27](07-configuracion.md) | P3 | "Tenant" aparece en diez textos de Configuración — **hecho 2026-10-16** | agente |
 | ☑ | [07.28](07-configuracion.md) | P3 | Voseo en 41 líneas de Configuración *(lote 00.3)* — **hecho 2026-10-16** | agente |
 | ☐ | [07.29](07-configuracion.md) | P3 | "Nuevo recargo" usa una frase de descuentos ("se descuenta línea por línea") | agente |
@@ -765,8 +765,8 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [08.5](08-ingreso-y-cuenta.md) | P2 | Tras registrarse, la pantalla dice "Si ese correo no tenía cuenta…" sin nombrar el correo | agente |
 | ☐ | [08.6](08-ingreso-y-cuenta.md) | P2 | La invitación no dice a qué empresa te están sumando | agente |
 | ☐ | [08.7](08-ingreso-y-cuenta.md) | P2 | "Mantener sesión iniciada" no hace nada | owner |
-| ☐ | [08.8](08-ingreso-y-cuenta.md) | P2 | Los controles del ingreso miden 32 px y los enlaces 16 px | agente |
-| ☐ | [08.9](08-ingreso-y-cuenta.md) | P2 | El ojo de mostrar contraseña no se alcanza con Tab ni tiene nombre | agente |
+| ☐ | [08.8](08-ingreso-y-cuenta.md) | P2 | Los controles del ingreso miden 32 px y los enlaces 16 px — **parcial 2026-10-16** (login, registro, recuperar contraseña y "Cerrar sesión" a 44 px; quedan el menú de usuario, Mi cuenta e invitación) | agente |
+| ☐ | [08.9](08-ingreso-y-cuenta.md) | P2 | El ojo de mostrar contraseña no se alcanza con Tab ni tiene nombre — **parcial 2026-10-16** (el ojo del login y del registro es un botón con nombre, alcanzable con Tab y de 44 px; queda ponerlo en invitación, recuperar y Mi cuenta) | agente |
 | ☐ | [08.10](08-ingreso-y-cuenta.md) | P2 | Los avisos de error del ingreso tienen poco contraste y no se anuncian al lector | agente |
 | ☐ | [08.11](08-ingreso-y-cuenta.md) | P2 | Si falla elegir el local, "Reintentar" recarga la lista y hay que elegir otra vez | agente |
 | ☐ | [08.12](08-ingreso-y-cuenta.md) | P2 | En "Elegir local" los nombres largos se cortan y dos locales parecidos se ven iguales | agente |
@@ -798,9 +798,9 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [09.7](09-tienda-y-suscripciones.md) | P2 | Al cancelar una suscripción, dos botones dicen "Cancelar" en el mismo modal | agente |
 | ☐ | [09.8](09-tienda-y-suscripciones.md) | P2 | "Pausar" y "Reanudar" actúan al instante sin decir qué pasa con el cobro | owner |
 | ☐ | [09.9](09-tienda-y-suscripciones.md) | P2 | El selector muestra el neto ($30.000) y el total a cobrar es otro ($35.700) | agente |
-| ☐ | [09.10](09-tienda-y-suscripciones.md) | P2 | Los controles del carrito online miden 24 a 28 px y quitar es inmediato | agente |
-| ☐ | [09.11](09-tienda-y-suscripciones.md) | P2 | Botones de ícono de la tienda sin nombre; la estrella solo cambia de color | agente |
-| ☐ | [09.12](09-tienda-y-suscripciones.md) | P2 | Las tarjetas del catálogo de la tienda no se pueden usar con teclado | agente |
+| ☐ | [09.10](09-tienda-y-suscripciones.md) | P2 | Los controles del carrito online miden 24 a 28 px y quitar es inmediato — **parcial 2026-10-16** (basurero y ± a 44 px y el basurero apartado; queda "Pagar" (36 px, botón de cobrar) y el "Deshacer") | agente |
+| ☑ | [09.11](09-tienda-y-suscripciones.md) | P2 | Botones de ícono de la tienda sin nombre; la estrella solo cambia de color — **hecho 2026-10-16** | agente |
+| ☑ | [09.12](09-tienda-y-suscripciones.md) | P2 | Las tarjetas del catálogo de la tienda no se pueden usar con teclado — **hecho 2026-10-16** | agente |
 | ☑ | [09.13](09-tienda-y-suscripciones.md) | P2 | El catálogo de la tienda dice lo mismo vacío que sin resultados — **hecho 2026-10-16** | agente |
 | ☐ | [09.14](09-tienda-y-suscripciones.md) | P2 | Sin permiso, la tienda deja armar un carrito entero y falla recién al pagar | agente |
 | ☑ | [09.15](09-tienda-y-suscripciones.md) | P2 | Jerga en tienda y suscripciones: "tenant", "pasarela con tokenización (Oneclick)" — **hecho 2026-10-16** | agente |

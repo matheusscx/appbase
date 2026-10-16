@@ -346,6 +346,7 @@ async function registrarAjusteCosto() {
 
         <div class="flex flex-wrap gap-2">
           <AppItemSelect
+            aria-label="Todos los productos"
             v-model="filtroItem"
             :catalogo="catalogoItems"
             :filtros="FILTROS_PRODUCTO"
@@ -354,6 +355,7 @@ async function registrarAjusteCosto() {
             placeholder="Todos los productos"
           />
           <USelectMenu
+            aria-label="Motivo"
             v-model="filtroMotivo"
             :items="motivoFiltroOpts"
             value-key="value"
@@ -361,6 +363,7 @@ async function registrarAjusteCosto() {
             placeholder="Motivo"
           />
           <USelectMenu
+            aria-label="Ubicación"
             v-if="hayBodegas"
             v-model="filtroUbicacion"
             :items="ubicacionFiltroOpts"
@@ -478,6 +481,7 @@ async function registrarAjusteCosto() {
             >
               <UFormField label="Producto" required>
                 <AppItemSelect
+                  aria-label="Producto"
                   v-model="ajusteCostoForm.itemId"
                   :catalogo="catalogoItems"
                   :filtros="FILTROS_PRODUCTO"
@@ -499,6 +503,7 @@ async function registrarAjusteCosto() {
                 label="Unidad"
               >
                 <USelectMenu
+                  aria-label="Unidad"
                   v-model="ajusteCostoForm.unidadCodigo"
                   :items="unidadesAjusteOpts"
                   value-key="value"

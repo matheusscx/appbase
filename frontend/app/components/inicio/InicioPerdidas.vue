@@ -53,7 +53,7 @@ const { formatMonto, formatCostoPorMoneda } = useFormatters()
         <p v-else class="text-sm text-muted">
           Sin anulaciones hoy.
         </p>
-        <ULink to="/salones/anulaciones" class="text-xs text-primary mt-2 inline-block">
+        <ULink to="/salones/anulaciones" class="inline-flex min-h-11 items-center text-xs text-primary">
           Ver anulaciones
         </ULink>
       </div>
@@ -68,7 +68,7 @@ const { formatMonto, formatCostoPorMoneda } = useFormatters()
         <p v-if="perdidas.mermas.sinValorizar > 0" class="text-xs text-warning">
           {{ perdidas.mermas.sinValorizar }} sin costo cargado
         </p>
-        <ULink to="/mermas" class="text-xs text-primary mt-2 inline-block">
+        <ULink to="/mermas" class="inline-flex min-h-11 items-center text-xs text-primary">
           Ver mermas
         </ULink>
       </div>

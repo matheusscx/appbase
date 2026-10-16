@@ -197,6 +197,24 @@ describe('zona "Hoy" — una sola carga y "Actualizar"', () => {
   })
 })
 
+// Auditoría UX 04.16: en la tablet, "Actualizar" medía 92×24 y los enlaces
+// "Ver anulaciones" / "Ver mermas" 16 px de alto, uno bajo el otro.
+describe('zona "Hoy" — tamaño táctil', () => {
+  const M44 = /(^|\s)(min-h-11|h-11|size-11)(\s|$)/
+
+  it('"Actualizar" y los enlaces de pérdidas miden 44 px', async () => {
+    const wrapper = await montarHoy()
+    const actualizar = wrapper.findAll('button').find(b => b.text().includes('Actualizar'))
+    expect(actualizar!.classes().join(' ')).toMatch(M44)
+    for (const texto of ['Ver anulaciones', 'Ver mermas']) {
+      const enlace = wrapper.findAll('a').find(a => a.text() === texto)
+      expect(enlace, texto).toBeTruthy()
+      expect(enlace!.classes().join(' '), texto).toMatch(M44)
+    }
+    wrapper.unmount()
+  })
+})
+
 describe('zona "Hoy" — tarjetas como links reales', () => {
   it('Ventas y Por cobrar son <a href="/ventas">, focuseables con Tab', async () => {
     const wrapper = await montarHoy()
@@ -204,6 +222,27 @@ describe('zona "Hoy" — tarjetas como links reales', () => {
     const hrefs = wrapper.findAll('a').map(a => a.attributes('href'))
     // Ventas y Por cobrar comparten destino (no hay reporte de ventas propio).
     expect(hrefs.filter(h => h === '/ventas')).toHaveLength(2)
+
+    wrapper.unmount()
+  })
+
+  // Auditoría UX 04.15: el `@click.prevent` incondicional se comía Cmd/Ctrl+clic y el
+  // clic medio, que son la forma de comparar "Ventas" y "Cajas" lado a lado.
+  it('Ctrl/Cmd+clic lo resuelve el navegador (pestaña nueva); el clic simple, el router', async () => {
+    const wrapper = await montarHoy()
+    const tarjeta = wrapper.findAll('a').find(a => a.attributes('href') === '/ventas')!
+
+    const conCtrl = new MouseEvent('click', { bubbles: true, cancelable: true, ctrlKey: true })
+    tarjeta.element.dispatchEvent(conCtrl)
+    expect(conCtrl.defaultPrevented, 'Ctrl+clic no se frena').toBe(false)
+
+    const conMeta = new MouseEvent('click', { bubbles: true, cancelable: true, metaKey: true })
+    tarjeta.element.dispatchEvent(conMeta)
+    expect(conMeta.defaultPrevented, 'Cmd+clic no se frena').toBe(false)
+
+    const simple = new MouseEvent('click', { bubbles: true, cancelable: true })
+    tarjeta.element.dispatchEvent(simple)
+    expect(simple.defaultPrevented, 'el clic simple navega por el router').toBe(true)
 
     wrapper.unmount()
   })

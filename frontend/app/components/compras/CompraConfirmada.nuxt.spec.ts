@@ -247,3 +247,15 @@ describe('CompraConfirmada — el admin del tenant ve lo que su tenant contrató
     expect(hay(w, 'compra-pago')).toBe(false)
   })
 })
+
+// Auditoría UX 06.20: "Corregir" 63×24, "Corregir total o vencimiento" 175×24 y
+// "Cargar descuento" 118×24 — bajo los 44 px de la tablet.
+describe('CompraConfirmada — tamaño táctil', () => {
+  it('Corregir, Corregir total o vencimiento y el descuento miden 44 px', async () => {
+    permisos = new Set(['Compras:Leer', 'Compras:Actualizar'])
+    const w = await montar(compra())
+    for (const qa of ['compra-corregir-', 'compra-descuento-abrir', 'compra-documento-corregir-abrir']) {
+      expect(w.find(`[data-qa^="${qa}"]`).classes().join(' '), qa).toMatch(/(^|\s)min-h-11(\s|$)/)
+    }
+  })
+})

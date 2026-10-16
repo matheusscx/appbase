@@ -141,6 +141,19 @@ function onDblClick(mesa: MesaResumen) {
   if (!props.editable) return
   emit('edit', mesa)
 }
+
+/** Enter/Espacio hacen lo que el clic en el salón y lo que el doble clic en edición. */
+function onActivar(mesa: MesaResumen) {
+  if (props.editable) emit('edit', mesa)
+  else emit('select', mesa)
+}
+
+/** "Mesa 2, ocupada, 1 cuenta abierta": el estado que el color da a quien ve. */
+function nombreAccesible(mesa: MesaResumen): string {
+  if (!mesa.ocupada) return `${mesa.nombre}, libre`
+  const n = mesa.cuentasAbiertas
+  return `${mesa.nombre}, ocupada, ${n} ${n === 1 ? 'cuenta abierta' : 'cuentas abiertas'}`
+}
 </script>
 
 <template>
@@ -160,12 +173,17 @@ function onDblClick(mesa: MesaResumen) {
     <div
       v-for="mesa in mesas"
       :key="mesa.id"
-      class="absolute -translate-x-1/2 -translate-y-1/2 touch-none"
+      class="absolute -translate-x-1/2 -translate-y-1/2 touch-none rounded-lg outline-none focus-visible:ring-2 focus-visible:ring-primary"
+      role="button"
+      tabindex="0"
+      :aria-label="nombreAccesible(mesa)"
       :style="{ left: `${Number(mesa.posX) * 100}%`, top: `${Number(mesa.posY) * 100}%` }"
       :data-qa="`mesa-${mesa.id}`"
       @pointerdown="onPointerDown($event, mesa)"
       @click="onSelect(mesa)"
       @dblclick="onDblClick(mesa)"
+      @keydown.enter.self.prevent="onActivar(mesa)"
+      @keydown.space.self.prevent="onActivar(mesa)"
     >
       <SalonesMesaNode
         :mesa="mesa"

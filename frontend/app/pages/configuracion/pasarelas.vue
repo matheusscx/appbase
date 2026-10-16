@@ -373,6 +373,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
               variant="ghost"
               aria-label="Editar"
               @click="abrirEditar(row.original)"
+              class="size-11 justify-center"
             />
             <UButton
               v-if="puedeEliminar"
@@ -381,6 +382,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
               variant="ghost"
               aria-label="Eliminar"
               @click="eliminandoConfig = row.original; eliminarConfigOpen = true"
+              class="size-11 justify-center"
             />
           </div>
         </template>
@@ -444,6 +446,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
               variant="ghost"
               aria-label="Revocar"
               @click="revocando = row.original; revocarOpen = true"
+              class="size-11 justify-center"
             />
           </div>
         </template>
@@ -582,7 +585,14 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
           </p>
           <div class="flex items-center gap-2">
             <code class="flex-1 text-sm bg-elevated rounded px-3 py-2 break-all">{{ keyCreada }}</code>
-            <UButton icon="i-lucide-copy" color="neutral" variant="ghost" @click="copiarKey" />
+            <UButton
+              icon="i-lucide-copy"
+              color="neutral"
+              variant="ghost"
+              aria-label="Copiar la API key"
+              class="size-11 justify-center"
+              @click="copiarKey"
+            />
           </div>
         </div>
       </template>

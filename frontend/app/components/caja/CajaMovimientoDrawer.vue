@@ -77,6 +77,7 @@ async function guardar() {
               color="success"
               icon="i-lucide-circle-arrow-down"
               label="Entrada"
+              :aria-pressed="form.tipo === 'entrada'"
               @click="() => { form.tipo = 'entrada' }"
             />
             <UButton
@@ -87,6 +88,7 @@ async function guardar() {
               color="error"
               icon="i-lucide-circle-arrow-up"
               label="Salida"
+              :aria-pressed="form.tipo === 'salida'"
               @click="() => { form.tipo = 'salida' }"
             />
           </div>

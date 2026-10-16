@@ -238,6 +238,7 @@ function confirmar() {
             <div class="flex items-center gap-2">
               <USelectMenu
                 v-model="pago.metodoPagoId"
+                :aria-label="`Método del pago ${i + 1}`"
                 :items="metodoItems"
                 value-key="value"
                 label-key="label"
@@ -251,6 +252,7 @@ function confirmar() {
                 @update:model-value="setMonto(i, $event)"
               />
               <UButton
+                :aria-label="`Quitar pago ${i + 1}`"
                 icon="i-lucide-trash-2"
                 color="error"
                 variant="ghost"

@@ -54,7 +54,8 @@ void cargar()
         Hoy
       </h3>
       <UButton
-        size="xs"
+        size="md"
+        class="min-h-11"
         variant="ghost"
         color="neutral"
         icon="i-lucide-refresh-cw"

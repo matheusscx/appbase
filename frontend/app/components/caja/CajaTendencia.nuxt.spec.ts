@@ -70,6 +70,15 @@ beforeEach(() => {
 })
 
 describe('CajaTendencia', () => {
+  // Auditoría UX 03.12: los dos campos se leían "16 - 09 - 2026" y "16 - 10 - 2026"
+  // sin "Desde" ni "Hasta", y sus botones de calendario se llamaban igual.
+  it('los campos de fecha dicen Desde y Hasta', async () => {
+    const w = await mountSuspended(CajaTendencia)
+    expect(w.find('[data-qa="tendencia-desde"] label').text()).toBe('Desde')
+    expect(w.find('[data-qa="tendencia-hasta"] label').text()).toBe('Hasta')
+    expect(w.find('[data-qa="tendencia-desde"] button[aria-label="Seleccionar la fecha Desde"]').exists()).toBe(true)
+  })
+
   it('arranca con una ventana de 30 días', async () => {
     await mountSuspended(CajaTendencia)
 

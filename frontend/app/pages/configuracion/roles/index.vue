@@ -307,17 +307,21 @@ const columns: TableColumn<Rol>[] = [
         <template #acciones-cell="{ row }">
           <div class="flex items-center justify-end gap-1">
             <UButton
+              :aria-label="`Editar rol ${row.original.nombre}`"
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
               @click="abrirEditar(row.original)"
+              class="size-11 justify-center"
             />
             <UButton
+              :aria-label="`Eliminar rol ${row.original.nombre}`"
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
               :disabled="row.original.esFijo || row.original.esSistema"
               @click="eliminar(row.original)"
+              class="size-11 justify-center"
             />
           </div>
         </template>

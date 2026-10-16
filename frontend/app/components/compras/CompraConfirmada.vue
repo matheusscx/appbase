@@ -149,7 +149,8 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
 
     <div v-if="puedeCorregir" class="flex justify-end">
       <UButton
-        size="xs"
+        size="md"
+        class="min-h-11"
         variant="soft"
         color="neutral"
         label="Corregir total o vencimiento"
@@ -184,7 +185,8 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
       <template #acciones-cell="{ row }">
         <div class="flex justify-end">
           <UButton
-            size="xs"
+            size="md"
+            class="min-h-11"
             variant="soft"
             :color="row.original.precioUnitario == null ? 'warning' : 'neutral'"
             :label="row.original.precioUnitario == null ? 'Completar' : 'Corregir'"
@@ -206,7 +208,8 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
       </div>
       <UButton
         v-if="puedeDescontar"
-        size="xs"
+        size="md"
+        class="min-h-11"
         variant="soft"
         color="neutral"
         :label="compra.descuentoTotal != null ? 'Cambiar el descuento' : 'Cargar descuento'"

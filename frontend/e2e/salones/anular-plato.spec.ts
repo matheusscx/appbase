@@ -256,8 +256,9 @@ test('pide, manda a cocina, anula como cortesía y el aviso aparece con el total
   await expect(page.locator('ol[data-slot="viewport"] li')).toHaveCount(0, { timeout: 10_000 })
 
   // 6. Anular 1 de las 2 unidades despachadas, como cortesía.
+  // Por `title`: el nombre accesible del botón ahora es "Anular <plato>" (auditoría UX 01.8).
   await page
-    .getByRole('button', { name: 'Anular (cortesía, merma, comida del personal o no se llegó a hacer)' })
+    .getByTitle('Anular (cortesía, merma, comida del personal o no se llegó a hacer)')
     .click()
   const modalAnular = page.getByRole('dialog').filter({ hasText: 'Anular plato' })
   await expect(modalAnular).toBeVisible()

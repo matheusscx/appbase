@@ -74,6 +74,18 @@ describe('compras/por-pagar', () => {
     expect(document.body.querySelector('[data-qa="por-pagar-pagar-abrir"]')).toBeTruthy()
   })
 
+  // Auditoría UX 06.21: la fila abre el detalle solo con clic; sin un control
+  // dentro, el teclado y el lector de pantalla no llegan a ningún proveedor.
+  it('el nombre del proveedor es un botón: Enter lo elige', async () => {
+    await montar()
+    const boton = document.body.querySelector<HTMLButtonElement>('[data-qa="por-pagar-proveedor-p1"]')
+    expect(boton).toBeTruthy()
+    expect(boton!.tagName).toBe('BUTTON')
+    boton!.click()
+    await new Promise(r => setTimeout(r, 20))
+    expect(document.body.querySelector('[data-qa="por-pagar-detalle"]')!.textContent).toContain('Don Pedro')
+  })
+
   it('sin proveedores con deuda ni saldo, no hay nada que seleccionar', async () => {
     document.body.innerHTML = ''
     await montar()

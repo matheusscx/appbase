@@ -587,3 +587,30 @@ describe('traslados — una línea empezada e incompleta bloquea el envío (05.2
     wrapper.unmount()
   })
 })
+
+// Auditoría UX 05.18: quitar línea medía 28×28 pegado al selector de producto,
+// sin confirmación ni deshacer; "Agregar línea" 110×24.
+describe('traslados — tamaño táctil de las líneas', () => {
+  const M44 = /(^|\s)(min-h-11|size-11|h-11)(\s|$)/
+
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('"Agregar línea" y quitar línea miden 44 px, y quitar va apartado del selector', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    const agregar = wrapper.findAll('button').find(b => b.text().includes('Agregar línea'))
+    expect(agregar!.classes().join(' ')).toMatch(M44)
+
+    const [origenSelect] = selectsConOpcion(wrapper, LOCAL.id)
+    await emitir(origenSelect!, LOCAL.id)
+    await agregar!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    const quitar = wrapper.find('button[aria-label="Quitar línea del traslado"]')
+    expect(quitar.exists()).toBe(true)
+    expect(quitar.classes().join(' ')).toMatch(M44)
+    expect(quitar.classes().join(' ')).toMatch(/(^|\s)ms-[2-9](\s|$)/)
+  })
+})

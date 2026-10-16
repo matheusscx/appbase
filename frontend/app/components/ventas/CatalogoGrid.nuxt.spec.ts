@@ -267,3 +267,39 @@ describe('CatalogoGrid — sin ítems: no es lo mismo no tener, no encontrar y n
     expect(wrapper.find('input').exists()).toBe(true)
   })
 })
+
+// Auditoría UX 01.9 / 09.12: la tarjeta era un `div` con `@click`. Sin rol ni
+// `tabindex`, el teclado saltaba el catálogo entero y la tienda online (que no
+// tiene otro camino al carrito) quedaba sin uso con lector de pantalla.
+describe('CatalogoGrid — se opera con teclado', () => {
+  it('la tarjeta es un botón alcanzable con Tab', async () => {
+    const wrapper = await montar([producto({ stockDisponible: '1.0000' })])
+    const tarjeta = wrapper.find('[data-qa="item-catalogo-item-1"]')
+    expect(tarjeta.attributes('role')).toBe('button')
+    expect(tarjeta.attributes('tabindex')).toBe('0')
+  })
+
+  it('Enter y Espacio agregan el ítem', async () => {
+    const wrapper = await montar([producto({ stockDisponible: '1.0000' })])
+    const tarjeta = wrapper.find('[data-qa="item-catalogo-item-1"]')
+    await tarjeta.trigger('keydown', { key: 'Enter' })
+    await tarjeta.trigger('keydown', { key: ' ' })
+    expect(wrapper.emitted('add')).toHaveLength(2)
+  })
+
+  it('mantener apretado Enter agrega una sola vez (la tecla repetida no cuenta)', async () => {
+    const wrapper = await montar([producto({ stockDisponible: '5.0000' })])
+    const tarjeta = wrapper.find('[data-qa="item-catalogo-item-1"]')
+    await tarjeta.trigger('keydown', { key: 'Enter' })
+    await tarjeta.trigger('keydown', { key: 'Enter', repeat: true })
+    await tarjeta.trigger('keydown', { key: 'Enter', repeat: true })
+    expect(wrapper.emitted('add')).toHaveLength(1)
+  })
+
+  it('agotado, el teclado tampoco agrega', async () => {
+    const wrapper = await montar([producto({ stockDisponible: '0.0000' })])
+    const tarjeta = wrapper.find('[data-qa="item-catalogo-item-1"]')
+    await tarjeta.trigger('keydown', { key: 'Enter' })
+    expect(wrapper.emitted('add')).toBeUndefined()
+  })
+})

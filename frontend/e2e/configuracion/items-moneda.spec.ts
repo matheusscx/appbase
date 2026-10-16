@@ -1,4 +1,5 @@
 import { test, expect } from '../support/sesion'
+import { DISPARADOR_DE_SELECTOR } from '../support/ui'
 import {
   crearProducto,
   limpiarItems,
@@ -107,9 +108,7 @@ test('cambiar la moneda frena y avisa; desistir no toca nada, confirmar vacía',
   await editar.click()
 
   const drawer = page.getByRole('dialog')
-  const selectorMoneda = campo(drawer, /^Moneda$/).getByRole('button', {
-    name: 'Show popup',
-  })
+  const selectorMoneda = campo(drawer, /^Moneda$/).locator(DISPARADOR_DE_SELECTOR)
   const precio = campo(drawer, /^Precio base/).locator('input[inputmode="decimal"]')
   const aviso = drawer.getByText('Cambiar la moneda del ítem')
 
@@ -152,7 +151,7 @@ test('un cambio a medio confirmar muere al cerrar el drawer', async ({
   const drawer = page.getByRole('dialog')
   const aviso = drawer.getByText('Cambiar la moneda del ítem')
 
-  await campo(drawer, /^Moneda$/).getByRole('button', { name: 'Show popup' }).click()
+  await campo(drawer, /^Moneda$/).locator(DISPARADOR_DE_SELECTOR).click()
   await page.getByRole('option', { name: `${USD} (USD)`, exact: true }).click()
   await expect(aviso).toBeVisible()
 

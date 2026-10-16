@@ -1432,3 +1432,32 @@ validador ("nombre should not be empty", "lineas.0.cantidad debe ser mayor a cer
   globo nativo y el error propio nunca sale.
 - **Lo que no cambia:** qué se envía y qué se bloquea lo deciden las reglas del formulario; esto
   solo cambia cómo y dónde se dice. Un aviso de UX nunca duplica una regla de plata.
+
+## 20. Tocar, nombrar, alcanzar: botones chicos, sin nombre y sin teclado
+
+Auditoría UX, lote 5 (2026-10-16). La tablet del local se usa de pie y con el dedo; el teclado
+externo y el lector de pantalla existen. Lo que sigue lo hace cumplir `invariants/accesibilidad.invariant.spec.ts`.
+
+- **Un botón de solo ícono lleva `aria-label`** que dice qué es y de quién: `Quitar Papas fritas`,
+  `Editar categoría Bebidas`. El `title` no cuenta (no se anuncia de forma fiable y no existe con el
+  dedo); puede quedar para quien ve. Lo mismo un `<button>` pelado con un `UIcon` adentro, y un
+  `USwitch` sin `label`: `Activo: Bebidas` (nombre estable, el estado ya lo dice el interruptor).
+- **Los selectores** (`USelectMenu`, `AppItemSelect`) se anuncian "Show popup" salvo que reciban
+  `aria-label`. Va con el rótulo de su `UFormField` o con su placeholder. Por eso los e2e **no**
+  buscan el disparador por nombre: usan `DISPARADOR_DE_SELECTOR` de `e2e/support/ui.ts`.
+- **Dos campos de fecha juntos** pasan `label="Desde"` / `label="Hasta"` a `AppDateInput`: pone el
+  rótulo visible y distingue el nombre del botón del calendario.
+- **Lo clicable se alcanza con Tab**: una tarjeta, fila o mesa con `@click` lleva `role="button"`,
+  `tabindex="0"` y `@keydown.enter.self.prevent` + `@keydown.space.self.prevent` al mismo handler, más
+  `outline-none focus-visible:ring-2` para que se vea el foco. Si lleva a otra pantalla, mejor un
+  `NuxtLink`/`<a>`. Con estado, `aria-pressed` (la estrella de "preferida", Entrada/Salida). La
+  invariante rechaza un `div`/`UCard`/`li` con `@click` sin `role` ni `tabindex`.
+- **Una tarjeta enlazada** (`UCard as="a" href`) no usa `@click.prevent` a secas: eso se come
+  Cmd/Ctrl+clic y el clic medio. `@click="seguirEnlaceInterno($event, destino)"` (`utils/enlace-interno.ts`)
+  navega por el router solo en el clic simple.
+- **44 px es el mínimo táctil.** Con Nuxt UI: `size="xl"` más `class="min-h-11"` (botón con texto),
+  `class="size-11 justify-center"` (solo ícono), `:ui="{ base: 'min-h-11' }"` en un `UInput`, y
+  `:ui="{ root: 'min-h-11 items-center' }"` en un `USwitch` con rótulo (el área tocable es su fila).
+  Lo destructivo (el basurero) va **apartado** de lo frecuente (`ms-2` o más). En `pages/configuracion/`
+  la invariante exige `size-11` en todo botón de solo ícono; una excepción lleva su porqué en la lista.
+- jsdom no mide píxeles: los specs afirman las clases (`size-11`, `min-h-11`), no la caja.

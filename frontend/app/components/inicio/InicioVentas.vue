@@ -33,7 +33,7 @@ const hayDevuelto = computed(() => !new Decimal(props.ventas.cobradoDesglose.dev
     as="a"
     href="/ventas"
     class="cursor-pointer transition hover:ring-2 hover:ring-primary-500"
-    @click.prevent="navigateTo('/ventas')"
+    @click="seguirEnlaceInterno($event, '/ventas')"
   >
     <template #header>
       <div class="flex items-center justify-between gap-2">

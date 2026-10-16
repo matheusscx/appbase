@@ -154,6 +154,7 @@ const columns = computed<TableColumn<StockMinimoFila>[]>(() => [
             class="w-64"
           />
           <USelectMenu
+            aria-label="Todas las ubicaciones"
             v-if="hayBodegas"
             v-model="filtroUbicacion"
             :items="ubicacionOpts"
@@ -164,6 +165,7 @@ const columns = computed<TableColumn<StockMinimoFila>[]>(() => [
           <USwitch
             v-model="soloBajoMinimo"
             label="Solo bajo el mínimo"
+            :ui="{ root: 'min-h-11 items-center' }"
             data-qa="filtro-bajo-minimo"
           />
         </div>
@@ -186,12 +188,13 @@ const columns = computed<TableColumn<StockMinimoFila>[]>(() => [
           </template>
 
           <template #minimo-cell="{ row }">
-            <UFormField v-if="puedeActualizar" :error="erroresMinimo.get(clave(row.original))" class="ml-auto text-right" :class="erroresMinimo.has(clave(row.original)) ? 'w-48' : 'w-24'">
+            <UFormField v-if="puedeActualizar" :error="erroresMinimo.get(clave(row.original))" class="ml-auto text-right" :class="erroresMinimo.has(clave(row.original)) ? 'w-48' : 'w-28'">
               <UInput
               :model-value="valorMinimo(row.original)"
               inputmode="decimal"
               placeholder="—"
-              size="sm"
+              size="xl"
+              :ui="{ base: 'min-h-11' }"
               class="w-full"
               :loading="guardando.has(clave(row.original))"
               :data-qa="`minimo-${row.original.itemId}-${row.original.ubicacionId}`"
@@ -232,7 +235,8 @@ const columns = computed<TableColumn<StockMinimoFila>[]>(() => [
             <template v-if="rutaTraslado(row.original)">
               <UButton
                 v-if="puedeTrasladar"
-                size="xs"
+                size="md"
+                class="min-h-11"
                 color="neutral"
                 variant="outline"
                 icon="i-lucide-arrow-left-right"

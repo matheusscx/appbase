@@ -364,6 +364,7 @@ const columns: TableColumn<Impresora>[] = [
             title="Editar"
             aria-label="Editar"
             @click="abrirEditar(row.original)"
+            class="size-11 justify-center"
           />
           <UButton
             v-if="puedeEliminar"
@@ -373,6 +374,7 @@ const columns: TableColumn<Impresora>[] = [
             title="Eliminar"
             aria-label="Eliminar"
             @click="confirmarEliminar(row.original)"
+            class="size-11 justify-center"
           />
         </div>
       </template>

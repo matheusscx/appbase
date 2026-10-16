@@ -227,6 +227,7 @@ const columns: TableColumn<MetodoPago>[] = [
           <div class="flex items-center justify-end gap-2">
             <span class="text-sm text-muted">Permite vuelto</span>
             <USwitch
+              :aria-label="`Permite vuelto: ${row.original.nombre}`"
               :model-value="row.original.permiteVuelto"
               :disabled="toggling.has(row.original.metodoPagoId)"
               @update:model-value="togglePermiteVuelto(row.original)"
@@ -238,6 +239,7 @@ const columns: TableColumn<MetodoPago>[] = [
           <div class="flex items-center justify-end gap-2">
             <span class="text-sm text-muted">Habilitado</span>
             <USwitch
+              :aria-label="`Habilitado: ${row.original.nombre}`"
               :model-value="row.original.habilitada"
               :disabled="toggling.has(row.original.metodoPagoId)"
               @update:model-value="toggleHabilitada(row.original)"

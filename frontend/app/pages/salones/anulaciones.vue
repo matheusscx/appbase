@@ -286,9 +286,9 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
           description="Cortesías, mermas en mesa y platos que no se hicieron — con precio de carta, costo e IVA de la cortesía congelados."
         />
 
-        <div class="flex flex-wrap gap-2">
-          <AppDateInput v-model="filtroDesde" class="w-40" qa="anulaciones-desde" />
-          <AppDateInput v-model="filtroHasta" class="w-40" qa="anulaciones-hasta" />
+        <div class="flex flex-wrap items-end gap-2">
+          <AppDateInput v-model="filtroDesde" label="Desde" class="w-40" qa="anulaciones-desde" />
+          <AppDateInput v-model="filtroHasta" label="Hasta" class="w-40" qa="anulaciones-hasta" />
           <USelectMenu
             v-model="filtroTipo"
             :items="tipoOpts"

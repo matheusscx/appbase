@@ -573,6 +573,7 @@ async function restaurarMesaSeleccionada(id: string) {
           title="Editar salón"
           aria-label="Editar salón"
           @click="abrirEditarSalon"
+          class="size-11 justify-center"
         />
         <UButton
           v-if="puedeEliminar && !selectedSalon?.eliminadoEl"
@@ -582,6 +583,7 @@ async function restaurarMesaSeleccionada(id: string) {
           title="Eliminar salón"
           aria-label="Eliminar salón"
           @click="() => { deleteSalonOpen = true }"
+          class="size-11 justify-center"
         />
         <UButton
           v-if="puedeEliminar && selectedSalon?.eliminadoEl"

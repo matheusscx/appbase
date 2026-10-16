@@ -247,4 +247,16 @@ describe('LineaCompraForm', () => {
     expect(linea.fechaVencimiento).toBe('')
     wrapper.unmount()
   })
+
+  // Auditoría UX 06.8 y 06.20: la papelera medía 28×28 y no tenía nombre; quitar
+  // una línea con todo lo tipeado es un toque, pegado al total de la línea.
+  it('la papelera y el lápiz de la presentación tienen nombre y miden 44 px', async () => {
+    const wrapper = await montar({ linea: lineaBase({ presentacionId: 'pres-1' }) })
+    const quitar = wrapper.find('button[aria-label="Quitar línea"]')
+    const editar = wrapper.find('button[aria-label="Editar presentación"]')
+    for (const b of [quitar, editar]) {
+      expect(b.exists()).toBe(true)
+      expect(b.classes().join(' ')).toMatch(/(^|\s)size-11(\s|$)/)
+    }
+  })
 })

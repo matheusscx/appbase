@@ -8319,3 +8319,65 @@ describe('salones — la pantalla declara el permiso que su listado exige', () =
     expect(meta).toContain("permisoLabel: 'Salones (operación)'")
   })
 })
+
+// Auditoría UX 02.11: la tarjeta de cuenta era un `div` con `@click`; con
+// teclado no había forma de entrar a una cuenta abierta.
+describe('salones — la tarjeta de cuenta se opera con teclado', () => {
+  beforeEach(reiniciarMock)
+
+  it('es un botón con Tab y Enter la abre', async () => {
+    cuentasDeLaMesa = [{
+      id: 'cuenta-9', numero: 9, nombre: null, estado: 'abierta', mesaId: MESA_ID, ventaId: null,
+      garzonAperturaId: 'g1', garzonAperturaNombre: 'Ana', garzonResponsableId: 'g1',
+      garzonResponsableNombre: 'Ana', garzonCierreId: null, garzonCierreNombre: null, lineas: [],
+    }]
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    const tarjeta = drawerMesa()?.querySelector<HTMLElement>('.cursor-pointer')
+    expect(tarjeta).toBeTruthy()
+    expect(tarjeta!.getAttribute('role')).toBe('button')
+    expect(tarjeta!.getAttribute('tabindex')).toBe('0')
+
+    tarjeta!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    await esperar(50)
+    expect(drawerMesa()?.textContent).toMatch(/— Cuenta \d+/)
+  })
+})
+
+// Auditoría UX 02.3: con el dedo, a 768 px, en la pantalla que se usa de pie y con
+// apuro, el basurero de la línea medía 24×24 pegado al "+": un toque corrido quitaba
+// el producto en vez de sumar uno. Mínimo táctil: 44 px, y el basurero apartado.
+describe('salones — tamaño táctil de lo que se usa de pie', () => {
+  const M44 = /(^|\s)(min-h-11|size-11|h-11)(\s|$)/
+  const clases = (b: Element | undefined | null) => (b?.className ?? '').toString()
+
+  beforeEach(reiniciarMock)
+
+  it('"Entrar a turno" y "Salir de turno" miden 44 px', async () => {
+    const wrapper = await montar()
+    for (const texto of ['Entrar a turno', 'Salir de turno']) {
+      const boton = wrapper.findAll('button').find(b => b.text() === texto)
+      expect(boton, texto).toBeTruthy()
+      expect(boton!.classes().join(' '), texto).toMatch(M44)
+    }
+  })
+
+  it('"Nueva cuenta", el basurero y el anular miden 44 px, y el basurero va apartado del "+"', async () => {
+    cuentasDeLaMesa = [{
+      id: 'cuenta-9', numero: 9, nombre: null, estado: 'abierta', mesaId: MESA_ID, ventaId: null,
+      garzonAperturaId: 'g1', garzonAperturaNombre: 'Ana', garzonResponsableId: 'g1',
+      garzonResponsableNombre: 'Ana', garzonCierreId: null, garzonCierreNombre: null,
+      lineas: [{ id: 'linea-1', itemId: 'item-1', nombre: 'Papas fritas', precioBase: '5000', monedaId: 'clp', cantidad: '1', cantidadEnviada: '0' }],
+    }]
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    expect(clases(botonEn(drawerMesa(), 'Nueva cuenta'))).toMatch(M44)
+
+    drawerMesa()!.querySelector<HTMLElement>('.cursor-pointer')!.click()
+    await esperar(50)
+    const basurero = drawerMesa()!.querySelector('button[aria-label="Quitar Papas fritas"]')
+    expect(basurero, 'el basurero tiene el nombre de la línea').toBeTruthy()
+    expect(clases(basurero)).toMatch(M44)
+    expect(clases(basurero), 'apartado del stepper').toMatch(/(^|\s)ms-[3-9](\s|$)/)
+  })
+})

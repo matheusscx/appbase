@@ -110,3 +110,14 @@ describe('compras/index — forma de la tabla en tablet', () => {
     }
   })
 })
+
+// Auditoría UX 06.21: la fila abre la compra con clic, pero no era un enlace:
+// sin Ctrl+clic para otra pestaña y sin que el lector la anuncie como navegación.
+describe('compras/index — la compra es un enlace', () => {
+  it('el documento lleva a la compra con un <a href>', async () => {
+    await montar()
+    const enlace = document.body.querySelector<HTMLAnchorElement>('a[href="/compras/compra-1"]')
+    expect(enlace).toBeTruthy()
+    expect(enlace!.textContent).toContain('4521')
+  })
+})

@@ -154,6 +154,7 @@ const columns: TableColumn<RecuentoListItem>[] = [
 
         <div class="flex flex-wrap gap-2">
           <USelectMenu
+            aria-label="Estado"
             v-model="filtroEstado"
             :items="estadoFiltroOpts"
             value-key="value"
@@ -237,6 +238,7 @@ const columns: TableColumn<RecuentoListItem>[] = [
                 help="Dónde se cuenta. No se puede cambiar después de crear la sesión."
               >
                 <USelectMenu
+                  aria-label="Ubicación"
                   v-model="form.ubicacionId"
                   @update:model-value="limpiar('ubicacionId')"
                   :items="ubicaciones.map(u => ({ label: u.nombre, value: u.id }))"
@@ -253,6 +255,7 @@ const columns: TableColumn<RecuentoListItem>[] = [
                 help="Solo productos por cantidad — series y lotes no admiten recuento en esta versión."
               >
                 <AppItemSelect
+                  aria-label="Productos"
                   v-model="form.itemIds"
                   @update:model-value="limpiar('itemIds')"
                   :catalogo="catalogoItems"

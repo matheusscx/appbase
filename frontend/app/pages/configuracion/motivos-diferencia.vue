@@ -368,6 +368,7 @@ const columns: TableColumn<MotivoDiferencia>[] = [
       <template #activo-cell="{ row }">
         <div class="flex justify-end">
           <USwitch
+            :aria-label="`Activo: ${row.original.nombre}`"
             :model-value="row.original.activo"
             :disabled="row.original.esFijo || toggling.has(row.original.id) || !!row.original.eliminadoEl"
             @update:model-value="toggleActivo(row.original)"
@@ -388,20 +389,24 @@ const columns: TableColumn<MotivoDiferencia>[] = [
         </div>
         <div v-else class="flex justify-end gap-2">
           <UButton
+            :aria-label="`Editar motivo ${row.original.nombre}`"
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
             title="Editar"
             :disabled="row.original.esFijo"
             @click="abrirEditar(row.original)"
+            class="size-11 justify-center"
           />
           <UButton
+            :aria-label="`Eliminar motivo ${row.original.nombre}`"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
             title="Eliminar"
             :disabled="row.original.esFijo"
             @click="pedirEliminar(row.original)"
+            class="size-11 justify-center"
           />
         </div>
       </template>

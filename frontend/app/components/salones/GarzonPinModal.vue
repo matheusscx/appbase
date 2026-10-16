@@ -169,6 +169,8 @@ async function verificar() {
               : 'border-accented bg-transparent'"
           />
         </div>
+        <!-- Los puntos no se leen; esto sí, sin mostrar nunca los dígitos. -->
+        <span class="sr-only" role="status" data-qa="pin-progreso">{{ pin.length }} de 6 dígitos</span>
 
         <p
           v-if="error"
@@ -211,6 +213,7 @@ async function verificar() {
             @click="pulsar('0')"
           />
           <UButton
+            aria-label="Borrar el último dígito"
             icon="i-lucide-delete"
             color="neutral"
             variant="ghost"

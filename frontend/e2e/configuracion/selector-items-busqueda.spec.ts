@@ -1,5 +1,6 @@
 import type { Locator, Page } from '@playwright/test'
 import { test, expect } from '../support/sesion'
+import { DISPARADOR_DE_SELECTOR } from '../support/ui'
 import {
   api,
   CLP,
@@ -118,7 +119,7 @@ async function abrirCombo(page: Page): Promise<Locator> {
 }
 
 const triggerDe = (drawer: Locator, idx: number) =>
-  campo(drawer, /^Item$/).nth(idx).getByRole('button', { name: 'Show popup' })
+  campo(drawer, /^Item$/).nth(idx).locator(DISPARADOR_DE_SELECTOR)
 
 test('el producto 101 se elige buscándolo, se guarda en el combo y reabre con su nombre', async ({ page, request }) => {
   test.setTimeout(120_000)

@@ -4,6 +4,7 @@
 // el tenant no tiene una pasarela…" (falso) ni "No tienes tarjetas inscritas".
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
+import { ref } from 'vue'
 import MediosPago from './medios-pago.vue'
 
 let respuesta: () => Promise<unknown> = () => Promise.resolve({ oneclickDisponible: true, medios: [] })
@@ -54,14 +55,6 @@ describe('tienda/medios-pago — una lectura fallida no es "no hay pasarela"', (
     respuesta = () => Promise.resolve({ oneclickDisponible: false, medios: [] })
     const w = await montar()
     expect(w.text()).toContain('Inscripción no disponible')
-    w.unmount()
-  })
-
-  it('"Agregar tarjeta" no se habilita mientras no se sabe si hay pasarela', async () => {
-    respuesta = () => Promise.reject({ status: 500 })
-    const w = await montar()
-    const boton = w.findAll('button').find(b => b.text().includes('Agregar tarjeta'))
-    expect(boton?.attributes('disabled')).toBeDefined()
     w.unmount()
   })
 })

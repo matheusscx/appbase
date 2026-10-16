@@ -583,19 +583,23 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
             <template #acciones-cell="{ row }">
               <div class="flex justify-end gap-2">
                 <UButton
+                  :aria-label="`Editar el paquete ${row.original.codigo}`"
                   icon="i-lucide-square-pen"
                   color="neutral"
                   variant="ghost"
                   title="Editar"
                   @click="abrirEditar(row.original)"
+                  class="size-11 justify-center"
                 />
                 <UButton
+                  :aria-label="`Eliminar el paquete ${row.original.codigo}`"
                   v-if="row.original.estado === 'disponible'"
                   icon="i-lucide-trash-2"
                   color="error"
                   variant="ghost"
                   title="Eliminar"
                   @click="pedirEliminar(row.original)"
+                  class="size-11 justify-center"
                 />
               </div>
             </template>

@@ -391,6 +391,7 @@ const columns: TableColumn<Tercero>[] = [
           <template #activo-cell="{ row }">
             <div class="flex justify-end">
               <USwitch
+                :aria-label="`Activo: ${row.original.nombre}`"
                 :model-value="row.original.activo"
                 :disabled="toggling.has(row.original.id) || !puedeActualizar || !!row.original.eliminadoEl"
                 @update:model-value="toggleActivo(row.original)"
@@ -412,20 +413,24 @@ const columns: TableColumn<Tercero>[] = [
             </div>
             <div v-else class="flex justify-end gap-2">
               <UButton
+                :aria-label="`Editar tercero ${row.original.nombre}`"
                 v-if="puedeActualizar"
                 icon="i-lucide-square-pen"
                 color="neutral"
                 variant="ghost"
                 title="Editar"
                 @click="abrirEditar(row.original)"
+                class="size-11 justify-center"
               />
               <UButton
+                :aria-label="`Eliminar tercero ${row.original.nombre}`"
                 v-if="puedeEliminar"
                 icon="i-lucide-trash-2"
                 color="error"
                 variant="ghost"
                 title="Eliminar"
                 @click="pedirEliminar(row.original)"
+                class="size-11 justify-center"
               />
             </div>
           </template>

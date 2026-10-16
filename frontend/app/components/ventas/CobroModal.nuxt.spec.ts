@@ -202,3 +202,11 @@ describe('CobroModal — boleta sobre el umbral de identidad', () => {
     expect(botonConfirmar().disabled).toBe(false)
   })
 })
+
+// Auditoría UX 01.8: el tacho de quitar un pago no tenía nombre.
+describe('CobroModal — quitar pago tiene nombre', () => {
+  it('cada pago ofrece "Quitar pago N"', async () => {
+    await montar([EFECTIVO])
+    expect(dialogo().querySelector('button[aria-label="Quitar pago 1"]')).toBeTruthy()
+  })
+})

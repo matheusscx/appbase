@@ -162,9 +162,18 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
           @select="elegirProveedor"
         >
           <template #proveedorNombre-cell="{ row }">
-            <span :class="{ 'font-medium': row.original.proveedorId === seleccionado?.proveedorId }">
+            <!-- Botón dentro de la fila: la fila entera sigue tocable, pero sin esto el
+                 teclado y el lector de pantalla no llegan a ningún proveedor. -->
+            <button
+              type="button"
+              class="text-left hover:underline focus-visible:outline-2 focus-visible:outline-primary"
+              :class="{ 'font-medium': row.original.proveedorId === seleccionado?.proveedorId }"
+              :aria-pressed="row.original.proveedorId === seleccionado?.proveedorId"
+              :data-qa="`por-pagar-proveedor-${row.original.proveedorId}`"
+              @click.stop="elegirProveedor($event, row)"
+            >
               {{ row.original.proveedorNombre || '—' }}
-            </span>
+            </button>
           </template>
           <template #deuda-cell="{ row }">
             <span class="tabular-nums">{{ formatMonto(row.original.deuda) }}</span>

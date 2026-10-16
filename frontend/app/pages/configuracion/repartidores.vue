@@ -206,18 +206,22 @@ const columns: TableColumn<RepartidorFila>[] = [
       <template #acciones-cell="{ row }">
         <div class="flex justify-end gap-2">
           <UButton
+            :aria-label="`Editar repartidor ${row.original.nombre}`"
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
             title="Editar"
             @click="abrirEditar(row.original)"
+            class="size-11 justify-center"
           />
           <UButton
+            :aria-label="`Eliminar repartidor ${row.original.nombre}`"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
             title="Eliminar"
             @click="pedirEliminar(row.original)"
+            class="size-11 justify-center"
           />
         </div>
       </template>

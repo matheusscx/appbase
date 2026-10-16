@@ -73,6 +73,7 @@ async function abrir() {
     <UForm id="caja-apertura-form" :state="form" class="space-y-4" @submit="abrir">
       <UFormField label="Caja" required :error="errores.cajonId">
         <USelectMenu
+          aria-label="Caja"
           v-model="form.cajonId"
           @update:model-value="limpiar('cajonId')"
           :items="cajaStore.cajonesDisponibles"

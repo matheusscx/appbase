@@ -871,6 +871,7 @@ const columns: TableColumn<Garzon>[] = [
             :aria-label="regenerarLabel(row.original)"
             :loading="abriendoRegenerarId === row.original.id"
             @click="abrirRegenerar(row.original)"
+            class="size-11 justify-center"
           />
           <UButton
             v-if="puedeActualizar"
@@ -880,6 +881,7 @@ const columns: TableColumn<Garzon>[] = [
             title="Editar"
             aria-label="Editar"
             @click="abrirEditar(row.original)"
+            class="size-11 justify-center"
           />
           <UButton
             v-if="puedeEliminar"
@@ -889,6 +891,7 @@ const columns: TableColumn<Garzon>[] = [
             title="Eliminar"
             aria-label="Eliminar"
             @click="confirmarEliminar(row.original)"
+            class="size-11 justify-center"
           />
         </div>
       </template>

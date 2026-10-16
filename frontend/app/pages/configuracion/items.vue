@@ -1977,6 +1977,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                  esconde") — sigue mostrando el estado aunque no se pueda
                  tocar sobre una fila eliminada. -->
             <USwitch
+              :aria-label="`Activo: ${row.original.nombre}`"
               :model-value="row.original.activo"
               disabled
               size="sm"
@@ -1994,12 +1995,14 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
           </div>
           <div v-else class="flex items-center justify-end gap-1">
             <USwitch
+              :aria-label="`Activo: ${row.original.nombre}`"
               :model-value="row.original.activo"
               :disabled="toggling.has(row.original.id) || !puedeActualizar"
               size="sm"
               @update:model-value="toggleActivo(row.original)"
             />
             <UButton
+              :aria-label="`Editar ítem ${row.original.nombre}`"
               v-if="puedeActualizar"
               icon="i-lucide-square-pen"
               color="neutral"
@@ -2007,6 +2010,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               size="sm"
               title="Editar"
               @click="abrirEditar(row.original)"
+              class="size-11 justify-center"
             />
             <!-- Sin permisos de escritura el menú puede quedar sin ninguna
                  entrada (un servicio solo ofrecía "Eliminar"): abrir un popover
@@ -2016,6 +2020,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               :items="menuAcciones(row.original)"
             >
               <UButton
+                :aria-label="`Más acciones de ${row.original.nombre}`"
                 icon="i-lucide-ellipsis-vertical"
                 color="neutral"
                 variant="ghost"
@@ -2023,6 +2028,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 title="Más acciones"
                 :loading="verificandoEliminarId === row.original.id"
                 :disabled="verificandoEliminarId === row.original.id"
+                class="size-11 justify-center"
               />
             </UDropdownMenu>
           </div>
@@ -2280,11 +2286,12 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                         <AppDateInput v-model="form.series[idx]!.garantiaHasta" />
                       </UFormField>
                       <UButton
+                        :aria-label="`Quitar serie ${idx + 1}`"
                         color="error"
                         variant="ghost"
                         icon="i-lucide-trash-2"
                         size="sm"
-                        class="self-end"
+                        class="self-end size-11 justify-center"
                         @click="removeSerie(idx)"
                       />
                     </div>
@@ -2467,11 +2474,13 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     <USwitch v-model="form.ingredientes[idx]!.bloqueante" />
                   </UFormField>
                   <UButton
+                    :aria-label="`Quitar ingrediente ${idx + 1}`"
                     color="error"
                     variant="ghost"
                     icon="i-lucide-trash-2"
                     size="sm"
                     @click="removeIngrediente(idx)"
+                    class="size-11 justify-center"
                   />
                 </div>
               </div>
@@ -2529,11 +2538,12 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     <MoneyInput v-model="form.extrasPermitidos[idx]!.precioExtra" :moneda-id="form.monedaId" class="w-full" />
                   </UFormField>
                   <UButton
+                    :aria-label="`Quitar extra ${idx + 1}`"
                     color="error"
                     variant="ghost"
                     icon="i-lucide-trash-2"
                     size="sm"
-                    class="self-end"
+                    class="self-end size-11 justify-center"
                     @click="removeExtraPermitido(idx)"
                   />
                 </div>
@@ -2577,11 +2587,13 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                     <USwitch v-model="form.componentes[idx]!.bloqueante" />
                   </UFormField>
                   <UButton
+                    :aria-label="`Quitar componente ${idx + 1}`"
                     color="error"
                     variant="ghost"
                     icon="i-lucide-trash-2"
                     size="sm"
                     @click="removeComponente(idx)"
+                    class="size-11 justify-center"
                   />
                 </div>
               </div>
@@ -2635,11 +2647,13 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                       <UInput v-model="form.gruposModificadores[idx]!.max" type="number" min="1" placeholder="1" class="w-full" />
                     </UFormField>
                     <UButton
+                      :aria-label="`Quitar grupo de modificadores ${idx + 1}`"
                       color="error"
                       variant="ghost"
                       icon="i-lucide-trash-2"
                       size="sm"
                       @click="removeGrupoModificador(idx)"
+                      class="size-11 justify-center"
                     />
                   </div>
                 </div>
@@ -2985,11 +2999,12 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                       <AppDateInput v-model="ajusteForm.series[idx]!.garantiaHasta" />
                     </UFormField>
                     <UButton
+                      :aria-label="`Quitar serie ${idx + 1}`"
                       color="error"
                       variant="ghost"
                       icon="i-lucide-trash-2"
                       size="sm"
-                      class="self-end"
+                      class="self-end size-11 justify-center"
                       @click="removeAjusteSerie(idx)"
                     />
                   </div>

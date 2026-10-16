@@ -332,8 +332,9 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
 
     <UTabs v-model="vista" :items="vistas" :content="false" />
 
-    <div class="flex flex-wrap gap-2">
+    <div class="flex flex-wrap items-end gap-2">
       <AppItemSelect
+        aria-label="Todos los productos"
         v-model="filtroItem"
         :catalogo="catalogoItems"
         :filtros="FILTROS_PRODUCTO"
@@ -342,14 +343,15 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
         placeholder="Todos los productos"
       />
       <USelectMenu
+        aria-label="Motivo"
         v-model="filtroMotivo"
         :items="motivosFiltroOpts"
         value-key="value"
         class="w-52"
         placeholder="Motivo"
       />
-      <AppDateInput v-model="filtroDesde" class="w-40" qa="mermas-desde" />
-      <AppDateInput v-model="filtroHasta" class="w-40" qa="mermas-hasta" />
+      <AppDateInput v-model="filtroDesde" label="Desde" class="w-40" qa="mermas-desde" />
+      <AppDateInput v-model="filtroHasta" label="Hasta" class="w-40" qa="mermas-hasta" />
     </div>
 
     <DiaNegocioNota />
@@ -456,6 +458,7 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
               : 'Dónde se pudrió — acota qué productos tienen stock ahí.'"
           >
             <USelectMenu
+              aria-label="Ubicación"
               v-model="form.ubicacionId"
               :items="ubicaciones.map(u => ({ label: u.nombre, value: u.id }))"
               @update:model-value="limpiar('ubicacionId')"
@@ -471,6 +474,7 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
             :error="errores.itemId"
           >
             <AppItemSelect
+              aria-label="Producto"
               v-model="form.itemId"
               :catalogo="catalogoItems"
               @update:model-value="limpiar('itemId')"
@@ -498,6 +502,7 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
             label="Unidad"
           >
             <USelectMenu
+              aria-label="Unidad"
               v-model="form.unidadCodigo"
               :items="unidadesOpts"
               value-key="value"
@@ -511,6 +516,7 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
             :error="errores.motivoBajaId"
           >
             <USelectMenu
+              aria-label="Motivo"
               v-model="form.motivoBajaId"
               :items="motivosFormOpts"
               @update:model-value="limpiar('motivoBajaId')"

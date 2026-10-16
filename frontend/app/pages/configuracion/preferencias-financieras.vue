@@ -501,6 +501,7 @@ function moverAbajo(index: number) {
                 </span>
                 <div class="flex gap-1">
                   <UButton
+                    :aria-label="`Subir el paso ${i + 1}`"
                     icon="i-lucide-chevron-up"
                     variant="ghost"
                     color="neutral"
@@ -509,6 +510,7 @@ function moverAbajo(index: number) {
                     @click="moverArriba(i)"
                   />
                   <UButton
+                    :aria-label="`Bajar el paso ${i + 1}`"
                     icon="i-lucide-chevron-down"
                     variant="ghost"
                     color="neutral"

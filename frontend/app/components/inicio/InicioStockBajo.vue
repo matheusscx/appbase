@@ -28,7 +28,7 @@ const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeri
     as="a"
     href="/inventario/stock-minimo?soloBajoMinimo=true"
     class="cursor-pointer transition hover:ring-2 hover:ring-primary-500"
-    @click.prevent="navigateTo('/inventario/stock-minimo?soloBajoMinimo=true')"
+    @click="seguirEnlaceInterno($event, '/inventario/stock-minimo?soloBajoMinimo=true')"
   >
     <template #header>
       <div class="flex items-center justify-between gap-2">

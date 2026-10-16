@@ -136,6 +136,7 @@ function nombreOpcion(itemId: string): string {
     <template v-else>
       <USelectMenu
         v-if="esUnico"
+        :aria-label="grupo.nombre"
         :model-value="valorSimple"
         :items="items"
         value-key="value"
@@ -146,6 +147,7 @@ function nombreOpcion(itemId: string): string {
 
       <template v-else>
         <USelectMenu
+          :aria-label="grupo.nombre"
           :model-value="valoresMultiple"
           :items="items"
           value-key="value"

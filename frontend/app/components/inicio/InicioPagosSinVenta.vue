@@ -30,7 +30,7 @@ const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeri
     as="a"
     :href="DESTINO"
     class="cursor-pointer transition hover:ring-2 hover:ring-primary-500"
-    @click.prevent="navigateTo(DESTINO)"
+    @click="seguirEnlaceInterno($event, DESTINO)"
   >
     <template #header>
       <div class="flex items-center justify-between gap-2">

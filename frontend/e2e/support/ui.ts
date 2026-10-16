@@ -52,10 +52,20 @@ export async function escribirMonto(
 }
 
 /**
+ * El disparador de un `USelectMenu`, por lo que NO cambia: `aria-haspopup="listbox"`.
+ *
+ * ⚠️ No se busca por nombre. Reka le pone `Show popup` al trigger por defecto, pero
+ * desde el lote 5 de la auditoría UX (05.19, 01.8) las pantallas le dan el suyo
+ * ("Origen", "Motivo"…), y los que aún no lo tienen conservan el de Reka: buscarlo
+ * por nombre depende de qué pantalla sea. El `USelect` nativo de Reka también trae
+ * `aria-haspopup`, pero con `role="combobox"`, y es otro control.
+ */
+export const DISPARADOR_DE_SELECTOR = 'button[aria-haspopup="listbox"]:not([role="combobox"])'
+
+/**
  * Elige una opción en un `USelectMenu` de Nuxt UI.
  *
- * ⚠️ `Show popup` es el label que Reka le pone por defecto al trigger — las
- * pantallas no le dan ninguno propio. Y espera a que el popup DESAPAREZCA, no
+ * Espera a que el popup DESAPAREZCA, no
  * solo a que el trigger muestre el nombre nuevo: al cerrarse, Reka devuelve el
  * foco al trigger, y ese salto le roba las teclas a lo que se escriba después.
  * Medido: el monto tecleado a continuación se perdía entero.
@@ -67,7 +77,9 @@ export async function elegirEnSelector(
   // Las opciones se dibujan en un portal, fuera de `raiz`: hay que buscarlas en
   // la página aunque el trigger esté acotado a un formulario o a una fila.
   const page = 'goto' in raiz ? raiz : raiz.page()
-  const trigger = raiz.getByRole('button', { name: 'Show popup' })
+  // El primero de la raíz: elegir puede dibujar otro selector debajo (el del comprobante al
+  // elegir débito en "Registrar pago"), y el trigger se vuelve a resolver al verificar.
+  const trigger = raiz.locator(DISPARADOR_DE_SELECTOR).first()
   await trigger.click()
   await page.getByRole('option', { name: nombre, exact: true }).click()
   await expect(trigger).toContainText(nombre)

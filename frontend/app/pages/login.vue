@@ -106,6 +106,8 @@ async function onGoogle() {
             placeholder="tu@email.com"
             autocomplete="email"
             :disabled="store.loading"
+            size="xl"
+            :ui="{ base: 'min-h-11' }"
             class="w-full"
           />
         </UFormField>
@@ -114,7 +116,7 @@ async function onGoogle() {
           <template #hint>
             <NuxtLink
               to="/forgot-password"
-              class="text-xs font-medium text-primary hover:underline"
+              class="inline-flex min-h-11 items-center text-xs font-medium text-primary hover:underline"
             >
               ¿Olvidaste tu contraseña?
             </NuxtLink>
@@ -125,26 +127,37 @@ async function onGoogle() {
             placeholder="••••••••"
             autocomplete="current-password"
             :disabled="store.loading"
+            size="xl"
+            :ui="{ base: 'min-h-11' }"
             class="w-full"
           >
             <template #trailing>
-              <button
-                type="button"
-                tabindex="-1"
-                class="text-muted hover:text-default transition-colors"
-                @click="showPassword = !showPassword"
-              >
-                <UIcon :name="showPassword ? 'i-lucide-eye-off' : 'i-lucide-eye'" class="w-4 h-4" />
-              </button>
+              <UButton
+                :icon="showPassword ? 'i-lucide-eye-off' : 'i-lucide-eye'"
+                color="neutral"
+                variant="link"
+                size="xl"
+                class="size-11 justify-center"
+                :aria-label="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
+                :aria-pressed="showPassword"
+                @click="() => { showPassword = !showPassword }"
+              />
             </template>
           </UInput>
         </UFormField>
 
-        <UCheckbox v-model="state.keepSession" label="Mantener sesión iniciada" :disabled="store.loading" />
+        <UCheckbox
+          v-model="state.keepSession"
+          label="Mantener sesión iniciada"
+          :disabled="store.loading"
+          :ui="{ root: 'min-h-11 items-center' }"
+        />
 
         <UButton
           type="submit"
           block
+          size="xl"
+          class="min-h-11"
           :loading="store.loading"
           :disabled="store.loading || !state.email || !state.password"
         >
@@ -158,6 +171,8 @@ async function onGoogle() {
       <!-- Google -->
       <UButton
         block
+        size="xl"
+        class="min-h-11"
         variant="outline"
         color="neutral"
         :disabled="store.loading"
@@ -180,7 +195,7 @@ async function onGoogle() {
       ¿No tienes cuenta?
       <NuxtLink
         to="/register"
-        class="text-primary hover:underline font-medium"
+        class="inline-flex min-h-11 items-center text-primary hover:underline font-medium"
       >
         Crear cuenta
       </NuxtLink>

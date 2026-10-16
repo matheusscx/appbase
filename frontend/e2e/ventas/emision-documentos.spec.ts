@@ -11,7 +11,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
-import { elegirEnSelector, entrarComo, escribirMonto, valorDeFila } from '../support/ui'
+import { DISPARADOR_DE_SELECTOR, elegirEnSelector, entrarComo, escribirMonto, valorDeFila } from '../support/ui'
 
 /**
  * Emisión por venta, en un navegador real: el número del comprobante al cobrar,
@@ -227,7 +227,7 @@ test('cobro mixto: efectivo y tarjeta con número — el documento de la máquin
 
 /** El selector de método de una fila de pago, para leerlo. */
 function selectorDe(fila: Locator): Locator {
-  return fila.locator('xpath=./div[1]').getByRole('button', { name: 'Show popup' })
+  return fila.locator('xpath=./div[1]').locator(DISPARADOR_DE_SELECTOR)
 }
 
 test('abono con tarjeta sobre una deuda ya documentada: avisa el voucher duplicado y no bloquea', async ({

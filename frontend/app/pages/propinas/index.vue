@@ -400,6 +400,7 @@ onMounted(async () => {
                             @keyup.enter="guardarMonto"
                           />
                           <UButton
+                            :aria-label="`Guardar el monto de ${garzonNombre(p.garzonId)}`"
                             size="sm"
                             variant="outline"
                             icon="i-lucide-save"

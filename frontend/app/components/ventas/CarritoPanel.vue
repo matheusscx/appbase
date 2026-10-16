@@ -179,6 +179,7 @@ watch(clienteDrawerOpen, (open) => {
           <span class="font-semibold">Venta</span>
           <UTooltip text="Vaciar todo">
             <UButton
+              aria-label="Vaciar todo"
               icon="i-lucide-eraser"
               variant="ghost"
               color="neutral"
@@ -209,6 +210,7 @@ watch(clienteDrawerOpen, (open) => {
         </div>
         <div class="flex items-center gap-1 shrink-0">
           <UButton
+            aria-label="Editar datos del cliente"
             icon="i-lucide-pencil"
             variant="ghost"
             color="neutral"
@@ -216,6 +218,7 @@ watch(clienteDrawerOpen, (open) => {
             @click="() => { clienteDrawerOpen = true }"
           />
           <UButton
+            aria-label="Quitar datos del cliente"
             v-if="!customerRequerido"
             icon="i-lucide-x"
             variant="ghost"
@@ -287,6 +290,7 @@ watch(clienteDrawerOpen, (open) => {
             @change="emit('cambiar-cantidad', index, $event)"
           />
           <UButton
+            :aria-label="`Quitar ${linea.item.nombre}`"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"

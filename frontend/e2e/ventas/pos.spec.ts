@@ -9,7 +9,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
-import { elegirEnSelector, escribirMonto, valorDeFila } from '../support/ui'
+import { DISPARADOR_DE_SELECTOR, elegirEnSelector, escribirMonto, valorDeFila } from '../support/ui'
 
 /**
  * El punto de venta de punta a punta, en un navegador de verdad: catálogo →
@@ -318,7 +318,7 @@ function filaDePago(cobro: Locator, indice: number) {
  * sobre una fila que nadie tocó —la que el modal creó sola al agregar un pago—.
  */
 function selectorDeMetodo(fila: Locator) {
-  return fila.getByRole('button', { name: 'Show popup' })
+  return fila.locator(DISPARADOR_DE_SELECTOR)
 }
 
 /** El input de monto de una fila de pago. */

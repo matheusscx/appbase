@@ -337,11 +337,13 @@ const columns: TableColumn<Ubicacion>[] = [
         <UBadge label="Local" color="primary" variant="subtle" size="xs" />
       </div>
       <UButton
+        aria-label="Renombrar el local"
         icon="i-lucide-square-pen"
         color="neutral"
         variant="ghost"
         title="Renombrar"
         @click="abrirEditarLocal"
+        class="size-11 justify-center"
       />
     </div>
 
@@ -370,6 +372,7 @@ const columns: TableColumn<Ubicacion>[] = [
       <template #activo-cell="{ row }">
         <div class="flex justify-end">
           <USwitch
+            :aria-label="`Activo: ${row.original.nombre}`"
             :model-value="row.original.activo"
             :disabled="toggling.has(row.original.id) || !!row.original.eliminadoEl"
             @update:model-value="toggleActivo(row.original)"
@@ -390,18 +393,22 @@ const columns: TableColumn<Ubicacion>[] = [
         </div>
         <div v-else class="flex justify-end gap-2">
           <UButton
+            :aria-label="`Editar ubicación ${row.original.nombre}`"
             icon="i-lucide-square-pen"
             color="neutral"
             variant="ghost"
             title="Editar"
             @click="abrirEditar(row.original)"
+            class="size-11 justify-center"
           />
           <UButton
+            :aria-label="`Eliminar ubicación ${row.original.nombre}`"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
             title="Eliminar"
             @click="pedirEliminar(row.original)"
+            class="size-11 justify-center"
           />
         </div>
       </template>

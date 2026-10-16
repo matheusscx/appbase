@@ -79,10 +79,12 @@ function presentacionLinea(linea: CarritoLinea): string {
             @change="emit('cambiar-cantidad', index, $event)"
           />
           <UButton
+            :aria-label="`Quitar ${linea.item.nombre}`"
             icon="i-lucide-trash-2"
             color="error"
             variant="ghost"
-            size="xs"
+            size="xl"
+            class="ms-2 size-11 justify-center"
             @click="emit('quitar', index)"
           />
         </li>

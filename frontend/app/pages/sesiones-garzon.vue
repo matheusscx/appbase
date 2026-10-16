@@ -279,7 +279,7 @@ onMounted(async () => {
 
         <template v-else-if="tab === 'historial'">
           <div class="space-y-3">
-            <div class="flex flex-wrap items-center gap-2">
+            <div class="flex flex-wrap items-end gap-2">
               <USelectMenu
                 v-model="filtroGarzon"
                 :items="garzonOptions"
@@ -302,8 +302,8 @@ onMounted(async () => {
                 placeholder="Estado"
                 class="w-36"
               />
-              <AppDateInput v-model="filtroDesde" class="w-44" qa="sesiones-desde" />
-              <AppDateInput v-model="filtroHasta" class="w-44" qa="sesiones-hasta" />
+              <AppDateInput v-model="filtroDesde" label="Desde" class="w-44" qa="sesiones-desde" />
+              <AppDateInput v-model="filtroHasta" label="Hasta" class="w-44" qa="sesiones-hasta" />
               <UButton
                 v-if="hayFiltrosActivos"
                 label="Limpiar filtros"

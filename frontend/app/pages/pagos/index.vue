@@ -233,6 +233,7 @@ onMounted(cargar)
           >
             Filtrado por venta
             <UButton
+              aria-label="Quitar el filtro por venta"
               icon="i-lucide-x"
               variant="link"
               color="primary"

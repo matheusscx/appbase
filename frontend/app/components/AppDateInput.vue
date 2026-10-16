@@ -10,16 +10,26 @@ const props = withDefaults(
     class?: string
     /** data-qa para E2E */
     qa?: string
+    /**
+     * Rótulo visible ("Desde", "Hasta"). Sin él, dos campos de fecha juntos son
+     * idénticos para el lector de pantalla y sus botones del calendario se llaman
+     * igual. Los que ya viven dentro de un `UFormField` no lo pasan.
+     */
+    label?: string
   }>(),
   {
     modelValue: null,
     disabled: false,
+    label: undefined,
   },
 )
 
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 
-const rootEl = ref<HTMLElement | null>(null)
+const UFormField = resolveComponent('UFormField')
+// Con `label` la raíz es un componente: el listener de QA va al elemento real.
+const rootEl = ref<HTMLElement | { $el: HTMLElement } | null>(null)
+const rootNode = () => (rootEl.value && '$el' in rootEl.value ? rootEl.value.$el : rootEl.value) as HTMLElement | null
 const internal = shallowRef(toCalendarDate(props.modelValue))
 
 watch(
@@ -56,16 +66,23 @@ function onQaSet(e: Event) {
 }
 
 onMounted(() => {
-  rootEl.value?.addEventListener('qa-set-value', onQaSet)
+  rootNode()?.addEventListener('qa-set-value', onQaSet)
 })
 
 onBeforeUnmount(() => {
-  rootEl.value?.removeEventListener('qa-set-value', onQaSet)
+  rootNode()?.removeEventListener('qa-set-value', onQaSet)
 })
 </script>
 
 <template>
-  <div ref="rootEl" :data-qa="qa" class="min-w-0" :class="props.class">
+  <component
+    :is="label ? UFormField : 'div'"
+    ref="rootEl"
+    :label="label"
+    :data-qa="qa"
+    class="min-w-0"
+    :class="props.class"
+  >
     <UInputDate
       v-model="internal"
       :disabled="disabled"
@@ -78,7 +95,7 @@ onBeforeUnmount(() => {
             variant="link"
             size="sm"
             icon="i-lucide-calendar"
-            aria-label="Seleccionar fecha"
+            :aria-label="label ? `Seleccionar la fecha ${label}` : 'Seleccionar fecha'"
             tabindex="-1"
             :disabled="disabled"
             :class="ui.trailingIcon()"
@@ -93,5 +110,5 @@ onBeforeUnmount(() => {
         </UPopover>
       </template>
     </UInputDate>
-  </div>
+  </component>
 </template>

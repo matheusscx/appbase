@@ -601,3 +601,18 @@ describe('mermas — forma de la tabla en tablet', () => {
     expect(th?.className).toContain('max-w-40')
   })
 })
+
+// Auditoría UX 05.16: dos campos de fecha idénticos ("dd - mm - aaaa") sin
+// "Desde" ni "Hasta", y el botón del calendario de cada uno se llamaba igual.
+describe('mermas — los filtros de fecha dicen cuál es cuál', () => {
+  it('rotula Desde y Hasta y distingue sus botones de calendario', async () => {
+    const wrapper = await montar()
+    // Los selectores de los filtros también dicen qué son (antes: "Show popup").
+    expect(wrapper.find('button[aria-label="Todos los productos"]').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="Motivo"]').exists()).toBe(true)
+    expect(wrapper.find('[data-qa="mermas-desde"] label').text()).toBe('Desde')
+    expect(wrapper.find('[data-qa="mermas-hasta"] label').text()).toBe('Hasta')
+    expect(wrapper.find('[data-qa="mermas-desde"] button[aria-label="Seleccionar la fecha Desde"]').exists()).toBe(true)
+    expect(wrapper.find('[data-qa="mermas-hasta"] button[aria-label="Seleccionar la fecha Hasta"]').exists()).toBe(true)
+  })
+})

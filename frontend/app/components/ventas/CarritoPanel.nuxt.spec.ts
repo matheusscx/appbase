@@ -283,3 +283,19 @@ describe('CarritoPanel — boleta sobre el umbral de la Res. Ex. SII 44/2025', (
     expect(cobrar(wrapper).props('disabled')).toBe(false)
   })
 })
+
+// Auditoría UX 01.8: los botones de solo ícono del carrito (el borrador "Vaciar
+// todo" y un tacho por línea) se anunciaban como "botón" a secas. El
+// `UTooltip` no da nombre accesible.
+describe('CarritoPanel — botones de ícono con nombre', () => {
+  it('"Vaciar todo" y un "Quitar <producto>" por línea', async () => {
+    const wrapper = await montar({
+      lineas: [linea('item-0', 'Papas fritas'), linea('item-1', 'Bebida')],
+      resultado: null,
+      vigente: false,
+    })
+    expect(wrapper.find('button[aria-label="Vaciar todo"]').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="Quitar Papas fritas"]').exists()).toBe(true)
+    expect(wrapper.find('button[aria-label="Quitar Bebida"]').exists()).toBe(true)
+  })
+})

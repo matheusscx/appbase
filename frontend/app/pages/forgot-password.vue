@@ -52,7 +52,7 @@ async function pedir() {
     :subtitulo="subtitulo"
     icono="i-lucide-key-round"
   >
-    <UButton v-if="enviado" to="/login" block variant="subtle">
+    <UButton v-if="enviado" to="/login" block size="xl" class="min-h-11" variant="subtle">
       Volver al inicio de sesión
     </UButton>
 
@@ -63,16 +63,18 @@ async function pedir() {
           type="email"
           autofocus
           :maxlength="100"
+          size="xl"
+          :ui="{ base: 'min-h-11' }"
           class="w-full"
         />
       </UFormField>
       <p v-if="error" class="text-sm text-error" role="alert">
         {{ error }}
       </p>
-      <UButton type="submit" block :loading="enviando" :disabled="!correo">
+      <UButton type="submit" block size="xl" class="min-h-11" :loading="enviando" :disabled="!correo">
         Mándame el link
       </UButton>
-      <UButton to="/login" block variant="ghost">
+      <UButton to="/login" block size="xl" class="min-h-11" variant="ghost">
         Volver
       </UButton>
     </UForm>

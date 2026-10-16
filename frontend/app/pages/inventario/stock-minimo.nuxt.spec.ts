@@ -281,3 +281,20 @@ describe('stock mínimo — con Inventario:Crear', () => {
     wrapper.unmount()
   })
 })
+
+// Auditoría UX 05.18: el campo de mínimo medía 96×28 y "Trasladar desde…" 228×24.
+describe('stock mínimo — tamaño táctil', () => {
+  const M44 = /(^|\s)(min-h-11|size-11|h-11)(\s|$)/
+
+  it('el campo del mínimo, "Trasladar desde…" y el interruptor miden 44 px', async () => {
+    permisos = ['Inventario:Leer', 'Inventario:Actualizar', 'Inventario:Crear']
+    const wrapper = await montar()
+
+    expect(wrapper.find('[data-qa^="minimo-item-"]').classes().join(' ')).toMatch(M44)
+    expect(wrapper.find('[data-qa="trasladar"]').classes().join(' ')).toMatch(M44)
+    // El área tocable del interruptor es su fila entera (control + rótulo).
+    const fila = wrapper.find('[data-qa="filtro-bajo-minimo"]').element.closest('[data-slot="root"]')
+    expect(fila?.className).toMatch(M44)
+    wrapper.unmount()
+  })
+})

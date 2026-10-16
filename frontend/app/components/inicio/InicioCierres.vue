@@ -33,7 +33,7 @@ function claseMonto(val: string | null): string {
     as="a"
     href="/cajas"
     class="cursor-pointer transition hover:ring-2 hover:ring-primary-500"
-    @click.prevent="navigateTo('/cajas')"
+    @click="seguirEnlaceInterno($event, '/cajas')"
   >
     <template #header>
       <div class="flex items-center justify-between gap-2">

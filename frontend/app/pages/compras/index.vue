@@ -205,9 +205,15 @@ const columns = computed<TableColumn<CompraListItem>[]>(() => [
             </span>
           </template>
           <template #folio-cell="{ row }">
-            <span class="text-sm">
+            <!-- Un enlace de verdad (Ctrl+clic, lector de pantalla); `.stop` para que
+                 la fila no navegue una segunda vez. -->
+            <NuxtLink
+              :to="`/compras/${row.original.id}`"
+              class="text-sm text-primary hover:underline"
+              @click.stop
+            >
               {{ row.original.tipoDocumentoNombre }}<template v-if="row.original.folio"> {{ row.original.folio }}</template>
-            </span>
+            </NuxtLink>
           </template>
           <template #ubicacionNombre-cell="{ row }">
             <span class="text-sm text-muted">{{ row.original.ubicacionNombre || '—' }}</span>

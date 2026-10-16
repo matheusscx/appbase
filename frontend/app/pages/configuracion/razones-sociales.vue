@@ -264,7 +264,9 @@ const columns: TableColumn<RazonSocial>[] = [
           <div class="flex justify-end">
             <button
               type="button"
-              class="p-1 rounded transition-colors hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+              class="inline-flex size-11 items-center justify-center rounded transition-colors hover:bg-muted disabled:opacity-40 disabled:cursor-not-allowed"
+              :aria-label="`Razón social preferida: ${row.original.nombre}`"
+              :aria-pressed="!!row.original.preferida"
               :disabled="toggling.has(row.original.id)"
               @click="togglePreferida(row.original)"
             >
@@ -280,6 +282,7 @@ const columns: TableColumn<RazonSocial>[] = [
         <template #habilitado-cell="{ row }">
           <div class="flex justify-end">
             <USwitch
+              :aria-label="`Habilitada: ${row.original.nombre}`"
               :model-value="row.original.habilitado"
               :disabled="toggling.has(row.original.id)"
               @update:model-value="toggleHabilitado(row.original)"
@@ -290,16 +293,20 @@ const columns: TableColumn<RazonSocial>[] = [
         <template #acciones-cell="{ row }">
           <div class="flex justify-end gap-2">
             <UButton
+              :aria-label="`Editar razón social ${row.original.nombre}`"
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
               @click="abrirEditar(row.original)"
+              class="size-11 justify-center"
             />
             <UButton
+              :aria-label="`Eliminar razón social ${row.original.nombre}`"
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
               @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
+              class="size-11 justify-center"
             />
           </div>
         </template>

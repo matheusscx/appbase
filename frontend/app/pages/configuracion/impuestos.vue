@@ -390,6 +390,7 @@ const columns: TableColumn<Impuesto>[] = [
         <template #activo-cell="{ row }">
           <div class="flex justify-end">
             <USwitch
+              :aria-label="`Activo: ${row.original.nombre}`"
               v-if="row.original.origen === 'personalizado'"
               :model-value="row.original.activo"
               :disabled="toggling.has(row.original.id) || !!row.original.eliminadoEl"
@@ -419,18 +420,22 @@ const columns: TableColumn<Impuesto>[] = [
           <div v-else class="flex justify-end gap-2">
             <template v-if="row.original.origen === 'personalizado'">
               <UButton
+                :aria-label="`Editar impuesto ${row.original.nombre}`"
                 icon="i-lucide-square-pen"
                 color="neutral"
                 variant="ghost"
                 title="Editar"
                 @click="abrirEditar(row.original)"
+                class="size-11 justify-center"
               />
               <UButton
+                :aria-label="`Eliminar impuesto ${row.original.nombre}`"
                 icon="i-lucide-trash-2"
                 color="error"
                 variant="ghost"
                 title="Eliminar"
                 @click="pedirEliminar(row.original)"
+                class="size-11 justify-center"
               />
             </template>
             <span v-else class="text-xs text-muted">Catálogo oficial</span>

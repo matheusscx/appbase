@@ -158,7 +158,7 @@ const columns: TableColumn<OrdenRow>[] = [
         />
 
         <!-- Filtros -->
-        <div class="flex flex-wrap items-center gap-3">
+        <div class="flex flex-wrap items-end gap-3">
           <UInput
             v-model="busqueda"
             icon="i-lucide-search"
@@ -178,12 +178,14 @@ const columns: TableColumn<OrdenRow>[] = [
             class="w-36"
           />
           <AppDateInput
+            label="Desde"
             :model-value="filtroFechaDesde"
             class="w-44"
             qa="ordenes-desde"
             @update:model-value="filtroFechaDesde = $event || undefined"
           />
           <AppDateInput
+            label="Hasta"
             :model-value="filtroFechaHasta"
             class="w-44"
             qa="ordenes-hasta"

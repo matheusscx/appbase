@@ -319,6 +319,7 @@ const columns: TableColumn<Categoria>[] = [
         <template #activo-cell="{ row }">
           <div class="flex justify-end">
             <USwitch
+              :aria-label="`Activo: ${row.original.nombre}`"
               :model-value="row.original.activo"
               :disabled="toggling.has(row.original.id) || !!row.original.eliminadoEl"
               @update:model-value="toggleActivo(row.original)"
@@ -339,18 +340,22 @@ const columns: TableColumn<Categoria>[] = [
           </div>
           <div v-else class="flex justify-end gap-2">
             <UButton
+              :aria-label="`Editar categoría ${row.original.nombre}`"
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
               title="Editar"
               @click="abrirEditar(row.original)"
+              class="size-11 justify-center"
             />
             <UButton
+              :aria-label="`Eliminar categoría ${row.original.nombre}`"
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
               title="Eliminar"
               @click="() => { confirmDeleteId = row.original.id; confirmModalOpen = true }"
+              class="size-11 justify-center"
             />
           </div>
         </template>

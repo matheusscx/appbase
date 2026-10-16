@@ -904,6 +904,7 @@ const columns: TableColumn<Regla>[] = [
         <template #activo-cell="{ row }">
           <div class="flex justify-end">
             <USwitch
+              :aria-label="`Activo: ${row.original.nombre}`"
               :model-value="row.original.activo"
               :disabled="toggling.has(row.original.id) || !!row.original.eliminadoEl"
               @update:model-value="toggleActivo(row.original)"
@@ -924,18 +925,22 @@ const columns: TableColumn<Regla>[] = [
           </div>
           <div v-else class="flex justify-end gap-2">
             <UButton
+              :aria-label="`Editar recargo ${row.original.nombre}`"
               icon="i-lucide-square-pen"
               color="neutral"
               variant="ghost"
               title="Editar"
               @click="abrirEditar(row.original)"
+              class="size-11 justify-center"
             />
             <UButton
+              :aria-label="`Eliminar recargo ${row.original.nombre}`"
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
               title="Eliminar"
               @click="pedirEliminar(row.original)"
+              class="size-11 justify-center"
             />
           </div>
         </template>
@@ -1115,11 +1120,13 @@ const columns: TableColumn<Regla>[] = [
                     </td>
                     <td class="py-1">
                       <UButton
+                        :aria-label="`Quitar tramo ${i + 1}`"
                         icon="i-lucide-trash-2"
                         color="error"
                         variant="ghost"
                         size="xs"
                         @click="eliminarTramo(i)"
+                        class="size-11 justify-center"
                       />
                     </td>
                   </tr>

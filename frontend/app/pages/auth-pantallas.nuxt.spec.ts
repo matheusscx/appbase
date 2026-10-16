@@ -129,3 +129,36 @@ describe('login y registro — cada uno con su aviso de error', () => {
     expect(login.text()).toContain('No pudimos entrar a tu empresa')
   })
 })
+
+// Auditoría UX 08.8 y 08.9. El ojo de la contraseña era un `<button tabindex="-1">`
+// de 16 px sin nombre: no se llegaba con Tab y el lector no lo anunciaba. Y las
+// pantallas de ingreso medían 32 px, bajo los 44 del dedo en la tablet del local.
+const CUARENTA_Y_CUATRO = /(^|\s)(min-h-11|h-11|size-11)(\s|$)/
+
+describe.each([
+  ['login', Login],
+  ['registro', Register],
+])('%s — mostrar la contraseña y tamaño táctil', (_nombre, Pantalla) => {
+  it('el ojo es un botón con nombre, alcanzable con Tab, que dice su estado', async () => {
+    const w = await mountSuspended(Pantalla)
+    const ojo = w.find('button[aria-label="Mostrar contraseña"]')
+    expect(ojo.exists()).toBe(true)
+    expect(ojo.attributes('tabindex')).not.toBe('-1')
+    expect(ojo.attributes('aria-pressed')).toBe('false')
+    expect(w.find('input[autocomplete$="password"]').attributes('type')).toBe('password')
+
+    await ojo.trigger('click')
+    const abierto = w.find('button[aria-label="Ocultar contraseña"]')
+    expect(abierto.exists()).toBe(true)
+    expect(abierto.attributes('aria-pressed')).toBe('true')
+    expect(w.find('input[autocomplete$="password"]').attributes('type')).toBe('text')
+  })
+
+  it('los campos y el botón de enviar miden 44 px', async () => {
+    const w = await mountSuspended(Pantalla)
+    for (const input of w.findAll('input:not([type="checkbox"])')) {
+      expect(input.classes().join(' '), `campo ${input.attributes('placeholder')}`).toMatch(CUARENTA_Y_CUATRO)
+    }
+    expect(w.find('button[type="submit"]').classes().join(' ')).toMatch(CUARENTA_Y_CUATRO)
+  })
+})

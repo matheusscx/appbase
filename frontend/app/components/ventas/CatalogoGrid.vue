@@ -104,12 +104,17 @@ function onAgregar(item: ItemCatalogo) {
           class="h-full transition"
           :class="[
             puedeAgregar(item) ? 'cursor-pointer hover:ring-2 hover:ring-primary' : 'cursor-not-allowed',
+            'outline-none focus-visible:ring-2 focus-visible:ring-primary',
             sinStockVisual(item) ? 'opacity-50' : '',
           ]"
           :ui="{ body: 'h-full p-3 sm:p-4' }"
+          role="button"
+          tabindex="0"
           :aria-disabled="!puedeAgregar(item)"
           :data-qa="`item-catalogo-${item.id}`"
           @click="onAgregar(item)"
+          @keydown.enter.self.prevent="!$event.repeat && onAgregar(item)"
+          @keydown.space.self.prevent="!$event.repeat && onAgregar(item)"
         >
           <div class="flex flex-col h-full gap-1">
             <span class="font-medium text-sm text-default truncate shrink-0">{{ item.nombre }}</span>

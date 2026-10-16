@@ -584,6 +584,7 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
               <div class="grid grid-cols-2 gap-4">
                 <UFormField label="Origen" required>
                   <USelectMenu
+                    aria-label="Origen"
                     v-model="form.origenId"
                     :items="origenOpts"
                     value-key="value"
@@ -593,6 +594,7 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                 </UFormField>
                 <UFormField label="Destino" required>
                   <USelectMenu
+                    aria-label="Destino"
                     v-model="form.destinoId"
                     :items="destinoOpts"
                     value-key="value"
@@ -612,6 +614,7 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
 
               <UFormField label="Motivo" required>
                 <USelectMenu
+                  aria-label="Motivo"
                   v-model="form.motivoTrasladoId"
                   :items="motivoOpts"
                   value-key="value"
@@ -633,7 +636,8 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                 <div class="flex items-center justify-between">
                   <span class="text-sm font-medium text-default">Líneas</span>
                   <UButton
-                    size="xs"
+                    size="md"
+                    class="min-h-11"
                     variant="ghost"
                     icon="i-lucide-plus"
                     :disabled="!form.origenId"
@@ -655,6 +659,7 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                   <div class="flex items-start gap-3">
                     <UFormField label="Producto" class="flex-1">
                       <AppItemSelect
+                        aria-label="Producto"
                         :model-value="linea.itemId"
                         :catalogo="catalogoItems"
                         :filtros="FILTROS_PRODUCTO"
@@ -665,12 +670,13 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                       />
                     </UFormField>
                     <UButton
+                      aria-label="Quitar línea del traslado"
                       v-if="lineas.length > 1"
                       color="error"
                       variant="ghost"
                       icon="i-lucide-trash-2"
-                      size="sm"
-                      class="mt-6"
+                      size="xl"
+                      class="mt-6 ms-2 size-11 justify-center"
                       @click="quitarLinea(linea.key)"
                     />
                   </div>
@@ -729,6 +735,7 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                       <template v-else-if="linea.modoInventario === 'lote'">
                         <UFormField label="Lote" required :error="errorDeLinea(linea, 'lote')">
                           <USelectMenu
+                            aria-label="Lote"
                             :model-value="linea.loteId"
                             :items="linea.lotesEnOrigen.map(l => ({ label: `${l.codigoLote} (disp. ${l.cantidadEnOrigen})`, value: l.id }))"
                             value-key="value"

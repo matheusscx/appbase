@@ -127,9 +127,9 @@ function onSelectFila(_e: Event, row: Row<TendenciaDescuadres>) {
           ese −500 aparece en <strong>Otros medios</strong>. Van separadas a propósito
           — el robo vive en el efectivo, pero ningún descuadre se esconde.
         </p>
-        <div class="flex flex-wrap items-center gap-2">
-          <AppDateInput v-model="filtroDesde" class="w-40" qa="tendencia-desde" />
-          <AppDateInput v-model="filtroHasta" class="w-40" qa="tendencia-hasta" />
+        <div class="flex flex-wrap items-end gap-2">
+          <AppDateInput v-model="filtroDesde" label="Desde" class="w-40" qa="tendencia-desde" />
+          <AppDateInput v-model="filtroHasta" label="Hasta" class="w-40" qa="tendencia-hasta" />
         </div>
 
         <DiaNegocioNota />
