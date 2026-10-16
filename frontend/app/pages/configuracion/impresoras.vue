@@ -46,7 +46,12 @@ function resetDrawer() {
   form.value = emptyForm()
 }
 
-watch(drawerOpen, (open) => { if (!open) resetDrawer() })
+watch(drawerOpen, (open) => {
+  if (!open) {
+    resetDrawer()
+    limpiar()
+  }
+})
 
 function rolLabel(rol: RolImpresora) {
   return rolOptions.find(o => o.value === rol)?.label ?? rol
@@ -119,7 +124,18 @@ function abrirEditar(imp: Impresora) {
   drawerOpen.value = true
 }
 
+const { errores, marcar, limpiar } = useErroresCampo()
+
 async function guardar() {
+  const faltan: Record<string, string> = {}
+  const f = form.value
+  if (!f.nombre.trim()) faltan.nombre = 'Escribe el nombre'
+  if (f.tipoConexion === 'red') {
+    if (!f.host.trim()) faltan.host = 'Escribe la dirección IP o el nombre de la impresora'
+    if (!String(f.puerto).trim()) faltan.puerto = 'Escribe el puerto, por ejemplo 9100'
+  }
+  else if (!f.nombreCola.trim()) faltan.nombreCola = 'Escribe el nombre de la cola, como figura en el sistema'
+  if (marcar(faltan)) return
   saving.value = true
   try {
     const body = {
@@ -141,6 +157,7 @@ async function guardar() {
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar la impresora'), color: 'error' })
+    marcar(apiFieldErrors(e))
   }
   finally {
     saving.value = false
@@ -370,8 +387,8 @@ const columns: TableColumn<Impresora>[] = [
 
       <template #body>
         <UForm id="impresora-form" :state="form" class="space-y-4" @submit="guardar">
-          <UFormField label="Nombre" required>
-            <UInput v-model="form.nombre" placeholder="Cocina" autofocus />
+          <UFormField label="Nombre" required :error="errores.nombre">
+            <UInput v-model="form.nombre" placeholder="Cocina" autofocus @update:model-value="limpiar('nombre')" />
           </UFormField>
           <UFormField label="Rol">
             <USelectMenu v-model="form.rol" :items="rolOptions" value-key="value" />
@@ -381,16 +398,16 @@ const columns: TableColumn<Impresora>[] = [
           </UFormField>
 
           <template v-if="form.tipoConexion === 'red'">
-            <UFormField label="Host / IP" required>
-              <UInput v-model="form.host" placeholder="192.168.1.50" />
+            <UFormField label="Host / IP" required :error="errores.host">
+              <UInput v-model="form.host" placeholder="192.168.1.50" @update:model-value="limpiar('host')" />
             </UFormField>
-            <UFormField label="Puerto" required>
-              <UInput v-model="form.puerto" inputmode="decimal" placeholder="9100" />
+            <UFormField label="Puerto" required :error="errores.puerto">
+              <UInput v-model="form.puerto" inputmode="decimal" placeholder="9100" @update:model-value="limpiar('puerto')" />
             </UFormField>
           </template>
           <template v-else>
-            <UFormField label="Nombre de la cola" required>
-              <UInput v-model="form.nombreCola" placeholder="EPSON_TM_T20" />
+            <UFormField label="Nombre de la cola" required :error="errores.nombreCola">
+              <UInput v-model="form.nombreCola" placeholder="EPSON_TM_T20" @update:model-value="limpiar('nombreCola')" />
             </UFormField>
           </template>
 

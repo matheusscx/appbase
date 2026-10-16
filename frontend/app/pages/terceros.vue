@@ -83,7 +83,10 @@ function resetDrawer() {
 }
 
 watch(drawerOpen, (open) => {
-  if (!open) resetDrawer()
+  if (!open) {
+    resetDrawer()
+    limpiar()
+  }
 })
 
 function tipoLabel(value: string) {
@@ -164,7 +167,16 @@ function abrirEditar(tercero: Tercero) {
   drawerOpen.value = true
 }
 
+const { errores, marcar, limpiar } = useErroresCampo()
+const CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+
 async function guardar() {
+  const faltan: Record<string, string> = {}
+  if (!form.value.nombre.trim()) faltan.nombre = 'Escribe el nombre'
+  if (form.value.correo.trim() && !CORREO.test(form.value.correo.trim())) {
+    faltan.correo = 'Escribe un correo válido, por ejemplo contacto@empresa.cl'
+  }
+  if (marcar(faltan)) return
   saving.value = true
   try {
     const body = {
@@ -427,6 +439,7 @@ const columns: TableColumn<Tercero>[] = [
               id="tercero-form"
               :state="form"
               class="space-y-4"
+              novalidate
               @submit="guardar"
             >
               <UFormField label="Tipo" required>
@@ -436,9 +449,10 @@ const columns: TableColumn<Tercero>[] = [
                   value-key="value"
                 />
               </UFormField>
-              <UFormField label="Nombre" required>
+              <UFormField label="Nombre" required :error="errores.nombre">
                 <UInput
                   v-model="form.nombre"
+                  @update:model-value="limpiar('nombre')"
                   placeholder="Distribuidora Andina"
                   autofocus
                 />
@@ -452,8 +466,8 @@ const columns: TableColumn<Tercero>[] = [
               <UFormField label="RUT fiscal">
                 <UInput v-model="form.rutFiscal" placeholder="76.123.456-7" />
               </UFormField>
-              <UFormField label="Correo">
-                <UInput v-model="form.correo" type="email" placeholder="contacto@empresa.cl" />
+              <UFormField label="Correo" :error="errores.correo">
+                <UInput v-model="form.correo" type="email" placeholder="contacto@empresa.cl" @update:model-value="limpiar('correo')" />
               </UFormField>
               <UFormField label="Teléfono">
                 <UInput v-model="form.telefono" placeholder="+56 9 1234 5678" />

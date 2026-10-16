@@ -77,8 +77,11 @@ function emptyForm() {
 }
 const form = ref(emptyForm())
 
+const { errores, marcar, limpiar } = useErroresCampo()
+
 function abrirCrear() {
   form.value = emptyForm()
+  limpiar()
   // Con una sola ubicación el selector no se dibuja (`docs/features/bodegas-y-traslados.md`,
   // «Frontend»): el cliente completa el local directamente.
   if (!hayBodegas.value && local.value) {
@@ -88,14 +91,10 @@ function abrirCrear() {
 }
 
 async function crear() {
-  if (!form.value.itemIds.length) {
-    toast.add({ title: 'Selecciona al menos un producto', color: 'error' })
-    return
-  }
-  if (!form.value.ubicacionId) {
-    toast.add({ title: 'Selecciona la ubicación', color: 'error' })
-    return
-  }
+  const faltan: Record<string, string> = {}
+  if (!form.value.ubicacionId) faltan.ubicacionId = 'Elige la ubicación'
+  if (!form.value.itemIds.length) faltan.itemIds = 'Elige al menos un producto'
+  if (marcar(faltan)) return
   creando.value = true
   try {
     const body: Record<string, unknown> = {
@@ -236,10 +235,12 @@ const columns: TableColumn<RecuentoListItem>[] = [
                 v-if="hayBodegas"
                 label="Ubicación"
                 required
+                :error="errores.ubicacionId"
                 help="Dónde se cuenta. No se puede cambiar después de crear la sesión."
               >
                 <USelectMenu
                   v-model="form.ubicacionId"
+                  @update:model-value="limpiar('ubicacionId')"
                   :items="ubicaciones.map(u => ({ label: u.nombre, value: u.id }))"
                   value-key="value"
                   placeholder="Selecciona la ubicación"
@@ -250,10 +251,12 @@ const columns: TableColumn<RecuentoListItem>[] = [
               <UFormField
                 label="Productos"
                 required
+                :error="errores.itemIds"
                 help="Solo productos por cantidad — series y lotes no admiten recuento en esta versión."
               >
                 <AppItemSelect
                   v-model="form.itemIds"
+                  @update:model-value="limpiar('itemIds')"
                   :catalogo="catalogoItems"
                   :filtros="FILTROS_RECUENTO"
                   multiple

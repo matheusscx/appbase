@@ -148,7 +148,25 @@ const altaOpen = ref(false)
 const creando = ref(false)
 const alta = ref({ nombre: '', apellido: '', correo: '', rolIds: [] as string[] })
 
+const CORREO = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const correoTocado = ref(false)
+const correoValido = computed(() => CORREO.test(alta.value.correo.trim()))
+const errorCorreo = computed(() =>
+  correoTocado.value && alta.value.correo.trim() && !correoValido.value
+    ? 'Escribe un correo válido, por ejemplo ana@tulocal.cl'
+    : undefined,
+)
+/** Por qué «Crear» está apagado: un botón gris sin motivo no dice qué hacer. */
+const faltaAlta = computed(() => {
+  if (!alta.value.nombre.trim()) return 'Falta el nombre'
+  if (!alta.value.correo.trim()) return 'Falta el correo'
+  if (!correoValido.value) return 'Falta escribir un correo válido'
+  if (alta.value.rolIds.length === 0) return 'Falta elegir al menos un rol'
+  return ''
+})
+
 function abrirAlta() {
+  correoTocado.value = false
   alta.value = { nombre: '', apellido: '', correo: '', rolIds: [] }
   altaOpen.value = true
 }
@@ -368,15 +386,15 @@ const columns: TableColumn<Member>[] = [
 
     <UModal v-model:open="altaOpen" title="Nuevo usuario">
       <template #body>
-        <UForm id="alta-usuario-form" :state="alta" class="space-y-4" @submit="crearUsuario">
+        <UForm id="alta-usuario-form" :state="alta" class="space-y-4" novalidate @submit="crearUsuario">
           <UFormField label="Nombre" required>
             <UInput v-model="alta.nombre" :maxlength="100" autofocus class="w-full" />
           </UFormField>
           <UFormField label="Apellido">
             <UInput v-model="alta.apellido" :maxlength="100" class="w-full" />
           </UFormField>
-          <UFormField label="Correo" required>
-            <UInput v-model="alta.correo" type="email" :maxlength="100" class="w-full" />
+          <UFormField label="Correo" required :error="errorCorreo">
+            <UInput v-model="alta.correo" type="email" :maxlength="100" class="w-full" @blur="correoTocado = true" />
           </UFormField>
           <!-- Obligatorio: un usuario sin rol entra y no ve nada. -->
           <UFormField label="Roles" required>
@@ -401,6 +419,9 @@ const columns: TableColumn<Member>[] = [
       </template>
       <template #footer>
         <AppModalFooter>
+          <p v-if="faltaAlta" class="mr-auto text-sm text-muted" data-qa="alta-falta">
+            {{ faltaAlta }}
+          </p>
           <UButton color="neutral" variant="ghost" @click="() => { altaOpen = false }">
             Cancelar
           </UButton>
@@ -408,7 +429,7 @@ const columns: TableColumn<Member>[] = [
             type="submit"
             form="alta-usuario-form"
             :loading="creando"
-            :disabled="!alta.nombre || !alta.correo || alta.rolIds.length === 0"
+            :disabled="!!faltaAlta"
           >
             Crear
           </UButton>

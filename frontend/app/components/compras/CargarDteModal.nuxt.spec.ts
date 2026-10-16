@@ -308,3 +308,28 @@ describe('CargarDteModal — proveedor ambiguo o ausente', () => {
     wrapper.unmount()
   })
 })
+
+// 06.15: el rechazo del validador no llega crudo, y se puede elegir otro archivo sin reabrir.
+describe('CargarDteModal — RUT del emisor con formato inválido', () => {
+  it('dice que el RUT del archivo no es válido y ofrece "Elegir otro archivo"', async () => {
+    lecturaRechaza = {
+      status: 400,
+      message: 'emisorRut must match /^[0-9.\\s]{1,12}-?[0-9kK]\\s*$/ regular expression',
+    }
+    const wrapper = await montar()
+    await subir(wrapper, archivo(xmlDte()))
+
+    expect(bodyText()).toContain('El RUT del emisor del archivo no es válido')
+    expect(bodyText()).not.toContain('regular expression')
+
+    const otro = bodyFind('[data-qa="cargar-dte-otro-archivo"]') as HTMLButtonElement | null
+    expect(otro, 'botón Elegir otro archivo').toBeTruthy()
+    lecturaRechaza = null
+    otro!.click()
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(wrapper.findComponent({ name: 'UFileUpload' }).exists()).toBe(true)
+    expect(bodyFind('[data-qa="cargar-dte-bloqueo"]')).toBeNull()
+    wrapper.unmount()
+  })
+})

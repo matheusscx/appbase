@@ -10,7 +10,10 @@ const form = reactive({
   telefono: authStore.user?.telefono ?? '',
 })
 
+const { errores, marcar, limpiar } = useErroresCampo()
+
 async function guardar() {
+  if (marcar(form.nombre.trim() ? {} : { nombre: 'Escribe tu nombre' })) return
   loading.value = true
   try {
     const updated = await useApiFetch<{ nombre: string; apellido: string | null; telefono: string | null }>(
@@ -22,6 +25,7 @@ async function guardar() {
   } catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al guardar')
     toast.add({ title: msg, color: 'error' })
+    marcar(apiFieldErrors(e))
   } finally {
     loading.value = false
   }
@@ -39,8 +43,8 @@ async function guardar() {
 
     <UForm :state="form" class="space-y-4" @submit="guardar">
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        <UFormField label="Nombre" required>
-          <UInput v-model="form.nombre" placeholder="Tu nombre" />
+        <UFormField label="Nombre" required :error="errores.nombre">
+          <UInput v-model="form.nombre" placeholder="Tu nombre" @update:model-value="limpiar('nombre')" />
         </UFormField>
 
         <UFormField label="Apellido">

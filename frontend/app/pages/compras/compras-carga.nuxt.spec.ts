@@ -18,6 +18,7 @@ import { leerDte } from '~/composables/useDte'
 import CompraCarga from './[id].vue'
 
 const FACTURA = { id: 'tipo-33', nombre: 'Factura', codigo: '33', requiereFolio: true }
+const FACTURA_TOTAL = { id: 'tipo-33t', nombre: 'Factura con total', codigo: '33', requiereFolio: true, totalDocumento: 'obligatorio' }
 const SIN_DOC = { id: 'tipo-sin', nombre: 'Sin documento', codigo: null, requiereFolio: false }
 const PROVEEDOR = { id: 'prov-1', nombre: 'Distribuidora X', rut: null }
 const PROVEEDOR2 = { id: 'prov-2', nombre: 'Distribuidora Y', rut: null }
@@ -62,7 +63,9 @@ let razaRemonte: {
  * hace que el `POST .../confirmar` rechace con un 400, como un stock
  * insuficiente real.
  */
-let confirmarFalla = false
+let confirmarFalla: boolean | string[] = false
+/** Mensajes con los que el próximo `POST /compras` (guardar) rechaza con 400. */
+let guardarFalla: string[] | null = null
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -133,7 +136,7 @@ mockNuxtImport('useApiFetch', () => {
     if (opts?.method === 'POST' && url.endsWith('/confirmar')) {
       enviados.push({ method: `POST ${url.split('/api').pop()}` })
       if (confirmarFalla) {
-        return Promise.reject({ status: 400, statusCode: 400, data: { message: 'Sin stock suficiente' } })
+        return Promise.reject({ status: 400, statusCode: 400, data: { message: Array.isArray(confirmarFalla) ? confirmarFalla : 'Sin stock suficiente' } })
       }
       if (razaRemonte) {
         const raza = razaRemonte
@@ -158,10 +161,11 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (opts?.method === 'POST' && url.endsWith('/compras')) {
       enviados.push({ method: opts.method, body: opts.body })
+      if (guardarFalla) return Promise.reject({ status: 400, statusCode: 400, data: { message: guardarFalla } })
       return Promise.resolve({
         id: 'compra-1', estado: 'borrador', faltaCosto: false, fechaDocumento: '2026-09-15',
         proveedorId: PROVEEDOR.id, proveedorNombre: PROVEEDOR.nombre,
-        tipoDocumentoCompraId: FACTURA.id, tipoDocumentoNombre: 'Factura', folio: '4521',
+        tipoDocumentoCompraId: (opts.body?.tipoDocumentoCompraId as string | undefined) ?? FACTURA.id, tipoDocumentoNombre: 'Factura', folio: '4521',
         ubicacionId: BODEGA.id, ubicacionNombre: BODEGA.nombre, observacion: null,
         descuentoTotal: null, total: null, lineas: [],
       })
@@ -183,7 +187,7 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/compras/presentaciones')) {
       return Promise.resolve(url.includes(`proveedorId=${PROVEEDOR.id}`) ? [CAJA] : [])
     }
-    if (url.includes('/compras/tipos-documento')) return Promise.resolve([FACTURA, SIN_DOC])
+    if (url.includes('/compras/tipos-documento')) return Promise.resolve([FACTURA, SIN_DOC, FACTURA_TOTAL])
     if (url.includes('/compras/proveedores')) return Promise.resolve([PROVEEDOR, PROVEEDOR2, PROVEEDOR_ANDINA])
     if (url.includes('/ubicaciones')) return Promise.resolve([BODEGA])
     // La lista de Compras, no `/items`: el encargado no tiene permiso de Ítems.
@@ -301,6 +305,7 @@ describe('compras/[id] — carga del borrador', () => {
     routeId = 'nueva'
     razaRemonte = null
     confirmarFalla = false
+    guardarFalla = null
   })
 
   it('muestra el total de la línea al lado, para comparar con el papel', async () => {
@@ -514,6 +519,74 @@ describe('compras/[id] — carga del borrador', () => {
     // `wrapper` ya se desmontó dentro del espía de `replace`, arriba.
     wrapperRemontado!.unmount()
     razaRemonte = null
+  })
+
+  // 06.5: el botón apagado dice qué falta (sin cambiar cuándo se habilita).
+  it('"Guardar borrador" apagado dice qué campo falta, en el orden del formulario', async () => {
+    const wrapper = await montar()
+    const falta = () => wrapper.find('[data-qa="compra-falta"]')
+    expect(falta().text()).toBe('Falta elegir el proveedor')
+
+    await emitir(selectConOpcion(wrapper, PROVEEDOR.id), PROVEEDOR.id)
+    expect(falta().text()).toBe('Falta elegir el tipo de documento')
+
+    await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
+    expect(falta().text()).toBe('Falta el folio')
+
+    await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
+    expect(falta().text()).toBe('Falta elegir adónde entra la mercadería')
+
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+    // Guardar ya se puede; Confirmar todavía no tiene líneas.
+    expect(falta().text()).toBe('Para confirmar la recepción falta una línea con producto y cantidad')
+
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+    expect(falta().exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  // 06.3: el rechazo del servidor se marca en el campo que lo causó.
+  it('"Falta el total del documento" del servidor se marca junto al campo Total', async () => {
+    confirmarFalla = ['Falta el total del documento']
+    const wrapper = await montar()
+    await emitir(selectConOpcion(wrapper, PROVEEDOR.id), PROVEEDOR.id)
+    await emitir(selectConOpcion(wrapper, FACTURA_TOTAL.id), FACTURA_TOTAL.id)
+    await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+
+    await wrapper.find('[data-qa="compra-confirmar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    ;(document.body.querySelector('[data-qa="compra-confirmar-si"]') as HTMLButtonElement).click()
+    await new Promise(r => setTimeout(r, 30))
+
+    expect(avisos.map(a => a.title)).toContain('Falta el total del documento')
+    expect(wrapper.find('[data-qa="compra-total-documento-campo"] [data-slot="error"]').text())
+      .toBe('Falta el total del documento')
+    wrapper.unmount()
+    confirmarFalla = false
+  })
+
+  // 06.2: el aviso por línea sale en español y la cantidad queda marcada.
+  it('"lineas.0.cantidad debe ser mayor a cero" sale con la línea nombrada y marca la cantidad', async () => {
+    guardarFalla = ['lineas.0.cantidad debe ser mayor a cero']
+    const wrapper = await montar()
+    await emitir(selectConOpcion(wrapper, PROVEEDOR.id), PROVEEDOR.id)
+    await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
+    await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('0.5')
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 30))
+
+    expect(avisos.map(a => a.title)).toContain('Línea 1, cantidad debe ser mayor a cero')
+    expect(wrapper.find('[data-qa="compra-linea"] [data-slot="error"]').text()).toBe('Debe ser mayor a cero')
+    wrapper.unmount()
+    guardarFalla = null
   })
 
   /**

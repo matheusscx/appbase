@@ -73,7 +73,7 @@ const stubs = {
     name: 'AppDrawer',
     props: ['open', 'width'],
     emits: ['update:open'],
-    template: '<div v-if="open"><slot name="header" /><slot name="body" /><slot name="actions" /></div>',
+    template: '<div v-if="open"><slot name="header" /><slot name="body" /><slot name="ayuda" /><slot name="actions" /></div>',
   },
 }
 
@@ -287,5 +287,70 @@ describe('CajaCierreDrawer — revelación del cierre en modo ciego', () => {
 
     expect(cajaStoreMock.mostrarResultadoCierre).not.toHaveBeenCalled()
     expect(navigateToMock.mock.calls).toEqual([['/cajas/caja-1']])
+  })
+})
+
+// 03.14: el botón apagado dice qué falta.
+describe('CajaCierreDrawer — por qué el botón está apagado', () => {
+  const SIN_CONTAR = [{
+    metodoPagoId: null,
+    nombre: 'Efectivo',
+    esEfectivo: true,
+    esperado: '10000.0000',
+    requiereConteo: true,
+    contado: null,
+    diferencia: null,
+  }]
+
+  it('conteo vacío: "Falta el efectivo contado"', async () => {
+    Object.assign(cajaStoreMock, {
+      arqueoCiego: false, motivos: [], arqueo: SIN_CONTAR, testigos: [],
+      detalle: { id: 'caja-1', comentarioCierre: null }, activa: null,
+    })
+    const wrapper = await mountSuspended(CajaCierreDrawer, {
+      attachTo: document.body,
+      global: { stubs },
+      props: { cajaId: 'caja-1', open: false },
+    })
+    montados.push(wrapper)
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(wrapper.find('[data-qa="cierre-falta"]').text()).toBe('Falta el efectivo contado')
+  })
+
+  it('conciliación sin motivo: nombra el método de pago', async () => {
+    Object.assign(cajaStoreMock, {
+      arqueoCiego: false,
+      motivos: [{ id: 'm1', nombre: 'Falta de efectivo', activo: true, requiereComentario: false, esFijo: true }],
+      arqueo: [{ ...SIN_CONTAR[0], contado: '2000.0000', diferencia: '-8000.0000' }],
+      testigos: [],
+      detalle: { id: 'caja-1', comentarioCierre: null, nivelDescuadre: 'ninguno', explicacionDescuadre: null },
+      activa: null,
+    })
+    const wrapper = await mountSuspended(CajaCierreDrawer, {
+      attachTo: document.body,
+      global: { stubs },
+      props: { cajaId: 'caja-1', resumir: true, open: false },
+    })
+    montados.push(wrapper)
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(wrapper.find('[data-qa="cierre-falta"]').text()).toBe('Falta el motivo de la diferencia en Efectivo')
+  })
+
+  it('con todo completo no muestra nada', async () => {
+    Object.assign(cajaStoreMock, {
+      arqueoCiego: false, motivos: [], arqueo: ARQUEO_CUADRADO, testigos: [],
+      detalle: { id: 'caja-1', comentarioCierre: null }, activa: null,
+    })
+    const wrapper = await mountSuspended(CajaCierreDrawer, {
+      attachTo: document.body,
+      global: { stubs },
+      props: { cajaId: 'caja-1', resumir: true, open: false },
+    })
+    montados.push(wrapper)
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    expect(wrapper.find('[data-qa="cierre-falta"]').exists()).toBe(false)
   })
 })

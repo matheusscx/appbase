@@ -394,7 +394,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     customer.value = customerVacio()
   } catch (e: unknown) {
     if (intentoCobro.mostrarSiCobroConOtrosDatos(e, AMBITO_COBRO)) return
-    mostrarRechazoPorStock({ error: e, fallback: 'Error al registrar la venta', puedeTrasladar: puedeTrasladar.value })
+    mostrarRechazoPorStock({ error: e, fallback: 'No se pudo registrar la venta. Inténtalo de nuevo.', puedeTrasladar: puedeTrasladar.value })
   } finally {
     submitting.value = false
   }

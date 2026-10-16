@@ -109,7 +109,9 @@ async function leer(proveedorIdElegido?: string) {
   } catch (e: unknown) {
     // El 400 de "otro RUT" (y cualquier otro rechazo de la lectura) se
     // muestra tal cual (spec § 7).
-    bloqueoMensaje.value = apiErrorMsg(e, 'Error al leer la factura')
+    bloqueoMensaje.value = 'emisorRut' in apiFieldErrors(e)
+      ? 'El RUT del emisor del archivo no es válido'
+      : apiErrorMsg(e, 'Error al leer la factura')
     paso.value = 'bloqueado'
   } finally {
     leyendo.value = false
@@ -243,6 +245,15 @@ function abrirCompraExistente() {
             @click="abrirCompraExistente"
           >
             Abrir
+          </UButton>
+          <UButton
+            variant="soft"
+            color="neutral"
+            icon="i-lucide-file-up"
+            data-qa="cargar-dte-otro-archivo"
+            @click="reset"
+          >
+            Elegir otro archivo
           </UButton>
         </template>
       </div>

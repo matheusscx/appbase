@@ -78,9 +78,15 @@ const drawerUi = computed(() => {
       <slot name="body" />
     </template>
     <template v-if="$slots.actions || $slots.footer" #footer>
-      <div class="flex w-full flex-row items-center justify-between gap-2">
-        <slot name="actions" />
-        <slot name="footer" />
+      <div class="flex w-full flex-col gap-2">
+        <!-- Por qué el botón principal está apagado: una línea bajo los botones. -->
+        <p v-if="$slots.ayuda" class="text-sm text-muted text-right">
+          <slot name="ayuda" />
+        </p>
+        <div class="flex w-full flex-row items-center justify-between gap-2">
+          <slot name="actions" />
+          <slot name="footer" />
+        </div>
       </div>
     </template>
     <template v-if="$slots.default" #default>

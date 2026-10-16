@@ -13,6 +13,7 @@ const open = defineModel<boolean>('open', { required: true })
 
 const cajaStore = useCajaStore()
 const toast = useToast()
+const { errores, marcar, limpiar } = useErroresCampo()
 const saving = ref(false)
 
 const emptyForm = () => ({
@@ -25,18 +26,17 @@ const emptyForm = () => ({
 const form = ref(emptyForm())
 
 watch(open, (isOpen) => {
-  if (!isOpen) form.value = emptyForm()
+  if (!isOpen) {
+    form.value = emptyForm()
+    limpiar()
+  }
 })
 
 async function guardar() {
-  if (!form.value.concepto) {
-    toast.add({ title: 'Ingresa el concepto del movimiento', color: 'warning' })
-    return
-  }
-  if (!form.value.monto) {
-    toast.add({ title: 'Ingresa el monto', color: 'warning' })
-    return
-  }
+  const faltan: Record<string, string> = {}
+  if (!form.value.concepto) faltan.concepto = 'Ingresa el concepto del movimiento'
+  if (!form.value.monto) faltan.monto = 'Ingresa el monto'
+  if (marcar(faltan)) return
   saving.value = true
   try {
     const mov = await cajaStore.registrarMovimiento(props.cajaId, {
@@ -92,17 +92,18 @@ async function guardar() {
           </div>
         </UFormField>
 
-        <UFormField label="Concepto" required>
+        <UFormField label="Concepto" required :error="errores.concepto">
           <UInput
             v-model="form.concepto"
             placeholder="Descripción del movimiento"
             class="w-full"
             autofocus
+            @update:model-value="limpiar('concepto')"
           />
         </UFormField>
 
-        <UFormField label="Monto" required>
-          <MoneyInput v-model="form.monto" oficial class="w-full" />
+        <UFormField label="Monto" required :error="errores.monto">
+          <MoneyInput v-model="form.monto" oficial class="w-full" @update:model-value="limpiar('monto')" />
         </UFormField>
 
         <UFormField label="Referencia">

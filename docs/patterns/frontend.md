@@ -1383,3 +1383,25 @@ try {
   el spec afirma "misma clave tras un error" y "otra clave tras el éxito". Como el estado vive
   a nivel de módulo, el `beforeEach` llama a `useIntentoCobro().terminar(<ámbito>)`.
 
+
+## 19. Errores de formulario: junto al campo, en español
+
+Auditoría UX 00.11 (2026-10-16). Un formulario nunca le muestra a la persona el texto crudo del
+validador ("nombre should not be empty", "lineas.0.cantidad debe ser mayor a cero").
+
+- **El toast sale de `apiErrorMsg`**, que traduce las reglas de `class-validator` y cambia el
+  nombre interno por su etiqueta ("Nombre: es obligatorio", "Línea 1, cantidad debe ser mayor a
+  cero"). Un campo nuevo con nombre raro se agrega a `ETIQUETAS` en `utils/api-error.ts`; si no
+  está, cae a una etiqueta derivada del nombre. Un 5xx genérico ("Internal server error") cae al
+  `fallback` de la pantalla, que debe ser una frase propia ("No se pudo… Inténtalo de nuevo.").
+  Las frases de negocio del backend en español pasan intactas.
+- **El campo se marca con `useErroresCampo()`**: `const { errores, marcar, limpiar } = …`,
+  `<UFormField :error="errores.nombre">`, `marcar({...})` al validar o con `apiFieldErrors(e)` ante
+  un rechazo del servidor (devuelve `true` si había algo, y lleva el foco al primer campo con
+  error), y `limpiar('campo')` en el `@update:model-value` del control.
+- **Un botón apagado dice por qué**: una línea con lo primero que falta (`data-qa="…-falta"`). En
+  `AppDrawer`, va en el slot `#ayuda`, sobre los botones.
+- **`type="email"` necesita `novalidate` en el `UForm`**: sin él el navegador frena el envío con su
+  globo nativo y el error propio nunca sale.
+- **Lo que no cambia:** qué se envía y qué se bloquea lo deciden las reglas del formulario; esto
+  solo cambia cómo y dónde se dice. Un aviso de UX nunca duplica una regla de plata.

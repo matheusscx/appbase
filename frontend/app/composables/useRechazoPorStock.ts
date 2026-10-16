@@ -72,7 +72,8 @@ export function useRechazoPorStock() {
       params.puedeTrasladar && !!datos?.itemId && !!bodegaOrigen
 
     toast.add({
-      title: datos?.message ?? apiErrorMsg(params.error, params.fallback),
+      // Por `apiErrorMsg` también cuando hay `message`: un 500 trae el inglés de Nest.
+      title: apiErrorMsg(params.error, params.fallback),
       description: params.description,
       color: 'error',
       actions: ofrecerTraslado

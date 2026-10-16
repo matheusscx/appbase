@@ -44,6 +44,7 @@ const loadingDrawer = ref(false)
 const modulos = ref<ModuloDisponible[]>([])
 const seleccionados = ref<Set<string>>(new Set())
 const form = reactive({ nombre: '', descripcion: '' })
+const { errores, marcar, limpiar } = useErroresCampo()
 
 const drawerTitle = computed(() =>
   drawerMode.value === 'create' ? 'Nuevo rol' : 'Editar rol',
@@ -77,6 +78,7 @@ function resetDrawer() {
   editandoRol.value = null
   form.nombre = ''
   form.descripcion = ''
+  limpiar()
   seleccionados.value = new Set()
 }
 
@@ -186,7 +188,7 @@ function removeLocal(id: string) {
 }
 
 async function guardar() {
-  if (!form.nombre.trim()) return
+  if (marcar(form.nombre.trim() ? {} : { nombre: 'Escribe un nombre para el rol' })) return
   saving.value = true
   try {
     if (drawerMode.value === 'create') {
@@ -224,6 +226,7 @@ async function guardar() {
       drawerMode.value === 'create' ? 'Error al crear rol' : 'Error al guardar rol',
     )
     toast.add({ title: msg, color: 'error' })
+    marcar(apiFieldErrors(e))
   }
   finally {
     saving.value = false
@@ -360,9 +363,10 @@ const columns: TableColumn<Rol>[] = [
           @submit="guardar"
         >
           <div class="space-y-4">
-            <UFormField label="Nombre" required>
+            <UFormField label="Nombre" required :error="errores.nombre">
               <UInput
                 v-model="form.nombre"
+                @update:model-value="limpiar('nombre')"
                 placeholder="Ej: Cajero"
                 :disabled="soloLectura"
                 :autofocus="!soloLectura"

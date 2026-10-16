@@ -201,6 +201,20 @@ const puedeConfirmar = computed(() =>
   && lineasValidas.value.length > 0,
 )
 
+/** Lo primero que falta para habilitar «Confirmar traslado»: el botón apagado lo dice. */
+const faltaTexto = computed(() => {
+  if (!form.value.origenId) return 'Falta elegir el origen'
+  if (!form.value.destinoId) return 'Falta elegir el destino'
+  if (origenIgualDestino.value) return 'El origen y el destino no pueden ser el mismo'
+  if (!form.value.motivoTrasladoId) return 'Falta elegir el motivo'
+  if (lineasValidas.value.length > 0) return ''
+  const conProducto = lineas.value.find(l => l.itemId)
+  if (!conProducto) return 'Falta elegir un producto'
+  if (conProducto.modoInventario === 'serie') return 'Falta elegir las unidades a trasladar'
+  if (conProducto.modoInventario === 'lote' && !conProducto.loteId) return 'Falta elegir el lote'
+  return 'Falta la cantidad'
+})
+
 // Cambiar el origen limpia las líneas ya cargadas: las cantidades, las
 // unidades y los lotes elegidos se resolvieron contra el disponible del
 // origen ANTERIOR, y dejarlos no los deja viejos — los deja reinterpretados.
@@ -724,6 +738,10 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                 </div>
               </div>
             </UForm>
+          </template>
+
+          <template v-if="faltaTexto" #ayuda>
+            <span data-qa="traslado-falta">{{ faltaTexto }}</span>
           </template>
 
           <template #actions>

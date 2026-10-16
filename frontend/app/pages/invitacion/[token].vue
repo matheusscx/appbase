@@ -32,6 +32,18 @@ const error = ref('')
 
 const LARGO_MINIMO = 8
 
+/**
+ * El aviso de "no coinciden" no sale mientras la repetición todavía va por la
+ * mitad: sale al salir del campo o cuando ya tiene el largo de la primera.
+ */
+const confirmarTocado = ref(false)
+const mostrarNoCoinciden = computed(
+  () =>
+    form.value.confirmar.length > 0
+    && form.value.contrasena !== form.value.confirmar
+    && (confirmarTocado.value || form.value.confirmar.length >= form.value.contrasena.length),
+)
+
 const puedeGuardar = computed(
   () =>
     form.value.contrasena.length >= LARGO_MINIMO
@@ -118,11 +130,11 @@ async function guardar() {
         />
       </UFormField>
       <UFormField label="Repetila" required>
-        <UInput v-model="form.confirmar" type="password" class="w-full" />
+        <UInput v-model="form.confirmar" type="password" class="w-full" @blur="confirmarTocado = true" />
       </UFormField>
 
       <p
-        v-if="form.confirmar.length > 0 && form.contrasena !== form.confirmar"
+        v-if="mostrarNoCoinciden"
         class="text-sm text-error"
       >
         Las contraseñas no coinciden.

@@ -3,6 +3,7 @@ const emit = defineEmits<{ opened: [cajaId: string] }>()
 
 const cajaStore = useCajaStore()
 const toast = useToast()
+const { errores, marcar, limpiar } = useErroresCampo()
 const loadingCajones = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
@@ -34,6 +35,7 @@ onMounted(async () => {
 watch(drawerOpen, (open) => {
   if (!open) {
     seleccionado.value = null
+    limpiar()
     form.value = { saldoInicial: '', comentario: '' }
   }
 })
@@ -46,10 +48,7 @@ function abrirDrawer(cajon: { cajonId: string, nombre: string }) {
 
 async function abrir() {
   if (!seleccionado.value) return
-  if (!form.value.saldoInicial) {
-    toast.add({ title: 'Ingresa el saldo inicial', color: 'warning' })
-    return
-  }
+  if (marcar(form.value.saldoInicial ? {} : { saldoInicial: 'Ingresa el saldo inicial' })) return
   saving.value = true
   try {
     const caja = await cajaStore.abrir({
@@ -108,8 +107,8 @@ async function abrir() {
 
       <template #body>
         <UForm id="caja-apertura-grid-form" :state="form" class="space-y-4" @submit="abrir">
-          <UFormField label="Saldo inicial" required>
-            <MoneyInput v-model="form.saldoInicial" oficial class="w-full" />
+          <UFormField label="Saldo inicial" required :error="errores.saldoInicial">
+            <MoneyInput v-model="form.saldoInicial" oficial class="w-full" @update:model-value="limpiar('saldoInicial')" />
           </UFormField>
 
           <UFormField label="Comentario">

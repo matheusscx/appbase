@@ -10,11 +10,14 @@ const form = reactive({
   confirmarContrasena: '',
 })
 
+const { errores, marcar, limpiar } = useErroresCampo()
+
 async function guardar() {
-  if (form.contrasenaNueva !== form.confirmarContrasena) {
-    toast.add({ title: 'Las contraseñas nuevas no coinciden', color: 'error' })
-    return
-  }
+  const faltan: Record<string, string> = {}
+  if (!form.contrasenaActual) faltan.contrasenaActual = 'Escribe tu contraseña actual'
+  if (form.contrasenaNueva.length < 8) faltan.contrasenaNueva = 'Usa al menos 8 caracteres'
+  else if (form.contrasenaNueva !== form.confirmarContrasena) faltan.confirmarContrasena = 'Las contraseñas no coinciden'
+  if (marcar(faltan)) return
   loading.value = true
   try {
     await useApiFetch<{ message: string }>(
@@ -38,6 +41,7 @@ async function guardar() {
   } catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al cambiar contraseña')
     toast.add({ title: msg, color: 'error' })
+    marcar(apiFieldErrors(e))
   } finally {
     loading.value = false
   }
@@ -54,16 +58,16 @@ async function guardar() {
     </template>
 
     <UForm :state="form" class="space-y-4" @submit="guardar">
-      <UFormField label="Contraseña actual" required>
-        <UInput v-model="form.contrasenaActual" type="password" placeholder="Tu contraseña actual" />
+      <UFormField label="Contraseña actual" required :error="errores.contrasenaActual">
+        <UInput v-model="form.contrasenaActual" type="password" placeholder="Tu contraseña actual" @update:model-value="limpiar('contrasenaActual')" />
       </UFormField>
 
-      <UFormField label="Nueva contraseña" required>
-        <UInput v-model="form.contrasenaNueva" type="password" placeholder="Mínimo 8 caracteres" />
+      <UFormField label="Nueva contraseña" required :error="errores.contrasenaNueva">
+        <UInput v-model="form.contrasenaNueva" type="password" placeholder="Mínimo 8 caracteres" @update:model-value="limpiar('contrasenaNueva')" />
       </UFormField>
 
-      <UFormField label="Confirmar nueva contraseña" required>
-        <UInput v-model="form.confirmarContrasena" type="password" placeholder="Repetí la nueva contraseña" />
+      <UFormField label="Confirmar nueva contraseña" required :error="errores.confirmarContrasena">
+        <UInput v-model="form.confirmarContrasena" type="password" placeholder="Repetí la nueva contraseña" @update:model-value="limpiar('confirmarContrasena')" />
       </UFormField>
 
       <UButton type="submit" :loading="loading">

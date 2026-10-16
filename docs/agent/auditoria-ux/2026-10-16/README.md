@@ -38,7 +38,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 |---|---|---|---|---|---|
 | ☑ | [02.1](02-salones-y-mesas.md) | P0 | Liquidar propinas paga el período del formulario, no el de la vista previa — **hecho 2026-10-16** | código | agente |
 | ☐ | [00.10](00-transversal.md) | P1 | Una línea incompleta se descarta al guardar y el aviso dice que guardó todo *(ver 05.2, 06.1)* | medido | agente |
-| ☐ | [00.11](00-transversal.md) | P1 | Los errores del servidor salen en inglés, con nombres internos, sin marcar el campo *(ver 06.2, 07.2, 08.2)* | medido | agente |
+| ☑ | [00.11](00-transversal.md) | P1 | Los errores del servidor salen en inglés, con nombres internos, sin marcar el campo *(ver 06.2, 07.2, 08.2)* — **hecho 2026-10-16** (`apiErrorMsg` traduce el texto del validador en todas las pantallas; el campo marcado va en las de este lote) | medido | agente |
 | ☐ | [01.1](01-pos-y-ventas.md) | P1 | Tras cobrar, el carrito vendido sigue en pantalla 5 a 10 s y borra lo que agregas | medido | agente |
 | ☐ | [01.2](01-pos-y-ventas.md) | P1 | El cobro trae la propina de 10% ya sumada, y el carrito no la muestra | medido | owner |
 | ☐ | [02.2](02-salones-y-mesas.md) | P1 | Garzón y encargado no pueden cobrar mesas y el aviso pide abrir caja | medido | owner |
@@ -55,12 +55,12 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☐ | [05.1](05-inventario.md) | P1 | El aprobador de un recuento sin causas puede apretar "Aplicar" y queda sin salida | medido | agente + owner |
 | ☐ | [05.2](05-inventario.md) | P1 | Un traslado con una línea incompleta guarda solo las otras y avisa "Traslado registrado" *(es 00.10)* | medido | agente |
 | ☐ | [06.1](06-compras-y-terceros.md) | P1 | Guardar o confirmar una compra descarta en silencio las líneas sin cantidad *(es 00.10)* | medido | agente |
-| ☐ | [06.2](06-compras-y-terceros.md) | P1 | La cantidad de una compra acepta texto, cero y negativos, y falla en inglés *(parte en 00.11)* | medido | agente |
-| ☐ | [06.3](06-compras-y-terceros.md) | P1 | "Confirmar recepción" no mira el total del documento y avisa recién después de confirmar | medido | agente |
+| ☐ | [06.2](06-compras-y-terceros.md) | P1 | La cantidad de una compra acepta texto, cero y negativos, y falla en inglés *(parte en 00.11)* — *parcial 2026-10-16: mensaje y campo marcado tras el rechazo; la regla de la cantidad (coma, cero, bloquear Guardar) queda en el lote 1* | medido | agente |
+| ☐ | [06.3](06-compras-y-terceros.md) | P1 | "Confirmar recepción" no mira el total del documento y avisa recién después de confirmar — *parcial 2026-10-16: el rechazo se marca en el campo Total; no se agregó un gate previo (regla de plata, lote 1)* | medido | agente |
 | ☐ | [06.4](06-compras-y-terceros.md) | P1 | Al recargar "Nueva compra", el medio de pago sale vacío y el botón apagado | medido | agente |
 | ☐ | [06.6](06-compras-y-terceros.md) | P1 | Un pago hecho no se puede anular desde la pantalla, salvo que sobre plata | medido | owner |
 | ☐ | [07.1](07-configuracion.md) | P1 | En Configuración, la columna de acciones queda fuera de la tarjeta en 15 pantallas *(causa en 00.9)* | medido | agente |
-| ☐ | [07.2](07-configuracion.md) | P1 | Los formularios de Configuración rechazan con avisos en inglés, sin marcar el campo *(es 00.11)* | medido | agente |
+| ☐ | [07.2](07-configuracion.md) | P1 | Los formularios de Configuración rechazan con avisos en inglés, sin marcar el campo *(es 00.11)* — *parcial 2026-10-16: traducción global y campos en Ítems, Impresoras, Descuentos, Recargos; faltan Salones/mesa e Impuestos (fiscal, frente aparte)* | medido | agente |
 | ☐ | [08.1](08-ingreso-y-cuenta.md) | P1 | Equivocarse en la "contraseña actual" cierra la sesión y manda al login | medido | agente |
 | ☐ | [09.1](09-tienda-y-suscripciones.md) | P1 | Al volver de Webpay, "Agregar tarjeta" cobra el primer período sin confirmar | código | owner |
 | ☐ | [09.2](09-tienda-y-suscripciones.md) | P1 | Al volver de Webpay el carrito se vacía, aunque el aviso dice lo contrario | medido + código | agente |
@@ -535,7 +535,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [01.15](01-pos-y-ventas.md) | P2 | Sin impresora o sin QZ la boleta no sale y casi no se avisa | agente |
 | ☐ | [01.16](01-pos-y-ventas.md) | P2 | Entrar a Órdenes sin permiso muestra una lista vacía en vez de "sin permiso" | agente |
 | ☑ | [01.17](01-pos-y-ventas.md) | P2 | La insignia "Pagada" y las cifras de estado no tienen contraste suficiente — **hecho 2026-10-16** *(ver 00.8)* | agente + owner |
-| ☐ | [01.18](01-pos-y-ventas.md) | P2 | Abrir caja sin datos avisa con un toast y no marca el campo | agente |
+| ☑ | [01.18](01-pos-y-ventas.md) | P2 | Abrir caja sin datos avisa con un toast y no marca el campo — **hecho 2026-10-16** | agente |
 | ☐ | [01.19](01-pos-y-ventas.md) | P2 | Si falla leer la propina sugerida, el cobro la deja activa con 10% | owner |
 | ☐ | [01.20](01-pos-y-ventas.md) | P3 | El aviso de boleta no impresa usa voseo y jerga ("QZ Tray", "timeout") | agente |
 | ☐ | [01.21](01-pos-y-ventas.md) | P3 | Diez textos del POS con voseo *(lote 00.3)* | agente |
@@ -547,7 +547,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [01.27](01-pos-y-ventas.md) | P3 | El detalle de venta dice "Fisico" sin tilde y "Garzón: Mostrador" | agente |
 | ☐ | [01.28](01-pos-y-ventas.md) | P3 | El historial de ventas no tiene filtro de fecha ni búsqueda por folio | owner |
 | ☐ | [01.29](01-pos-y-ventas.md) | P3 | "Total cobrado" y "cobrado" muestran dos cifras con el mismo nombre | agente |
-| ☐ | [01.30](01-pos-y-ventas.md) | P3 | Un error 500 del cobro se muestra en inglés ("Internal server error") | agente |
+| ☑ | [01.30](01-pos-y-ventas.md) | P3 | Un error 500 del cobro se muestra en inglés ("Internal server error") — **hecho 2026-10-16** | agente |
 | ☐ | [01.31](01-pos-y-ventas.md) | P3 | Seis textos con tres puntos en vez de "…" y un placeholder poco legible | agente |
 
 ### 02 · Salones y mesas
@@ -602,8 +602,8 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [03.10](03-caja.md) | P2 | El texto ámbar de caja ("Sin justificar", avisos) no tiene contraste suficiente *(ver 00.8)* | agente |
 | ☐ | [03.11](03-caja.md) | P2 | Las tarjetas de cajón no se pueden usar con teclado | agente |
 | ☐ | [03.12](03-caja.md) | P2 | Los dos campos de fecha de la tendencia no dicen "Desde" ni "Hasta" | agente |
-| ☐ | [03.13](03-caja.md) | P2 | Los datos que faltan en caja se avisan con un toast, no junto al campo | agente |
-| ☐ | [03.14](03-caja.md) | P2 | "Enviar conteo" y "Confirmar cierre" quedan apagados sin decir qué falta | agente |
+| ☑ | [03.13](03-caja.md) | P2 | Los datos que faltan en caja se avisan con un toast, no junto al campo — **hecho 2026-10-16** | agente |
+| ☑ | [03.14](03-caja.md) | P2 | "Enviar conteo" y "Confirmar cierre" quedan apagados sin decir qué falta — **hecho 2026-10-16** | agente |
 | ☐ | [03.15](03-caja.md) | P2 | El estado de caja sale crudo: "EN_CONCILIACION", "cerrada" a 10 px | agente |
 | ☐ | [03.16](03-caja.md) | P2 | El historial del encargado no tiene columna de cajero ni dice por quién se filtró | agente |
 | ☐ | [03.17](03-caja.md) | P2 | "Pendientes de revisar" no dice cuántos hay | agente |
@@ -661,13 +661,13 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [05.6](05-inventario.md) | P2 | En "Cancelar recuento", los botones "Cancelar" y "Cancelar recuento" se confunden | agente |
 | ☐ | [05.7](05-inventario.md) | P2 | Un recuento aplicado se ve igual que uno abierto y no dice quién lo aplicó | agente |
 | ☐ | [05.8](05-inventario.md) | P2 | El traslado deja escribir más que el stock disponible; recién el servidor lo rechaza | agente |
-| ☐ | [05.9](05-inventario.md) | P2 | Una merma incompleta avisa siempre "Completa producto, cantidad y motivo", sin marcar cuál | agente |
-| ☐ | [05.10](05-inventario.md) | P2 | "Confirmar traslado" queda apagado sin decir qué falta | agente |
+| ☑ | [05.9](05-inventario.md) | P2 | Una merma incompleta avisa siempre "Completa producto, cantidad y motivo", sin marcar cuál — **hecho 2026-10-16** | agente |
+| ☑ | [05.10](05-inventario.md) | P2 | "Confirmar traslado" queda apagado sin decir qué falta — **hecho 2026-10-16** | agente |
 | ☐ | [05.11](05-inventario.md) | P2 | Un traslado o merma mal tipeado no tiene resumen previo ni deshacer | agente + owner |
 | ☐ | [05.12](05-inventario.md) | P2 | El kardex tiene 10 columnas y deja Resultante, Costo y Usuario fuera de vista | agente + owner |
 | ☐ | [05.13](05-inventario.md) | P2 | A 768 faltan columnas en traslados y mermas y el selector de causa se corta | agente |
 | ☐ | [05.14](05-inventario.md) | P2 | El menú dice "Stock" pero la pantalla es una lista de movimientos, no el saldo | agente + owner |
-| ☐ | [05.15](05-inventario.md) | P2 | Un stock mínimo inválido muestra un aviso técnico a medias en inglés | agente |
+| ☑ | [05.15](05-inventario.md) | P2 | Un stock mínimo inválido muestra un aviso técnico a medias en inglés — **hecho 2026-10-16** | agente |
 | ☐ | [05.16](05-inventario.md) | P2 | Los dos campos de fecha de Mermas no dicen "Desde" ni "Hasta" | agente |
 | ☑ | [05.17](05-inventario.md) | P2 | En el kardex y Mermas, cantidades e insignias verde, ámbar y rojo se leen mal — **hecho 2026-10-16** (colores e insignias; el placeholder no) *(ver 00.8)* | owner |
 | ☐ | [05.18](05-inventario.md) | P2 | Los botones de Inventario miden 20 a 28 px en la tablet | agente |
@@ -685,7 +685,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
-| ☐ | [06.5](06-compras-y-terceros.md) | P2 | En la cabecera de la compra, lo que falta apaga "Guardar borrador" sin decir qué | agente |
+| ☑ | [06.5](06-compras-y-terceros.md) | P2 | En la cabecera de la compra, lo que falta apaga "Guardar borrador" sin decir qué — **hecho 2026-10-16** | agente |
 | ☐ | [06.7](06-compras-y-terceros.md) | P2 | "Pagos" de Por pagar dice "Sin pagos registrados" aunque se acabe de pagar | agente |
 | ☐ | [06.8](06-compras-y-terceros.md) | P2 | Los botones de la línea de compra no tienen nombre y quitar no se deshace | agente |
 | ☐ | [06.9](06-compras-y-terceros.md) | P2 | La fecha de una compra sale en tres formatos distintos | agente |
@@ -694,8 +694,8 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [06.12](06-compras-y-terceros.md) | P2 | Pagar en efectivo sin caja abierta falla con un aviso lejos del botón | agente |
 | ☐ | [06.13](06-compras-y-terceros.md) | P2 | "Pagar todo lo que debo" no tiene atajo y "Pagar" se apaga sin explicar | agente |
 | ☐ | [06.14](06-compras-y-terceros.md) | P2 | En la tablet, la columna "Pago" de la lista de compras queda fuera de vista | agente |
-| ☐ | [06.15](06-compras-y-terceros.md) | P2 | Un XML con RUT mal formado da un mensaje técnico y no deja elegir otro | agente |
-| ☐ | [06.16](06-compras-y-terceros.md) | P2 | El formulario de Terceros no valida nada y los errores llegan por toast | agente |
+| ☑ | [06.15](06-compras-y-terceros.md) | P2 | Un XML con RUT mal formado da un mensaje técnico y no deja elegir otro — **hecho 2026-10-16** | agente |
+| ☐ | [06.16](06-compras-y-terceros.md) | P2 | El formulario de Terceros no valida nada y los errores llegan por toast — *parcial 2026-10-16: Nombre y correo junto al campo; el formato de RUT no, porque el servidor no lo valida hoy* | agente |
 | ☐ | [06.17](06-compras-y-terceros.md) | P2 | Un filtro de compras sin resultados dice "No hay compras registradas" | agente |
 | ☐ | [06.18](06-compras-y-terceros.md) | P2 | Tras pagar, el aviso no dice monto ni medio y "Pagar" sigue activo sin deuda | agente |
 | ☐ | [06.19](06-compras-y-terceros.md) | P2 | El documento se lee "FacturaAUDIT-001", sin espacio entre tipo y folio | agente |
@@ -725,7 +725,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [07.7](07-configuracion.md) | P2 | Los campos de texto de Configuración miden 167 px aunque haya espacio libre | agente |
 | ☐ | [07.8](07-configuracion.md) | P2 | 69 interruptores y 35 botones de ícono en Configuración no tienen nombre accesible | agente |
 | ☐ | [07.9](07-configuracion.md) | P2 | Eliminar un rol usa el diálogo del navegador y no dice cuántos lo tienen | agente + owner |
-| ☐ | [07.10](07-configuracion.md) | P2 | "Crear" un rol con el nombre vacío no hace nada ni avisa | agente |
+| ☑ | [07.10](07-configuracion.md) | P2 | "Crear" un rol con el nombre vacío no hace nada ni avisa — **hecho 2026-10-16** | agente |
 | ☐ | [07.11](07-configuracion.md) | P2 | Guardar permisos de un rol manda hasta 16 guardados seguidos y puede quedar a medias | owner |
 | ☐ | [07.12](07-configuracion.md) | P2 | Apagar "Efectivo" en Métodos de pago se hace con un toque, sin confirmar | owner |
 | ☐ | [07.13](07-configuracion.md) | P2 | Escape o un clic al lado cierra el panel de Items y se pierde lo escrito | agente |
@@ -736,7 +736,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [07.18](07-configuracion.md) | P2 | Editar o eliminar una mesa solo se puede con doble clic en el plano | agente |
 | ☐ | [07.19](07-configuracion.md) | P2 | El ícono "tótem" de Usuarios cambia cómo entra la persona al salón, con un toque | agente + owner |
 | ☐ | [07.20](07-configuracion.md) | P2 | Usuarios no permite quitar a alguien del local, aunque el sistema sabe hacerlo | owner |
-| ☐ | [07.21](07-configuracion.md) | P2 | "Crear" usuario queda gris sin decir qué falta y un correo malo no se marca | agente |
+| ☑ | [07.21](07-configuracion.md) | P2 | "Crear" usuario queda gris sin decir qué falta y un correo malo no se marca — **hecho 2026-10-16** | agente |
 | ☐ | [07.22](07-configuracion.md) | P2 | Quien no es administrador y abre una pantalla de admin vuelve a Perfil sin aviso | agente |
 | ☐ | [07.23](07-configuracion.md) | P2 | En desarrollo, el menú de Configuración muestra el ícono de otra entrada | agente |
 | ☐ | [07.24](07-configuracion.md) | P3 | El panel de un rol fijo no muestra los permisos que da | agente |
@@ -759,7 +759,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
-| ☐ | [08.2](08-ingreso-y-cuenta.md) | P2 | Los errores de registro y de Mi cuenta salen en inglés y con nombres internos *(parte en 00.11)* | agente |
+| ☐ | [08.2](08-ingreso-y-cuenta.md) | P2 | Los errores de registro y de Mi cuenta salen en inglés y con nombres internos *(parte en 00.11)* — *parcial 2026-10-16: Mi cuenta (nombre, contraseñas) y traducción del validador; faltan los mensajes en español en los DTO del backend* | agente |
 | ☐ | [08.3](08-ingreso-y-cuenta.md) | P2 | "Guardar y entrar" manda al login y hay que escribir la contraseña de nuevo | agente |
 | ☐ | [08.4](08-ingreso-y-cuenta.md) | P2 | Un link vencido no deja pedir otro desde ahí y está en voseo | agente |
 | ☐ | [08.5](08-ingreso-y-cuenta.md) | P2 | Tras registrarse, la pantalla dice "Si ese correo no tenía cuenta…" sin nombrar el correo | agente |
@@ -783,7 +783,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [08.23](08-ingreso-y-cuenta.md) | P3 | En link inválido, título y párrafo dicen la misma frase seguida | agente |
 | ☐ | [08.24](08-ingreso-y-cuenta.md) | P3 | En Mi cuenta los campos miden 167 px y uno se corta a 768 | agente |
 | ☐ | [08.25](08-ingreso-y-cuenta.md) | P3 | "Continuar con Google" puede llevar a una página de error si no está configurado | owner |
-| ☐ | [08.26](08-ingreso-y-cuenta.md) | P3 | "Las contraseñas no coinciden" aparece desde la primera letra de la repetición | agente |
+| ☑ | [08.26](08-ingreso-y-cuenta.md) | P3 | "Las contraseñas no coinciden" aparece desde la primera letra de la repetición — **hecho 2026-10-16** | agente |
 
 ### 09 · Tienda y suscripciones
 

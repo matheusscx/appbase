@@ -181,6 +181,37 @@ describe('stock mínimo — con Inventario:Actualizar', () => {
     wrapper.unmount()
   })
 
+  it('un mínimo que no es número se marca junto al campo, no viaja y no se borra lo tipeado (05.15)', async () => {
+    permisos = ['Inventario:Leer', 'Inventario:Actualizar']
+    const wrapper = await montar()
+
+    const input = wrapper.find('input[data-qa="minimo-item-1-bodega-1"]')
+    await input.setValue('abc')
+    await input.trigger('blur')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(llamadas.some(l => l.method === 'PUT')).toBe(false)
+    expect(wrapper.find('[data-slot="error"]').text()).toBe('Escribe un número, por ejemplo 2 o 1,5')
+    expect((input.element as HTMLInputElement).value).toBe('abc')
+
+    await input.setValue('2')
+    expect(wrapper.find('[data-slot="error"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('acepta la coma decimal y manda el punto', async () => {
+    permisos = ['Inventario:Leer', 'Inventario:Actualizar']
+    const wrapper = await montar()
+
+    const input = wrapper.find('input[data-qa="minimo-item-1-bodega-1"]')
+    await input.setValue('1,5')
+    await input.trigger('blur')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(llamadas.find(l => l.method === 'PUT')?.body).toEqual({ minimo: '1.5' })
+    wrapper.unmount()
+  })
+
   it('un guardado que falla no se reintenta solo al salir del campo, y el campo vuelve al valor guardado', async () => {
     permisos = ['Inventario:Leer', 'Inventario:Actualizar']
     respuestaPut = 'falla'

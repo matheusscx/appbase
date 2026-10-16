@@ -111,6 +111,25 @@ async function crear(wrapper: Wrapper) {
   await new Promise(r => setTimeout(r, 100))
 }
 
+describe('inventario/recuentos — formulario incompleto (05.9)', () => {
+  beforeEach(() => {
+    recuentosEnviados = []
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('marca la ubicación y los productos que faltan, y no envía', async () => {
+    ubicacionesBackend = [LOCAL, BODEGA]
+    const wrapper = await montar()
+    await abrirCrear(wrapper)
+    await crear(wrapper)
+
+    expect(recuentosEnviados).toHaveLength(0)
+    expect(wrapper.findAll('[data-slot="error"]').map(e => e.text()))
+      .toEqual(['Elige la ubicación', 'Elige al menos un producto'])
+    wrapper.unmount()
+  })
+})
+
 describe('inventario/recuentos — selector de ubicación al crear', () => {
   beforeEach(() => {
     recuentosEnviados = []

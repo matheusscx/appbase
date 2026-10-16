@@ -131,4 +131,16 @@ describe('useRechazoPorStock', () => {
     expect(toasts).toHaveLength(1)
     expect(toasts[0]!.actions).toBeUndefined()
   })
+
+  it('un 500 ("Internal server error") muestra el texto propio, no el inglés del servidor', () => {
+    const { mostrarRechazoPorStock } = useRechazoPorStock()
+
+    mostrarRechazoPorStock({
+      error: { data: { statusCode: 500, message: 'Internal server error' } },
+      fallback: 'No se pudo registrar la venta. Inténtalo de nuevo.',
+      puedeTrasladar: false,
+    })
+
+    expect(toasts[0]!.title).toBe('No se pudo registrar la venta. Inténtalo de nuevo.')
+  })
 })

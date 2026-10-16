@@ -201,6 +201,7 @@ async function cargarCatalogos() {
 
 function abrirRegistrar() {
   form.value = emptyForm()
+  limpiar()
   // Con una sola ubicación el selector no se dibuja (`docs/features/bodegas-y-traslados.md`,
   // «Frontend»): el cliente completa el local directamente, sin que el usuario
   // tenga que elegirlo.
@@ -210,18 +211,18 @@ function abrirRegistrar() {
   drawerOpen.value = true
 }
 
+const { errores, marcar, limpiar } = useErroresCampo()
+
 async function registrar() {
   // El botón ya está deshabilitado, pero Enter dentro del formulario también lo envía: el
   // backend rechazaría con 400 y esta pantalla no tiene dónde elegir la unidad.
   if (productoConSerie.value) return
-  if (!form.value.itemId || !form.value.cantidad || !form.value.motivoBajaId) {
-    toast.add({ title: 'Completa producto, cantidad y motivo', color: 'error' })
-    return
-  }
-  if (!form.value.ubicacionId) {
-    toast.add({ title: 'Selecciona la ubicación', color: 'error' })
-    return
-  }
+  const faltan: Record<string, string> = {}
+  if (!form.value.ubicacionId) faltan.ubicacionId = 'Elige la ubicación'
+  if (!form.value.itemId) faltan.itemId = 'Elige el producto'
+  if (!form.value.cantidad) faltan.cantidad = 'Escribe la cantidad'
+  if (!form.value.motivoBajaId) faltan.motivoBajaId = 'Elige el motivo'
+  if (marcar(faltan)) return
 
   saving.value = true
   try {
@@ -439,6 +440,7 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
             v-if="hayBodegas"
             label="Ubicación"
             required
+            :error="errores.ubicacionId"
             :help="esPersonal
               ? 'De dónde sale — acota qué productos tienen stock ahí.'
               : 'Dónde se pudrió — acota qué productos tienen stock ahí.'"
@@ -446,6 +448,7 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
             <USelectMenu
               v-model="form.ubicacionId"
               :items="ubicaciones.map(u => ({ label: u.nombre, value: u.id }))"
+              @update:model-value="limpiar('ubicacionId')"
               value-key="value"
               placeholder="Selecciona la ubicación"
               class="w-full"
@@ -455,10 +458,12 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
           <UFormField
             label="Producto"
             required
+            :error="errores.itemId"
           >
             <AppItemSelect
               v-model="form.itemId"
               :catalogo="catalogoItems"
+              @update:model-value="limpiar('itemId')"
               :filtros="FILTROS_PRODUCTO"
               placeholder="Selecciona un producto"
               class="w-full"
@@ -468,10 +473,12 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
           <UFormField
             label="Cantidad"
             required
+            :error="errores.cantidad"
           >
             <UInput
               v-model="form.cantidad"
               inputmode="decimal"
+              @update:model-value="limpiar('cantidad')"
               placeholder="0"
             />
           </UFormField>
@@ -491,10 +498,12 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
           <UFormField
             label="Motivo"
             required
+            :error="errores.motivoBajaId"
           >
             <USelectMenu
               v-model="form.motivoBajaId"
               :items="motivosFormOpts"
+              @update:model-value="limpiar('motivoBajaId')"
               value-key="value"
               placeholder="Selecciona el motivo"
               class="w-full"

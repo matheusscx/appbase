@@ -1306,6 +1306,7 @@ onMounted(() => {
 
 function abrirCrear() {
   resetDrawer()
+  limpiar()
   drawerOpen.value = true
 }
 
@@ -1423,9 +1424,12 @@ function onAplicarDesfases(aplicados: AplicarDesfaseItem[]) {
   return aplicarDesfases(aplicados, syncDesfaseEnLista)
 }
 
+const { errores, marcar, limpiar } = useErroresCampo()
+
 async function guardar() {
   // El Enter dentro del formulario también llega acá, no solo el botón que se deshabilita.
   if (errorNombre.value) return
+  if (marcar(form.value.nombre.trim() ? {} : { nombre: 'Escribe el nombre del item' })) return
   saving.value = true
   try {
     // `|| undefined` colapsaba todo lo falsy y el campo NO viajaba: el usuario
@@ -1552,6 +1556,7 @@ async function guardar() {
   } catch (e) {
     const msg = apiErrorMsg(e, 'Error al guardar')
     toast.add({ title: msg, color: 'error' })
+    marcar(apiFieldErrors(e))
   } finally {
     saving.value = false
   }
@@ -2049,13 +2054,14 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
         >
           <!-- Campos base -->
           <div class="grid grid-cols-2 gap-4">
-            <UFormField label="Nombre" class="col-span-2" required :error="errorNombre ?? undefined">
+            <UFormField label="Nombre" class="col-span-2" required :error="errorNombre ?? errores.nombre">
               <UInput
                 v-model="form.nombre"
                 placeholder="Nombre del item"
                 class="w-full"
                 autofocus
                 :maxlength="MAX_NOMBRE_ITEM"
+                @update:model-value="limpiar('nombre')"
               />
             </UFormField>
 
@@ -2063,8 +2069,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               <UInput v-model="form.descripcion" placeholder="Descripción opcional" class="w-full" />
             </UFormField>
 
-            <UFormField v-if="form.tipo !== 'ingrediente'" :label="precioBaseLabel" required>
-              <MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" class="w-full" />
+            <UFormField v-if="form.tipo !== 'ingrediente'" :label="precioBaseLabel" required :error="errores.precioBase">
+              <MoneyInput v-model="form.precioBase" :moneda-id="form.monedaId" class="w-full" @update:model-value="limpiar('precioBase')" />
             </UFormField>
 
             <UFormField label="Moneda" required>

@@ -56,6 +56,8 @@ const props = defineProps<{
   catalogo: ItemsPorId<ProductoOpt>
   presentaciones: PresentacionCompra[]
   proveedorId: string
+  /** Rechazo del servidor sobre esta cantidad, junto al campo. */
+  errorCantidad?: string
 }>()
 
 const emit = defineEmits<{
@@ -199,7 +201,7 @@ function onSeriesChange(texto: string) {
           @update:model-value="(v: string | string[] | null | undefined) => { if (typeof v === 'string') onSeleccionarItem(v) }"
         />
       </UFormField>
-      <UFormField label="Cantidad" class="md:col-span-2">
+      <UFormField label="Cantidad" class="md:col-span-2" :error="errorCantidad">
         <UInput
           :model-value="linea.cantidad"
           inputmode="decimal"

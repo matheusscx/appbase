@@ -256,6 +256,24 @@ const conciliacionCompleta = computed(() =>
   && (!requiereComentarioSinTestigo.value || !!comentario.value.trim()),
 )
 
+/** Lo que falta para habilitar el botón principal: se dice, no se deja un botón gris mudo. */
+const faltaTexto = computed(() => {
+  if (loading.value) return ''
+  if (fase.value === 'conteo') {
+    const sin = obligatorias.value.filter(l => !contado.value[claveDe(l)])
+    if (!sin.length) return ''
+    return sin.length === 1 && sin[0]!.esEfectivo
+      ? 'Falta el efectivo contado'
+      : `Falta contar: ${sin.map(l => l.nombre).join(', ')}`
+  }
+  const sinMotivo = descuadres.value.filter(l => !lineaJustificada(l))
+  if (sinMotivo.length) return `Falta el motivo de la diferencia en ${sinMotivo.map(l => l.nombre).join(', ')}`
+  if (requiereComentarioSinTestigo.value && !comentario.value.trim()) {
+    return 'Falta explicar qué pasó: nadie firmó como testigo'
+  }
+  return ''
+})
+
 async function confirmarCierre() {
   if (!conciliacionCompleta.value) {
     toast.add({
@@ -474,6 +492,10 @@ async function confirmarCierre() {
           </div>
         </div>
       </UForm>
+    </template>
+
+    <template v-if="faltaTexto" #ayuda>
+      <span data-qa="cierre-falta">{{ faltaTexto }}</span>
     </template>
 
     <template #actions>

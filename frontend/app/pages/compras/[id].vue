@@ -565,6 +565,20 @@ const puedeGuardar = computed(() =>
   && lineasPorAsociar.value.length === 0,
 )
 
+/** Lo que falta para habilitar los botones de abajo: un botón gris sin motivo no dice qué hacer. */
+const faltaTexto = computed(() => {
+  if (!form.value.proveedorId) return 'Falta elegir el proveedor'
+  if (!form.value.tipoDocumentoCompraId) return 'Falta elegir el tipo de documento'
+  if (pideFolio.value && !form.value.folio.trim()) return 'Falta el folio'
+  if (!form.value.fechaDocumento) return 'Falta la fecha del documento'
+  if (!form.value.ubicacionId) return 'Falta elegir adónde entra la mercadería'
+  if (lineasCargadas.value.some(l => !l.presentacionId && !l.unidadCodigo)) return 'Falta elegir la unidad de cada línea'
+  // Las líneas del XML sin asociar ya tienen su propio aviso arriba.
+  if (lineasPorAsociar.value.length) return ''
+  if (!lineasCargadas.value.length) return 'Para confirmar la recepción falta una línea con producto y cantidad'
+  return ''
+})
+
 function armarBody() {
   const body: Record<string, unknown> = {
     proveedorId: form.value.proveedorId,
@@ -640,6 +654,22 @@ function armarBody() {
  * `navegar: false` acá y hace el replace ella misma, recién cuando el
  * `/confirmar` ya cerró (haya funcionado o no).
  */
+// Rechazos del servidor que se pueden marcar en su campo (solo el aviso: qué se
+// envía y qué se bloquea lo siguen decidiendo las reglas de arriba).
+const { errores: erroresCompra, marcar: marcarErroresCompra, limpiar: limpiarErrorCompra } = useErroresCampo()
+
+function marcarRechazo(e: unknown) {
+  const marcas: Record<string, string> = {}
+  for (const [campo, texto] of Object.entries(apiFieldErrors(e))) {
+    // El índice del servidor es el de las líneas que se mandaron (`lineasCargadas`).
+    const m = campo.match(/^lineas\.(\d+)\.cantidad$/)
+    const linea = m ? lineasCargadas.value[Number(m[1])] : undefined
+    if (linea) marcas[`cantidad:${linea.key}`] = texto
+  }
+  if (/total del documento/i.test(apiErrorMsg(e, ''))) marcas.totalDocumento = 'Falta el total del documento'
+  marcarErroresCompra(marcas)
+}
+
 async function persistirBorrador({ navegar = true } = {}): Promise<CompraDetalle | null> {
   folioError.value = null
   try {
@@ -665,7 +695,10 @@ async function persistirBorrador({ navegar = true } = {}): Promise<CompraDetalle
     const mensaje = apiErrorMsg(e, 'Error al guardar la compra')
     // El folio repetido se muestra al lado del campo, que es donde se arregla.
     if (status === 409) folioError.value = mensaje
-    else toast.add({ title: mensaje, color: 'error' })
+    else {
+      toast.add({ title: mensaje, color: 'error' })
+      marcarRechazo(e)
+    }
     return null
   }
 }
@@ -784,6 +817,7 @@ async function confirmarRecepcion() {
       })
     } catch (e: unknown) {
       toast.add({ title: apiErrorMsg(e, 'Error al confirmar la recepción'), color: 'error' })
+      marcarRechazo(e)
     } finally {
       // Recién ACÁ, con `/confirmar` ya resuelto (haya funcionado o no): así
       // ningún GET que el replace remonte puede quedar pisando una
@@ -945,6 +979,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
               v-if="totalDocumentoVisible"
               label="Total del documento"
               :required="totalDocumentoRequerido"
+              :error="erroresCompra.totalDocumento"
               data-qa="compra-total-documento-campo"
             >
               <MoneyInput
@@ -952,6 +987,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
                 oficial
                 class="w-full"
                 data-qa="compra-total-documento"
+                @update:model-value="limpiarErrorCompra('totalDocumento')"
               />
             </UFormField>
             <UFormField label="Vence el">
@@ -986,8 +1022,9 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
               :catalogo="catalogoProductos"
               :presentaciones="presentaciones"
               :proveedor-id="form.proveedorId"
+              :error-cantidad="erroresCompra[`cantidad:${linea.key}`]"
               @seleccionar-item="(cambios: Partial<LineaForm>) => Object.assign(linea, cambios)"
-              @cambiar-cantidad="(v: string) => { linea.cantidad = v }"
+              @cambiar-cantidad="(v: string) => { linea.cantidad = v; limpiarErrorCompra(`cantidad:${linea.key}`) }"
               @cambiar-unidad="(cambios: Partial<LineaForm>) => Object.assign(linea, cambios)"
               @nueva-presentacion="() => abrirNuevaPresentacion(linea)"
               @editar-presentacion="() => abrirEditarPresentacion(linea)"
@@ -1072,6 +1109,10 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
               Hay líneas sin precio: entran igual y se completan cuando llegue la factura.
             </p>
           </div>
+
+          <p v-if="faltaTexto" class="text-right text-sm text-muted" data-qa="compra-falta">
+            {{ faltaTexto }}
+          </p>
 
           <div class="flex flex-wrap justify-end gap-2">
             <UButton

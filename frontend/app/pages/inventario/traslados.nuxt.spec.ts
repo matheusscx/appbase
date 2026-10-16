@@ -126,6 +126,7 @@ async function montar() {
             <div v-if="open" role="dialog">
               <slot name="header" />
               <slot name="body" />
+              <slot name="ayuda" />
               <slot name="actions" />
             </div>
           `,
@@ -255,6 +256,40 @@ describe('traslados — formulario', () => {
     // disponible del LOCAL, aplicado como si fuera de la bodega.
     expect(wrapper.find('input[inputmode="decimal"]').exists()).toBe(false)
 
+    wrapper.unmount()
+  })
+})
+
+describe('traslados — por qué Confirmar está apagado (05.10)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  const falta = (w: Wrapper) => w.find('[data-qa="traslado-falta"]')
+
+  it('va nombrando lo primero que falta, en el orden del formulario', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    expect(falta(wrapper).text()).toBe('Falta elegir el origen')
+
+    const [origenSelect, destinoSelect] = selectsConOpcion(wrapper, LOCAL.id)
+    await emitir(origenSelect!, LOCAL.id)
+    expect(falta(wrapper).text()).toBe('Falta elegir el destino')
+
+    await emitir(destinoSelect!, LOCAL.id)
+    expect(falta(wrapper).text()).toBe('El origen y el destino no pueden ser el mismo')
+
+    await emitir(destinoSelect!, BODEGA.id)
+    expect(falta(wrapper).text()).toBe('Falta elegir el motivo')
+
+    await emitir(selectConOpcion(wrapper, MOTIVO.id), MOTIVO.id)
+    expect(falta(wrapper).text()).toBe('Falta elegir un producto')
+
+    await elegirProducto(wrapper, PRODUCTO.id)
+    expect(falta(wrapper).text()).toBe('Falta la cantidad')
+
+    await wrapper.find('input[inputmode="decimal"]').setValue('2')
+    expect(falta(wrapper).exists()).toBe(false)
     wrapper.unmount()
   })
 })

@@ -67,10 +67,22 @@ function valorMinimo(f: StockMinimoFila): string {
   return borradores.get(clave(f)) ?? f.minimo ?? ''
 }
 
+/** Filas cuyo mínimo tipeado no es un número: el error va junto al campo. */
+const erroresMinimo = reactive(new Map<string, string>())
+const NUMERO = /^\d+([.,]\d+)?$/
+
 async function guardar(f: StockMinimoFila) {
   const k = clave(f)
-  const tipeado = borradores.get(k)
+  let tipeado = borradores.get(k)
   if (tipeado === undefined || guardando.has(k)) return
+  tipeado = tipeado.trim()
+  if (tipeado !== '') {
+    if (!NUMERO.test(tipeado)) {
+      erroresMinimo.set(k, 'Escribe un número, por ejemplo 2 o 1,5')
+      return
+    }
+    tipeado = tipeado.replace(',', '.')
+  }
   if (sinCambio(f, tipeado)) {
     borradores.delete(k)
     return
@@ -159,19 +171,20 @@ const columns = computed<TableColumn<StockMinimoFila>[]>(() => [
           </template>
 
           <template #minimo-cell="{ row }">
-            <UInput
-              v-if="puedeActualizar"
+            <UFormField v-if="puedeActualizar" :error="erroresMinimo.get(clave(row.original))" class="ml-auto text-right" :class="erroresMinimo.has(clave(row.original)) ? 'w-48' : 'w-24'">
+              <UInput
               :model-value="valorMinimo(row.original)"
               inputmode="decimal"
               placeholder="—"
               size="sm"
-              class="w-24 ml-auto"
+              class="w-full"
               :loading="guardando.has(clave(row.original))"
               :data-qa="`minimo-${row.original.itemId}-${row.original.ubicacionId}`"
-              @update:model-value="(v: string | number) => borradores.set(clave(row.original), String(v))"
+              @update:model-value="(v: string | number) => { erroresMinimo.delete(clave(row.original)); borradores.set(clave(row.original), String(v)) }"
               @blur="guardar(row.original)"
               @keydown.enter="guardar(row.original)"
             />
+            </UFormField>
             <span
               v-else
               class="text-muted"

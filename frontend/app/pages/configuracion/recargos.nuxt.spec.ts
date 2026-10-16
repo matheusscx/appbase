@@ -1259,3 +1259,26 @@ describe('configuracion/recargos — perder la forma de importe avisa por los ci
     wrapper.unmount()
   })
 })
+
+// 07.2: guardar sin nombre ni tipo marca los dos campos, en vez de dejar que el
+// servidor conteste "nombre should not be empty, tipoReglaId must be a UUID".
+describe('configuracion/recargos — el alta vacía se marca junto a los campos', () => {
+  beforeEach(() => {
+    recargosBackend = []
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('sin nombre ni tipo: no manda nada y marca ambos', async () => {
+    const wrapper = await montar()
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    await wrapper.findAll('button').find(b => b.text().includes('Nuevo'))!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    document.querySelector('#recargo-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await new Promise(r => setTimeout(r, 60))
+
+    const errores = [...document.querySelectorAll('#recargo-form [data-slot="error"]')].map(e => e.textContent?.trim())
+    expect(errores).toEqual(['Escribe el nombre', 'Elige un tipo'])
+    wrapper.unmount()
+  })
+})

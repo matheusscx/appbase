@@ -248,6 +248,49 @@ describe('configuracion/usuarios — el alta avisa cuál de los tres desenlaces 
   })
 })
 
+// 07.21: "Crear" apagado dice qué falta, y el correo mal escrito se marca junto al campo.
+describe('configuracion/usuarios — el alta dice qué falta', () => {
+  async function abrirAlta(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await wrapper.findAll('button').find(b => b.text().includes('Nuevo usuario'))!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+  }
+  const falta = () => document.querySelector('[data-qa="alta-falta"]')?.textContent?.trim()
+  const entrada = (n: number) => document.querySelectorAll<HTMLInputElement>('#alta-usuario-form input')[n]!
+
+  async function escribir(el: HTMLInputElement, valor: string) {
+    el.value = valor
+    el.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(r => setTimeout(r, 10))
+  }
+
+  it('nombra lo primero que falta, en el orden del formulario', async () => {
+    const wrapper = await montar()
+    await abrirAlta(wrapper)
+    expect(falta()).toBe('Falta el nombre')
+
+    await escribir(entrada(0), 'Ana')
+    expect(falta()).toBe('Falta el correo')
+
+    await escribir(entrada(2), 'ana@tulocal.cl')
+    expect(falta()).toBe('Falta elegir al menos un rol')
+  })
+
+  it('un correo mal escrito se marca al salir del campo, con un ejemplo', async () => {
+    const wrapper = await montar()
+    await abrirAlta(wrapper)
+    await escribir(entrada(0), 'Ana')
+    await escribir(entrada(2), 'no-es-correo')
+    expect(document.querySelector('#alta-usuario-form [data-slot="error"]')).toBeNull()
+
+    entrada(2).dispatchEvent(new Event('blur'))
+    await new Promise(r => setTimeout(r, 10))
+
+    expect(document.querySelector('#alta-usuario-form [data-slot="error"]')?.textContent)
+      .toContain('Escribe un correo válido, por ejemplo ana@tulocal.cl')
+    expect(falta()).toBe('Falta escribir un correo válido')
+  })
+})
+
 /**
  * El editor de roles aplica N requests que **no son atómicas** —no hay endpoint
  * que las agrupe— y desde el 2026-08-16 una de ellas puede fallar:

@@ -89,6 +89,8 @@ let overrideConEliminados: Promise<unknown[]> | null = null
 let overrideSinEliminados: Promise<unknown[]> | null = null
 /** Cada `POST .../restaurar` recibido: el contador del doble submit. */
 let postsRestaurar: string[] = []
+/** Cada alta (`POST /impresoras`) que llegó al backend. */
+let postsCrear: unknown[] = []
 /** Retiene la respuesta del restaurar para dejar el POST "en vuelo". */
 let restaurarRetenido: Promise<unknown> | null = null
 
@@ -106,6 +108,10 @@ mockNuxtImport('useApiFetch', () => {
         imp.eliminadoPorNombre = 'admin.paris'
       }
       return Promise.resolve(undefined)
+    }
+    if (method === 'POST' && !url.endsWith('/restaurar')) {
+      postsCrear.push(opts)
+      return Promise.resolve(impresora({ id: 'imp-nueva' }))
     }
     if (method === 'POST' && url.endsWith('/restaurar')) {
       const id = url.split('/').slice(-2)[0] ?? ''
@@ -209,6 +215,7 @@ function reset() {
   overrideConEliminados = null
   overrideSinEliminados = null
   postsRestaurar = []
+  postsCrear = []
   restaurarRetenido = null
 }
 
@@ -492,6 +499,37 @@ describe('impresoras — papelera: la carrera de `cargar()` bajo toggles rápido
     expect(wrapper.text()).toContain('Cocina')
     expect(wrapper.text()).not.toContain('Impresora vieja')
 
+    wrapper.unmount()
+  })
+})
+
+// 07.2: crear con campos vacíos marca cada campo, en vez del texto crudo del validador.
+describe('impresoras — el alta valida al enviar', () => {
+  beforeEach(() => {
+    impresorasBackend = [impresora()]
+    reset()
+    esAdmin = true
+    permisos = ADMIN_IMPRESORAS
+    document.body.innerHTML = ''
+  })
+
+  async function abrirNueva(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await wrapper.findAll('button').find(b => b.text().includes('Nueva impresora'))!.trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+  }
+  async function enviar() {
+    document.querySelector('#impresora-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await new Promise(r => setTimeout(r, 30))
+  }
+  const errores = () => [...document.querySelectorAll('#impresora-form [data-slot="error"]')].map(e => e.textContent?.trim())
+
+  it('sin nombre ni host: marca los dos y no manda nada', async () => {
+    const wrapper = await montar()
+    await abrirNueva(wrapper)
+    await enviar()
+
+    expect(postsCrear).toHaveLength(0)
+    expect(errores()).toEqual(['Escribe el nombre', 'Escribe la dirección IP o el nombre de la impresora'])
     wrapper.unmount()
   })
 })

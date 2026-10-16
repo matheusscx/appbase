@@ -148,6 +148,7 @@ function resetDrawer() {
   form.value = emptyForm()
   nivelTocado.value = false
   nombreError.value = null
+  limpiar()
   escalonesGuardados.value = 0
   valorGuardado.value = false
   marcarEscalones.value = false
@@ -180,6 +181,7 @@ const mostrarTramos = computed(() =>
 // form population in abrirEditar). Bound to the select's change event below.
 function onTipoChange(value: string) {
   form.value.tipoReglaId = value
+  limpiar('tipoReglaId')
   // El tipo empuja el nivel SOLO mientras nadie lo eligió a mano. Va después de
   // asignar `tipoReglaId` porque `config` se deriva de él.
   if (!nivelTocado.value) form.value.nivel = config.value?.nivelSugerido ?? 'linea'
@@ -573,7 +575,13 @@ const avisoPerdida = computed(() => {
  * Los cuatro primeros, uno por uno: `escalonesAPerder`; el quinto,
  * `valorSinCargar`.
  */
+const { errores, marcar, limpiar } = useErroresCampo()
+
 async function guardar() {
+  const faltan: Record<string, string> = {}
+  if (!form.value.nombre.trim()) faltan.nombre = 'Escribe el nombre'
+  if (!form.value.tipoReglaId) faltan.tipoReglaId = 'Elige un tipo'
+  if (marcar(faltan)) return
   await checkNombre()
   if (nombreError.value) return
 
@@ -947,17 +955,18 @@ const columns: TableColumn<Regla>[] = [
           @submit="guardar"
         >
           <!-- Nombre (always visible) -->
-          <UFormField label="Nombre" required :error="nombreError ?? undefined">
+          <UFormField label="Nombre" required :error="nombreError ?? errores.nombre">
             <UInput
               v-model="form.nombre"
               placeholder="Mi recargo"
               autofocus
+              @update:model-value="limpiar('nombre')"
               @blur="checkNombre"
             />
           </UFormField>
 
           <!-- Tipo (always visible) -->
-          <UFormField label="Tipo" required>
+          <UFormField label="Tipo" required :error="errores.tipoReglaId">
             <USelectMenu
               :model-value="form.tipoReglaId"
               :items="tipos"

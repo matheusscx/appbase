@@ -327,6 +327,38 @@ describe('mermas — producto con número de serie', () => {
   })
 })
 
+// 05.9: lo que falta se marca junto a su campo, no en un toast genérico.
+describe('mermas — formulario incompleto', () => {
+  beforeEach(() => {
+    mermasEnviadas = []
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('marca cada campo que falta y no envía', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await enviar(wrapper)
+
+    expect(mermasEnviadas).toHaveLength(0)
+    const errores = wrapper.findAll('[data-slot="error"]').map(e => e.text())
+    expect(errores).toEqual(['Elige el producto', 'Escribe la cantidad', 'Elige el motivo'])
+    wrapper.unmount()
+  })
+
+  it('al corregir un campo, su error se va y los otros quedan', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await enviar(wrapper)
+    await wrapper.find('input[inputmode="decimal"]').setValue('2')
+
+    const errores = wrapper.findAll('[data-slot="error"]').map(e => e.text())
+    expect(errores).toEqual(['Elige el producto', 'Elige el motivo'])
+    wrapper.unmount()
+  })
+})
+
 // El filtro de producto: vacío = todos (con `clear`), no una opción "Todos" con un valor inventado.
 describe('mermas — filtro de producto', () => {
   beforeEach(() => {

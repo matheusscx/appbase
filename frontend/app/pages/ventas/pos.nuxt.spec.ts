@@ -796,7 +796,7 @@ describe('ventas/pos — un cobro que se repite no se registra dos veces', () =>
     await confirmar(wrapper, [{ metodoPagoId: 'mp-efectivo', monto: '1200' }])
     const aviso = toasts.find(t => t.title?.includes('otros datos'))
     expect(aviso?.actions?.map(a => a.label)).toEqual(['Ver venta'])
-    expect(toasts.some(t => t.title === 'Error al registrar la venta')).toBe(false)
+    expect(toasts.some(t => t.title === 'No se pudo registrar la venta. Inténtalo de nuevo.')).toBe(false)
 
     await confirmar(wrapper, [{ metodoPagoId: 'mp-efectivo', monto: '1200' }])
     expect(clavesDeVenta[1], 'el aviso cerró el intento (owner, 2026-09-19)').not.toBe(clavesDeVenta[0])

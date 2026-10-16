@@ -2158,3 +2158,27 @@ describe('configuracion/items — el costo cuenta lo que el ítem ya usa, esté 
     wrapper.unmount()
   })
 })
+
+// 07.2: "Crear item" con el nombre vacío marca el campo en vez de dejar que el
+// servidor conteste con el texto crudo del validador.
+describe('configuracion/items — el nombre vacío se marca junto al campo', () => {
+  beforeEach(() => {
+    esAdmin = true
+    permisos = ADMIN_ITEMS
+    enviados.length = 0
+  })
+
+  it('no manda nada y dice "Escribe el nombre del item"', async () => {
+    const wrapper = await montar()
+    await wrapper.findAll('button').find(b => b.text().includes('Nuevo item'))!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    document.querySelector('#item-form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))
+    await new Promise(r => setTimeout(r, 30))
+
+    expect(enviados.filter(e => e.method === 'POST')).toHaveLength(0)
+    const nombre = wrapper.findAllComponents({ name: 'UFormField' }).find(f => f.props('label') === 'Nombre')!
+    expect(nombre.find('[data-slot="error"]').text()).toBe('Escribe el nombre del item')
+    wrapper.unmount()
+  })
+})

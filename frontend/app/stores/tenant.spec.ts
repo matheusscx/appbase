@@ -226,7 +226,8 @@ describe('useTenantStore — fetchMyTenants', () => {
 
     await store.fetchMyTenants()
 
-    expect(store.error).toBe('tenantId debe ser un UUID, nombre no puede estar vacío')
+    // `apiErrorMsg` además cambia el nombre interno del campo por su etiqueta.
+    expect(store.error).toBe('Tenant debe ser un UUID, Nombre no puede estar vacío')
     expect(typeof store.error).toBe('string')
   })
 })

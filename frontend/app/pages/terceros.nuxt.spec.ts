@@ -630,3 +630,61 @@ describe('terceros — "Plazo de pago (días)" (spec compras-deuda-proveedor § 
     wrapper.unmount()
   })
 })
+
+// 06.16: el formulario avisa junto al campo, antes de mandar nada.
+describe('terceros — el formulario valida al enviar', () => {
+  beforeEach(() => {
+    tercerosBackend = [tercero()]
+    reset()
+    esAdmin = true
+    permisos = TERCEROS_COMPLETO
+  })
+
+  /** El `<input>` del `UInput` con ese placeholder. */
+  function campo(wrapper: Awaited<ReturnType<typeof montar>>, placeholder: string) {
+    const c = wrapper.findAllComponents({ name: 'UInput' }).find(i => i.props('placeholder') === placeholder)
+    expect(c, `UInput "${placeholder}"`).toBeTruthy()
+    return c!.find('input')
+  }
+  async function abrirNuevo(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await wrapper.findAll('button').find(b => b.text().includes('Nuevo tercero'))!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+  }
+  async function crear(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await wrapper.findAll('button').find(b => b.text().trim() === 'Crear')!.trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+  }
+
+  it('nombre vacío: marca el campo y no manda nada', async () => {
+    const wrapper = await montar()
+    await abrirNuevo(wrapper)
+    await crear(wrapper)
+
+    expect(guardados).toHaveLength(0)
+    expect(wrapper.findAll('[data-slot="error"]').map(e => e.text())).toEqual(['Escribe el nombre'])
+    wrapper.unmount()
+  })
+
+  it('correo mal escrito: lo marca con un ejemplo y no manda nada', async () => {
+    const wrapper = await montar()
+    await abrirNuevo(wrapper)
+    await campo(wrapper, 'Distribuidora Andina').setValue('Sur')
+    await campo(wrapper, 'contacto@empresa.cl').setValue('no-es-correo')
+    await crear(wrapper)
+
+    expect(guardados).toHaveLength(0)
+    expect(wrapper.findAll('[data-slot="error"]').map(e => e.text()))
+      .toEqual(['Escribe un correo válido, por ejemplo contacto@empresa.cl'])
+    wrapper.unmount()
+  })
+
+  it('con nombre y correo válidos manda el tercero', async () => {
+    const wrapper = await montar()
+    await abrirNuevo(wrapper)
+    await campo(wrapper, 'Distribuidora Andina').setValue('Sur')
+    await campo(wrapper, 'contacto@empresa.cl').setValue('ventas@sur.cl')
+    await crear(wrapper)
+    expect(guardados).toHaveLength(1)
+    wrapper.unmount()
+  })
+})
