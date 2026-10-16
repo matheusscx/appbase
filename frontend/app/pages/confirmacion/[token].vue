@@ -54,6 +54,22 @@ onMounted(async () => {
   }
 })
 
+/** El título y la bajada del marco cambian con el estado del link. */
+const titulo = computed(() => {
+  if (cargando.value) return undefined
+  if (linkInvalido.value) return 'Este link ya no sirve'
+  if (declinado.value) return 'No hicimos nada'
+  return `Te están sumando a ${tenant.value}`
+})
+const subtitulo = computed(() => {
+  if (cargando.value) return 'Verificando el link…'
+  if (linkInvalido.value) return linkInvalido.value
+  if (declinado.value) {
+    return `No te sumamos a ${tenant.value} y tu cuenta quedó igual que antes. Si cambiás de idea, volvé a abrir el link del mail antes de que venza.`
+  }
+  return `Con tu cuenta ${correo.value}. Si aceptás, vas a poder entrar a ${tenant.value} con la contraseña que ya usás — no tenés que crear nada nuevo.`
+})
+
 async function confirmar() {
   if (confirmando.value) return
   confirmando.value = true
@@ -79,83 +95,39 @@ async function confirmar() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-elevated px-4">
-    <div class="w-full max-w-sm">
-      <div class="text-center">
-        <div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600 mb-6">
-          <UIcon name="i-lucide-building-2" class="text-white w-5 h-5" />
-        </div>
+  <AppMarco :titulo="titulo" :subtitulo="subtitulo" icono="i-lucide-building-2">
+    <UButton v-if="linkInvalido || declinado" to="/login" block variant="subtle">
+      Ir a iniciar sesión
+    </UButton>
 
-        <template v-if="cargando">
-          <p class="text-sm text-muted">
-            Verificando el link…
-          </p>
-        </template>
-
-        <template v-else-if="linkInvalido">
-          <h1 class="text-xl font-semibold mb-2">
-            Este link ya no sirve
-          </h1>
-          <p class="text-sm text-muted mb-6">
-            {{ linkInvalido }}
-          </p>
-          <UButton to="/login" block variant="subtle">
-            Ir a iniciar sesión
-          </UButton>
-        </template>
-
-        <template v-else-if="declinado">
-          <h1 class="text-xl font-semibold mb-2">
-            No hicimos nada
-          </h1>
-          <p class="text-sm text-muted mb-6">
-            No te sumamos a {{ tenant }} y tu cuenta quedó igual que antes. Si
-            cambiás de idea, volvé a abrir el link del mail antes de que venza.
-          </p>
-          <UButton to="/login" block variant="subtle">
-            Ir a iniciar sesión
-          </UButton>
-        </template>
-
-        <template v-else>
-          <h1 class="text-xl font-semibold mb-2">
-            Te están sumando a {{ tenant }}
-          </h1>
-          <p class="text-sm text-muted mb-6">
-            Con tu cuenta {{ correo }}. Si aceptás, vas a poder entrar a
-            {{ tenant }} con la contraseña que ya usás — no tenés que crear
-            nada nuevo.
-          </p>
-
-          <div class="space-y-2">
-            <UButton
-              block
-              :loading="confirmando"
-              @click="confirmar"
-            >
-              Sí, quiero sumarme
-            </UButton>
-            <UButton
-              block
-              color="neutral"
-              variant="ghost"
-              :disabled="confirmando"
-              @click="() => { declinado = true }"
-            >
-              Ahora no
-            </UButton>
-          </div>
-
-          <p v-if="error" class="text-sm text-error mt-4" role="alert">
-            {{ error }}
-          </p>
-
-          <p class="text-xs text-muted mt-6">
-            Si no esperabas esto, no aceptes: sin tu confirmación no quedás
-            asociado a ninguna empresa.
-          </p>
-        </template>
+    <template v-else-if="!cargando">
+      <div class="space-y-2">
+        <UButton
+          block
+          :loading="confirmando"
+          @click="confirmar"
+        >
+          Sí, quiero sumarme
+        </UButton>
+        <UButton
+          block
+          color="neutral"
+          variant="ghost"
+          :disabled="confirmando"
+          @click="() => { declinado = true }"
+        >
+          Ahora no
+        </UButton>
       </div>
-    </div>
-  </div>
+
+      <p v-if="error" class="text-center text-sm text-error mt-4" role="alert">
+        {{ error }}
+      </p>
+
+      <p class="text-center text-xs text-muted mt-6">
+        Si no esperabas esto, no aceptes: sin tu confirmación no quedás
+        asociado a ninguna empresa.
+      </p>
+    </template>
+  </AppMarco>
 </template>

@@ -38,6 +38,20 @@ const puedeGuardar = computed(
     && form.value.contrasena === form.value.confirmar,
 )
 
+/** El título y la bajada del marco cambian con el estado del link. */
+const titulo = computed(() => {
+  if (cargando.value) return undefined
+  if (linkInvalido.value) return 'Este link ya no sirve'
+  return esInvitacion ? 'Elegí tu contraseña' : 'Elegí una contraseña nueva'
+})
+const subtitulo = computed(() => {
+  if (cargando.value) return 'Verificando el link…'
+  if (linkInvalido.value) return linkInvalido.value
+  return esInvitacion
+    ? `Te sumaron a un equipo con ${correo.value}. Elegí una contraseña para entrar.`
+    : `Vas a cambiar la contraseña de ${correo.value}.`
+})
+
 /**
  * Se consulta el token ANTES de mostrar el formulario. Sin esto, la persona
  * tipea dos veces una contraseña y recién ahí se entera de que el link venció.
@@ -80,79 +94,46 @@ async function guardar() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-elevated px-4">
-    <div class="w-full max-w-sm">
-      <div class="text-center">
-        <div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600 mb-6">
-          <UIcon name="i-lucide-key-round" class="text-white w-5 h-5" />
-        </div>
+  <AppMarco :titulo="titulo" :subtitulo="subtitulo" icono="i-lucide-key-round">
+    <UButton v-if="linkInvalido" to="/login" block variant="subtle">
+      Ir a iniciar sesión
+    </UButton>
 
-        <template v-if="cargando">
-          <p class="text-sm text-muted">
-            Verificando el link…
-          </p>
-        </template>
-
-        <template v-else-if="linkInvalido">
-          <h1 class="text-xl font-semibold mb-2">
-            Este link ya no sirve
-          </h1>
-          <p class="text-sm text-muted mb-6">
-            {{ linkInvalido }}
-          </p>
-          <UButton to="/login" block variant="subtle">
-            Ir a iniciar sesión
-          </UButton>
-        </template>
-
-        <template v-else>
-          <h1 class="text-xl font-semibold mb-2">
-            {{ esInvitacion ? 'Elegí tu contraseña' : 'Elegí una contraseña nueva' }}
-          </h1>
-          <p class="text-sm text-muted mb-6">
-            {{ esInvitacion
-              ? `Te sumaron a un equipo con ${correo}. Elegí una contraseña para entrar.`
-              : `Vas a cambiar la contraseña de ${correo}.` }}
-          </p>
-        </template>
-      </div>
-
-      <UForm
-        v-if="!cargando && !linkInvalido"
-        :state="form"
-        class="space-y-4"
-        @submit="guardar"
+    <UForm
+      v-else-if="!cargando"
+      :state="form"
+      class="space-y-4"
+      @submit="guardar"
+    >
+      <UFormField
+        label="Contraseña"
+        required
+        :hint="`Mínimo ${LARGO_MINIMO} caracteres`"
       >
-        <UFormField
-          label="Contraseña"
-          required
-          :hint="`Mínimo ${LARGO_MINIMO} caracteres`"
-        >
-          <UInput
-            v-model="form.contrasena"
-            type="password"
-            autofocus
-            class="w-full"
-          />
-        </UFormField>
-        <UFormField label="Repetila" required>
-          <UInput v-model="form.confirmar" type="password" class="w-full" />
-        </UFormField>
+        <UInput
+          v-model="form.contrasena"
+          type="password"
+          autofocus
+          class="w-full"
+        />
+      </UFormField>
+      <UFormField label="Repetila" required>
+        <UInput v-model="form.confirmar" type="password" class="w-full" />
+      </UFormField>
 
-        <p
-          v-if="form.confirmar.length > 0 && form.contrasena !== form.confirmar"
-          class="text-sm text-error"
-        >
-          Las contraseñas no coinciden.
-        </p>
-        <p v-if="error" class="text-sm text-error" role="alert">
-          {{ error }}
-        </p>
+      <p
+        v-if="form.confirmar.length > 0 && form.contrasena !== form.confirmar"
+        class="text-sm text-error"
+      >
+        Las contraseñas no coinciden.
+      </p>
+      <p v-if="error" class="text-sm text-error" role="alert">
+        {{ error }}
+      </p>
 
-        <UButton type="submit" block :loading="guardando" :disabled="!puedeGuardar">
-          Guardar y entrar
-        </UButton>
-      </UForm>
-    </div>
-  </div>
+      <UButton type="submit" block :loading="guardando" :disabled="!puedeGuardar">
+        Guardar y entrar
+      </UButton>
+    </UForm>
+  </AppMarco>
 </template>

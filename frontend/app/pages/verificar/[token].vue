@@ -31,6 +31,18 @@ const linkInvalido = ref<string | null>(null)
 const verificando = ref(false)
 const mensaje = ref('')
 
+/** El título y la bajada del marco cambian con el estado del link. */
+const titulo = computed(() => {
+  if (linkInvalido.value) return 'Este link ya no sirve'
+  if (mensaje.value) return 'Correo verificado'
+  return 'Confirmá que este correo es tuyo'
+})
+const subtitulo = computed(() => {
+  if (linkInvalido.value) return linkInvalido.value
+  if (mensaje.value) return mensaje.value
+  return 'Es el último paso: hasta que lo hagas, tu cuenta no se puede usar.'
+})
+
 async function verificar() {
   if (verificando.value) return
   verificando.value = true
@@ -51,50 +63,20 @@ async function verificar() {
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-elevated px-4">
-    <div class="w-full max-w-sm text-center">
-      <div class="inline-flex items-center justify-center w-10 h-10 rounded-xl bg-primary-600 mb-6">
-        <UIcon name="i-lucide-mail-check" class="text-white w-5 h-5" />
-      </div>
+  <AppMarco :titulo="titulo" :subtitulo="subtitulo" icono="i-lucide-mail-check">
+    <!-- A registrarse y no a entrar: sin el correo verificado el login
+         corta igual, así que mandarla al login sería un callejón. Volver a
+         registrarse con la misma dirección reenvía el link. -->
+    <UButton v-if="linkInvalido" to="/register" block variant="subtle">
+      Pedir un link nuevo
+    </UButton>
 
-      <template v-if="linkInvalido">
-        <h1 class="text-xl font-semibold mb-2">
-          Este link ya no sirve
-        </h1>
-        <p class="text-sm text-muted mb-6">
-          {{ linkInvalido }}
-        </p>
-        <!-- A registrarse y no a entrar: sin el correo verificado el login
-             corta igual, así que mandarla al login sería un callejón. Volver a
-             registrarse con la misma dirección reenvía el link. -->
-        <UButton to="/register" block variant="subtle">
-          Pedir un link nuevo
-        </UButton>
-      </template>
+    <UButton v-else-if="mensaje" to="/login" block>
+      Iniciar sesión
+    </UButton>
 
-      <template v-else-if="mensaje">
-        <h1 class="text-xl font-semibold mb-2">
-          Correo verificado
-        </h1>
-        <p class="text-sm text-muted mb-6">
-          {{ mensaje }}
-        </p>
-        <UButton to="/login" block>
-          Iniciar sesión
-        </UButton>
-      </template>
-
-      <template v-else>
-        <h1 class="text-xl font-semibold mb-2">
-          Confirmá que este correo es tuyo
-        </h1>
-        <p class="text-sm text-muted mb-6">
-          Es el último paso: hasta que lo hagas, tu cuenta no se puede usar.
-        </p>
-        <UButton block :loading="verificando" @click="verificar">
-          Verificar mi correo
-        </UButton>
-      </template>
-    </div>
-  </div>
+    <UButton v-else block :loading="verificando" @click="verificar">
+      Verificar mi correo
+    </UButton>
+  </AppMarco>
 </template>

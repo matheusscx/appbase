@@ -4,14 +4,8 @@ const authStore = useAuthStore()
 </script>
 
 <template>
-  <div class="min-h-screen flex items-center justify-center bg-elevated px-4">
-    <div class="w-full max-w-sm text-center">
-      <div class="w-14 h-14 rounded-xl bg-primary-50 dark:bg-primary-900/20 flex items-center justify-center mx-auto mb-5">
-        <UIcon name="i-lucide-building-2" class="w-7 h-7 text-highlighted" />
-      </div>
-      <h1 class="text-lg font-semibold text-default mb-2">
-        Sin acceso a empresas
-      </h1>
+  <AppMarco titulo="Sin acceso a empresas" icono="i-lucide-building-2">
+    <div class="text-center">
       <p class="text-sm text-muted mb-8 leading-relaxed">
         Tu cuenta no pertenece a ninguna empresa todavía.<br>
         Contacta al administrador para que te agregue.
@@ -25,5 +19,5 @@ const authStore = useAuthStore()
         </UButton>
       </div>
     </div>
-  </div>
+  </AppMarco>
 </template>
