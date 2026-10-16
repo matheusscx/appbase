@@ -16,6 +16,13 @@ import type {
   RespuestaEscaneo,
   ResumenPaqueteria,
 } from '../src/modules/paqueteria/paqueteria.types';
+import type { PaginatedResponse } from '../src/common/interfaces/paginated-response.interface';
+import { fechaMenosDias } from '../src/common/utils/rango-fecha.util';
+import { MOTIVOS_BAJA_FIJOS } from '../src/modules/motivos-baja/motivos-baja.defaults';
+import { MOTIVOS_DIFERENCIA_DEFAULTS } from '../src/modules/motivos-diferencia/motivos-diferencia.defaults';
+import { MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS } from '../src/modules/motivos-diferencia-inventario/motivos-diferencia-inventario.defaults';
+import { MOTIVOS_TRASLADO_FIJOS } from '../src/modules/motivos-traslado/motivos-traslado.defaults';
+import { SeederService } from '../src/modules/seeder/seeder.service';
 import { correrCarrera } from './helpers/carrera';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
 
@@ -1961,6 +1968,171 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           expect(entregadas).toBe(1);
         });
       });
+    });
+  });
+
+  describe('tenant demo', () => {
+    const DEMO_TENANT_ID = '550e8400-e29b-41d4-a716-446655440502';
+    const ADMIN_DEMO = { email: 'admin@paquetes.cl', pass: 'admin' };
+    let tokenDemo: string;
+
+    beforeAll(async () => {
+      tokenDemo = await login(
+        app,
+        ADMIN_DEMO.email,
+        ADMIN_DEMO.pass,
+        DEMO_TENANT_ID,
+      );
+    });
+
+    it('el admin del demo ve solo Paquetería: su único permiso es Paquetería:Leer', async () => {
+      const res = await llamar('get', '/api/rbac/mis-permisos', tokenDemo);
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual(['Paquetería:Leer']);
+    });
+
+    it('no es superadmin ni miembro de otro tenant: entrar a Paris es 401/403', async () => {
+      const resLogin = await request(app.getHttpServer())
+        .post('/api/auth/login')
+        .send({ email: ADMIN_DEMO.email, password: ADMIN_DEMO.pass });
+      expect(resLogin.status).toBe(200);
+      const res = await request(app.getHttpServer())
+        .post('/api/auth/switch-tenant')
+        .set(
+          'Cookie',
+          (resLogin.headers['set-cookie'] as unknown as string[]) ?? [],
+        )
+        .set(
+          'Authorization',
+          `Bearer ${(resLogin.body as TokenResponse).access_token}`,
+        )
+        .send({ tenantId: PARIS_TENANT_ID });
+      expect([401, 403]).toContain(res.status);
+    });
+
+    it('abre con números: 3 hojas (dos rendidas con totales congelados y una abierta con 5 en ruta) y 30 paquetes', async () => {
+      const yo = await llamar('get', '/api/tenants/me', tokenDemo);
+      expect(yo.status).toBe(200);
+      const hoy = (yo.body as { diaNegocioHoy: string }).diaNegocioHoy;
+
+      const res = await llamar(
+        'get',
+        `/api/hojas-ruta?desde=${fechaMenosDias(hoy, 7)}&hasta=${hoy}`,
+        tokenDemo,
+      );
+      expect(res.status).toBe(200);
+      const hojas = res.body as HojaRutaFila[];
+      expect(hojas.map((h) => [h.fecha, h.estado])).toEqual([
+        [hoy, 'abierta'],
+        [fechaMenosDias(hoy, 1), 'rendida'],
+        [fechaMenosDias(hoy, 2), 'rendida'],
+      ]);
+
+      const [abierta, ayer, antesDeAyer] = hojas;
+      expect(abierta).toMatchObject({ asignados: 5, enRuta: 5, entregados: 0 });
+      // Las rendidas leen lo congelado: un neto negativo y uno positivo, como el demo promete.
+      expect(antesDeAyer).toMatchObject({
+        asignados: 12,
+        enRuta: 0,
+        entregados: 10,
+        cobroDestino: 3,
+        montoCobradoDestino: '30000.0000',
+        montoPagoRepartidor: '50000.0000',
+        montoTotalGeneral: '100000.0000',
+        netoARendir: '-20000.0000',
+      });
+      expect(ayer).toMatchObject({
+        asignados: 10,
+        enRuta: 0,
+        entregados: 9,
+        cobroDestino: 5,
+        montoCobradoDestino: '50000.0000',
+        montoPagoRepartidor: '45000.0000',
+        montoTotalGeneral: '90000.0000',
+        netoARendir: '5000.0000',
+      });
+
+      const paquetes = await llamar(
+        'get',
+        '/api/paquetes?pageSize=100',
+        tokenDemo,
+      );
+      expect(paquetes.status).toBe(200);
+      const pagina = paquetes.body as PaginatedResponse<PaqueteFila>;
+      expect(pagina.meta.total).toBe(30);
+      expect(pagina.data.every((p) => /^46\d{9}$/.test(p.codigo))).toBe(true);
+      // Un tercio con cobro en destino y la mitad con dirección y comuna.
+      expect(pagina.data.filter((p) => p.cobroEnDestino)).toHaveLength(10);
+      expect(pagina.data.filter((p) => p.direccion && p.comuna)).toHaveLength(
+        15,
+      );
+    });
+
+    it('nace con lo que le da TenantsService.create: métodos de pago habilitados y los motivos fijos', async () => {
+      const [fila] = await app.get(DataSource).query<Record<string, number>[]>(
+        `SELECT
+           (SELECT COUNT(*)::int FROM tenant_metodo_pago
+             WHERE tenant_id = $1 AND habilitada AND eliminado_el IS NULL) AS metodos,
+           (SELECT COUNT(*)::int FROM tenant_metodo_pago
+             WHERE tenant_id = $1 AND NOT habilitada) AS apagados,
+           (SELECT COUNT(*)::int FROM motivo_baja WHERE tenant_id = $1 AND es_fijo AND eliminado_el IS NULL) AS baja,
+           (SELECT COUNT(*)::int FROM motivo_diferencia_caja WHERE tenant_id = $1 AND es_fijo AND eliminado_el IS NULL) AS caja,
+           (SELECT COUNT(*)::int FROM motivo_diferencia_inventario WHERE tenant_id = $1 AND es_fijo AND eliminado_el IS NULL) AS inventario,
+           (SELECT COUNT(*)::int FROM motivo_traslado WHERE tenant_id = $1 AND es_fijo AND eliminado_el IS NULL) AS traslado`,
+        [DEMO_TENANT_ID],
+      );
+      expect(fila).toEqual({
+        metodos: 4,
+        apagados: 0,
+        baja: MOTIVOS_BAJA_FIJOS.length,
+        caja: MOTIVOS_DIFERENCIA_DEFAULTS.length,
+        inventario: MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS.length,
+        traslado: MOTIVOS_TRASLADO_FIJOS.length,
+      });
+    });
+
+    it('el seed corrido otra vez no duplica ni pisa nada', async () => {
+      const contar = async (): Promise<Record<string, number>> => {
+        const filas = await app
+          .get(DataSource)
+          .query<{ tabla: string; n: number }[]>(
+            `SELECT 'tenants' AS tabla, COUNT(*)::int AS n FROM tenants
+           UNION ALL SELECT 'usuarios', COUNT(*)::int FROM usuarios
+           UNION ALL SELECT 'usuarios_tenants', COUNT(*)::int FROM usuarios_tenants
+           UNION ALL SELECT 'roles', COUNT(*)::int FROM roles
+           UNION ALL SELECT 'roles_usuarios', COUNT(*)::int FROM roles_usuarios
+           UNION ALL SELECT 'modulos_app', COUNT(*)::int FROM modulos_app
+           UNION ALL SELECT 'modulo_app_permisos', COUNT(*)::int FROM modulo_app_permisos
+           UNION ALL SELECT 'tenant_modulos', COUNT(*)::int FROM tenant_modulos
+           UNION ALL SELECT 'ubicaciones', COUNT(*)::int FROM ubicaciones
+           UNION ALL SELECT 'cajas', COUNT(*)::int FROM cajas
+           UNION ALL SELECT 'tenant_moneda', COUNT(*)::int FROM tenant_moneda
+           UNION ALL SELECT 'tenant_formula_precio', COUNT(*)::int FROM tenant_formula_precio
+           UNION ALL SELECT 'tenant_metodo_pago', COUNT(*)::int FROM tenant_metodo_pago
+           UNION ALL SELECT 'motivo_baja', COUNT(*)::int FROM motivo_baja
+           UNION ALL SELECT 'motivo_diferencia_caja', COUNT(*)::int FROM motivo_diferencia_caja
+           UNION ALL SELECT 'motivo_diferencia_inventario', COUNT(*)::int FROM motivo_diferencia_inventario
+           UNION ALL SELECT 'motivo_traslado', COUNT(*)::int FROM motivo_traslado
+           UNION ALL SELECT 'paquete_configuracion', COUNT(*)::int FROM paquete_configuracion
+           UNION ALL SELECT 'repartidores', COUNT(*)::int FROM repartidores
+           UNION ALL SELECT 'paquetes', COUNT(*)::int FROM paquetes
+           UNION ALL SELECT 'hojas_ruta', COUNT(*)::int FROM hojas_ruta
+           UNION ALL SELECT 'hoja_ruta_paquetes', COUNT(*)::int FROM hoja_ruta_paquetes`,
+          );
+        return Object.fromEntries(filas.map((f) => [f.tabla, f.n]));
+      };
+      const hojasDemo = async () =>
+        app.get(DataSource).query<unknown[]>(
+          `SELECT hoja_ruta_id, estado, rendida_el, total_asignados, neto_a_rendir
+             FROM hojas_ruta WHERE tenant_id = $1 ORDER BY hoja_ruta_id`,
+          [DEMO_TENANT_ID],
+        );
+
+      const antes = await contar();
+      const hojasAntes = await hojasDemo();
+      await app.get(SeederService).onApplicationBootstrap();
+      expect(await contar()).toEqual(antes);
+      expect(await hojasDemo()).toEqual(hojasAntes);
     });
   });
 });

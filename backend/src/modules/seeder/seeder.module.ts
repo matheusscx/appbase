@@ -37,6 +37,7 @@ import { Pasarela } from '../pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../pasarela/entities/tenant-pasarela.entity';
 import { PasarelaModule } from '../pasarela/pasarela.module';
 import { ItemsModule } from '../items/items.module';
+import { PaqueteriaModule } from '../paqueteria/paqueteria.module';
 import { Salon } from '../salones/entities/salon.entity';
 import { Mesa } from '../salones/entities/mesa.entity';
 import { Garzon } from '../garzones/entities/garzon.entity';
@@ -54,6 +55,9 @@ import { PromocionScopeItem } from '../promociones/entities/promocion-scope-item
     // Por `ItemsService.asegurarItemAjuste`: el ítem de sistema "Ajuste" de
     // cada tenant del seed se crea por el mismo camino que el del alta real.
     ItemsModule,
+    // Por `HojasRutaService.congelarTotales`: las hojas rendidas del demo de
+    // Paquetería congelan sus totales por el mismo camino que `rendir`.
+    PaqueteriaModule,
     RepositoriosModule.forFeature([
       Moneda,
       UnidadMedida,

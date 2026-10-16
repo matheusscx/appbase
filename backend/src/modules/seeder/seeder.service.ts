@@ -59,6 +59,40 @@ import { MOTIVOS_BAJA_FIJOS } from '../motivos-baja/motivos-baja.defaults';
 import { MOTIVOS_DIFERENCIA_DEFAULTS } from '../motivos-diferencia/motivos-diferencia.defaults';
 import { MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS } from '../motivos-diferencia-inventario/motivos-diferencia-inventario.defaults';
 import { MOTIVOS_TRASLADO_FIJOS } from '../motivos-traslado/motivos-traslado.defaults';
+import { Db } from '../../common/db/db.service';
+import {
+  diaNegocioEnZona,
+  diaNegocioTenant,
+  fechaMenosDias,
+} from '../../common/utils/rango-fecha.util';
+import { HojasRutaService } from '../paqueteria/hojas-ruta.service';
+
+/**
+ * Tenant demo de Paquetería y todo lo que cuelga de él. Los usan varios métodos del
+ * seed, así que viven acá y no como locales de cada uno.
+ *
+ * Bloque 502-589 (medido el 2026-10-15 contra el CÓDIGO, no `docs/`): los literales
+ * `44665544XXXX` llegan a 457 y los generadores dinámicos (`uuid(n)`, `uuid(id++)`)
+ * a 471 (`NUEVOS` de `seedMotivosBaja`); 481-495 los reserva el plan de aviso de stock
+ * bajo. 496-501 se dejan libres: 500 y 501 los usan como ids de mentira unos specs.
+ * Reparto: 502-511 tenant/usuario/rol/módulo/contratos/caja/configuraciones,
+ * 512-514 repartidores, 515-517 hojas, 520-549 paquetes (520 + índice),
+ * 550-579 líneas de hoja (550 + índice del paquete).
+ */
+const uuidPaqueteria = (n: number): string =>
+  `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
+const PAQUETERIA = {
+  tenantId: uuidPaqueteria(502),
+  adminUsuarioId: uuidPaqueteria(503),
+  adminRolId: uuidPaqueteria(504),
+  moduloAppId: uuidPaqueteria(505),
+  moduloAppPermisoLeerId: uuidPaqueteria(506),
+  tenantModuloPaquetesId: uuidPaqueteria(507),
+  tenantModuloRestauranteId: uuidPaqueteria(508),
+  cajaVirtualId: uuidPaqueteria(509),
+  configuracionPaquetesId: uuidPaqueteria(510),
+  configuracionRestauranteId: uuidPaqueteria(511),
+} as const;
 
 @Injectable()
 export class SeederService implements OnApplicationBootstrap {
@@ -153,6 +187,8 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly promocionScopeItemRepo: Repository<PromocionScopeItem>,
     private readonly credencialesService: CredencialesService,
     private readonly itemsService: ItemsService,
+    private readonly db: Db,
+    private readonly hojasRutaService: HojasRutaService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -221,6 +257,8 @@ export class SeederService implements OnApplicationBootstrap {
     await this.seedMesas();
     await this.seedGarzones();
     await this.seedTurnos();
+    await this.seedDefaultsTenantPaquetes();
+    await this.seedPaqueteria();
 
     this.logger.log('Seed complete.');
   }
@@ -564,6 +602,15 @@ export class SeederService implements OnApplicationBootstrap {
         },
       );
     }
+    // Solo la oficial, a tasa 1: es lo único que `TenantsService.create` habilita
+    // (paso 8). UF y dólar son del demo de restaurante, donde se prueba el
+    // multi-moneda; un tenant de reparto no vende en otra.
+    entries.push({
+      tenantId: PAQUETERIA.tenantId,
+      monedaId: CLP,
+      habilitada: true,
+      valorDelDia: '1',
+    });
 
     for (const data of entries) {
       const exists = await this.tenantMonedaRepo.findOne({
@@ -754,6 +801,15 @@ export class SeederService implements OnApplicationBootstrap {
         url: '/reportes/varianza',
         icono: 'mdi-scale-balance',
         tieneConfiguracion: false,
+      },
+      // Paquetería: el cliente de reparto entra a un tenant que tiene solo este
+      // módulo. `tieneConfiguracion` porque tiene sus montos por defecto.
+      {
+        moduloAppId: PAQUETERIA.moduloAppId,
+        nombre: 'Paquetería',
+        url: '/paquetes',
+        icono: 'mdi-package-variant',
+        tieneConfiguracion: true,
       },
     ];
 
@@ -1207,6 +1263,15 @@ export class SeederService implements OnApplicationBootstrap {
         moduloAppId: VARIANZA,
         permisoId: LEER,
       },
+      // Paquetería: solo `Leer`, y no para que lo consulte un guard —las rutas
+      // son de `TenantAdminGuard`— sino porque es la marca de "contratado" que
+      // lee el menú (`GET /rbac/mis-permisos`): un módulo sin ningún permiso
+      // no aparece nunca para nadie.
+      {
+        moduloAppPermisoId: PAQUETERIA.moduloAppPermisoLeerId,
+        moduloAppId: PAQUETERIA.moduloAppId,
+        permisoId: LEER,
+      },
     ];
 
     for (const data of entries) {
@@ -1453,6 +1518,18 @@ export class SeederService implements OnApplicationBootstrap {
         correo: 'compras.paga@paris.cl',
         esSuperadmin: false,
       },
+      // El admin del cliente de Paquetería: lo es de UN tenant (el demo de
+      // gestión de paquetes) y de ningún otro, y no es superadmin.
+      {
+        id: PAQUETERIA.adminUsuarioId,
+        nombreUsuario: 'admin.paquetes',
+        contrasena: HASH,
+        nombre: 'Admin',
+        apellido: 'Paquetes',
+        telefono: '987654503',
+        correo: 'admin@paquetes.cl',
+        esSuperadmin: false,
+      },
     ];
 
     for (const data of usuarios) {
@@ -1479,6 +1556,9 @@ export class SeederService implements OnApplicationBootstrap {
       correo: string;
       telefono: string;
       direccion: string;
+      // Sin cajas no hay cierres que descuadrar: el tenant nace con los
+      // umbrales apagados, como uno real (`TenantsService.create`).
+      sinUmbralesDescuadre?: boolean;
     }> = [
       {
         id: '550e8400-e29b-41d4-a716-446655440007',
@@ -1496,9 +1576,18 @@ export class SeederService implements OnApplicationBootstrap {
         telefono: '+56226007000',
         direccion: 'Av. Presidente Kennedy 6400, Las Condes, Santiago',
       },
+      {
+        id: PAQUETERIA.tenantId,
+        provinciaId: '550e8400-e29b-41d4-a716-446655440001',
+        nombre: 'Demo Gestión de Paquetes',
+        correo: 'contacto@paquetes.cl',
+        telefono: '+56226008000',
+        direccion: 'Av. Providencia 1234, Providencia, Santiago',
+        sinUmbralesDescuadre: true,
+      },
     ];
 
-    for (const data of tenants) {
+    for (const { sinUmbralesDescuadre, ...data } of tenants) {
       const exists = await this.tenantRepo.findOne({ where: { id: data.id } });
       if (!exists) {
         await this.tenantRepo.save(
@@ -1516,8 +1605,8 @@ export class SeederService implements OnApplicationBootstrap {
             // la bandeja de pendientes de revisar tenga de dónde poblarse en el
             // demo: con los dos en cero la feature entera es invisible.
             // $2.000 avisa, $10.000 va a la bandeja.
-            umbralDescuadreAviso: '2000',
-            umbralDescuadreAlto: '10000',
+            umbralDescuadreAviso: sinUmbralesDescuadre ? '0' : '2000',
+            umbralDescuadreAlto: sinUmbralesDescuadre ? '0' : '10000',
           }),
         );
       }
@@ -1543,7 +1632,7 @@ export class SeederService implements OnApplicationBootstrap {
 
     // Sin id fijo: nadie referencia el local de un tenant por su UUID, solo
     // por `tipo = 'local'` (`UbicacionesService.localDe`).
-    for (const tenantId of [PARIS, FALABELLA]) {
+    for (const tenantId of [PARIS, FALABELLA, PAQUETERIA.tenantId]) {
       // `eliminado_el IS NULL`: el local nunca se borra en la práctica
       // (`UbicacionesService.remove` lo rechaza siempre), así que hoy esta
       // fila es inalcanzable — pero es el criterio del propio frente
@@ -1748,6 +1837,7 @@ export class SeederService implements OnApplicationBootstrap {
         id: '550e8400-e29b-41d4-a716-446655440151',
         tenantId: '550e8400-e29b-41d4-a716-446655440040', // Falabella
       },
+      { id: PAQUETERIA.cajaVirtualId, tenantId: PAQUETERIA.tenantId },
     ];
 
     for (const data of cajas) {
@@ -2061,6 +2151,23 @@ export class SeederService implements OnApplicationBootstrap {
         moduloTenantId: '550e8400-e29b-41d4-a716-446655440438',
         tenantId: '550e8400-e29b-41d4-a716-446655440040',
         moduloAppId: '550e8400-e29b-41d4-a716-446655440432', // Falabella → Compras
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        // Demo Gestión de Paquetes → Paquetería: su único módulo.
+        moduloTenantId: PAQUETERIA.tenantModuloPaquetesId,
+        tenantId: PAQUETERIA.tenantId,
+        moduloAppId: PAQUETERIA.moduloAppId,
+        estado: 'activo',
+        expiraEn: new Date('2026-12-31T23:59:59Z'),
+      },
+      {
+        // Paris → Paquetería: ahí corren los e2e y el Playwright. ⛔ Demo Bodega
+        // NO la contrata, a propósito: es el tenant donde el menú no la muestra.
+        moduloTenantId: PAQUETERIA.tenantModuloRestauranteId,
+        tenantId: '550e8400-e29b-41d4-a716-446655440007',
+        moduloAppId: PAQUETERIA.moduloAppId,
         estado: 'activo',
         expiraEn: new Date('2026-12-31T23:59:59Z'),
       },
@@ -2527,6 +2634,9 @@ export class SeederService implements OnApplicationBootstrap {
       { tenantId: FALABELLA, paso: 1, tipo: 'descuentos' },
       { tenantId: FALABELLA, paso: 2, tipo: 'recargos' },
       { tenantId: FALABELLA, paso: 3, tipo: 'impuestos' },
+      { tenantId: PAQUETERIA.tenantId, paso: 1, tipo: 'descuentos' },
+      { tenantId: PAQUETERIA.tenantId, paso: 2, tipo: 'recargos' },
+      { tenantId: PAQUETERIA.tenantId, paso: 3, tipo: 'impuestos' },
     ];
 
     for (const row of formula) {
@@ -2578,6 +2688,9 @@ export class SeederService implements OnApplicationBootstrap {
       [COMPRAS_CARGA_PARIS, PARIS], // Compras:Leer y Crear, sin Actualizar → Paris
       [COMPRAS_CORRECCION_PARIS, PARIS], // Compras sin Anular → Paris
       [COMPRAS_PAGA_PARIS, PARIS], // las cuatro de Compras + Pagar → Paris
+      // Su admin y nadie más: `admin@sistema.com` NO entra a este tenant, así los
+      // otros dos siguen viendo los mismos tenants que antes.
+      [PAQUETERIA.adminUsuarioId, PAQUETERIA.tenantId],
     ];
 
     for (const [usuarioId, tenantId] of pairs) {
@@ -2641,6 +2754,30 @@ export class SeederService implements OnApplicationBootstrap {
         );
       }
     }
+
+    // Demo Gestión de Paquetes: su rol Administrador (fijo) para SU admin. Va
+    // aparte del loop de arriba porque ahí se asigna el superadmin a cada rol, y
+    // `admin@sistema.com` no es miembro de este tenant.
+    const rolPaquetes: { rol_id: string }[] = await this.dataSource.query(
+      `SELECT rol_id FROM roles WHERE tenant_id = $1 AND nombre = 'Administrador' AND eliminado_el IS NULL`,
+      [PAQUETERIA.tenantId],
+    );
+    if (rolPaquetes.length === 0) {
+      await this.dataSource.query(
+        `INSERT INTO roles (rol_id, tenant_id, nombre, descripcion, es_fijo, creado_el, actualizado_el)
+         VALUES ($1, $2, 'Administrador', 'Acceso completo', true, NOW(), NOW())`,
+        [PAQUETERIA.adminRolId, PAQUETERIA.tenantId],
+      );
+    }
+    await this.dataSource.query(
+      `INSERT INTO roles_usuarios (usuario_id, tenant_id, rol_id, creado_el, actualizado_el)
+       VALUES ($1, $2, $3, NOW(), NOW()) ON CONFLICT DO NOTHING`,
+      [
+        PAQUETERIA.adminUsuarioId,
+        PAQUETERIA.tenantId,
+        rolPaquetes[0]?.rol_id ?? PAQUETERIA.adminRolId,
+      ],
+    );
 
     // Crear rol Vendedor en Paris (no fijo) y asignar a vendedor@paris.cl
     const vendedorRolId = '550e8400-e29b-41d4-a716-446655440046';
@@ -5276,5 +5413,274 @@ export class SeederService implements OnApplicationBootstrap {
        VALUES ($1, $2, $3) ON CONFLICT DO NOTHING`,
       [rolId, MODULO_TENANT_ITEMS, ITEMS_LEER],
     );
+  }
+
+  /**
+   * Lo que `TenantsService.create` le da a todo tenant y que su admin ve igual en
+   * Configuración aunque no contrate el módulo (`configuracion.vue` solo exige ser
+   * admin): los métodos de pago del país (paso 9) y los cuatro juegos de motivos fijos
+   * (pasos 7 a 7d). Sin ellos esas pantallas salen vacías o con todo apagado, y el
+   * tenant no se parece a uno real.
+   *
+   * Sin IDs fijos y sin tocar los loops `[PARIS, FALABELLA]` de los motivos (sus ids
+   * salen de contadores que arrancan en 266/291/316/391: sumar un tenant los
+   * correría): cada tabla tiene un único parcial por (tenant, nombre) o por
+   * (tenant, método), así que `ON CONFLICT DO NOTHING` es la idempotencia.
+   *
+   * No se siembra, a propósito: el garzón Mostrador (`asegurarMostrador` es
+   * find-or-create en la primera venta), la configuración de propinas
+   * (`asegurarDefault` la crea al primer uso), el ítem "Ajuste" (`asegurarItemAjuste`
+   * lo crea con la primera nota de crédito) ni nada de cajas (el tenant no abre cajas
+   * físicas; la virtual sí está, en `seedCajasVirtuales`).
+   */
+  private async seedDefaultsTenantPaquetes(): Promise<void> {
+    const { tenantId } = PAQUETERIA;
+
+    await this.db.query(
+      `INSERT INTO tenant_metodo_pago
+         (tenant_id, metodo_pago_id, habilitada, permite_vuelto, emisor, creado_el, actualizado_el)
+       SELECT $1, mpp.metodo_pago_id, true, false, 'sistema', NOW(), NOW()
+         FROM metodo_pago_pais mpp
+         JOIN provincia prov ON prov.pais_id = mpp.pais_id AND prov.eliminado_el IS NULL
+         JOIN tenants t ON t.provincia_id = prov.provincia_id AND t.eliminado_el IS NULL
+        WHERE t.tenant_id = $1 AND mpp.eliminado_el IS NULL
+       ON CONFLICT DO NOTHING`,
+      [tenantId],
+    );
+
+    for (const { nombre, tipo, esDevolucion } of MOTIVOS_BAJA_FIJOS) {
+      await this.db.query(
+        `INSERT INTO motivo_baja
+           (tenant_id, nombre, activo, es_fijo, tipo, es_devolucion)
+         VALUES ($1, $2, true, true, $3, $4)
+         ON CONFLICT DO NOTHING`,
+        [tenantId, nombre, tipo, esDevolucion === true],
+      );
+    }
+    for (const m of MOTIVOS_DIFERENCIA_DEFAULTS) {
+      await this.db.query(
+        `INSERT INTO motivo_diferencia_caja
+           (tenant_id, nombre, activo, requiere_comentario, es_fijo)
+         VALUES ($1, $2, true, $3, true)
+         ON CONFLICT DO NOTHING`,
+        [tenantId, m.nombre, m.requiereComentario],
+      );
+    }
+    await this.db.query(
+      `INSERT INTO motivo_diferencia_inventario (tenant_id, nombre, activo, es_fijo)
+       SELECT $1, n, true, true FROM unnest($2::text[]) AS n
+       ON CONFLICT DO NOTHING`,
+      [tenantId, [...MOTIVOS_DIFERENCIA_INVENTARIO_FIJOS]],
+    );
+    await this.db.query(
+      `INSERT INTO motivo_traslado (tenant_id, nombre, activo, es_fijo)
+       SELECT $1, n, true, true FROM unnest($2::text[]) AS n
+       ON CONFLICT DO NOTHING`,
+      [tenantId, [...MOTIVOS_TRASLADO_FIJOS]],
+    );
+  }
+
+  /**
+   * Los datos del demo de Paquetería, para que abra con números: los montos por
+   * defecto de los dos tenants que la contratan y, solo en Demo Gestión de Paquetes,
+   * 3 repartidores, 30 paquetes y 3 hojas (dos rendidas en días anteriores y una
+   * abierta hoy). IDs fijos de `PAQUETERIA` (bloque 502-589): 512-514 repartidores,
+   * 515-517 hojas, 520 + i los paquetes, 550 + i la línea del paquete i.
+   *
+   * "Hoy" sale del mismo cálculo que `GET /tenants/me` (`diaNegocioEnZona`: zona y hora de
+   * corte del tenant) y los días anteriores se restan sobre ese string; el día en la zona
+   * de la sesión de Postgres (`CURRENT_DATE`) lo rechaza `dia-negocio.invariant.spec`.
+   *
+   * Los totales de las rendidas no se escriben a mano: se congelan con
+   * `congelarTotales`, la misma consulta que usa rendir, así lo congelado y lo calculado
+   * no pueden diferir. Por eso las líneas de una rendida son solo `entregado` /
+   * `no_entregado` (rendir exige que no quede ninguna en ruta).
+   *
+   * Idempotente: nada se actualiza, así que un reinicio no pisa lo que el demo ya cambió
+   * (una hoja rendida se salta entera). Corre dentro de `onApplicationBootstrap`, que
+   * ya no corre en producción.
+   */
+  private async seedPaqueteria(): Promise<void> {
+    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
+    const { tenantId } = PAQUETERIA;
+    const PRECIO_ENVIO = '10000';
+    const PAGO_REPARTIDOR = '5000';
+
+    await this.db.query(
+      `INSERT INTO paquete_configuracion
+         (paquete_configuracion_id, tenant_id, precio_envio_defecto, pago_repartidor_defecto)
+       VALUES ($1, $2, $5, $6), ($3, $4, $5, $6)
+       ON CONFLICT DO NOTHING`,
+      [
+        PAQUETERIA.configuracionPaquetesId,
+        tenantId,
+        PAQUETERIA.configuracionRestauranteId,
+        PARIS,
+        PRECIO_ENVIO,
+        PAGO_REPARTIDOR,
+      ],
+    );
+
+    const repartidores = [
+      {
+        id: uuidPaqueteria(512),
+        nombre: 'Juan Pérez',
+        telefono: '+56911110001',
+      },
+      {
+        id: uuidPaqueteria(513),
+        nombre: 'María Soto',
+        telefono: '+56911110002',
+      },
+      {
+        id: uuidPaqueteria(514),
+        nombre: 'Pedro Rojas',
+        telefono: '+56911110003',
+      },
+    ];
+    await this.db.query(
+      `INSERT INTO repartidores (repartidor_id, tenant_id, nombre, telefono)
+       SELECT x.id, $1, x.nombre, x.telefono
+         FROM unnest($2::uuid[], $3::text[], $4::text[]) AS x(id, nombre, telefono)
+       ON CONFLICT DO NOTHING`,
+      [
+        tenantId,
+        repartidores.map((r) => r.id),
+        repartidores.map((r) => r.nombre),
+        repartidores.map((r) => r.telefono),
+      ],
+    );
+
+    // Códigos de 11 dígitos que empiezan con 46 (la forma de una etiqueta de Mercado
+    // Libre). Un tercio con cobro en destino, repartido para que una rendida dé neto
+    // negativo (pagó más al repartidor de lo que cobró) y la otra positivo.
+    const CON_COBRO_DESTINO = new Set([1, 5, 9, 12, 13, 15, 17, 19, 23, 26]);
+    const COMUNAS = [
+      'Providencia',
+      'Ñuñoa',
+      'Maipú',
+      'La Florida',
+      'Las Condes',
+    ];
+    const paquetes = Array.from({ length: 30 }, (_, i) => {
+      // La mitad trae destinatario, dirección y comuna; la otra mitad solo el código.
+      const completo = i % 2 === 0;
+      return {
+        id: uuidPaqueteria(520 + i),
+        codigo: `46${310000000 + i * 1234567}`,
+        nombre: completo ? `Cliente ${i + 1} Demo` : null,
+        telefono: completo ? `+5692222${String(1000 + i)}` : null,
+        direccion: completo ? `Calle Demo ${100 + i * 13}` : null,
+        comuna: completo ? COMUNAS[(i / 2) % COMUNAS.length] : null,
+        cobroEnDestino: CON_COBRO_DESTINO.has(i),
+      };
+    });
+    await this.db.query(
+      `INSERT INTO paquetes
+         (paquete_id, tenant_id, codigo, destinatario_nombre, destinatario_telefono,
+          direccion, comuna, cobro_en_destino, precio_envio, pago_repartidor)
+       SELECT x.id, $1, x.codigo, x.nombre, x.telefono, x.direccion, x.comuna,
+              x.cobro, $9::numeric, $10::numeric
+         FROM unnest($2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[],
+                     $7::text[], $8::boolean[])
+              AS x(id, codigo, nombre, telefono, direccion, comuna, cobro)
+       ON CONFLICT DO NOTHING`,
+      [
+        tenantId,
+        paquetes.map((p) => p.id),
+        paquetes.map((p) => p.codigo),
+        paquetes.map((p) => p.nombre),
+        paquetes.map((p) => p.telefono),
+        paquetes.map((p) => p.direccion),
+        paquetes.map((p) => p.comuna),
+        paquetes.map((p) => p.cobroEnDestino),
+        PRECIO_ENVIO,
+        PAGO_REPARTIDOR,
+      ],
+    );
+
+    const hoy = diaNegocioEnZona(
+      await diaNegocioTenant(this.db, tenantId),
+      new Date(),
+    );
+    // `desde`/`hasta`: los índices de `paquetes` de cada hoja. Quedan 3 sin hoja
+    // (27-29) y 3 con un intento `no_entregado` que volvió a estar disponible.
+    const hojas = [
+      {
+        id: uuidPaqueteria(515),
+        repartidorId: repartidores[0].id,
+        fecha: fechaMenosDias(hoy, 2),
+        rendir: true,
+        desde: 0,
+        hasta: 12,
+        noEntregados: new Set([4, 8]),
+      },
+      {
+        id: uuidPaqueteria(516),
+        repartidorId: repartidores[1].id,
+        fecha: fechaMenosDias(hoy, 1),
+        rendir: true,
+        desde: 12,
+        hasta: 22,
+        noEntregados: new Set([14]),
+      },
+      {
+        id: uuidPaqueteria(517),
+        repartidorId: repartidores[2].id,
+        fecha: hoy,
+        rendir: false,
+        desde: 22,
+        hasta: 27,
+        noEntregados: new Set<number>(),
+      },
+    ];
+
+    for (const hoja of hojas) {
+      const indices = Array.from(
+        { length: hoja.hasta - hoja.desde },
+        (_, k) => hoja.desde + k,
+      );
+      await this.db.transaccion(async () => {
+        await this.db.query(
+          `INSERT INTO hojas_ruta (hoja_ruta_id, tenant_id, repartidor_id, fecha)
+           VALUES ($1, $2, $3, $4)
+           ON CONFLICT DO NOTHING`,
+          [hoja.id, tenantId, hoja.repartidorId, hoja.fecha],
+        );
+        // Cerrojo de la hoja: `congelarTotales` lo exige tomado por quien llama. Sin fila
+        // viva (borrada) o ya rendida no hay nada que sembrar: es lo que dejó el demo.
+        const filas: { estado: string }[] = await this.db.query(
+          `SELECT estado FROM hojas_ruta
+            WHERE hoja_ruta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+            FOR UPDATE`,
+          [hoja.id, tenantId],
+        );
+        if (!filas.length || filas[0].estado === 'rendida') return;
+
+        await this.db.query(
+          `INSERT INTO hoja_ruta_paquetes
+             (hoja_ruta_paquete_id, tenant_id, hoja_ruta_id, paquete_id, estado)
+           SELECT x.id, $1, $2, x.paquete, x.estado
+             FROM unnest($3::uuid[], $4::uuid[], $5::text[]) AS x(id, paquete, estado)
+           ON CONFLICT DO NOTHING`,
+          [
+            tenantId,
+            hoja.id,
+            indices.map((i) => uuidPaqueteria(550 + i)),
+            indices.map((i) => paquetes[i].id),
+            indices.map((i) =>
+              !hoja.rendir
+                ? 'en_ruta'
+                : hoja.noEntregados.has(i)
+                  ? 'no_entregado'
+                  : 'entregado',
+            ),
+          ],
+        );
+        if (hoja.rendir) {
+          await this.hojasRutaService.congelarTotales(tenantId, hoja.id, null);
+        }
+      });
+    }
   }
 }
