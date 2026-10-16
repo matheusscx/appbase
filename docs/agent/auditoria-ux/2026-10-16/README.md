@@ -2,6 +2,8 @@
 
 Se aplicó la identidad de Venka y se auditaron nueve grupos de pantallas, más un documento de hallazgos transversales, con la skill `revisando-ux`. La app estaba corriendo y cada grupo se revisó con el rol real de quien usa la pantalla.
 
+**Las 57 preguntas ya tienen respuesta del owner (2026-10-16): ver [decisiones.md](decisiones.md).** Las dos fiscales (02.10 y 07.14) van en su propia sesión.
+
 Cómo usar esto: marca ☐ → ☑ lo que entra, o dime los números (por ejemplo "entran 02.1, 01.2 y el lote 3"). Parte por "Lo primero" y por "Preguntas para ti". Cada hallazgo vive en su documento, enlazado por el número.
 
 Las capturas citadas están en `frontend/e2e-auditoria/capturas/` (local, fuera de git). Ningún documento de los grupos se modificó.
