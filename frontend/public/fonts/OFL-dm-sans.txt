@@ -91,20 +91,3 @@ INCLUDING ANY GENERAL, SPECIAL, INDIRECT, INCIDENTAL, OR CONSEQUENTIAL
 DAMAGES, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
 FROM, OUT OF THE USE OR INABILITY TO USE THE FONT SOFTWARE OR FROM
 OTHER DEALINGS IN THE FONT SOFTWARE.
-
-
------------------------------------------------------------
-AVISO DE VERSION MODIFICADA (Venka)
------------------------------------------------------------
-
-El archivo dm-sans.woff2 de esta carpeta es una Modified Version de DM Sans
-(googlefonts/dm-fonts, DMSans[opsz,wght].ttf), hecha segun la OFL 1.1:
-
-- Los diez digitos (0-9) tienen el MISMO ancho de avance en todo el rango de los ejes
-  wght y opsz (el del "0"), centrados en ese ancho, y no llevan kerning entre si ni con
-  los simbolos . , : % $ EUR + - minus / ( ). El original los trae proporcionales y sin
-  la funcion tnum, asi que `tabular-nums` no tenia efecto.
-- Subconjunto latino, en formato woff2. Los ejes opsz y wght siguen siendo variables.
-- Se conserva el nombre "DM Sans": la fuente original no declara Reserved Font Name.
-
-Se regenera desde el TTF de origen con frontend/scripts/fuente-digitos-fijos.py.
