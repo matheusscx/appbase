@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { hoyLocal } from '~/composables/useVigenciaRegla'
+import { shellUi } from '~/utils/ui-shell'
 import type {
   HojaRutaDetalle,
   HojaRutaFila,
@@ -42,6 +43,7 @@ interface Rechazo {
 const toast = useToast()
 const apiUrl = useRuntimeConfig().public.apiUrl
 const { textoNeto, lineasConCobro, rotuloEstadoLinea, colorEstadoLinea, fechaCorta } = usePaqueteria()
+const { formatOficial } = useCurrency()
 const { diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
 
 // ── Contexto: repartidor, fecha, cobro en destino ─────────────────────────
@@ -326,6 +328,78 @@ async function quitar(linea: LineaHoja) {
   }
 }
 
+// ── Montos de un paquete (override de los valores por defecto) ────────────
+
+// Se editan en un modal con botón, no en la fila: un campo de monto con el foco recibiría lo que
+// tipee la pistola. Enter no guarda; solo el botón.
+const montosAbierto = ref(false)
+const montosLinea = ref<LineaHoja | null>(null)
+const montosForm = ref({ precioEnvio: '', pagoRepartidor: '' })
+const guardandoMontos = ref(false)
+const errorMontos = ref<string | null>(null)
+
+const montosEditables = computed(() => !!hoja.value && !hojaRendida.value)
+
+function abrirMontos(linea: LineaHoja) {
+  if (!montosEditables.value) return
+  montosLinea.value = linea
+  montosForm.value = { precioEnvio: linea.precioEnvio, pagoRepartidor: linea.pagoRepartidor }
+  errorMontos.value = null
+  montosAbierto.value = true
+}
+
+// El foco vuelve al campo en `after:leave` del modal: antes, el diálogo todavía está montado.
+function cerrarMontos() {
+  montosAbierto.value = false
+}
+
+function ponerMontos(hojaId: string, paqueteId: string, precioEnvio: string, pagoRepartidor: string) {
+  if (hoja.value?.id !== hojaId) return
+  hoja.value = {
+    ...hoja.value,
+    lineas: hoja.value.lineas.map(l => l.paqueteId === paqueteId ? { ...l, precioEnvio, pagoRepartidor } : l),
+  }
+}
+
+async function guardarMontos() {
+  const actual = hoja.value
+  const linea = montosLinea.value
+  const { precioEnvio, pagoRepartidor } = montosForm.value
+  if (!actual || !linea || guardandoMontos.value || !precioEnvio || !pagoRepartidor) return
+  guardandoMontos.value = true
+  errorMontos.value = null
+  marcarEnCambio(linea.paqueteId, true)
+  try {
+    const guardado = await useApiFetch<PaqueteFila>(`${apiUrl}/paquetes/${linea.paqueteId}`, {
+      method: 'PATCH',
+      body: { precioEnvio, pagoRepartidor },
+    })
+    ponerMontos(actual.id, linea.paqueteId, guardado.precioEnvio, guardado.pagoRepartidor)
+    toast.add({ title: `Montos de ${linea.codigo} guardados`, color: 'success' })
+    cerrarMontos()
+  }
+  catch (e: unknown) {
+    errorMontos.value = apiErrorMsg(e, 'No se pudieron guardar los montos')
+    return
+  }
+  finally {
+    guardandoMontos.value = false
+    marcarEnCambio(linea.paqueteId, false)
+  }
+  // Los totales del servidor suman solo lo entregado: con entregados en la hoja, cambian.
+  if (actual.entregados > 0) {
+    // Si mientras tanto llegó una hoja más nueva (un escaneo de la cola), esta foto ya es vieja.
+    const secuencia = secuenciaHoja
+    try {
+      const releida = await useApiFetch<HojaRutaDetalle>(`${apiUrl}/hojas-ruta/${actual.id}`)
+      if (secuencia === secuenciaHoja) mostrarHoja(releida)
+    }
+    catch (e: unknown) {
+      toast.add({ title: apiErrorMsg(e, 'Los montos se guardaron, pero no se pudo actualizar la hoja'), color: 'warning' })
+    }
+  }
+}
+
 // ── Totales de la hoja ────────────────────────────────────────────────────
 
 const conCobro = computed(() => hoja.value ? lineasConCobro(hoja.value.lineas) : 0)
@@ -554,6 +628,39 @@ const iconoResultado = {
                     Sin datos del destinatario todavía
                   </p>
                 </div>
+                <div class="flex items-center gap-1">
+                  <dl class="grid grid-cols-[auto_auto] gap-x-2 text-sm">
+                    <dt class="text-muted">
+                      Envío
+                    </dt>
+                    <dd
+                      class="text-right font-medium tabular-nums text-highlighted"
+                      :data-qa="`escanear-linea-envio-${linea.codigo}`"
+                    >
+                      {{ formatOficial(linea.precioEnvio) }}
+                    </dd>
+                    <dt class="text-muted">
+                      Repartidor
+                    </dt>
+                    <dd
+                      class="text-right font-medium tabular-nums text-highlighted"
+                      :data-qa="`escanear-linea-pago-${linea.codigo}`"
+                    >
+                      {{ formatOficial(linea.pagoRepartidor) }}
+                    </dd>
+                  </dl>
+                  <UButton
+                    v-if="montosEditables"
+                    icon="i-lucide-pencil"
+                    color="neutral"
+                    variant="ghost"
+                    size="sm"
+                    :disabled="enCambio.has(linea.paqueteId)"
+                    :aria-label="`Editar montos de ${linea.codigo}`"
+                    :data-qa="`escanear-linea-montos-${linea.codigo}`"
+                    @click="abrirMontos(linea)"
+                  />
+                </div>
                 <UBadge
                   v-if="linea.estado !== 'en_ruta'"
                   :label="rotuloEstadoLinea(linea.estado)"
@@ -595,6 +702,58 @@ const iconoResultado = {
       </div>
     </template>
   </UDashboardPanel>
+
+  <UModal
+    v-model:open="montosAbierto"
+    :title="montosLinea ? `Montos de ${montosLinea.codigo}` : 'Montos del paquete'"
+    description="Reemplazan los valores por defecto solo para este paquete."
+    :ui="shellUi.modal"
+    @after:leave="enfocar(true)"
+  >
+    <template #body>
+      <div class="space-y-4" data-qa="escanear-montos-modal">
+        <UFormField label="Precio de envío" description="Lo que se cobra por este envío.">
+          <MoneyInput
+            v-model="montosForm.precioEnvio"
+            oficial
+            class="w-48"
+            data-qa="escanear-montos-envio"
+          />
+        </UFormField>
+        <UFormField label="Pago al repartidor" description="Lo que se le paga si lo entrega.">
+          <MoneyInput
+            v-model="montosForm.pagoRepartidor"
+            oficial
+            class="w-48"
+            data-qa="escanear-montos-pago"
+          />
+        </UFormField>
+        <UAlert
+          v-if="errorMontos"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-circle-x"
+          :title="errorMontos"
+          data-qa="escanear-montos-error"
+        />
+      </div>
+    </template>
+    <template #footer>
+      <AppModalFooter>
+        <UButton color="neutral" variant="ghost" :disabled="guardandoMontos" @click="cerrarMontos">
+          Cancelar
+        </UButton>
+        <UButton
+          :loading="guardandoMontos"
+          :disabled="!montosForm.precioEnvio || !montosForm.pagoRepartidor"
+          data-qa="escanear-montos-guardar"
+          @click="guardarMontos"
+        >
+          Guardar montos
+        </UButton>
+      </AppModalFooter>
+    </template>
+  </UModal>
 </template>
 
 <style scoped>

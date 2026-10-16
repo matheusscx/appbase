@@ -636,3 +636,119 @@ describe('escanear: filas de la hoja', () => {
     void w
   })
 })
+
+describe('escanear: montos de cada paquete', () => {
+  const lapiz = (codigo: string) =>
+    document.body.querySelector<HTMLButtonElement>(`[data-qa="escanear-linea-montos-${codigo}"]`)
+  const texto = (qa: string) => document.body.querySelector(`[data-qa="${qa}"]`)?.textContent?.trim()
+  const botonGuardar = () => document.body.querySelector<HTMLButtonElement>('[data-qa="escanear-montos-guardar"]')!
+
+  async function cargarMontos(w: Wrapper, precioEnvio: string, pagoRepartidor: string) {
+    const [envio, pago] = w.findAllComponents({ name: 'MoneyInput' })
+    await emitir(envio!, precioEnvio)
+    await emitir(pago!, pagoRepartidor)
+  }
+
+  it('cada fila muestra el precio del envío y el pago al repartidor', async () => {
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', precioEnvio: '2500.0000', pagoRepartidor: '1000.0000' }),
+    ])
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+    expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$2.500')
+    expect(texto('escanear-linea-pago-EN-RUTA')).toBe('$1.000')
+    void w
+  })
+
+  it('el lápiz abre el modal con los montos del paquete y Guardar manda PATCH /paquetes/:id', async () => {
+    // El backend devuelve los montos con la escala de la columna (numeric 18,4).
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', precioEnvio: '2500.0000', pagoRepartidor: '1000.0000' }),
+    ])
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+    lapiz('EN-RUTA')!.click()
+    await esperar(30)
+
+    const [envio, pago] = w.findAllComponents({ name: 'MoneyInput' })
+    expect(envio!.props('modelValue')).toBe('2500.0000')
+    expect(pago!.props('modelValue')).toBe('1000.0000')
+    await cargarMontos(w, '3000', '1500')
+    const getsAntes = llamadas.filter(l => l.method === 'GET').length
+    botonGuardar().click()
+    await esperar(30)
+
+    const patch = llamadas.find(l => l.method === 'PATCH')!
+    expect(patch.url.endsWith('/paquetes/p-9')).toBe(true)
+    expect(patch.body).toEqual({ precioEnvio: '3000', pagoRepartidor: '1500' })
+    expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$3.000')
+    expect(texto('escanear-linea-pago-EN-RUTA')).toBe('$1.500')
+    // Sin entregados los totales del servidor no cambian: no se relee la hoja.
+    expect(llamadas.filter(l => l.method === 'GET')).toHaveLength(getsAntes)
+    expect(toasts.some(t => t.title === 'Montos de EN-RUTA guardados')).toBe(true)
+  })
+
+  it('con entregados en la hoja, después de guardar se relee la hoja para los totales', async () => {
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-8', codigo: 'ENTREGADO', estado: 'entregado' }),
+    ])
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+    lapiz('ENTREGADO')!.click()
+    await esperar(30)
+    await cargarMontos(w, '4000', '2000')
+    botonGuardar().click()
+    await esperar(40)
+
+    const orden = llamadas.filter(l => l.method !== 'GET' || /\/hojas-ruta\/[^/?]+$/.test(l.url))
+    const iPatch = orden.findIndex(l => l.method === 'PATCH')
+    expect(iPatch).toBeGreaterThanOrEqual(0)
+    expect(orden.slice(iPatch + 1).some(l => l.method === 'GET' && l.url.endsWith('/hojas-ruta/h-r-1-2026-10-14'))).toBe(true)
+  })
+
+  it('si el PATCH falla, el error queda en el modal y la fila no cambia', async () => {
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA' }),
+    ])
+    falloPatch = 'El precio de envío admite como máximo 0 decimales.'
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+    lapiz('EN-RUTA')!.click()
+    await esperar(30)
+    await cargarMontos(w, '3000', '1500')
+    botonGuardar().click()
+    await esperar(30)
+
+    expect(texto('escanear-montos-error')).toContain('El precio de envío admite como máximo 0 decimales.')
+    expect(document.body.querySelector('[data-qa="escanear-montos-modal"]')).not.toBeNull()
+    expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$2.500')
+  })
+
+  it('Enter en un campo de monto no guarda: la pistola no puede escribir un precio', async () => {
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA' }),
+    ])
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+    lapiz('EN-RUTA')!.click()
+    await esperar(30)
+    await cargarMontos(w, '46123456789', '1000')
+    const input = document.body.querySelector<HTMLInputElement>('[data-qa="escanear-montos-envio"] input, input[data-qa="escanear-montos-envio"]')!
+    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
+    await esperar(30)
+
+    expect(llamadas.filter(l => l.method === 'PATCH')).toHaveLength(0)
+    expect(llamadas.filter(l => l.method === 'POST')).toHaveLength(0)
+  })
+
+  it('con la hoja rendida no hay lápiz: los montos no se pueden cambiar', async () => {
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-8', codigo: 'ENTREGADO', estado: 'entregado' }),
+    ], { estado: 'rendida' })
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+    expect(texto('escanear-linea-envio-ENTREGADO')).toBe('$2.500')
+    expect(lapiz('ENTREGADO')).toBeNull()
+    void w
+  })
+})

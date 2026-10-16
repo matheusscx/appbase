@@ -265,7 +265,16 @@ presentación en `composables/usePaqueteria.ts` y `useColaEscaneo.ts`.
   cobrar en destino"*, y una fila por paquete (código, destinatario y
   dirección si los tiene) con su interruptor *Cobra en destino* (cambia el paquete al instante,
   con rollback si el servidor lo rechaza) y *Quitar* mientras la línea sigue en ruta y la hoja
-  está abierta. Una hoja rendida se muestra bloqueada. El **neto a rendir no se muestra mientras
+  está abierta. Cada fila muestra además el **precio del envío y el pago al repartidor** del
+  paquete, con un lápiz que abre un modal para cambiarlos solo para ese paquete (`PATCH
+  /paquetes/:id`; la regla 7 sigue valiendo en el backend). Lo pidió el owner el 2026-10-16, solo
+  para esta pantalla (en el detalle de la hoja no se editan montos). El modal con botón —y Enter
+  que no guarda— es decisión de diseño: un campo de monto con el foco recibiría lo que tipee la
+  pistola. El lápiz aparece en toda línea de una hoja abierta, también `entregado` y
+  `no_entregado`, a diferencia de *Quitar* y del interruptor (solo `en_ruta`): corregir un monto
+  antes de rendir es justo el caso de una línea ya marcada. Con entregados en la hoja, después de
+  guardar se relee la hoja para los totales (descartada si mientras tanto llegó una más nueva).
+  Una hoja rendida se muestra bloqueada, sin lápiz. El **neto a rendir no se muestra mientras
   se escanea**: solo cuando hay entregados y no queda nada en ruta (`textoResumenNeto`), porque
   el neto del servidor suma solo lo entregado y uno parcial se leería como el de la rendición.
 - **La lista de rechazados es persistente en pantalla:** un rechazo queda hasta que alguien lo
