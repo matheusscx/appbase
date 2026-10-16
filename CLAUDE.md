@@ -400,8 +400,9 @@ cd frontend && npx playwright test <specs>
 ```
 
 El stack sigue yendo **por turno de la orquestadora** (la sesión que reparte los frentes por
-encargo del owner) cuando hay varias sesiones activas: la VM de Docker da para un solo stack
-completo. El "sin pedir turno" que imprime `entorno.sh stack` se refiere a los puertos, no a la
+encargo del owner) cuando hay varias sesiones activas: la VM de Docker tiene 7,75 GiB (el owner la
+subió de 3,83 el 2026-10-16) y un stack completo pesa ~1,9 GiB, así que entran **dos** con margen;
+un tercero no está medido. El "sin pedir turno" que imprime `entorno.sh stack` se refiere a los puertos, no a la
 memoria. Cómo leer la corrida: `verify-feature` paso 1.
 
 Además verificar:
