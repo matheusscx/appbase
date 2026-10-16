@@ -1,4 +1,4 @@
-import { BadRequestException } from '@nestjs/common';
+import { BadRequestException, ConflictException } from '@nestjs/common';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { IsNull } from 'typeorm';
@@ -232,7 +232,11 @@ describe('LiquidacionPropinasService', () => {
     [
       'liquidar',
       (dto: { fechaDesde: string; fechaHasta: string }) =>
-        service.liquidar(TENANT, USER, dto),
+        service.liquidar(TENANT, USER, {
+          ...dto,
+          poolEsperado: '0',
+          repartoEsperado: [],
+        }),
     ],
   ])(
     '%s rechaza una fecha ilegible sin consultar la configuración',
@@ -951,6 +955,8 @@ describe('LiquidacionPropinasService', () => {
       fechaDesde: '2026-07-01T00:00:00Z',
       fechaHasta: '2026-07-08T00:00:00Z',
       ajustes: { exclusiones: [garzonBId] },
+      poolEsperado: '2000.0000',
+      repartoEsperado: [{ garzonId: garzonAId, monto: '2000.0000' }],
     });
 
     expect(result.estado).toBe(EstadoLiquidacion.CONFIRMADA);
@@ -994,6 +1000,11 @@ describe('LiquidacionPropinasService', () => {
         ajustes: {
           montosManuales: [{ garzonId: garzonAId, monto: '1900.0000' }],
         },
+        poolEsperado: '2000.0000',
+        repartoEsperado: [
+          { garzonId: garzonAId, monto: '1900.0000' },
+          { garzonId: garzonBId, monto: '1000.0000' },
+        ],
       }),
     ).rejects.toThrow(/no coincide con el monto del grupo/);
   });
@@ -1017,8 +1028,88 @@ describe('LiquidacionPropinasService', () => {
           { garzonId: garzonBId, monto: '800.0000' },
         ],
       },
+      poolEsperado: '2000.0000',
+      repartoEsperado: [
+        { garzonId: garzonAId, monto: '1200.0000' },
+        { garzonId: garzonBId, monto: '800.0000' },
+      ],
     });
 
     expect(result.estado).toBe(EstadoLiquidacion.CONFIRMADA);
   });
+
+  // Se liquida el fondo que se vio (owner, 2026-10-16). El e2e de API mide la escena
+  // entera; acá, que la comparación corta antes de bloquear las propinas y confirmar.
+  it('si el fondo recalculado no es el que se vio, no bloquea propinas ni confirma', async () => {
+    mockeaTipsParaPreview();
+
+    await expect(
+      service.liquidar(TENANT, USER, {
+        fechaDesde: '2026-07-01T00:00:00Z',
+        fechaHasta: '2026-07-08T00:00:00Z',
+        poolEsperado: '1000.0000',
+        repartoEsperado: [],
+      }),
+    ).rejects.toThrow(ConflictException);
+
+    expect(manager.query).not.toHaveBeenCalledWith(
+      expect.stringContaining('UPDATE venta_propina'),
+      expect.anything(),
+    );
+    expect(manager.save).not.toHaveBeenCalledWith(
+      LiquidacionPropinasEvento,
+      expect.objectContaining({ tipo: TipoEventoLiquidacion.CONFIRMADA }),
+    );
+  });
+
+  // Y el reparto que se vio (owner, 2026-10-16): mismo fondo, partes iguales de 1000.
+  it.each([
+    [
+      'otros montos para las mismas personas',
+      () => [
+        { garzonId: garzonAId, monto: '1001.0000' },
+        { garzonId: garzonBId, monto: '999.0000' },
+      ],
+    ],
+    [
+      'una persona distinta, misma cantidad',
+      () => [
+        { garzonId: garzonAId, monto: '1000.0000' },
+        {
+          garzonId: '00000000-0000-4000-8000-000000000999',
+          monto: '1000.0000',
+        },
+      ],
+    ],
+    [
+      'una persona de menos',
+      () => [{ garzonId: garzonAId, monto: '1000.0000' }],
+    ],
+    [
+      'la misma persona dos veces',
+      () => [
+        { garzonId: garzonAId, monto: '1000.0000' },
+        { garzonId: garzonAId, monto: '1000.0000' },
+      ],
+    ],
+  ])(
+    'si el reparto recalculado no es el que se vio (%s), no confirma',
+    async (_caso, reparto) => {
+      mockeaTipsParaPreview();
+
+      await expect(
+        service.liquidar(TENANT, USER, {
+          fechaDesde: '2026-07-01T00:00:00Z',
+          fechaHasta: '2026-07-08T00:00:00Z',
+          poolEsperado: '2000',
+          repartoEsperado: reparto(),
+        }),
+      ).rejects.toThrow('El reparto cambió desde que lo viste');
+
+      expect(manager.query).not.toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE venta_propina'),
+        expect.anything(),
+      );
+    },
+  );
 });

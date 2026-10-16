@@ -33,6 +33,11 @@ const tab = ref('propinas')
 const reparto = ref<PreviewReparto | null>(null)
 /** La consulta que produjo `reparto`: es lo único que se liquida (auditoría UX 02.1). */
 const consultaMostrada = ref<PreviewBody | null>(null)
+/**
+ * El backend rechazó liquidar porque el fondo o el reparto ya no son los que se vieron
+ * (entraron propinas, o alguien entró o salió de turno).
+ */
+const repartoDesactualizado = ref(false)
 const confirmarAbierto = ref(false)
 const exclusiones = ref<string[]>([])
 const montosManuales = reactive<Record<string, string>>({})
@@ -75,14 +80,16 @@ const consultaActual = computed<PreviewBody>(() => ({
 }))
 
 /**
- * Qué cambió en el formulario desde el reparto que está en pantalla: el período, los
- * turnos o quién participa (hay que volver a calcular), o un monto manual escrito y
- * todavía no guardado. Mientras haya algo, no se liquida. Durante un recálculo no se
- * avisa nada: el botón ya está apagado y el reparto nuevo llega enseguida.
+ * Qué cambió desde el reparto que está en pantalla: el período, los turnos o quién
+ * participa (hay que volver a calcular), un monto manual escrito y todavía no guardado,
+ * o el fondo o el reparto, que el backend encontró distintos al liquidar (owner,
+ * 2026-10-16: se liquida lo que se vio). Mientras haya algo, no se liquida. Durante un
+ * recálculo no se avisa nada: el botón ya está apagado y el reparto nuevo llega enseguida.
  */
-const cambioPendiente = computed<'recalcular' | 'monto' | null>(() => {
+const cambioPendiente = computed<'recalcular' | 'monto' | 'servidor' | null>(() => {
   const vista = consultaMostrada.value
   if (!reparto.value || !vista || loadingPreview.value) return null
+  if (repartoDesactualizado.value) return 'servidor'
   const actual = consultaActual.value
   const sinMontos = (c: PreviewBody) =>
     claveConsultaReparto({ ...c, ajustes: { exclusiones: c.ajustes?.exclusiones } })
@@ -90,6 +97,12 @@ const cambioPendiente = computed<'recalcular' | 'monto' | null>(() => {
   if (claveConsultaReparto(vista) !== claveConsultaReparto(actual)) return 'monto'
   return null
 })
+
+const AVISO_CAMBIO = {
+  recalcular: 'Cambiaste el período, los turnos o quién participa: vuelve a calcular el reparto para liquidar.',
+  monto: 'Guarda el monto manual para ver cómo queda el reparto antes de liquidar.',
+  servidor: 'El reparto cambió desde que lo viste (entraron propinas o alguien entró a turno): vuelve a calcularlo para liquidar.',
+} as const
 
 const puedeConfirmarLiquidar = computed(() =>
   !!reparto.value
@@ -160,6 +173,7 @@ async function cargarPreview() {
   try {
     reparto.value = await api.preview(consulta)
     consultaMostrada.value = consulta
+    repartoDesactualizado.value = false
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al calcular el reparto'), color: 'error' })
@@ -181,15 +195,23 @@ function guardarMonto() {
 }
 
 async function liquidar() {
-  if (!consultaMostrada.value || !puedeConfirmarLiquidar.value) return
+  if (!consultaMostrada.value || !reparto.value || !puedeConfirmarLiquidar.value) return
   liquidando.value = true
   try {
-    const detalle = await api.liquidar(consultaMostrada.value)
+    const detalle = await api.liquidar({
+      ...consultaMostrada.value,
+      poolEsperado: reparto.value.poolTotal,
+      repartoEsperado: participantesIncluidos.value.map(p => ({ garzonId: p.garzonId, monto: p.monto })),
+    })
     confirmarAbierto.value = false
     toast.add({ title: 'Período liquidado', color: 'success' })
     await router.push(`/propinas/liquidaciones/${detalle.id}/imprimir?tipo=resumen`)
   }
   catch (e: unknown) {
+    if ((e as { status?: number })?.status === 409) {
+      confirmarAbierto.value = false
+      repartoDesactualizado.value = true
+    }
     toast.add({ title: apiErrorMsg(e, 'Error al liquidar el período'), color: 'error' })
   }
   finally {
@@ -306,9 +328,7 @@ onMounted(async () => {
               color="warning"
               variant="subtle"
               icon="i-lucide-refresh-cw"
-              :title="cambioPendiente === 'recalcular'
-                ? 'Cambiaste el período, los turnos o quién participa: vuelve a calcular el reparto para liquidar.'
-                : 'Guarda el monto manual para ver cómo queda el reparto antes de liquidar.'"
+              :title="AVISO_CAMBIO[cambioPendiente]"
             />
 
             <div class="space-y-6 transition-opacity" :class="{ 'opacity-50': cambioPendiente }">

@@ -236,6 +236,15 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
   const suma = (p: Participante[]): string =>
     p.reduce((acc, x) => acc.plus(x.monto), new Decimal(0)).toFixed(4);
 
+  /** Lo que la pantalla manda al liquidar: el fondo y el reparto que se vieron. */
+  const loVisto = (prev: PreviewReparto) => ({
+    poolEsperado: prev.poolTotal,
+    repartoEsperado: incluidos(prev.participantes).map((p) => ({
+      garzonId: p.garzonId,
+      monto: p.monto,
+    })),
+  });
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -434,10 +443,11 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
         [ventaId],
       );
 
+    const visto = await preview();
     await request(app.getHttpServer())
       .post('/api/propinas/liquidaciones/liquidar')
       .set('Authorization', `Bearer ${token}`)
-      .send({ fechaDesde, fechaHasta })
+      .send({ fechaDesde, fechaHasta, ...loVisto(visto) })
       .expect(201);
 
     // La propina quedó asignada a una liquidación (bloqueada).
@@ -452,6 +462,181 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
     expect(new Decimal(despues.poolTotal).toNumber()).toBe(0);
   });
 
+  /**
+   * Se liquida lo que se vio (owner, 2026-10-16, por AskUserQuestion de la orquestadora:
+   * "Avisar y no liquidar"). Escena: la encargada ve el reparto con un fondo, cierra una
+   * mesa con propina del mismo período y confirma el fondo que vio. Hasta ese día el
+   * backend recalculaba al liquidar y cerraba el fondo nuevo, que nadie había visto.
+   */
+  describe('liquidar con el fondo y el reparto que se vieron (auditoría UX 02.1)', () => {
+    const REPARTO_CAMBIO =
+      'El reparto cambió desde que lo viste: vuelve a verlo antes de liquidar';
+    /** Sesiones y garzones que siembra este bloque; se dan de baja (soft delete) al final. */
+    const sesionesPropias: string[] = [];
+    const garzonesPropios: string[] = [];
+
+    afterAll(async () => {
+      if (sesionesPropias.length) {
+        await ds.query(
+          `UPDATE sesiones_garzon SET eliminado_el = NOW()
+           WHERE sesion_garzon_id = ANY($1::uuid[])`,
+          [sesionesPropias],
+        );
+      }
+      for (const id of garzonesPropios) {
+        await request(app.getHttpServer())
+          .delete(`/api/garzones/${id}`)
+          .set('Authorization', `Bearer ${token}`);
+      }
+    });
+
+    async function contarLiquidaciones(): Promise<number> {
+      const rows: { n: number }[] = await ds.query(
+        `SELECT COUNT(*)::int AS n FROM liquidacion_propinas
+         WHERE tenant_id = $1 AND eliminado_el IS NULL`,
+        [PARIS_TENANT_ID],
+      );
+      return rows[0]?.n ?? 0;
+    }
+
+    it('una propina que entra después de ver el reparto frena la liquidación, sin escribir nada', async () => {
+      await sembrarTipGarzon(ANA_ID, '1000');
+      const visto = await preview();
+      const antes = await contarLiquidaciones();
+
+      // La Mesa 4 cierra con $3.000 de propina mientras la encargada revisa.
+      await sembrarTipGarzon(BRUNO_ID, '3000');
+
+      const res = await request(app.getHttpServer())
+        .post('/api/propinas/liquidaciones/liquidar')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fechaDesde, fechaHasta, ...loVisto(visto) });
+
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toBe(
+        'Entraron propinas nuevas desde que viste el reparto: vuelve a verlo antes de liquidar',
+      );
+      expect(await contarLiquidaciones()).toBe(antes);
+      // Las propinas siguen libres: el siguiente reparto las ve todas.
+      const despues = await preview();
+      expect(new Decimal(despues.poolTotal).toFixed(4)).toBe(
+        new Decimal(visto.poolTotal).plus(3000).toFixed(4),
+      );
+    });
+
+    /**
+     * Mismo fondo, otro reparto (owner, 2026-10-16, por AskUserQuestion de la orquestadora:
+     * "Avisar también si cambió el reparto"). Escena: la encargada ve $X entre tres garzones
+     * y un cuarto entra a turno antes de que confirme; el fondo no se mueve, pero a cada uno
+     * le toca menos.
+     */
+    it('un garzón que entra a turno después de ver el reparto frena la liquidación, aunque el fondo sea el mismo', async () => {
+      const visto = await preview();
+      const antes = await contarLiquidaciones();
+
+      const garzon = await request(app.getHttpServer())
+        .post('/api/garzones')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ nombre: `Garzón reparto E2E ${Date.now()}` })
+        .expect(201);
+      const garzonId = (garzon.body as { id: string }).id;
+      garzonesPropios.push(garzonId);
+      await sembrarSesionCerrada(garzonId, 2);
+      sesionesPropias.push(sesionesSembradas[sesionesSembradas.length - 1]);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/propinas/liquidaciones/liquidar')
+        .set('Authorization', `Bearer ${token}`)
+        .send({ fechaDesde, fechaHasta, ...loVisto(visto) });
+
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toBe(REPARTO_CAMBIO);
+      expect(await contarLiquidaciones()).toBe(antes);
+      // El fondo es el mismo; lo que cambió es quién recibe.
+      const despues = await preview();
+      expect(new Decimal(despues.poolTotal).eq(visto.poolTotal)).toBe(true);
+      expect(incluidos(despues.participantes).map((p) => p.garzonId)).toContain(
+        garzonId,
+      );
+    });
+
+    it('los mismos garzones con otros montos frenan la liquidación', async () => {
+      const visto = await preview();
+      const reparto = loVisto(visto).repartoEsperado;
+      expect(reparto.length).toBeGreaterThanOrEqual(2);
+      // Uno más, otro menos: la suma y la cantidad no cambian, los montos sí.
+      reparto[0].monto = new Decimal(reparto[0].monto).plus(1).toFixed(4);
+      reparto[1].monto = new Decimal(reparto[1].monto).minus(1).toFixed(4);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/propinas/liquidaciones/liquidar')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          fechaDesde,
+          fechaHasta,
+          poolEsperado: visto.poolTotal,
+          repartoEsperado: reparto,
+        });
+
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toBe(REPARTO_CAMBIO);
+    });
+
+    it('la misma cantidad de garzones con uno distinto frena la liquidación', async () => {
+      const visto = await preview();
+      const reparto = loVisto(visto).repartoEsperado;
+      reparto[0].garzonId = '1238f035-39ec-40fd-8397-5d7df07262eb';
+
+      const res = await request(app.getHttpServer())
+        .post('/api/propinas/liquidaciones/liquidar')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          fechaDesde,
+          fechaHasta,
+          poolEsperado: visto.poolTotal,
+          repartoEsperado: reparto,
+        });
+
+      expect(res.status).toBe(409);
+      expect((res.body as { message: string }).message).toBe(REPARTO_CAMBIO);
+    });
+
+    it('con el fondo y el reparto que se vieron, liquida ese reparto', async () => {
+      const visto = await preview();
+      expect(new Decimal(visto.poolTotal).gt(0)).toBe(true);
+      const { repartoEsperado } = loVisto(visto);
+
+      const res = await request(app.getHttpServer())
+        .post('/api/propinas/liquidaciones/liquidar')
+        .set('Authorization', `Bearer ${token}`)
+        // Mismas cifras con otra escritura: la comparación es de montos, no de texto.
+        .send({
+          fechaDesde,
+          fechaHasta,
+          poolEsperado: new Decimal(visto.poolTotal).toFixed(0),
+          repartoEsperado: repartoEsperado.map((r) => ({
+            garzonId: r.garzonId,
+            monto: new Decimal(r.monto).toFixed(0),
+          })),
+        })
+        .expect(201);
+
+      const liquidada = res.body as {
+        poolTotal: string;
+        participantes: Participante[];
+      };
+      expect(new Decimal(liquidada.poolTotal).toFixed(4)).toBe(
+        new Decimal(visto.poolTotal).toFixed(4),
+      );
+      for (const r of repartoEsperado) {
+        const p = liquidada.participantes.find(
+          (x) => x.garzonId === r.garzonId,
+        );
+        expect(new Decimal(p!.monto).eq(r.monto)).toBe(true);
+      }
+    });
+  });
+
   // Estos casos mutan la config de distribución de PARIS por la API real
   // (PUT /propinas/distribucion, versionada) y la restauran en afterAll. Cada
   // test parte de pool 0 (resetPool liquida cualquier remanente) y siembra sus
@@ -463,7 +648,7 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
       await request(app.getHttpServer())
         .post('/api/propinas/liquidaciones/liquidar')
         .set('Authorization', `Bearer ${token}`)
-        .send({ fechaDesde, fechaHasta })
+        .send({ fechaDesde, fechaHasta, ...loVisto(prev) })
         .expect(201);
     }
 
@@ -914,7 +1099,15 @@ describe('Liquidación de propinas — reparto (e2e)', () => {
         const res = await request(app.getHttpServer())
           .post(ruta)
           .set('Authorization', `Bearer ${token}`)
-          .send({ fechaDesde: fechaHasta, fechaHasta: fechaDesde });
+          // `poolEsperado` lo exige solo `liquidar`; los otros dos lo rechazan
+          // (`forbidNonWhitelisted`), y el que tiene que cortar es el rango.
+          .send({
+            fechaDesde: fechaHasta,
+            fechaHasta: fechaDesde,
+            ...(ruta.endsWith('/liquidar')
+              ? { poolEsperado: '0', repartoEsperado: [] }
+              : {}),
+          });
 
         expect(res.status).toBe(400);
         expect((res.body as { message: string }).message).toBe(

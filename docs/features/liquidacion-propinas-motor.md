@@ -63,8 +63,22 @@ diaria vive completa en una **pantalla única `/propinas`**.
   diga el formulario en ese momento: hasta el 2026-10-16 mandaba el formulario, y
   cambiar "Desde" sin recalcular liquidaba un período que nadie había visto
   (auditoría UX 02.1). Un monto manual escrito y no guardado también apaga el botón.
-  ⚠️ El backend recalcula al liquidar: una propina que entre al período entre "Ver
-  reparto" y la confirmación entra al fondo liquidado aunque no estuviera en la vista.
+- **Se liquida el fondo que se vio** (owner, 2026-10-16, por AskUserQuestion de la
+  orquestadora: "Avisar y no liquidar"). La pantalla manda `poolEsperado` (el fondo del
+  reparto mostrado) y `liquidar` lo compara, con Decimal y adentro de su transacción,
+  contra el fondo que recalcula: si entró una propina al período entre "Ver reparto" y la
+  confirmación, contesta **409** *"Entraron propinas nuevas desde que viste el reparto…"*
+  y no escribe nada. Hasta ese día el backend liquidaba el fondo recalculado, que nadie
+  había visto (medido: se vio $4.000 y se liquidaron $7.000).
+- **Y el reparto que se vio** (owner, 2026-10-16, por AskUserQuestion de la orquestadora:
+  "Avisar también si cambió el reparto"). Con el fondo igual, alguien que entra o sale de
+  turno entre ver y confirmar cambia la parte de cada uno (medido: se vieron tres garzones
+  a $1.000 y se liquidaron cuatro a $750). La pantalla manda también `repartoEsperado`
+  (las personas incluidas y su monto) y `liquidar` lo compara con el recalculado, después
+  de aplicar los ajustes: mismas personas y cada monto igual con Decimal. Si difiere,
+  **409** *"El reparto cambió desde que lo viste…"* y no escribe nada.
+- En los dos casos la pantalla cierra la confirmación, avisa que el reparto cambió y
+  apaga el botón hasta que se vuelva a calcular.
 - **Impresión**: página `/propinas/liquidaciones/:id/imprimir?tipo=persona|resumen|grupo`
   (un solo componente, 3 vistas por query param), pensada para `window.print()`
   a A4 con saltos de página por grupo/persona (`usePropinaImpresion.ts` arma los
@@ -249,7 +263,10 @@ POST /propinas/liquidaciones/liquidar
 Authorization: Bearer <token>
 ```
 
-Mismo body que `preview`. Ejecuta en una sola transacción: crea el borrador,
+Mismo body que `preview`, más dos campos obligatorios: **`poolEsperado`** (el fondo del
+reparto que se vio) y **`repartoEsperado`** (`[{ garzonId, monto }]`, las personas incluidas;
+hasta 200). Si el fondo o el reparto recalculados no son esos, **409** y no se escribe nada
+(regla arriba, en la pantalla). Ejecuta en una sola transacción: crea el borrador,
 aplica los `ajustes` (exclusiones/montos manuales) y confirma — equivalente a
 encadenar `crear` → `actualizar` → `confirmar`, pero sin dejar borradores
 intermedios si algo falla. Requiere `Propinas:Liquidar`. Respuesta:

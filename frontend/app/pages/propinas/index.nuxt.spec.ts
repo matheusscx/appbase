@@ -27,9 +27,12 @@ let previews: Array<Record<string, unknown>> = []
 let liquidaciones: Array<Record<string, unknown>> = []
 /** Para simular un recálculo que el servidor rechaza. */
 let previewFalla = false
+/** Para simular el 409 del backend: el fondo cambió entre ver y confirmar. */
+let liquidarConflicto = false
 
 /** El reparto depende del período pedido: así se ve cuál se mostró y cuál se liquidó. */
-function repartoPara(body: { fechaDesde: string }) {
+function repartoPara(body: { fechaDesde: string, ajustes?: { exclusiones?: string[] } }) {
+  const excluidos = body.ajustes?.exclusiones ?? []
   const pool = body.fechaDesde === '2026-09-01' ? '450000.0000' : '120000.0000'
   const mitad = body.fechaDesde === '2026-09-01' ? '225000.0000' : '60000.0000'
   return {
@@ -44,7 +47,9 @@ function repartoPara(body: { fechaDesde: string }) {
     participantes: [
       { garzonId: 'gz-ana', grupoId: 'g1', tipoGarzon: 'garzon', incluido: true, horas: '0', ventasBase: '0', cuentas: '0', pesoManual: null, monto: mitad },
       { garzonId: 'gz-beto', grupoId: 'g1', tipoGarzon: 'garzon', incluido: true, horas: '0', ventasBase: '0', cuentas: '0', pesoManual: null, monto: mitad },
-    ],
+    ].map(p => (excluidos.includes(p.garzonId)
+      ? { ...p, incluido: false, monto: '0.0000' }
+      : excluidos.length ? { ...p, monto: pool } : p)),
   }
 }
 
@@ -71,6 +76,12 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (url.endsWith('/propinas/liquidaciones/liquidar')) {
       liquidaciones.push(JSON.parse(JSON.stringify(opts!.body!)))
+      if (liquidarConflicto) {
+        return Promise.reject(Object.assign(new Error('409'), {
+          status: 409,
+          data: { message: 'Entraron propinas nuevas desde que viste el reparto: vuelve a verlo antes de liquidar' },
+        }))
+      }
       return Promise.resolve({ id: 'liq-1' })
     }
     if (url.includes('/tenants/me')) {
@@ -108,6 +119,7 @@ beforeEach(() => {
   previews = []
   liquidaciones = []
   previewFalla = false
+  liquidarConflicto = false
   navigateTo.mockClear()
   document.body.innerHTML = ''
 })
@@ -230,7 +242,30 @@ describe('propinas — se liquida el reparto que se vio (auditoría UX 02.1)', (
     await liquidarYConfirmar(wrapper)
 
     expect(liquidaciones).toHaveLength(1)
-    expect(liquidaciones[0]).toEqual(previews[previews.length - 1])
+    // La consulta del reparto mostrado, más el fondo que se vio (450.000 es el de septiembre).
+    expect(liquidaciones[0]).toEqual({
+      ...previews[previews.length - 1],
+      poolEsperado: '450000.0000',
+      repartoEsperado: [
+        { garzonId: 'gz-ana', monto: '225000.0000' },
+        { garzonId: 'gz-beto', monto: '225000.0000' },
+      ],
+    })
+    wrapper.unmount()
+  })
+
+  it('el reparto que se manda es el de las personas incluidas, no el de las excluidas', async () => {
+    const wrapper = await montar()
+    await fijarPeriodo(wrapper, '2026-09-01', '2026-09-30')
+    await verReparto(wrapper)
+
+    // Excluir a Beto: el reparto recalculado le deja todo a Ana.
+    ;[...wrapper.element.querySelectorAll('button')].filter(b => b.textContent?.trim() === 'Excluir')[1]!.click()
+    await tick()
+    await liquidarYConfirmar(wrapper)
+
+    expect(liquidaciones).toHaveLength(1)
+    expect(liquidaciones[0]!.repartoEsperado).toEqual([{ garzonId: 'gz-ana', monto: '450000.0000' }])
     wrapper.unmount()
   })
 
@@ -263,6 +298,26 @@ describe('propinas — se liquida el reparto que se vio (auditoría UX 02.1)', (
     expect(wrapper.text()).toContain('vuelve a calcular el reparto')
     expect(wrapper.text()).not.toContain('Guarda el monto manual')
     expect(botonPorTexto(wrapper.element, 'Liquidar período')!.disabled).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('si el backend dice que el reparto cambió, no liquida y pide volver a calcular', async () => {
+    const wrapper = await montar()
+    await fijarPeriodo(wrapper, '2026-09-01', '2026-09-30')
+    await verReparto(wrapper)
+
+    liquidarConflicto = true
+    await liquidarYConfirmar(wrapper)
+
+    expect(document.body.querySelector('[role="dialog"]')).toBeNull()
+    expect(wrapper.text()).toContain('El reparto cambió desde que lo viste')
+    expect(botonPorTexto(wrapper.element, 'Liquidar período')!.disabled).toBe(true)
+
+    // Volver a calcular trae el fondo nuevo y deja liquidar de nuevo.
+    liquidarConflicto = false
+    await verReparto(wrapper)
+    expect(wrapper.text()).not.toContain('El reparto cambió desde que lo viste')
+    expect(botonPorTexto(wrapper.element, 'Liquidar período')!.disabled).toBe(false)
     wrapper.unmount()
   })
 })

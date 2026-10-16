@@ -146,7 +146,14 @@ export interface PreviewBody {
   ajustes?: AjustesReparto
 }
 
-export interface LiquidarBody extends PreviewBody {}
+export interface LiquidarBody extends PreviewBody {
+  /**
+   * El fondo y el reparto (personas incluidas y su monto) que se vieron: si el backend los
+   * encuentra distintos al liquidar, contesta 409 y no liquida.
+   */
+  poolEsperado: string
+  repartoEsperado: Array<{ garzonId: string, monto: string }>
+}
 
 /**
  * Clave de una consulta de reparto: dos consultas con la misma clave dan el mismo reparto.

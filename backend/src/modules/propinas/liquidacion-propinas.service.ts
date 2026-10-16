@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -648,6 +649,15 @@ export class LiquidacionPropinasService {
         config.version,
       );
 
+      // Se liquida el fondo que se vio (owner, 2026-10-16): una propina que entró al
+      // período entre el reparto y la confirmación lo cambia, y entonces no se liquida.
+      // Va adentro de la transacción: el throw deshace el borrador recién escrito.
+      if (!new Decimal(liquidacion.poolTotal).eq(dto.poolEsperado)) {
+        throw new ConflictException(
+          'Entraron propinas nuevas desde que viste el reparto: vuelve a verlo antes de liquidar',
+        );
+      }
+
       const participantes = await this.aplicarAjustesPersistido(
         manager,
         grupos,
@@ -655,6 +665,15 @@ export class LiquidacionPropinasService {
         dto.ajustes,
         liquidacion.decimalesMoneda,
       );
+
+      // Y el reparto que se vio: mismas personas incluidas, mismo monto cada una. Con
+      // el fondo igual, alguien que entró a turno entre el reparto y la confirmación le
+      // baja la parte a los demás (owner, 2026-10-16).
+      if (!this.mismoReparto(participantes, dto.repartoEsperado)) {
+        throw new ConflictException(
+          'El reparto cambió desde que lo viste: vuelve a verlo antes de liquidar',
+        );
+      }
 
       const eventoConfirmada = await this.confirmarEnTransaccion(
         manager,
@@ -674,6 +693,27 @@ export class LiquidacionPropinasService {
         advertencias: this.advertenciasSesionesAbiertas(sesiones),
       });
     });
+  }
+
+  /** Mismas personas incluidas y el mismo monto para cada una, comparado con Decimal. */
+  private mismoReparto(
+    participantes: LiquidacionPropinasParticipante[],
+    esperado: Array<{ garzonId: string; monto: string }>,
+  ): boolean {
+    const recalculado = new Map(
+      participantes
+        .filter((p) => p.incluido)
+        .map((p) => [p.garzonId, p.monto] as const),
+    );
+    const visto = new Map(esperado.map((e) => [e.garzonId, e.monto] as const));
+    if (recalculado.size !== visto.size || visto.size !== esperado.length) {
+      return false;
+    }
+    for (const [garzonId, monto] of visto) {
+      const actual = recalculado.get(garzonId);
+      if (actual === undefined || !new Decimal(actual).eq(monto)) return false;
+    }
+    return true;
   }
 
   async anular(

@@ -17,9 +17,14 @@ const DTOS = [
   ['PreviewLiquidacionDto', PreviewLiquidacionDto],
 ] as const;
 
-describe.each(DTOS)('%s — fechaDesde/fechaHasta', (_nombre, Dto) => {
+// Lo que cada DTO exige además del período, para que la validación mire solo las fechas.
+const RESTO: Record<string, Record<string, unknown>> = {
+  LiquidarDto: { poolEsperado: '0', repartoEsperado: [] },
+};
+
+describe.each(DTOS)('%s — fechaDesde/fechaHasta', (nombre, Dto) => {
   const validar = (valores: Record<string, string>) =>
-    validate(plainToInstance(Dto, valores));
+    validate(plainToInstance(Dto, { ...RESTO[nombre], ...valores }));
 
   it('acepta fecha pura', async () => {
     expect(

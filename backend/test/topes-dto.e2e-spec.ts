@@ -172,6 +172,15 @@ const TOPES: FilaTope[] = [
     cuerpo: (n) => ({ turnoIds: uuids(n) }),
   },
   {
+    campo: 'repartoEsperado',
+    tope: 200,
+    metodo: 'post',
+    ruta: 'propinas/liquidaciones/liquidar',
+    cuerpo: (n) => ({
+      repartoEsperado: uuids(n).map((garzonId) => ({ garzonId, monto: '0' })),
+    }),
+  },
+  {
     campo: 'ajustes.exclusiones',
     tope: 200,
     metodo: 'post',
