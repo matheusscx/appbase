@@ -44,8 +44,10 @@ diaria vive completa en una **pantalla única `/propinas`**.
 - **Métricas**: "pendiente por liquidar" y "cobrado del mes" (`usePropinaResumen`,
   sigue consumiendo `GET /propinas/reportes/resumen` del backend de reportes,
   que se mantiene sin cambios).
-- **Selector período + turnos**: rango de fechas y turnos opcionales; cada
-  cambio recalcula el reparto en vivo llamando a `preview` (no persiste nada).
+- **Selector período + turnos**: rango de fechas y turnos opcionales; "Ver reparto"
+  lo calcula llamando a `preview` (no persiste nada). Cambiar el período o los turnos
+  **no** recalcula: deja el reparto atenuado con el aviso "vuelve a calcular el
+  reparto" y apaga "Liquidar período" hasta que se vuelva a calcular.
 - **Reparto en vivo**: muestra grupos y participantes con los montos que
   resultarían de liquidar ahora mismo, según la config de distribución vigente.
 - **Ajustes en memoria**: excluir/incluir personas del reparto y fijar un monto
@@ -53,8 +55,16 @@ diaria vive completa en una **pantalla única `/propinas`**.
   `preview`/`liquidar`, sin tocar el borrador hasta confirmar. El monto manual
   está pensado para grupos `MANUAL`, pero **funciona en cualquier criterio**
   siempre que lo repartido siga cuadrando con el monto del grupo (regla 2 abajo).
-- **Botón "Liquidar período"**: llama a `POST /propinas/liquidaciones/liquidar`,
-  que crea, aplica los ajustes y confirma en una sola transacción atómica.
+- **Botón "Liquidar período"**: abre una confirmación con el período, los turnos, el
+  fondo y el monto de cada persona incluida; al aceptarla llama a
+  `POST /propinas/liquidaciones/liquidar`, que crea, aplica los ajustes y confirma en
+  una sola transacción atómica. **Se liquida la consulta del reparto que está en
+  pantalla** (fechas, turnos y ajustes con los que se pidió el `preview`), nunca lo que
+  diga el formulario en ese momento: hasta el 2026-10-16 mandaba el formulario, y
+  cambiar "Desde" sin recalcular liquidaba un período que nadie había visto
+  (auditoría UX 02.1). Un monto manual escrito y no guardado también apaga el botón.
+  ⚠️ El backend recalcula al liquidar: una propina que entre al período entre "Ver
+  reparto" y la confirmación entra al fondo liquidado aunque no estuviera en la vista.
 - **Impresión**: página `/propinas/liquidaciones/:id/imprimir?tipo=persona|resumen|grupo`
   (un solo componente, 3 vistas por query param), pensada para `window.print()`
   a A4 con saltos de página por grupo/persona (`usePropinaImpresion.ts` arma los

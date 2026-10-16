@@ -148,6 +148,24 @@ export interface PreviewBody {
 
 export interface LiquidarBody extends PreviewBody {}
 
+/**
+ * Clave de una consulta de reparto: dos consultas con la misma clave dan el mismo reparto.
+ * No depende del orden en que se eligieron los turnos, las exclusiones ni los montos.
+ * Con ella la pantalla sabe si el reparto que muestra sigue siendo el del formulario
+ * (auditoría UX 02.1: se liquidaba un período que nadie había visto).
+ */
+export function claveConsultaReparto(body: PreviewBody): string {
+  return JSON.stringify([
+    body.fechaDesde,
+    body.fechaHasta,
+    [...(body.turnoIds ?? [])].sort(),
+    [...(body.ajustes?.exclusiones ?? [])].sort(),
+    [...(body.ajustes?.montosManuales ?? [])]
+      .map(m => [m.garzonId, m.monto])
+      .sort(([a], [b]) => (a! < b! ? -1 : a! > b! ? 1 : 0)),
+  ])
+}
+
 export function usePropinaLiquidaciones() {
   const apiUrl = useRuntimeConfig().public.apiUrl
   const base = `${apiUrl}/propinas/liquidaciones`

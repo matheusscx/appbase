@@ -36,7 +36,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 
 | ¿Entra? | # | Sev | Título | Conf. | Decide |
 |---|---|---|---|---|---|
-| ☐ | [02.1](02-salones-y-mesas.md) | P0 | Liquidar propinas paga el período del formulario, no el de la vista previa | código | agente |
+| ☑ | [02.1](02-salones-y-mesas.md) | P0 | Liquidar propinas paga el período del formulario, no el de la vista previa — **hecho 2026-10-16** | código | agente |
 | ☐ | [00.10](00-transversal.md) | P1 | Una línea incompleta se descarta al guardar y el aviso dice que guardó todo *(ver 05.2, 06.1)* | medido | agente |
 | ☐ | [00.11](00-transversal.md) | P1 | Los errores del servidor salen en inglés, con nombres internos, sin marcar el campo *(ver 06.2, 07.2, 08.2)* | medido | agente |
 | ☐ | [01.1](01-pos-y-ventas.md) | P1 | Tras cobrar, el carrito vendido sigue en pantalla 5 a 10 s y borra lo que agregas | medido | agente |

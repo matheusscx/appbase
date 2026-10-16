@@ -8,6 +8,7 @@
 // describe "nota del día de negocio".
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
+import { useMonedasStore } from '~/stores/monedas'
 import Propinas from './index.vue'
 
 /** Task 5: corte del día de negocio que devuelve `GET /tenants/me` — 0 por
@@ -21,6 +22,31 @@ const ADMIN_PROPINAS = [
 ]
 let permisos: string[] = ADMIN_PROPINAS
 let llamadas: string[] = []
+/** Bodies de `POST …/preview` y `POST …/liquidar`, en orden. */
+let previews: Array<Record<string, unknown>> = []
+let liquidaciones: Array<Record<string, unknown>> = []
+/** Para simular un recálculo que el servidor rechaza. */
+let previewFalla = false
+
+/** El reparto depende del período pedido: así se ve cuál se mostró y cuál se liquidó. */
+function repartoPara(body: { fechaDesde: string }) {
+  const pool = body.fechaDesde === '2026-09-01' ? '450000.0000' : '120000.0000'
+  const mitad = body.fechaDesde === '2026-09-01' ? '225000.0000' : '60000.0000'
+  return {
+    poolTotal: pool,
+    monedaId: 'clp',
+    decimalesMoneda: 0,
+    advertencias: [],
+    grupos: [{
+      id: 'g1', tipoGarzon: 'garzon', nombre: 'Garzones', porcentaje: '1',
+      criterio: 'MANUAL', baseVentas: 'NETAS', manualModo: 'MONTO', montoGrupo: pool, orden: 1,
+    }],
+    participantes: [
+      { garzonId: 'gz-ana', grupoId: 'g1', tipoGarzon: 'garzon', incluido: true, horas: '0', ventasBase: '0', cuentas: '0', pesoManual: null, monto: mitad },
+      { garzonId: 'gz-beto', grupoId: 'g1', tipoGarzon: 'garzon', incluido: true, horas: '0', ventasBase: '0', cuentas: '0', pesoManual: null, monto: mitad },
+    ],
+  }
+}
 
 const { navigateTo } = vi.hoisted(() => ({ navigateTo: vi.fn() }))
 mockNuxtImport('navigateTo', () => navigateTo)
@@ -35,9 +61,18 @@ mockNuxtImport('usePermissionsStore', () => {
 })
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string) => {
+  return (url: string, opts?: { body?: Record<string, unknown> }) => {
     if (typeof url !== 'string') return Promise.resolve([])
     llamadas.push(url)
+    if (url.endsWith('/propinas/liquidaciones/preview')) {
+      previews.push(JSON.parse(JSON.stringify(opts!.body!)))
+      if (previewFalla) return Promise.reject(new Error('preview caído'))
+      return Promise.resolve(repartoPara(opts!.body as { fechaDesde: string }))
+    }
+    if (url.endsWith('/propinas/liquidaciones/liquidar')) {
+      liquidaciones.push(JSON.parse(JSON.stringify(opts!.body!)))
+      return Promise.resolve({ id: 'liq-1' })
+    }
     if (url.includes('/tenants/me')) {
       return Promise.resolve({ horaCorte: horaCorteBackend, diaNegocioHoy: '2026-09-18' })
     }
@@ -49,12 +84,19 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (url.includes('/propinas/liquidaciones')) return Promise.resolve([])
     if (url.includes('/turnos')) return Promise.resolve([])
-    if (url.includes('/garzones')) return Promise.resolve([])
+    if (url.includes('/garzones')) {
+      return Promise.resolve([{ id: 'gz-ana', nombre: 'Ana Torres' }, { id: 'gz-beto', nombre: 'Beto Díaz' }])
+    }
     return Promise.resolve([])
   }
 })
 
 async function montar() {
+  useMonedasStore().hydrate([{
+    monedaId: 'clp', nombre: 'Peso Chileno', codigoIso: 'CLP', simbolo: '$', decimales: 0,
+    separadorDecimal: ',', separadorMiles: '.', locale: 'es-CL', habilitada: true,
+    esOficial: true, valorDelDia: null,
+  }], 'tenant-1')
   const wrapper = await mountSuspended(Propinas)
   await new Promise(r => setTimeout(r, 20))
   return wrapper
@@ -63,7 +105,11 @@ async function montar() {
 beforeEach(() => {
   permisos = ADMIN_PROPINAS
   llamadas = []
+  previews = []
+  liquidaciones = []
+  previewFalla = false
   navigateTo.mockClear()
+  document.body.innerHTML = ''
 })
 
 describe('propinas — nota del día de negocio', () => {
@@ -105,6 +151,118 @@ describe('propinas — el admin del tenant entra solo si su tenant contrató Pro
 
     expect(navigateTo).toHaveBeenCalledWith('/')
     expect(llamadas.some(u => u.includes('/propinas'))).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('propinas — se liquida el reparto que se vio (auditoría UX 02.1)', () => {
+  const tick = () => new Promise(r => setTimeout(r, 20))
+
+  async function fijarPeriodo(wrapper: Awaited<ReturnType<typeof montar>>, desde: string, hasta: string) {
+    const [inDesde, inHasta] = wrapper.findAllComponents({ name: 'AppDateInput' })
+    inDesde!.vm.$emit('update:modelValue', desde)
+    inHasta!.vm.$emit('update:modelValue', hasta)
+    await tick()
+  }
+
+  function botonPorTexto(raiz: ParentNode, texto: string): HTMLButtonElement | undefined {
+    return [...raiz.querySelectorAll('button')].find(b => b.textContent?.trim() === texto) as HTMLButtonElement | undefined
+  }
+
+  async function verReparto(wrapper: Awaited<ReturnType<typeof montar>>) {
+    botonPorTexto(wrapper.element, 'Ver reparto')!.click()
+    await tick()
+  }
+
+  /** Toca "Liquidar período" y, si aparece la confirmación, la acepta. */
+  async function liquidarYConfirmar(wrapper: Awaited<ReturnType<typeof montar>>) {
+    const boton = botonPorTexto(wrapper.element, 'Liquidar período')
+    if (boton && !boton.disabled) boton.click()
+    await tick()
+    const confirmar = [...document.body.querySelectorAll('[role="dialog"] button')]
+      .find(b => b.textContent?.trim().startsWith('Liquidar')) as HTMLButtonElement | undefined
+    if (confirmar && !confirmar.disabled) confirmar.click()
+    await tick()
+  }
+
+  it('cambiar "Desde" después de ver el reparto no liquida un período que nadie vio', async () => {
+    const wrapper = await montar()
+    await fijarPeriodo(wrapper, '2026-09-01', '2026-09-30')
+    await verReparto(wrapper)
+    expect(previews).toHaveLength(1)
+
+    // La encargada cambia "Desde" y no vuelve a calcular.
+    const [inDesde] = wrapper.findAllComponents({ name: 'AppDateInput' })
+    inDesde!.vm.$emit('update:modelValue', '2026-09-15')
+    await tick()
+
+    expect(botonPorTexto(wrapper.element, 'Liquidar período')!.disabled).toBe(true)
+    await liquidarYConfirmar(wrapper)
+
+    expect(liquidaciones.some(b => b.fechaDesde === '2026-09-15')).toBe(false)
+    expect(wrapper.text()).toContain('vuelve a calcular el reparto')
+    wrapper.unmount()
+  })
+
+  it('"Liquidar período" pide confirmación con el monto antes de liquidar', async () => {
+    const wrapper = await montar()
+    await fijarPeriodo(wrapper, '2026-09-01', '2026-09-30')
+    await verReparto(wrapper)
+
+    botonPorTexto(wrapper.element, 'Liquidar período')!.click()
+    await tick()
+
+    expect(liquidaciones).toHaveLength(0)
+    const dialogo = document.body.querySelector('[role="dialog"]')!
+    expect(dialogo).toBeTruthy()
+    const texto = dialogo.textContent!
+    expect(texto).toContain('450.000')
+    expect(texto).toContain('Ana Torres')
+    expect(texto).toContain('225.000')
+    wrapper.unmount()
+  })
+
+  it('al confirmar, liquida con el período, los turnos y los ajustes del reparto mostrado', async () => {
+    const wrapper = await montar()
+    await fijarPeriodo(wrapper, '2026-09-01', '2026-09-30')
+    await verReparto(wrapper)
+
+    await liquidarYConfirmar(wrapper)
+
+    expect(liquidaciones).toHaveLength(1)
+    expect(liquidaciones[0]).toEqual(previews[previews.length - 1])
+    wrapper.unmount()
+  })
+
+  it('un monto manual escrito y no guardado no viaja en la liquidación', async () => {
+    const wrapper = await montar()
+    await fijarPeriodo(wrapper, '2026-09-01', '2026-09-30')
+    await verReparto(wrapper)
+
+    const monto = wrapper.findAllComponents({ name: 'MoneyInput' })[0]!
+    monto.vm.$emit('update:modelValue', '300000')
+    await tick()
+
+    expect(botonPorTexto(wrapper.element, 'Liquidar período')!.disabled).toBe(true)
+    expect(wrapper.text()).toContain('Guarda el monto manual')
+    await liquidarYConfirmar(wrapper)
+
+    expect(liquidaciones.some(b => JSON.stringify(b).includes('300000'))).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('si el recálculo de una exclusión falla, pide volver a calcular y no habla del monto', async () => {
+    const wrapper = await montar()
+    await fijarPeriodo(wrapper, '2026-09-01', '2026-09-30')
+    await verReparto(wrapper)
+
+    previewFalla = true
+    botonPorTexto(wrapper.element, 'Excluir')!.click()
+    await tick()
+
+    expect(wrapper.text()).toContain('vuelve a calcular el reparto')
+    expect(wrapper.text()).not.toContain('Guarda el monto manual')
+    expect(botonPorTexto(wrapper.element, 'Liquidar período')!.disabled).toBe(true)
     wrapper.unmount()
   })
 })

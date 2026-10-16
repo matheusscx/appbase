@@ -6,7 +6,9 @@ import type {
   PreviewGrupo,
   PreviewParticipante,
   AjustesReparto,
+  PreviewBody,
 } from '~/composables/usePropinaLiquidaciones'
+import { claveConsultaReparto } from '~/composables/usePropinaLiquidaciones'
 import type { Turno } from '~/composables/useTurnos'
 import type { Garzon } from '~/composables/useGarzones'
 import { rangoMesActual } from '~/composables/usePropinaResumen'
@@ -29,6 +31,9 @@ const turnoIds = ref<string[]>([])
 const tab = ref('propinas')
 
 const reparto = ref<PreviewReparto | null>(null)
+/** La consulta que produjo `reparto`: es lo único que se liquida (auditoría UX 02.1). */
+const consultaMostrada = ref<PreviewBody | null>(null)
+const confirmarAbierto = ref(false)
 const exclusiones = ref<string[]>([])
 const montosManuales = reactive<Record<string, string>>({})
 
@@ -56,11 +61,53 @@ const turnoOptions = computed(() =>
 )
 
 const ajustes = computed<AjustesReparto>(() => ({
-  exclusiones: exclusiones.value,
+  exclusiones: [...exclusiones.value],
   montosManuales: Object.entries(montosManuales)
     .filter(([, v]) => v)
     .map(([garzonId, monto]) => ({ garzonId, monto })),
 }))
+
+const consultaActual = computed<PreviewBody>(() => ({
+  fechaDesde: fechaDesde.value,
+  fechaHasta: fechaHasta.value,
+  turnoIds: [...turnoIds.value],
+  ajustes: ajustes.value,
+}))
+
+/**
+ * Qué cambió en el formulario desde el reparto que está en pantalla: el período, los
+ * turnos o quién participa (hay que volver a calcular), o un monto manual escrito y
+ * todavía no guardado. Mientras haya algo, no se liquida. Durante un recálculo no se
+ * avisa nada: el botón ya está apagado y el reparto nuevo llega enseguida.
+ */
+const cambioPendiente = computed<'recalcular' | 'monto' | null>(() => {
+  const vista = consultaMostrada.value
+  if (!reparto.value || !vista || loadingPreview.value) return null
+  const actual = consultaActual.value
+  const sinMontos = (c: PreviewBody) =>
+    claveConsultaReparto({ ...c, ajustes: { exclusiones: c.ajustes?.exclusiones } })
+  if (sinMontos(vista) !== sinMontos(actual)) return 'recalcular'
+  if (claveConsultaReparto(vista) !== claveConsultaReparto(actual)) return 'monto'
+  return null
+})
+
+const puedeConfirmarLiquidar = computed(() =>
+  !!reparto.value
+  && Number(reparto.value.poolTotal) !== 0
+  && puedeLiquidar.value
+  && !cambioPendiente.value
+  && !loadingPreview.value,
+)
+
+const turnosMostrados = computed(() => {
+  const ids = consultaMostrada.value?.turnoIds ?? []
+  if (!ids.length) return 'Todos los turnos'
+  return ids.map(id => turnoOptions.value.find(t => t.value === id)?.label ?? 'Turno dado de baja').join(', ')
+})
+
+const participantesIncluidos = computed(() =>
+  reparto.value?.participantes.filter(p => p.incluido) ?? [],
+)
 
 const columns: TableColumn<LiquidacionResumen>[] = [
   { accessorKey: 'fechaDesde', header: 'Desde' },
@@ -109,13 +156,10 @@ function criterioLabel(criterio: string): string {
 async function cargarPreview() {
   if (!fechaDesde.value || !fechaHasta.value) return
   loadingPreview.value = true
+  const consulta = consultaActual.value
   try {
-    reparto.value = await api.preview({
-      fechaDesde: fechaDesde.value,
-      fechaHasta: fechaHasta.value,
-      turnoIds: turnoIds.value,
-      ajustes: ajustes.value,
-    })
+    reparto.value = await api.preview(consulta)
+    consultaMostrada.value = consulta
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al calcular el reparto'), color: 'error' })
@@ -137,15 +181,11 @@ function guardarMonto() {
 }
 
 async function liquidar() {
-  if (!reparto.value) return
+  if (!consultaMostrada.value || !puedeConfirmarLiquidar.value) return
   liquidando.value = true
   try {
-    const detalle = await api.liquidar({
-      fechaDesde: fechaDesde.value,
-      fechaHasta: fechaHasta.value,
-      turnoIds: turnoIds.value,
-      ajustes: ajustes.value,
-    })
+    const detalle = await api.liquidar(consultaMostrada.value)
+    confirmarAbierto.value = false
     toast.add({ title: 'Período liquidado', color: 'success' })
     await router.push(`/propinas/liquidaciones/${detalle.id}/imprimir?tipo=resumen`)
   }
@@ -261,98 +301,110 @@ onMounted(async () => {
 
           <!-- Reparto en vivo -->
           <template v-if="reparto">
-            <UCard>
-              <p class="text-sm text-muted">
-                Fondo total del período
-              </p>
-              <p class="text-3xl font-bold text-default">
-                {{ formatMonto(reparto.poolTotal, reparto.monedaId) }}
-              </p>
-            </UCard>
-
             <UAlert
-              v-for="w in reparto.advertencias"
-              :key="w"
+              v-if="cambioPendiente"
               color="warning"
               variant="subtle"
-              icon="i-lucide-triangle-alert"
-              :title="w"
+              icon="i-lucide-refresh-cw"
+              :title="cambioPendiente === 'recalcular'
+                ? 'Cambiaste el período, los turnos o quién participa: vuelve a calcular el reparto para liquidar.'
+                : 'Guarda el monto manual para ver cómo queda el reparto antes de liquidar.'"
             />
 
-            <div class="space-y-4">
-              <UCard v-for="grupo in reparto.grupos" :key="grupo.id">
-                <template #header>
-                  <div class="flex flex-wrap items-center justify-between gap-2">
-                    <div>
-                      <p class="font-medium text-default">
-                        {{ grupo.nombre }}
-                      </p>
-                      <p class="text-sm text-muted">
-                        {{ formatPorcentaje(grupo.porcentaje) }} · {{ criterioLabel(grupo.criterio) }}
-                      </p>
-                    </div>
-                    <p class="font-semibold text-default">
-                      {{ formatMonto(grupo.montoGrupo, reparto.monedaId) }}
-                    </p>
-                  </div>
-                </template>
-                <div class="space-y-3">
-                  <div
-                    v-for="p in participantesGrupo(grupo)"
-                    :key="p.garzonId"
-                    class="rounded-lg border border-default p-3"
-                  >
-                    <div class="grid gap-3 lg:grid-cols-[1fr_140px_140px_auto] lg:items-center">
-                      <div>
-                        <p class="font-medium text-default" :class="{ 'line-through opacity-60': !p.incluido }">
-                          {{ garzonNombre(p.garzonId) }}
-                        </p>
-                        <p v-if="!p.incluido" class="text-xs text-muted">
-                          Excluido
-                        </p>
-                      </div>
-                      <div class="text-sm">
-                        <p class="text-muted">
-                          Monto
-                        </p>
-                        <p class="font-medium text-default">
-                          {{ formatMonto(p.monto, reparto.monedaId) }}
-                        </p>
-                      </div>
-                      <div v-if="grupo.criterio === 'MANUAL' && puedeLiquidar" class="flex items-end gap-2">
-                        <MoneyInput
-                          :model-value="montosManuales[p.garzonId] ?? ''"
-                          :moneda-id="reparto.monedaId"
-                          size="sm"
-                          placeholder="Monto manual"
-                          @update:model-value="(v: string) => { montosManuales[p.garzonId] = v }"
-                          @keyup.enter="guardarMonto"
-                        />
-                        <UButton
-                          size="sm"
-                          variant="outline"
-                          icon="i-lucide-save"
-                          :loading="loadingPreview"
-                          @click="guardarMonto"
-                        />
-                      </div>
-                      <div v-else />
-                      <div class="flex items-end">
-                        <UButton
-                          size="sm"
-                          class="w-full justify-center"
-                          :variant="p.incluido ? 'outline' : 'solid'"
-                          :color="p.incluido ? 'neutral' : 'primary'"
-                          :label="p.incluido ? 'Excluir' : 'Incluir'"
-                          :disabled="!puedeLiquidar"
-                          :loading="loadingPreview"
-                          @click="toggleExcluir(p.garzonId)"
-                        />
-                      </div>
-                    </div>
-                  </div>
-                </div>
+            <div class="space-y-6 transition-opacity" :class="{ 'opacity-50': cambioPendiente }">
+              <UCard>
+                <p class="text-sm text-muted">
+                  Fondo total del período
+                </p>
+                <p class="text-3xl font-bold text-default">
+                  {{ formatMonto(reparto.poolTotal, reparto.monedaId) }}
+                </p>
               </UCard>
+
+              <UAlert
+                v-for="w in reparto.advertencias"
+                :key="w"
+                color="warning"
+                variant="subtle"
+                icon="i-lucide-triangle-alert"
+                :title="w"
+              />
+
+              <div class="space-y-4">
+                <UCard v-for="grupo in reparto.grupos" :key="grupo.id">
+                  <template #header>
+                    <div class="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p class="font-medium text-default">
+                          {{ grupo.nombre }}
+                        </p>
+                        <p class="text-sm text-muted">
+                          {{ formatPorcentaje(grupo.porcentaje) }} · {{ criterioLabel(grupo.criterio) }}
+                        </p>
+                      </div>
+                      <p class="font-semibold text-default">
+                        {{ formatMonto(grupo.montoGrupo, reparto.monedaId) }}
+                      </p>
+                    </div>
+                  </template>
+                  <div class="space-y-3">
+                    <div
+                      v-for="p in participantesGrupo(grupo)"
+                      :key="p.garzonId"
+                      class="rounded-lg border border-default p-3"
+                    >
+                      <div class="grid gap-3 lg:grid-cols-[1fr_140px_140px_auto] lg:items-center">
+                        <div>
+                          <p class="font-medium text-default" :class="{ 'line-through opacity-60': !p.incluido }">
+                            {{ garzonNombre(p.garzonId) }}
+                          </p>
+                          <p v-if="!p.incluido" class="text-xs text-muted">
+                            Excluido
+                          </p>
+                        </div>
+                        <div class="text-sm">
+                          <p class="text-muted">
+                            Monto
+                          </p>
+                          <p class="font-medium text-default">
+                            {{ formatMonto(p.monto, reparto.monedaId) }}
+                          </p>
+                        </div>
+                        <div v-if="grupo.criterio === 'MANUAL' && puedeLiquidar" class="flex items-end gap-2">
+                          <MoneyInput
+                            :model-value="montosManuales[p.garzonId] ?? ''"
+                            :moneda-id="reparto.monedaId"
+                            size="sm"
+                            placeholder="Monto manual"
+                            @update:model-value="(v: string) => { montosManuales[p.garzonId] = v }"
+                            @keyup.enter="guardarMonto"
+                          />
+                          <UButton
+                            size="sm"
+                            variant="outline"
+                            icon="i-lucide-save"
+                            :loading="loadingPreview"
+                            @click="guardarMonto"
+                          />
+                        </div>
+                        <div v-else />
+                        <div class="flex items-end">
+                          <UButton
+                            size="sm"
+                            class="w-full justify-center"
+                            :variant="p.incluido ? 'outline' : 'solid'"
+                            :color="p.incluido ? 'neutral' : 'primary'"
+                            :label="p.incluido ? 'Excluir' : 'Incluir'"
+                            :disabled="!puedeLiquidar"
+                            :loading="loadingPreview"
+                            @click="toggleExcluir(p.garzonId)"
+                          />
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                </UCard>
+              </div>
             </div>
 
             <div class="flex justify-end">
@@ -361,10 +413,49 @@ onMounted(async () => {
                 label="Liquidar período"
                 size="lg"
                 :loading="liquidando"
-                :disabled="!reparto || Number(reparto.poolTotal) === 0 || !puedeLiquidar"
-                @click="liquidar"
+                :disabled="!puedeConfirmarLiquidar"
+                @click="() => { confirmarAbierto = true }"
               />
             </div>
+
+            <CrudModal
+              v-if="consultaMostrada"
+              v-model:open="confirmarAbierto"
+              title="Liquidar el período"
+              message="El reparto queda cerrado con estos montos. Para corregirlo después hay que anular la liquidación."
+              :confirm-label="`Liquidar ${formatMonto(reparto.poolTotal, reparto.monedaId)}`"
+              confirm-color="primary"
+              :loading="liquidando"
+              :confirm-disabled="!puedeConfirmarLiquidar"
+              @confirm="liquidar"
+            >
+              <template #detalle>
+                <div class="mt-4 space-y-4">
+                  <div class="text-sm text-muted">
+                    <p>Del {{ formatFecha(consultaMostrada.fechaDesde) }} al {{ formatFecha(consultaMostrada.fechaHasta) }}</p>
+                    <p>{{ turnosMostrados }}</p>
+                  </div>
+                  <div>
+                    <p class="text-sm text-muted">
+                      Fondo a repartir
+                    </p>
+                    <p class="text-2xl font-semibold text-highlighted tabular-nums">
+                      {{ formatMonto(reparto.poolTotal, reparto.monedaId) }}
+                    </p>
+                  </div>
+                  <ul v-if="participantesIncluidos.length" class="divide-y divide-default rounded-lg border border-default">
+                    <li
+                      v-for="p in participantesIncluidos"
+                      :key="`${p.grupoId}-${p.garzonId}`"
+                      class="flex items-center justify-between gap-3 px-3 py-2 text-sm"
+                    >
+                      <span class="text-default">{{ garzonNombre(p.garzonId) }}</span>
+                      <span class="font-medium text-highlighted tabular-nums">{{ formatMonto(p.monto, reparto.monedaId) }}</span>
+                    </li>
+                  </ul>
+                </div>
+              </template>
+            </CrudModal>
           </template>
         </template>
 
