@@ -72,4 +72,40 @@ test.describe('marca Venka', () => {
     const centro = (c: { y: number, height: number }) => c.y + c.height / 2
     expect(Math.abs(centro(cajaLink!) - centro(cajaRotulo!))).toBeLessThan(12)
   })
+
+  test('las cifras de DM Sans miden lo mismo', async ({ page }) => {
+    await page.goto('/login')
+    // La cara solo baja cuando algo la usa: se espera a que el título pinte y se la pide
+    // por nombre en cada peso que mide la prueba.
+    await expect(page.getByText('Contraseña', { exact: true })).toBeVisible()
+    // Los diez dígitos, en varios pesos y en dos tamaños (el tamaño mueve el eje óptico).
+    // El motor de fuentes de Linux (FreeType) lee el avance de los puntos fantasma del
+    // glifo y el de macOS lo lee de HVAR: la fuente tiene que decir lo mismo en los dos
+    // sitios, y esta prueba corre en CI sobre Linux, no solo en un Mac.
+    const pesos = [400, 500, 600, 700]
+    const tamanos = [14, 32]
+    const medidas = await page.evaluate(async ({ pesos, tamanos }) => {
+      const medir = (texto: string, peso: number, tamano: number) => {
+        const span = document.createElement('span')
+        span.textContent = texto
+        span.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:${peso} ${tamano}px 'DM Sans'`
+        document.body.appendChild(span)
+        const ancho = span.getBoundingClientRect().width
+        span.remove()
+        return ancho
+      }
+      await Promise.all(pesos.flatMap(p => tamanos.map(t => document.fonts.load(`${p} ${t}px 'DM Sans'`, '0123456789'))))
+      await document.fonts.ready
+      const cara = [...document.fonts].find(f => f.family.replace(/["']/g, '') === 'DM Sans')
+      const filas = pesos.flatMap(peso => tamanos.map((tamano) => {
+        const anchos = [...'0123456789'].map(d => medir(d.repeat(10), peso, tamano))
+        return { peso, tamano, dif: Math.max(...anchos) - Math.min(...anchos) }
+      }))
+      return { estado: cara?.status, filas }
+    }, { pesos, tamanos })
+
+    expect(medidas.estado).toBe('loaded')
+    // Cifras de ancho fijo: la columna de montos se alinea sin `tabular-nums`.
+    for (const fila of medidas.filas) expect(fila.dif, `${fila.peso} a ${fila.tamano}px`).toBeLessThanOrEqual(0.5)
+  })
 })
