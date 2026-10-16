@@ -348,9 +348,15 @@ function abrirMontos(linea: LineaHoja) {
   montosAbierto.value = true
 }
 
-// El foco vuelve al campo en `after:leave` del modal: antes, el diálogo todavía está montado.
 function cerrarMontos() {
   montosAbierto.value = false
+}
+
+// Al cerrar, reka le devuelve el foco al botón que abrió el modal (medido en el navegador: le
+// ganaba a un `after:leave`). Se le previene y el foco vuelve al campo, para la pistola.
+function alCerrarModalMontos(e: Event) {
+  e.preventDefault()
+  enfocar(true)
 }
 
 function ponerMontos(hojaId: string, paqueteId: string, precioEnvio: string, pagoRepartidor: string) {
@@ -708,7 +714,7 @@ const iconoResultado = {
     :title="montosLinea ? `Montos de ${montosLinea.codigo}` : 'Montos del paquete'"
     description="Reemplazan los valores por defecto solo para este paquete."
     :ui="shellUi.modal"
-    @after:leave="enfocar(true)"
+    :content="{ onCloseAutoFocus: alCerrarModalMontos }"
   >
     <template #body>
       <div class="space-y-4" data-qa="escanear-montos-modal">

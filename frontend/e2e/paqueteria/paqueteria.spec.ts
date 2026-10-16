@@ -60,6 +60,60 @@ test('escanear con la pistola, marcar y rendir: el repartidor entrega lo cobrado
   await expect(page.getByRole('row').filter({ hasText: nombre })).toContainText('Rendida')
 })
 
+test('cambiar el precio y el pago de un paquete desde la hoja de Escanear', async ({ page, request }) => {
+  const token = await tokenDe(request, TENANTS.restaurante)
+  const nombre = `E2E Repartidor montos ${Date.now()}`
+  await api(request, 'post', '/repartidores', { token, data: { nombre } })
+  const codigo = `E2EM${Date.now()}`
+
+  await page.goto('/paquetes/escanear')
+  await page.locator('[data-qa="escanear-repartidor"]').click()
+  await page.getByRole('option', { name: nombre, exact: true }).click()
+  // La lista retiene el foco ~140 ms mientras se cierra: lo que se tipea ahí se pierde. Ninguna
+  // persona elige con el mouse y dispara la pistola tan rápido; el test sí, así que espera.
+  await expect(page.getByRole('listbox')).toHaveCount(0)
+  const campo = page.locator('[data-qa="escanear-codigo"]')
+  await campo.fill(codigo)
+  await campo.press('Enter')
+  await expect(page.locator('[data-qa="escanear-asignados"]')).toHaveText('1 asignados')
+  // Nace con los defaults del seed.
+  await expect(page.locator(`[data-qa="escanear-linea-envio-${codigo}"]`)).toHaveText('$10.000')
+  await expect(page.locator(`[data-qa="escanear-linea-pago-${codigo}"]`)).toHaveText('$5.000')
+
+  await page.locator(`[data-qa="escanear-linea-montos-${codigo}"]`).click()
+  const modal = page.getByRole('dialog')
+  // El `data-qa` del MoneyInput cae en el propio <input>: se tipea ahí, tecla por tecla (maska
+  // ignora `fill`, ver `escribirMonto` en support/ui).
+  for (const [qa, monto] of [['escanear-montos-envio', '12000'], ['escanear-montos-pago', '6000']] as const) {
+    const input = modal.locator(`input[data-qa="${qa}"]`)
+    await input.selectText()
+    await input.pressSequentially(monto)
+  }
+  // Enter en el campo no guarda: es lo que tipea una pistola al final de cada código.
+  await page.keyboard.press('Enter')
+  await expect(modal).toBeVisible()
+  await expect(page.locator(`[data-qa="escanear-linea-envio-${codigo}"]`)).toHaveText('$10.000')
+
+  await modal.locator('[data-qa="escanear-montos-guardar"]').click()
+  await expect(modal).toHaveCount(0)
+  await expect(page.locator(`[data-qa="escanear-linea-envio-${codigo}"]`)).toHaveText('$12.000')
+  await expect(page.locator(`[data-qa="escanear-linea-pago-${codigo}"]`)).toHaveText('$6.000')
+
+  // Al cerrar, el foco volvió al campo: la pistola sigue sin tocar el mouse.
+  await expect(campo).toBeFocused()
+  await page.keyboard.type(`${codigo}B`)
+  await page.keyboard.press('Enter')
+  await expect(page.locator('[data-qa="escanear-asignados"]')).toHaveText('2 asignados')
+
+  // Lo guardado es del paquete, en el backend.
+  const lista = await api<{ data: { codigo: string, precioEnvio: string, pagoRepartidor: string }[] }>(
+    request, 'get', `/paquetes?q=${codigo}`, { token },
+  )
+  const guardado = lista.data.find(p => p.codigo === codigo)!
+  expect(guardado.precioEnvio).toBe('12000.0000')
+  expect(guardado.pagoRepartidor).toBe('6000.0000')
+})
+
 test('el admin del tenant demo ve solo Paquetería en el menú', async ({ browser }) => {
   // No es superadmin: es el caso real que verá el cliente.
   const context = await browser.newContext({
