@@ -26,6 +26,7 @@ const BODEGA = { id: 'bodega-1', nombre: 'Bodega', tipo: 'bodega', activo: true 
 const HARINA = { id: 'item-harina', nombre: 'Harina', modoInventario: 'cantidad', unidadMedida: 'kg' }
 const LATAS = { id: 'item-latas', nombre: 'Coca-Cola lata', modoInventario: 'cantidad', unidadMedida: 'unidad' }
 const BOTELLA_SERIE = { id: 'item-botella', nombre: 'Botella premium', modoInventario: 'serie', unidadMedida: 'unidad' }
+const LECHE_LOTE = { id: 'item-leche', nombre: 'Leche en lote', modoInventario: 'lote', unidadMedida: 'unidad' }
 const CAJA = { id: 'pres-caja', itemId: LATAS.id, nombre: 'Caja', contenido: '12.0000', unidadCodigo: 'unidad' }
 // Para la escena del XML (andina-33.xml): Coca ya con un producto en el
 // catálogo, Fanta todavía sin uno (se asocia a mano en el test).
@@ -111,7 +112,7 @@ let replaceCalls: string[] = []
  */
 let confirmDuranteReplace: boolean | null = null
 
-const PRODUCTOS = [HARINA, LATAS, BOTELLA_SERIE, COCA, FANTA]
+const PRODUCTOS = [HARINA, LATAS, BOTELLA_SERIE, COCA, FANTA, LECHE_LOTE]
 /** Cada pedido a `/compras/productos`: para afirmar que no se trae la lista entera. */
 let pedidosProductos: string[] = []
 let productosFalla = false
@@ -556,6 +557,9 @@ describe('compras/[id] — carga del borrador', () => {
     await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
     await elegirProducto(wrapper, 0, HARINA.id)
     await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+    // La pantalla ya frena un total vacío (lote 1); acá el total está cargado y es el servidor
+    // el que discrepa — el respaldo que sigue marcando el campo.
+    await wrapper.find('input[data-qa="compra-total-documento"]').setValue('5950')
 
     await wrapper.find('[data-qa="compra-confirmar"]').trigger('click')
     await new Promise(r => setTimeout(r, 20))
@@ -1294,6 +1298,191 @@ describe('compras/[id] — los productos se resuelven por id, no con la lista en
     expect(avisos.map(a => a.title)).toContain('Se cayó')
     expect(wrapper.find('[data-qa="compra-dte-franja"]').exists()).toBe(false)
     expect(wrapper.findAll('[data-qa="compra-linea"]')).toHaveLength(1)
+    wrapper.unmount()
+  })
+})
+
+// Lote 1 (auditoría UX 00.10, 06.1, 06.2, 06.3): una línea EMPEZADA e incompleta no se descarta en
+// silencio — bloquea Guardar y Confirmar y se marca junto al campo. Una línea vacía sigue sin viajar.
+describe('compras/[id] — una línea incompleta bloquea el envío', () => {
+  beforeEach(() => {
+    enviados = []
+    avisos = []
+    routeId = 'nueva'
+    razaRemonte = null
+    confirmarFalla = false
+    guardarFalla = null
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  async function cabecera(wrapper: Wrapper, tipo = FACTURA.id) {
+    await emitir(selectConOpcion(wrapper, PROVEEDOR.id), PROVEEDOR.id)
+    await emitir(selectConOpcion(wrapper, tipo), tipo)
+    await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+  }
+
+  const errores = (w: Wrapper) => w.findAll('[data-qa="compra-linea"] [data-slot="error"]').map(e => e.text())
+  const guardar = async (w: Wrapper) => {
+    await w.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 30))
+  }
+
+  it('06.1: producto sin cantidad — Guardar no envía, no dice "Borrador guardado" y marca la cantidad', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, HARINA.id)
+
+    expect(errores(wrapper)).toEqual([])
+    await guardar(wrapper)
+
+    expect(enviados).toHaveLength(0)
+    expect(avisos.map(a => a.title)).not.toContain('Borrador guardado')
+    expect(errores(wrapper)).toEqual(['Falta la cantidad'])
+
+    // Completar la cantidad limpia la marca y el guardado sale con la línea.
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('3')
+    expect(errores(wrapper)).toEqual([])
+    await guardar(wrapper)
+    expect(enviados).toHaveLength(1)
+    expect(enviados[0]!.body!.lineas).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('06.1: Confirmar con una línea sin cantidad no abre el modal ni envía, y marca la cantidad', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, HARINA.id)
+
+    expect(wrapper.find('[data-qa="compra-confirmar"]').attributes('disabled')).toBeUndefined()
+    await wrapper.find('[data-qa="compra-confirmar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+
+    expect(document.body.querySelector('[data-qa="compra-confirmar-resumen"]')).toBeNull()
+    expect(enviados).toHaveLength(0)
+    expect(errores(wrapper)).toEqual(['Falta la cantidad'])
+    wrapper.unmount()
+  })
+
+  it('06.1: una línea completa y otra incompleta — no viaja ninguna', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+    await wrapper.findAll('button').find(b => b.text().includes('Agregar línea'))!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    await elegirProducto(wrapper, 1, LATAS.id)
+
+    await guardar(wrapper)
+
+    expect(enviados).toHaveLength(0)
+    expect(errores(wrapper)).toEqual(['Falta la cantidad'])
+    wrapper.unmount()
+  })
+
+  it('una línea vacía (sin producto ni datos) no bloquea y no viaja', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+    await wrapper.findAll('button').find(b => b.text().includes('Agregar línea'))!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(wrapper.findAll('[data-qa="compra-linea"]')).toHaveLength(2)
+
+    await guardar(wrapper)
+
+    expect(enviados).toHaveLength(1)
+    expect(enviados[0]!.body!.lineas).toHaveLength(1)
+    expect(avisos.map(a => a.title)).toContain('Borrador guardado')
+    expect(errores(wrapper)).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('una cantidad sin producto se marca en el producto (no se descarta)', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('5')
+
+    await guardar(wrapper)
+
+    expect(enviados).toHaveLength(0)
+    expect(errores(wrapper)).toEqual(['Falta elegir el producto'])
+    wrapper.unmount()
+  })
+
+  it.each([
+    ['0', 'La cantidad tiene que ser mayor que 0'],
+    ['-3', 'La cantidad tiene que ser mayor que 0'],
+    ['abc', 'La cantidad tiene que ser un número'],
+    ['2,5', 'Los decimales van con punto, no con coma'],
+  ])('06.2: la cantidad "%s" no se envía y dice por qué', async (valor, texto) => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue(valor)
+
+    await guardar(wrapper)
+
+    expect(enviados).toHaveLength(0)
+    expect(errores(wrapper)).toEqual([texto])
+    wrapper.unmount()
+  })
+
+  // Lo que el DTO acepta (`@IsNumberString` + `@IsDecimalPositivo`) la pantalla no lo frena.
+  it.each(['.5', '+2', '2.5'])('06.2: la cantidad "%s" la acepta el backend y la pantalla la deja pasar', async (valor) => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue(valor)
+
+    await guardar(wrapper)
+
+    expect(errores(wrapper)).toEqual([])
+    expect(enviados).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('un producto por serie sin series se marca en las series y no viaja', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, BOTELLA_SERIE.id)
+
+    await guardar(wrapper)
+
+    expect(enviados).toHaveLength(0)
+    expect(errores(wrapper)).toEqual(['Faltan las series: una por renglón'])
+
+    await wrapper.find('textarea').setValue('SN-1')
+    expect(errores(wrapper)).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('un producto por lote sin código de lote se marca en el lote y no viaja', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, LECHE_LOTE.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('4')
+
+    await guardar(wrapper)
+
+    expect(enviados).toHaveLength(0)
+    expect(errores(wrapper)).toEqual(['Falta el código del lote'])
+    wrapper.unmount()
+  })
+
+  it('06.3: Confirmar sin el total del documento obligatorio no abre el modal y marca el campo', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper, FACTURA_TOTAL.id)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+
+    await wrapper.find('[data-qa="compra-confirmar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+
+    expect(document.body.querySelector('[data-qa="compra-confirmar-resumen"]')).toBeNull()
+    expect(enviados).toHaveLength(0)
+    expect(wrapper.find('[data-qa="compra-total-documento-campo"] [data-slot="error"]').text())
+      .toBe('Falta el total del documento')
     wrapper.unmount()
   })
 })

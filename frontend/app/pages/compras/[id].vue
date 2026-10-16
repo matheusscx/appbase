@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { CompraDetalle, LineaCompra as LineaDetalle, PresentacionCompra, TotalDocumentoTipo } from '~/composables/useCompras'
+import Decimal from 'decimal.js'
 import { hoyLocal } from '~/composables/useVigenciaRegla'
 import type { DestinoCodigo, DocumentoDte, LecturaDteRespuesta, LineaDte } from '~/composables/useDte'
 import { debeLlenarDescuentoDte, explicacionDescuentoDte, fraseOrigenDte, lineaFormDesdeDte, precargaDescuento, repartirLineas } from '~/composables/useDte'
@@ -370,12 +371,44 @@ function quitarLinea(key: string) {
   if (!lineas.value.length) lineas.value.push(nuevaLinea())
 }
 
-/** Una línea a medio cargar (sin producto o sin cantidad) no viaja. */
-const lineasCargadas = computed(() => lineas.value.filter(l => l.itemId && l.cantidad))
+type CampoLinea = 'producto' | 'cantidad' | 'series' | 'lote'
+
+/**
+ * Qué le falta a una línea EMPEZADA (ya tiene algo cargado) para poder enviarse; `null` si está
+ * completa o si está vacía. Una línea incompleta no se descarta en silencio: bloquea Guardar y
+ * Confirmar y se marca junto al campo (auditoría UX 00.10, 06.1, 06.2). La cantidad, las series,
+ * el lote y el total son las condiciones que el backend ya rechaza con 400 (`validarTrazabilidad`,
+ * DTO). «Cantidad o precio sin producto» el backend no la ve nunca (la línea no viaja): bloquearla
+ * solo evita descartar en silencio lo que la persona escribió.
+ */
+function faltaDeLinea(l: LineaForm): { campo: CampoLinea, texto: string } | null {
+  if (!l.itemId) {
+    // Las del XML sin producto tienen su propio aviso (`lineasPorAsociar`).
+    if (!l.dte && (l.cantidad.trim() || l.precioUnitario)) return { campo: 'producto', texto: 'Falta elegir el producto' }
+    return null
+  }
+  if (l.modoInventario === 'serie') {
+    // En serie la cantidad es la cuenta de las series: no es un campo aparte.
+    return seriesDe(l).length > 0 ? null : { campo: 'series', texto: 'Faltan las series: una por renglón' }
+  }
+  const cantidad = l.cantidad.trim()
+  if (!cantidad) return { campo: 'cantidad', texto: 'Falta la cantidad' }
+  if (cantidad.includes(',')) return { campo: 'cantidad', texto: 'Los decimales van con punto, no con coma' }
+  // Mismo criterio que el DTO: `@IsNumberString` (acepta «.5» y «+2») y `@IsDecimalPositivo`.
+  if (!/^[+-]?(\d*\.)?\d+$/.test(cantidad)) return { campo: 'cantidad', texto: 'La cantidad tiene que ser un número' }
+  if (!new Decimal(cantidad).gt(0)) return { campo: 'cantidad', texto: 'La cantidad tiene que ser mayor que 0' }
+  if (l.modoInventario === 'lote' && !l.codigoLote.trim()) return { campo: 'lote', texto: 'Falta el código del lote' }
+  return null
+}
+
+/** Las líneas completas: las únicas que viajan y suman. */
+const lineasCargadas = computed(() => lineas.value.filter(l => l.itemId && !faltaDeLinea(l)))
+/** Las empezadas e incompletas: no viajan, bloquean. */
+const lineasIncompletas = computed(() => lineas.value.filter(l => faltaDeLinea(l)))
 
 /** Una línea del XML todavía sin terminar de asociar: sin producto, sin
- *  unidad/presentación, o sin cantidad. `lineasCargadas` las descarta en
- *  silencio (le falta `itemId` o `cantidad`) — acá es donde `puedeGuardar`
+ *  unidad/presentación, o sin cantidad. `lineasCargadas` no las incluye
+ *  (le falta `itemId` o `cantidad`) — acá es donde `puedeGuardar`
  *  las tiene que ver, para no guardar una factura a medio asociar. */
 const lineasPorAsociar = computed(() =>
   lineas.value.filter(l => l.dte && (!l.itemId || !(l.presentacionId || l.unidadCodigo) || !l.cantidad)),
@@ -585,6 +618,8 @@ const faltaTexto = computed(() => {
   if (lineasCargadas.value.some(l => !l.presentacionId && !l.unidadCodigo)) return 'Falta elegir la unidad de cada línea'
   // Las líneas del XML sin asociar ya tienen su propio aviso arriba.
   if (lineasPorAsociar.value.length) return ''
+  const incompleta = lineasIncompletas.value[0]
+  if (incompleta) return faltaDeLinea(incompleta)!.texto
   if (!lineasCargadas.value.length) return 'Para confirmar la recepción falta una línea con producto y cantidad'
   return ''
 })
@@ -713,8 +748,22 @@ async function persistirBorrador({ navegar = true } = {}): Promise<CompraDetalle
   }
 }
 
+/** Marca junto a cada campo lo que falta de las líneas empezadas (y del total, si `conTotal`). */
+function marcarIncompletas({ conTotal = false } = {}): boolean {
+  const marcas: Record<string, string> = {}
+  for (const l of lineasIncompletas.value) {
+    const falta = faltaDeLinea(l)!
+    marcas[`${falta.campo}:${l.key}`] = falta.texto
+  }
+  if (conTotal && totalDocumentoRequerido.value && !form.value.totalDocumento.trim()) {
+    marcas.totalDocumento = 'Falta el total del documento'
+  }
+  return marcarErroresCompra(marcas)
+}
+
 async function guardar() {
   if (!puedeGuardar.value || guardando.value) return
+  if (marcarIncompletas()) return
   guardando.value = true
   try {
     if (await persistirBorrador()) {
@@ -728,7 +777,16 @@ async function guardar() {
 // ── Confirmar ───────────────────────────────────────────────────────────────
 
 const confirmarOpen = ref(false)
-const puedeConfirmar = computed(() => puedeGuardar.value && lineasCargadas.value.length > 0)
+// Con una línea incompleta el botón sigue activo: al tocarlo, el error aparece junto al campo.
+const puedeConfirmar = computed(() =>
+  puedeGuardar.value && (lineasCargadas.value.length > 0 || lineasIncompletas.value.length > 0),
+)
+
+/** «Confirmar recepción»: antes del modal, lo que el servidor rechazaría igual se marca en su campo. */
+function pedirConfirmacion() {
+  if (marcarIncompletas({ conTotal: true })) return
+  confirmarOpen.value = true
+}
 
 const ubicacionNombre = computed(() =>
   ubicaciones.value.find(u => u.id === form.value.ubicacionId)?.nombre ?? '',
@@ -786,6 +844,10 @@ const puedeEnviarConfirmar = computed(() => !pagarAhora.value || cuerpoPago.valu
  */
 async function confirmarRecepcion() {
   if (!puedeConfirmar.value || !puedeEnviarConfirmar.value || guardando.value) return
+  if (marcarIncompletas({ conTotal: true })) {
+    confirmarOpen.value = false
+    return
+  }
   guardando.value = true
   try {
     // Si esta instancia todavía no tiene una compra persistida, el guardado
@@ -1070,15 +1132,18 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
               :catalogo="catalogoProductos"
               :presentaciones="presentaciones"
               :proveedor-id="form.proveedorId"
+              :error-producto="erroresCompra[`producto:${linea.key}`]"
               :error-cantidad="erroresCompra[`cantidad:${linea.key}`]"
-              @seleccionar-item="(cambios: Partial<LineaForm>) => Object.assign(linea, cambios)"
+              :error-series="erroresCompra[`series:${linea.key}`]"
+              :error-lote="erroresCompra[`lote:${linea.key}`]"
+              @seleccionar-item="(cambios: Partial<LineaForm>) => { Object.assign(linea, cambios); limpiarErrorCompra(`producto:${linea.key}`) }"
               @cambiar-cantidad="(v: string) => { linea.cantidad = v; limpiarErrorCompra(`cantidad:${linea.key}`) }"
               @cambiar-unidad="(cambios: Partial<LineaForm>) => Object.assign(linea, cambios)"
               @nueva-presentacion="() => abrirNuevaPresentacion(linea)"
               @editar-presentacion="() => abrirEditarPresentacion(linea)"
               @cambiar-precio="(v: string) => { linea.precioUnitario = v }"
-              @cambiar-series="(cambios: Partial<LineaForm>) => Object.assign(linea, cambios)"
-              @cambiar-codigo-lote="(v: string) => { linea.codigoLote = v }"
+              @cambiar-series="(cambios: Partial<LineaForm>) => { Object.assign(linea, cambios); limpiarErrorCompra(`series:${linea.key}`); limpiarErrorCompra(`cantidad:${linea.key}`) }"
+              @cambiar-codigo-lote="(v: string) => { linea.codigoLote = v; limpiarErrorCompra(`lote:${linea.key}`) }"
               @cambiar-fecha-vencimiento="(v: string) => { linea.fechaVencimiento = v }"
               @quitar="quitarLinea(linea.key)"
               @apartar="apartarLinea(linea.key)"
@@ -1177,7 +1242,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
               color="success"
               :disabled="!puedeConfirmar || guardando"
               data-qa="compra-confirmar"
-              @click="() => { confirmarOpen = true }"
+              @click="pedirConfirmacion"
             >
               Confirmar recepción
             </UButton>

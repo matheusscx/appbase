@@ -456,6 +456,19 @@ DIRECTO contra el catálogo de tipos en ese instante (`tipos.value.find(...)`), 
 la TRANSICIÓN visible→oculto, y si el tipo que trae el XML ya era `suma_lineas` desde antes (no
 hay transición), el total precargado quedaría puesto sin que nadie lo borre.
 
+### Una línea empezada e incompleta bloquea Guardar y Confirmar (auditoría UX 00.10, 06.1, 06.2, 06.3)
+
+`faltaDeLinea` (en `pages/compras/[id].vue`) dice qué le falta a una línea que ya tiene algo cargado:
+el producto (hay cantidad o precio sin producto), la cantidad (vacía, no numérica, cero o con coma), las
+series (producto por serie) o el código del lote. «Guardar borrador» y «Confirmar recepción» no envían
+nada mientras haya una, y la marcan junto al campo; antes se filtraba en silencio y el aviso decía
+«Borrador guardado». Una línea sin nada cargado se ignora, como siempre. «Confirmar recepción» además
+exige el «Total del documento» de un tipo `obligatorio` **antes** de abrir el modal. La cantidad (con el
+mismo criterio que el DTO: número, «.5» incluido, y mayor que 0), las series, el lote y el total son
+condiciones que el backend ya rechaza con 400; «cantidad o precio sin producto» el backend no la ve nunca,
+y bloquearla solo evita descartar en silencio lo escrito. No cambia qué se guarda. La coma decimal («2,5») se avisa
+pero no se convierte en punto (convertirla cambiaría la cantidad que entra al stock; sin decidir).
+
 ### El modal de confirmar: "¿La pagaste ya?"
 
 Solo con `Compras:Pagar` (decisión 7 y 12): No / "Sí, la pagué", con medio de pago

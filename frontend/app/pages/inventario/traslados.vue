@@ -184,35 +184,48 @@ const origenIgualDestino = computed(() =>
   !!form.value.origenId && form.value.origenId === form.value.destinoId,
 )
 
-const lineasValidas = computed(() =>
-  lineas.value.filter((l) => {
-    if (!l.itemId || !l.cantidad) return false
-    if (l.modoInventario === 'serie') return l.unidadIds.length > 0
-    if (l.modoInventario === 'lote') return !!l.loteId
-    return true
-  }),
-)
+// Una línea EMPEZADA es la que ya tiene producto. Si le falta algo (cantidad, unidades, lote)
+// no se descarta en silencio: bloquea el envío y se marca junto al campo (auditoría UX 05.2).
+// Una línea sin producto es una línea vacía y sí se ignora.
+type CampoLinea = 'cantidad' | 'unidades' | 'lote'
+
+function faltaDeLinea(l: LineaForm): { campo: CampoLinea, texto: string } | null {
+  if (!l.itemId) return null
+  if (l.modoInventario === 'serie') {
+    return l.unidadIds.length > 0 ? null : { campo: 'unidades', texto: 'Elige las unidades a trasladar' }
+  }
+  if (l.modoInventario === 'lote' && !l.loteId) return { campo: 'lote', texto: 'Elige el lote' }
+  return l.cantidad ? null : { campo: 'cantidad', texto: 'Falta la cantidad' }
+}
+
+const lineasEmpezadas = computed(() => lineas.value.filter(l => !!l.itemId))
+const lineasIncompletas = computed(() => lineasEmpezadas.value.filter(l => faltaDeLinea(l)))
+
+// Los errores de línea solo se pintan después de un intento de confirmar: no se grita antes.
+const intentoConfirmar = ref(false)
+function errorDeLinea(l: LineaForm, campo: CampoLinea): string | undefined {
+  if (!intentoConfirmar.value) return undefined
+  const falta = faltaDeLinea(l)
+  return falta?.campo === campo ? falta.texto : undefined
+}
 
 const puedeConfirmar = computed(() =>
   !!form.value.origenId
   && !!form.value.destinoId
   && !origenIgualDestino.value
   && !!form.value.motivoTrasladoId
-  && lineasValidas.value.length > 0,
+  && lineasEmpezadas.value.length > 0,
 )
 
-/** Lo primero que falta para habilitar «Confirmar traslado»: el botón apagado lo dice. */
+/** Lo primero que falta para confirmar: lo dice el botón apagado, o la línea incompleta. */
 const faltaTexto = computed(() => {
   if (!form.value.origenId) return 'Falta elegir el origen'
   if (!form.value.destinoId) return 'Falta elegir el destino'
   if (origenIgualDestino.value) return 'El origen y el destino no pueden ser el mismo'
   if (!form.value.motivoTrasladoId) return 'Falta elegir el motivo'
-  if (lineasValidas.value.length > 0) return ''
-  const conProducto = lineas.value.find(l => l.itemId)
-  if (!conProducto) return 'Falta elegir un producto'
-  if (conProducto.modoInventario === 'serie') return 'Falta elegir las unidades a trasladar'
-  if (conProducto.modoInventario === 'lote' && !conProducto.loteId) return 'Falta elegir el lote'
-  return 'Falta la cantidad'
+  if (lineasEmpezadas.value.length === 0) return 'Falta elegir un producto'
+  const incompleta = lineasIncompletas.value[0]
+  return incompleta ? faltaDeLinea(incompleta)!.texto : ''
 })
 
 // Cambiar el origen limpia las líneas ya cargadas: las cantidades, las
@@ -226,6 +239,7 @@ watch(() => form.value.origenId, (_nuevo, anterior) => {
 })
 
 function abrirCrear() {
+  intentoConfirmar.value = false
   form.value = emptyForm()
   lineas.value = [nuevaLinea()]
   drawerOpen.value = true
@@ -399,6 +413,11 @@ async function confirmar() {
   // también un segundo submit disparado por otro camino (Enter, etc.) — un
   // doble tap no puede mandar dos POST.
   if (!puedeConfirmar.value || saving.value) return
+  // Una línea empezada e incompleta no viaja ni se descarta: se marca y no se envía.
+  if (lineasIncompletas.value.length > 0) {
+    intentoConfirmar.value = true
+    return
+  }
   saving.value = true
   try {
     const body = {
@@ -406,7 +425,7 @@ async function confirmar() {
       destinoId: form.value.destinoId,
       motivoTrasladoId: form.value.motivoTrasladoId,
       comentario: form.value.comentario.trim() || undefined,
-      lineas: lineasValidas.value.map((l) => {
+      lineas: lineasEmpezadas.value.map((l) => {
         const linea: Record<string, unknown> = { itemId: l.itemId, cantidad: l.cantidad }
         if (l.modoInventario === 'serie') linea.unidadIds = l.unidadIds
         if (l.modoInventario === 'lote') linea.loteId = l.loteId
@@ -665,7 +684,7 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                     <template v-else>
                       <!-- Modo cantidad -->
                       <template v-if="linea.modoInventario === 'cantidad' || !linea.modoInventario">
-                        <UFormField label="Cantidad" required>
+                        <UFormField label="Cantidad" required :error="errorDeLinea(linea, 'cantidad')">
                           <UInput
                             v-model="linea.cantidad"
                             inputmode="decimal"
@@ -682,6 +701,9 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                       <template v-else-if="linea.modoInventario === 'serie'">
                         <p class="text-sm text-muted">
                           Selecciona unidades a trasladar ({{ linea.unidadIds.length }} seleccionadas)
+                        </p>
+                        <p v-if="errorDeLinea(linea, 'unidades')" data-qa="linea-error" class="text-sm text-error">
+                          {{ errorDeLinea(linea, 'unidades') }}
                         </p>
                         <div v-if="!linea.unidadesEnOrigen.length" class="text-sm text-muted py-2">
                           No hay unidades disponibles en {{ origenNombre }}.
@@ -705,7 +727,7 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
 
                       <!-- Modo lote: elegir un lote concreto + cantidad -->
                       <template v-else-if="linea.modoInventario === 'lote'">
-                        <UFormField label="Lote" required>
+                        <UFormField label="Lote" required :error="errorDeLinea(linea, 'lote')">
                           <USelectMenu
                             :model-value="linea.loteId"
                             :items="linea.lotesEnOrigen.map(l => ({ label: `${l.codigoLote} (disp. ${l.cantidadEnOrigen})`, value: l.id }))"
@@ -718,7 +740,7 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                         <p v-if="!linea.lotesEnOrigen.length" class="text-sm text-muted">
                           No hay lotes con stock en {{ origenNombre }}.
                         </p>
-                        <UFormField v-if="linea.loteId" label="Cantidad" required>
+                        <UFormField v-if="linea.loteId" label="Cantidad" required :error="errorDeLinea(linea, 'cantidad')">
                           <UInput
                             v-model="linea.cantidad"
                             inputmode="decimal"

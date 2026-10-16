@@ -73,6 +73,13 @@ let routeQuery: Record<string, string> = {}
 let retenerIds: Promise<void> | null = null
 let pedidosIds = 0
 const urlsItems: string[] = []
+// Los POST /traslados que salieron (05.2: una línea incompleta no debe viajar ni descartarse).
+let enviados: { url: string, body: { lineas: Record<string, unknown>[] } }[] = []
+let avisos: { title: string, color?: string }[] = []
+
+mockNuxtImport('useToast', () => {
+  return () => ({ add: (t: { title: string, color?: string }) => avisos.push(t) })
+})
 
 mockNuxtImport('useRoute', () => {
   return () => ({ query: routeQuery })
@@ -86,8 +93,12 @@ mockNuxtImport('usePermissionsStore', () => {
 })
 
 mockNuxtImport('useApiFetch', () => {
-  return (url: string, _opts?: { method?: string, body?: Record<string, unknown> }) => {
+  return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string') return Promise.resolve({ data: [], meta: {} })
+    if (opts?.method === 'POST' && url.endsWith('/traslados')) {
+      enviados.push({ url, body: opts.body as { lineas: Record<string, unknown>[] } })
+      return Promise.resolve({ id: 't-1', detalle: [] })
+    }
     if (url.includes('/ubicaciones')) return Promise.resolve([LOCAL, BODEGA, BODEGA_BARRA])
     if (url.includes('/motivos-traslado')) return Promise.resolve([MOTIVO])
     // `GET /items?ids=` — el caché por id (`resolver`): solo conoce lo que se pide.
@@ -466,5 +477,113 @@ describe('traslados — forma de la tabla en tablet', () => {
     expect(cabecera('Usuario')?.className).toContain('hidden')
     expect(cabecera('Usuario')?.className).toContain('lg:table-cell')
     expect(cabecera('Comentario')?.className).toContain('max-w-40')
+  })
+})
+
+describe('traslados — una línea empezada e incompleta bloquea el envío (05.2)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+    routeQuery = {}
+    enviados = []
+    avisos = []
+  })
+
+  /** Cabecera completa: origen bodega, destino local, motivo. */
+  async function cabecera(wrapper: Wrapper) {
+    const [origenSelect, destinoSelect] = selectsConOpcion(wrapper, LOCAL.id)
+    await emitir(origenSelect!, BODEGA.id)
+    await emitir(destinoSelect!, LOCAL.id)
+    await emitir(selectConOpcion(wrapper, MOTIVO.id), MOTIVO.id)
+  }
+
+  const errorDeLinea = (w: Wrapper) => w.find('[data-slot="error"]')
+
+  it('con producto y sin cantidad, el envío no sale, el campo queda marcado y no hay aviso de éxito', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, PRODUCTO.id)
+
+    // Antes del intento no se grita.
+    expect(errorDeLinea(wrapper).exists()).toBe(false)
+    // El botón queda activo para que el error aparezca junto al campo.
+    expect(botonConfirmar(wrapper).attributes('disabled')).toBeUndefined()
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(enviados).toHaveLength(0)
+    expect(avisos.map(a => a.title)).not.toContain('Traslado registrado')
+    expect(errorDeLinea(wrapper).text()).toBe('Falta la cantidad')
+
+    // Al completar la cantidad la marca se va y el envío sale.
+    await wrapper.find('input[inputmode="decimal"]').setValue('2')
+    expect(errorDeLinea(wrapper).exists()).toBe(false)
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 20))
+    expect(enviados).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('una línea completa y otra incompleta: no viaja NINGUNA (antes viajaba solo la completa)', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, PRODUCTO.id)
+    await wrapper.find('input[inputmode="decimal"]').setValue('2')
+
+    const agregar = wrapper.findAll('button').find(b => b.text().includes('Agregar línea'))
+    await agregar!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    // Segunda línea: producto elegido, sin cantidad.
+    const menu = wrapper.findAllComponents({ name: 'AppItemSelect' })[1]!.findComponent({ name: 'USelectMenu' })
+    menu.vm.$emit('update:open', true)
+    await new Promise(r => setTimeout(r, 20))
+    menu.vm.$emit('update:modelValue', PRODUCTO.id)
+    await new Promise(r => setTimeout(r, 40))
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(enviados).toHaveLength(0)
+    expect(wrapper.findAll('[data-slot="error"]')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('una línea vacía (sin producto) no bloquea y no viaja', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, PRODUCTO.id)
+    await wrapper.find('input[inputmode="decimal"]').setValue('2')
+
+    const agregar = wrapper.findAll('button').find(b => b.text().includes('Agregar línea'))
+    await agregar!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(wrapper.findAllComponents({ name: 'AppItemSelect' })).toHaveLength(2)
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(enviados).toHaveLength(1)
+    expect(enviados[0]!.body.lineas).toHaveLength(1)
+    expect(wrapper.findAll('[data-slot="error"]')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('un producto por serie sin unidades elegidas queda marcado y no viaja', async () => {
+    routeQuery = { itemId: PRODUCTO_SERIE.id, origenId: BODEGA.id }
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 60))
+    const [, destinoSelect] = selectsConOpcion(wrapper, LOCAL.id)
+    await emitir(destinoSelect!, LOCAL.id)
+    await emitir(selectConOpcion(wrapper, MOTIVO.id), MOTIVO.id)
+
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(enviados).toHaveLength(0)
+    expect(wrapper.find('[data-qa="linea-error"]').text()).toBe('Elige las unidades a trasladar')
+    wrapper.unmount()
   })
 })

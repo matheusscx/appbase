@@ -358,6 +358,14 @@ reseteó la base.
 selector de ubicación se **esconde** —escondido, no deshabilitado— y el `ubicacionId` lo
 completa el frontend solo. La primera bodega los hace aparecer en las cuatro pantallas.
 
+**Una línea empezada e incompleta bloquea el envío** (`inventario/traslados.vue`, auditoría UX 05.2).
+«Empezada» = ya tiene producto. Si le falta la cantidad, las unidades (serie) o el lote, «Confirmar
+traslado» no manda nada y marca el campo («Falta la cantidad», «Elige las unidades a trasladar», «Elige el
+lote»); antes la filtraba en silencio y el aviso decía «Traslado registrado» con menos líneas de las
+cargadas. Una línea sin producto es una línea vacía y sí se ignora. El backend no cambió: la cantidad y
+las unidades de serie ya las rechazaba; el lote no (si no viene `loteId`, toma el que vence antes), pero
+la pantalla nunca mandó una línea por lote sin lote elegido: antes la descartaba, ahora la marca.
+
 La misma condición gobierna **lo que solo informa**: con una sola ubicación, la columna
 Ubicación del kardex y su filtro tampoco se dibujan, y la ubicación del encabezado de una
 sesión de recuento no se muestra. No es la misma razón que la del selector —acá no hay nada

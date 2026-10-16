@@ -37,7 +37,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ¿Entra? | # | Sev | Título | Conf. | Decide |
 |---|---|---|---|---|---|
 | ☑ | [02.1](02-salones-y-mesas.md) | P0 | Liquidar propinas paga el período del formulario, no el de la vista previa — **hecho 2026-10-16** | código | agente |
-| ☐ | [00.10](00-transversal.md) | P1 | Una línea incompleta se descarta al guardar y el aviso dice que guardó todo *(ver 05.2, 06.1)* | medido | agente |
+| ☑ | [00.10](00-transversal.md) | P1 | Una línea incompleta se descarta al guardar y el aviso dice que guardó todo *(ver 05.2, 06.1)* — **hecho 2026-10-16** | medido | agente |
 | ☑ | [00.11](00-transversal.md) | P1 | Los errores del servidor salen en inglés, con nombres internos, sin marcar el campo *(ver 06.2, 07.2, 08.2)* — **hecho 2026-10-16** (`apiErrorMsg` traduce el texto del validador en todas las pantallas; el campo marcado va en las de este lote) | medido | agente |
 | ☐ | [01.1](01-pos-y-ventas.md) | P1 | Tras cobrar, el carrito vendido sigue en pantalla 5 a 10 s y borra lo que agregas | medido | agente |
 | ☐ | [01.2](01-pos-y-ventas.md) | P1 | El cobro trae la propina de 10% ya sumada, y el carrito no la muestra | medido | owner |
@@ -53,10 +53,10 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☐ | [04.3](04-inicio-y-reportes.md) | P1 | "Hoy" no dice de qué hora son sus números y se queda viejo | medido | agente + owner |
 | ☐ | [04.4](04-inicio-y-reportes.md) | P1 | "Costos desfasados" abre todo marcado y aplica a todas las recetas de un toque | medido | owner |
 | ☐ | [05.1](05-inventario.md) | P1 | El aprobador de un recuento sin causas puede apretar "Aplicar" y queda sin salida | medido | agente + owner |
-| ☐ | [05.2](05-inventario.md) | P1 | Un traslado con una línea incompleta guarda solo las otras y avisa "Traslado registrado" *(es 00.10)* | medido | agente |
-| ☐ | [06.1](06-compras-y-terceros.md) | P1 | Guardar o confirmar una compra descarta en silencio las líneas sin cantidad *(es 00.10)* | medido | agente |
-| ☐ | [06.2](06-compras-y-terceros.md) | P1 | La cantidad de una compra acepta texto, cero y negativos, y falla en inglés *(parte en 00.11)* — *parcial 2026-10-16: mensaje y campo marcado tras el rechazo; la regla de la cantidad (coma, cero, bloquear Guardar) queda en el lote 1* | medido | agente |
-| ☐ | [06.3](06-compras-y-terceros.md) | P1 | "Confirmar recepción" no mira el total del documento y avisa recién después de confirmar — *parcial 2026-10-16: el rechazo se marca en el campo Total; no se agregó un gate previo (regla de plata, lote 1)* | medido | agente |
+| ☑ | [05.2](05-inventario.md) | P1 | Un traslado con una línea incompleta guarda solo las otras y avisa "Traslado registrado" *(es 00.10)* — **hecho 2026-10-16** | medido | agente |
+| ☑ | [06.1](06-compras-y-terceros.md) | P1 | Guardar o confirmar una compra descarta en silencio las líneas sin cantidad *(es 00.10)* — **hecho 2026-10-16** | medido | agente |
+| ☐ | [06.2](06-compras-y-terceros.md) | P1 | La cantidad de una compra acepta texto, cero y negativos, y falla en inglés *(parte en 00.11)* — *parcial 2026-10-16: mensaje y campo marcado tras el rechazo; cero, texto y negativos bloquean Guardar y Confirmar con su motivo junto al campo (lote 1); la coma decimal se avisa pero NO se normaliza a punto: aceptarla cambiaría qué se guarda y espera decisión del owner* | medido | agente |
+| ☑ | [06.3](06-compras-y-terceros.md) | P1 | "Confirmar recepción" no mira el total del documento y avisa recién después de confirmar — **hecho 2026-10-16** (el rechazo se marca en el campo Total, y lote 1: Confirmar no abre el modal sin el total obligatorio y marca el campo) | medido | agente |
 | ☐ | [06.4](06-compras-y-terceros.md) | P1 | Al recargar "Nueva compra", el medio de pago sale vacío y el botón apagado | medido | agente |
 | ☐ | [06.6](06-compras-y-terceros.md) | P1 | Un pago hecho no se puede anular desde la pantalla, salvo que sobre plata | medido | owner |
 | ☑ | [07.1](07-configuracion.md) | P1 | En Configuración, la columna de acciones queda fuera de la tarjeta en 15 pantallas *(causa en 00.9)* — **hecho 2026-10-16** | medido | agente |

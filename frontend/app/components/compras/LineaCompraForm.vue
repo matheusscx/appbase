@@ -56,8 +56,11 @@ const props = defineProps<{
   catalogo: ItemsPorId<ProductoOpt>
   presentaciones: PresentacionCompra[]
   proveedorId: string
-  /** Rechazo del servidor sobre esta cantidad, junto al campo. */
+  /** Lo que falta o rechazó el servidor, junto al campo de cada dato de la línea. */
+  errorProducto?: string
   errorCantidad?: string
+  errorSeries?: string
+  errorLote?: string
 }>()
 
 const emit = defineEmits<{
@@ -192,7 +195,7 @@ function onSeriesChange(texto: string) {
 <template>
   <div class="border border-default rounded-md p-4 space-y-3" data-qa="compra-linea">
     <div class="grid grid-cols-1 gap-3 md:grid-cols-12 md:items-end">
-      <UFormField label="Producto" class="md:col-span-4">
+      <UFormField label="Producto" class="md:col-span-4" :error="errorProducto">
         <AppItemSelect
           :model-value="linea.itemId || null"
           :catalogo="catalogo"
@@ -301,6 +304,7 @@ function onSeriesChange(texto: string) {
     <UFormField
       v-if="linea.modoInventario === 'serie'"
       label="Series (una por renglón)"
+      :error="errorSeries"
     >
       <UTextarea
         :model-value="linea.seriesTexto"
@@ -310,7 +314,7 @@ function onSeriesChange(texto: string) {
       />
     </UFormField>
     <div v-if="linea.modoInventario === 'lote'" class="grid grid-cols-2 gap-3">
-      <UFormField label="Lote" required>
+      <UFormField label="Lote" required :error="errorLote">
         <UInput
           :model-value="linea.codigoLote"
           placeholder="Código del lote"
