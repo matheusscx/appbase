@@ -1,5 +1,5 @@
 import { useApiFetch } from './useApiFetch'
-import type { Suscripcion } from './useSuscripciones'
+import { explicacionCobro, type Suscripcion } from './useSuscripciones'
 
 export interface SuscripcionAdmin extends Suscripcion {
   usuarioId: string
@@ -26,6 +26,7 @@ const TOAST_ACCION = {
 export function useSuscripcionesAdmin() {
   const config = useRuntimeConfig()
   const toast = useToast()
+  const { formatFecha } = useFormatters()
   const apiUrl = config.public.apiUrl
 
   const suscripciones = ref<SuscripcionAdmin[]>([])
@@ -58,12 +59,17 @@ export function useSuscripcionesAdmin() {
     const prev = susc.estado
     susc.estado = ESTADO_TRAS_ACCION[tipo] // optimista
     try {
-      const res = await useApiFetch<{ id: string, estado: Suscripcion['estado'], activaHasta: string | null }>(
+      const res = await useApiFetch<{ id: string, estado: Suscripcion['estado'], activaHasta: string | null, proximoCobro: string }>(
         `${apiUrl}/suscripciones/admin/${id}`,
         { method: 'PATCH', body: { accion: tipo } },
       )
       susc.activaHasta = res.activaHasta
-      toast.add({ title: TOAST_ACCION[tipo], color: 'success' })
+      susc.proximoCobro = res.proximoCobro
+      toast.add({
+        title: TOAST_ACCION[tipo],
+        description: explicacionCobro(tipo, formatFecha(res.proximoCobro)),
+        color: 'success',
+      })
     } catch (e: unknown) {
       susc.estado = prev // revert
       toast.add({ title: apiErrorMsg(e, 'Error al actualizar'), color: 'error' })

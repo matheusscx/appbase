@@ -63,6 +63,8 @@ function vigencia(s: SuscripcionAdmin): string {
   if (s.estado === 'cancelada' && s.activaHasta)
     return `Activa hasta el ${formatFecha(diaAnterior(s.activaHasta))}`
   if (s.estado === 'cancelada') return ''
+  // Pausada no se cobra (09.8).
+  if (s.estado === 'pausada') return 'Pausada, no se cobra'
   return `Próximo cobro ${formatFecha(s.proximoCobro)}`
 }
 

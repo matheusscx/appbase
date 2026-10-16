@@ -45,6 +45,13 @@ mockNuxtImport('useAuthStore', () => () => ({
 }))
 mockNuxtImport('useColorMode', () => () => ({ preference: 'light', value: 'light' }))
 
+// Sin tienda de monedas cargada `format` devuelve "—": el monto se formatea en claro.
+mockNuxtImport('useCurrency', () => () => ({
+  format: (v: string) => `$${v}`,
+  formatCosto: (v: string) => `$${v}`,
+  formatOficial: (v: string) => `$${v}`,
+}))
+
 let consulta: Record<string, string> = {}
 mockNuxtImport('useRoute', () => () => ({ path: '/tienda/suscripciones', fullPath: '/tienda/suscripciones', query: consulta, params: {}, meta: {} }))
 
@@ -139,6 +146,12 @@ mockNuxtImport('useApiFetch', () => {
       }
       cargasLista++
       return Promise.resolve(listaSuscripciones)
+    }
+    if (/\/suscripciones\/[^/]+$/.test(ruta) && (opts as { method?: string } | undefined)?.method === 'PATCH') {
+      const accion = (opts as unknown as { body: { accion: string } }).body.accion
+      return Promise.resolve({
+        id: 'susc-1', estado: accion === 'pausar' ? 'pausada' : 'activa', activaHasta: null, proximoCobro: '2026-11-05',
+      })
     }
     if (ruta.endsWith('/online/medios-pago')) {
       return Promise.resolve({ oneclickDisponible: true, medios })
@@ -349,7 +362,7 @@ describe('tienda/suscripciones — el selector de ítem suscribible busca en el 
     expect(textoDrawer()).not.toContain('Día de la semana')
     expect(calculos).toHaveLength(0)
     const confirmar = [...document.body.querySelectorAll('button')]
-      .find(b => b.textContent?.trim() === 'Suscribirme y pagar') as HTMLButtonElement | undefined
+      .find(b => b.textContent?.trim().startsWith('Suscribirme y pagar')) as HTMLButtonElement | undefined
     expect(confirmar, 'botón confirmar').toBeTruthy()
     expect(confirmar!.disabled).toBe(true)
   })
@@ -357,7 +370,7 @@ describe('tienda/suscripciones — el selector de ítem suscribible busca en el 
 
 describe('tienda/suscripciones — confirmar espera el cálculo vigente', () => {
   const botonConfirmar = () => [...document.body.querySelectorAll('button')]
-    .find(b => b.textContent?.trim() === 'Suscribirme y pagar') as HTMLButtonElement | undefined
+    .find(b => b.textContent?.trim().startsWith('Suscribirme y pagar')) as HTMLButtonElement | undefined
 
   async function confirmar() {
     expect(botonConfirmar(), 'botón confirmar').toBeTruthy()
@@ -467,7 +480,7 @@ describe('tienda/suscripciones — confirmar espera el cálculo vigente', () => 
 
 describe('tienda/suscripciones — una Idempotency-Key por intento de alta (ADR-029)', () => {
   const botonConfirmar = () => [...document.body.querySelectorAll('button')]
-    .find(b => b.textContent?.trim() === 'Suscribirme y pagar') as HTMLButtonElement | undefined
+    .find(b => b.textContent?.trim().startsWith('Suscribirme y pagar')) as HTMLButtonElement | undefined
   const claveDe = (alta: unknown) =>
     (alta as { headers?: Record<string, string> }).headers?.['Idempotency-Key']
 
@@ -629,9 +642,100 @@ describe('tienda/suscripciones — el alta a medias caduca y es de quien la empe
     expect(altas).toHaveLength(0)
   })
 
-  it('una intención reciente y propia sigue su camino (el cobro sin clic lo decide 09.1)', async () => {
+  it('una intención reciente y propia reabre el panel, no cobra (09.1)', async () => {
     localStorage.setItem(CLAVE, intencion())
     await volverDeWebpay()
+    expect(altas).toHaveLength(0)
+    expect(textoDrawer()).toContain('Suscribirme y pagar')
+  })
+})
+
+describe('tienda/suscripciones — al volver de Webpay el cobro espera el clic (09.1)', () => {
+  const CLAVE = 'suscripcion-pendiente'
+  const intencion = (over: Record<string, unknown> = {}) => JSON.stringify({
+    itemId: SEMANAL.id, diaMes: null, diaSemana: 3, usuarioId: 'u1', tenantId: 't1', creadaEl: Date.now(), ...over,
+  })
+  const botonPagar = () => [...document.body.querySelectorAll('button')]
+    .find(b => b.textContent?.trim().startsWith('Suscribirme y pagar')) as HTMLButtonElement | undefined
+
+  async function volver(over: Record<string, unknown> = {}) {
+    medios = [TARJETA]
+    localStorage.setItem(CLAVE, intencion(over))
+    consulta = { estado: 'activa', inscripcionId: 'insc-1' }
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 450))
+    return wrapper
+  }
+
+  it('reabre el panel con el plan, el día y el total vigente, y no manda ningún alta', async () => {
+    await volver()
+    expect(altas).toHaveLength(0)
+    expect(textoDrawer()).toContain('Café semanal')
+    expect(textoDrawer()).toContain('Miércoles')
+    expect(calculos.length).toBeGreaterThan(0)
+    expect(botonPagar()?.textContent).toMatch(/^Suscribirme y pagar \$11900$/)
+  })
+
+  it('el cobro sale con el clic, con la tarjeta recién agregada y una Idempotency-Key', async () => {
+    await volver()
+    botonPagar()!.click()
+    await new Promise(r => setTimeout(r, 400))
     expect(altas).toHaveLength(1)
+    const alta = altas[0] as { body: Record<string, unknown>, headers: Record<string, string> }
+    expect(alta.body).toMatchObject({ itemId: SEMANAL.id, diaSemana: 3, inscripcionId: 'insc-1' })
+    expect(alta.headers['Idempotency-Key']).toMatch(/^[0-9a-f-]{36}$/)
+  })
+
+  it('si el plan ya no se puede suscribir, avisa y no abre nada', async () => {
+    await volver({ itemId: 'item-borrado' })
+    expect(altas).toHaveLength(0)
+    expect(textoDrawer()).not.toContain('Suscribirme y pagar')
+    expect(toasts.map(t => t.title)).toContain('El plan que elegiste ya no está disponible. Empieza de nuevo.')
+  })
+
+  it('con la inscripción rechazada no queda intención ni cobro', async () => {
+    localStorage.setItem(CLAVE, intencion())
+    consulta = { estado: 'fallida', inscripcionId: 'insc-1' }
+    await montar()
+    await new Promise(r => setTimeout(r, 50))
+    expect(altas).toHaveLength(0)
+    expect(localStorage.getItem(CLAVE)).toBeNull()
+  })
+})
+
+describe('tienda/suscripciones — pausar y reanudar dicen qué pasa con el cobro (09.8)', () => {
+  const FILA = {
+    id: 'susc-1', itemId: SEMANAL.id, itemNombre: 'Café semanal', precio: '10000', monedaId: 'moneda-1',
+    frecuencia: 'mensual', diaMes: 5, diaSemana: null, estado: 'activa', proximoCobro: '2026-11-05',
+    activaHasta: null, inscripcionId: 'insc-1', tarjetaMarca: 'Visa', tarjetaLast4: '4242', ventaInicialId: 'v1',
+  }
+
+  async function pulsar(wrapper: Awaited<ReturnType<typeof montar>>, texto: string) {
+    const boton = wrapper.findAll('button').find(b => b.text().trim() === texto)
+    expect(boton, texto).toBeTruthy()
+    await boton!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+  }
+
+  it('al pausar avisa que no se cobra y cuándo es el próximo cobro, con la fecha del servidor', async () => {
+    listaSuscripciones = [{ ...FILA }]
+    await pulsar(await montar(), 'Pausar')
+    expect(toasts).toHaveLength(1)
+    expect(toasts[0]!.title).toBe('Suscripción pausada')
+    expect(toasts[0]!.description).toMatch(/^No se cobra mientras esté pausada\. Al reanudarla, el próximo cobro es el .*2026/)
+  })
+
+  it('al reanudar avisa que no se cobra ahora y cuándo es el próximo cobro', async () => {
+    listaSuscripciones = [{ ...FILA, estado: 'pausada' }]
+    await pulsar(await montar(), 'Reanudar')
+    expect(toasts[0]!.title).toBe('Suscripción reanudada')
+    expect(toasts[0]!.description).toMatch(/^No se cobró nada al reanudar\. El próximo cobro es el .*2026/)
+  })
+
+  it('la fila pausada no promete un próximo cobro', async () => {
+    listaSuscripciones = [{ ...FILA, estado: 'pausada' }]
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('pausada, no se cobra')
+    expect(wrapper.text()).not.toContain('próximo cobro')
   })
 })

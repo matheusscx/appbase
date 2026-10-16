@@ -329,7 +329,13 @@ PATCH /suscripciones/:id
 Request:
 { "accion": "pausar" | "reanudar" | "cancelar" }
 
-Response (200): { "id": "uuid", "estado": "pausada", "activaHasta": null }
+Response (200): { "id": "uuid", "estado": "pausada", "activaHasta": null, "proximoCobro": "2026-11-05" }
+```
+
+`proximoCobro` es la fecha que el servidor guarda; pausar y reanudar **no la mueven** y no cobran
+(la pantalla la muestra, nunca la calcula). Ver § "Pausar y reanudar".
+
+```
 ```
 
 ```
@@ -407,15 +413,24 @@ mismo ítem son legítimas (owner, 2026-10-09): no hay restricción única.
 La pantalla manda la cabecera con `useIntentoCobro` (ámbito `suscripcion`, por
 pestaña). El drawer y el retorno de inscribir una tarjeta comparten el ámbito.
 
-**Reanudar el alta tras inscribir una tarjeta:** si el usuario no tiene tarjetas,
+**Retomar el alta tras inscribir una tarjeta (09.1):** si el usuario no tiene tarjetas,
 el drawer guarda la intención de alta en `localStorage` —con el usuario, el local y la hora— y redirige a Transbank
 (`POST /online/medios-pago { retornoPath: 'suscripciones' }`). Al volver a
-`/tienda/suscripciones?inscripcionId=...&estado=activa`, la página dispara el
-`POST /suscripciones` automáticamente con esa inscripción (cobro del primer
-período sin clic extra). La intención **caduca a la hora** y es de quien la empezó: la de otro
-usuario u otro local, la de formato viejo y la vencida se descartan sin cobrar (la vencida avisa
-*"La suscripción que dejaste a medias venció"*; auditoría UX 09.22). Que el cobro espere un clic
-al volver es el hallazgo 09.1, frente de plata propio y todavía abierto.
+`/tienda/suscripciones?inscripcionId=...&estado=activa`, la página **no cobra**: reabre el panel con
+el plan, el día y la tarjeta recién inscrita ya elegidos, un aviso ("Tu tarjeta quedó registrada. Todavía
+no se cobró nada") y el total vigente que calcula el servidor; el cobro sale solo con el clic en
+**"Suscribirme y pagar $35.700"** (el botón lleva el total). Decisión del owner (2026-10-16, 09.1): reemplaza
+el "cobro del primer período sin clic extra". La `Idempotency-Key` es la del intento. La intención **caduca a la
+hora** y es de quien la empezó: la de otro usuario u otro local, la de formato viejo y la vencida se descartan
+(la vencida avisa *"La suscripción que dejaste a medias venció"*; 09.22). Si el plan ya no es suscribible, avisa
+*"El plan que elegiste ya no está disponible"* y no abre nada.
+
+**Pausar y reanudar (09.8):** una pausada no se cobra. Hoy `PATCH /suscripciones/:id` solo cambia el estado
+(`cambiarEstado`): no cobra al reanudar y no toca `proximo_cobro` (tampoco hay job que cobre, ver más abajo). La
+pantalla lo dice en un toast con la fecha del servidor ("No se cobra mientras esté pausada. Al reanudarla, el
+próximo cobro es el …"), y la fila pausada dice "pausada, no se cobra" en vez de "próximo cobro". ⛔ Abierto: si
+la pausa cruzó `proximo_cobro`, al reanudar la fecha queda vencida; recalcularla "a la siguiente fecha del ciclo"
+tiene una decisión pendiente (ver el informe del frente).
 
 **Cascada al eliminar una tarjeta:** `DELETE /online/medios-pago/:id` cancela
 primero las suscripciones vigentes amarradas a esa inscripción

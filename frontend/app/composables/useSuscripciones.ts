@@ -75,12 +75,23 @@ const TOAST_ACCION = {
 } as const
 
 /**
+ * La línea que explica el cobro al pausar y al reanudar (09.8). La fecha es la que el servidor
+ * guarda (`proximoCobro` de la respuesta): la pantalla no la calcula.
+ */
+export function explicacionCobro(tipo: 'pausar' | 'reanudar' | 'cancelar', fecha: string): string | undefined {
+  if (tipo === 'pausar') return `No se cobra mientras esté pausada. Al reanudarla, el próximo cobro es el ${fecha}.`
+  if (tipo === 'reanudar') return `No se cobró nada al reanudar. El próximo cobro es el ${fecha}.`
+  return undefined
+}
+
+/**
  * Suscripciones del usuario autenticado — GET/PATCH /suscripciones.
  * Reemplaza el mock anterior (localStorage): ahora es 100% API-backed.
  */
 export function useSuscripciones() {
   const config = useRuntimeConfig()
   const toast = useToast()
+  const { formatFecha } = useFormatters()
   const apiUrl = config.public.apiUrl
 
   // Una clave por intento de alta: el reintento después de un corte no cobra
@@ -161,12 +172,17 @@ export function useSuscripciones() {
     const prev = susc.estado
     susc.estado = ESTADO_TRAS_ACCION[tipo] // optimista
     try {
-      const res = await useApiFetch<{ id: string, estado: Suscripcion['estado'], activaHasta: string | null }>(
+      const res = await useApiFetch<{ id: string, estado: Suscripcion['estado'], activaHasta: string | null, proximoCobro: string }>(
         `${apiUrl}/suscripciones/${id}`,
         { method: 'PATCH', body: { accion: tipo } },
       )
       susc.activaHasta = res.activaHasta
-      toast.add({ title: TOAST_ACCION[tipo], color: 'success' })
+      susc.proximoCobro = res.proximoCobro
+      toast.add({
+        title: TOAST_ACCION[tipo],
+        description: explicacionCobro(tipo, formatFecha(res.proximoCobro)),
+        color: 'success',
+      })
     } catch (e: unknown) {
       susc.estado = prev // revert
       toast.add({ title: apiErrorMsg(e, 'Error al actualizar'), color: 'error' })

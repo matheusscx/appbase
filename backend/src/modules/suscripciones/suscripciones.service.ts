@@ -648,6 +648,9 @@ export class SuscripcionesService {
       id: suscripcion.id,
       estado: suscripcion.estado,
       activaHasta: suscripcion.activaHasta,
+      // La fecha que el servidor guarda: pausar y reanudar no la mueven (09.8), y la pantalla la
+      // muestra en vez de calcularla.
+      proximoCobro: suscripcion.proximoCobro,
     };
   }
 

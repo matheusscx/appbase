@@ -75,6 +75,8 @@ function subtitulo(s: Suscripcion): string {
     return `${base} · activa hasta el ${formatFecha(diaAnterior(s.activaHasta))}`
   if (s.estado === 'cancelada') return base
   const tarjeta = s.tarjetaLast4 ? ` · ${s.tarjetaMarca ?? 'Tarjeta'} ••••${s.tarjetaLast4}` : ''
+  // Pausada no se cobra: mostrar "próximo cobro" prometería un cobro que no ocurre (09.8).
+  if (s.estado === 'pausada') return `${base} · pausada, no se cobra${tarjeta}`
   return `${base} · próximo cobro ${formatFecha(s.proximoCobro)}${tarjeta}`
 }
 
@@ -210,6 +212,13 @@ const totalACobrar = computed(() =>
   calculoVigente.value ? (calculo.value?.totales.totalFinal ?? null) : null,
 )
 
+/** El botón dice cuánto va a cobrar; sin total vigente, solo la acción. */
+const etiquetaPagar = computed(() => {
+  if (!totalACobrar.value || !itemSeleccionado.value) return 'Suscribirme y pagar'
+  const monto = formatMonto(totalACobrar.value, itemSeleccionado.value.monedaId)
+  return monto === '—' ? 'Suscribirme y pagar' : `Suscribirme y pagar ${monto}`
+})
+
 function etiquetaSuscribible(i: ItemSuscribible): string {
   // Sin monto: `precioBase` es el neto y lo que se cobra lleva impuestos (09.9). El total vigente va debajo.
   return i.frecuencia ? `${i.nombre} / ${frecuenciaLabel[i.frecuencia]}` : i.nombre
@@ -250,6 +259,7 @@ function diasDePayload(item: ItemSuscribible): {
 }
 
 function abrirCrear() {
+  volviendoDeWebpay.value = false
   form.value = { itemId: '', diaMes: 1, diaSemana: 1 }
   selectedInscripcionId.value = tarjetaPreferida.value?.inscripcionId ?? ''
   drawerOpen.value = true
@@ -339,35 +349,34 @@ function avisarAltaFallida(e: unknown) {
   toast.add({ title: apiErrorMsg(e, 'No se pudo activar la suscripción'), color: 'error' })
 }
 
-// ── Reanudar alta tras inscribir una tarjeta (retorno de Transbank) ──────────
+// ── Retomar el alta tras inscribir una tarjeta (retorno de Transbank) ────────
 
-const procesandoAlta = ref(false)
+/** El panel se reabrió al volver de Webpay: el aviso dice que la tarjeta quedó y que falta el clic. */
+const volviendoDeWebpay = ref(false)
 
-async function reanudarAltaPendiente(inscripcionId: string) {
+/**
+ * Al volver de Webpay NO se cobra (09.1): se reabre el panel con el plan, el día y la tarjeta
+ * recién inscrita ya elegidos, el total vigente lo calcula el servidor como en cualquier alta, y
+ * el cobro sale con el clic en "Suscribirme y pagar". La `Idempotency-Key` sigue siendo la del
+ * intento (`useSuscripciones.crear`).
+ */
+async function retomarAlta(inscripcionId: string) {
   const { intent, vencida } = tomarIntencion()
   if (vencida) toast.add({ title: 'La suscripción que dejaste a medias venció. Empieza de nuevo.', color: 'warning' })
   if (!intent) return
-  procesandoAlta.value = true
   try {
-    const { advertencias, repetida } = await crear({
-      itemId: intent.itemId,
-      diaMes: intent.diaMes ?? undefined,
-      diaSemana: intent.diaSemana ?? undefined,
-      inscripcionId,
-    })
-    avisarAlta(repetida)
-    // Mismo trato que le da el POS a las advertencias de una venta
-    // (`ventas/pos.vue`): un toast por mensaje, cada uno se explica solo. Van
-    // después del éxito porque el cobro ya ocurrió — explican el monto, no lo
-    // frenan.
-    for (const advertencia of advertencias) {
-      toast.add({ title: advertencia, color: 'warning' })
-    }
-  } catch (e: unknown) {
-    avisarAltaFallida(e)
-  } finally {
-    procesandoAlta.value = false
+    await catalogoItems.resolver([intent.itemId])
   }
+  catch { /* sin el plan se avisa abajo */ }
+  const item = catalogoItems.porId.get(intent.itemId)
+  if (!item?.frecuencia || !item.activo) {
+    toast.add({ title: 'El plan que elegiste ya no está disponible. Empieza de nuevo.', color: 'warning' })
+    return
+  }
+  form.value = { itemId: item.id, diaMes: intent.diaMes ?? 1, diaSemana: intent.diaSemana ?? 1 }
+  selectedInscripcionId.value = inscripcionId
+  volviendoDeWebpay.value = true
+  drawerOpen.value = true
 }
 
 onMounted(async () => {
@@ -377,7 +386,7 @@ onMounted(async () => {
   const inscripcionId = route.query.inscripcionId
   if (typeof estado === 'string' && typeof inscripcionId === 'string') {
     if (estado === 'activa') {
-      await reanudarAltaPendiente(inscripcionId)
+      await retomarAlta(inscripcionId)
     } else {
       try { localStorage.removeItem(INTENT_KEY) } catch { /* nada que limpiar */ }
       toast.add({ title: 'La inscripción de la tarjeta fue rechazada', color: 'error' })
@@ -407,7 +416,6 @@ onMounted(async () => {
             <UButton
               v-if="puedeCrear"
               icon="i-lucide-plus"
-              :loading="procesandoAlta"
               @click="abrirCrear"
             >
               Nueva suscripción
@@ -489,7 +497,7 @@ onMounted(async () => {
               <p class="text-sm text-muted">
                 Aún no tienes suscripciones. Crea la primera para recibir y pagar un producto cada período.
               </p>
-              <UButton v-if="puedeCrear" icon="i-lucide-plus" :loading="procesandoAlta" @click="abrirCrear">
+              <UButton v-if="puedeCrear" icon="i-lucide-plus" @click="abrirCrear">
                 Nueva suscripción
               </UButton>
             </div>
@@ -553,6 +561,17 @@ onMounted(async () => {
               variant="soft"
               title="Suscripciones no disponibles"
               description="Tu local aún no tiene activo el cobro con tarjeta inscrita, necesario para cobrar las suscripciones. Actívalo en Configuración › Pasarelas, o pídelo a quien administra el local."
+              class="mb-4"
+            />
+
+            <UAlert
+              v-if="volviendoDeWebpay"
+              data-qa="alta-retomada"
+              icon="i-lucide-credit-card"
+              color="success"
+              variant="soft"
+              title="Tu tarjeta quedó registrada"
+              description="Todavía no se cobró nada. Revisa el total y confirma con «Suscribirme y pagar»."
               class="mb-4"
             />
 
@@ -670,7 +689,7 @@ onMounted(async () => {
               Cancelar
             </UButton>
             <UButton
-              label="Suscribirme y pagar"
+              :label="etiquetaPagar"
               type="submit"
               form="suscripcion-form"
               :loading="confirmando"
