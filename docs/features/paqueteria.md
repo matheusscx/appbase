@@ -119,12 +119,11 @@ la búsqueda, para que el código tipeado y el escaneado sean el mismo paquete. 
 entrar hasta 500 caracteres crudos (`MAX_ENTRADA_CODIGO`) y el código normalizado cabe en 100
 (`MAX_CODIGO`).
 
-⚠️ **Supuesto sin confirmar** (también en *Risks & Mitigations*, abajo): que la etiqueta de Mercado Libre trae un JSON con `id` (el
-número de envío). Nadie lo comprobó con una etiqueta real. **Antes de usarlo con un cliente:**
-escanear dos o tres etiquetas en un editor de texto y pegar lo que sale. Si el formato es otro,
-cambia **solo** `idDelJson` en `codigo-paquete.ts` y su spec. Un caso ya conocido de ese
-supuesto: un `id` numérico de más de 15 dígitos pierde precisión en `JSON.parse`; si la etiqueta
-real lo trae sin comillas, hay que leerlo como texto.
+✅ **Confirmado con una etiqueta real** (owner, 2026-10-16, escaneada con el teléfono): el QR de
+Mercado Libre trae `{"id":"<número de envío>","sender_id":<número>,"hash_code":null,"security_digit":null}`.
+El `id` viene **entre comillas**, así que no hay pérdida de precisión de `JSON.parse`; el spec de
+`codigo-paquete.ts` usa esa misma forma. Si una etiqueta trajera el `id` sin comillas y con más de
+15 dígitos, habría que leerlo como texto.
 
 ### KPIs (por rango de fechas de la hoja)
 
@@ -311,7 +310,6 @@ El Playwright simula la pistola tipeando el código + Enter en el campo.
 
 | Risk | Impact | Mitigation |
 |---|---|---|
-| El QR de Mercado Libre no es el JSON con `id` que se supone | Los códigos escaneados no coinciden con los tipeados | Confirmar con etiquetas reales; cambia solo `codigo-paquete.ts` |
 | El backend no exige el contrato del módulo | Un admin de un tenant que no lo contrató usa la API | Borde comercial, no de aislamiento; fase 2 |
 | Un lock fuera de orden | Deadlock entre escaneo, edición, rendir y borrar repartidor | El orden de arriba; documentado en `HojasRutaService` |
 

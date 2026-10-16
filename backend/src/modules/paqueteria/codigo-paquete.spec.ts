@@ -7,8 +7,9 @@ describe('normalizarCodigoPaquete', () => {
   });
 
   it('JSON con id (QR de Mercado Libre): el código es el id', () => {
+    // La forma de una etiqueta real (owner, 2026-10-16), con los números cambiados.
     const qr =
-      '{"id":"46123456789","sender_id":123,"hash_code":"abc","security_digit":"0"}';
+      '{"id":"46123456789","sender_id":1234567890,"hash_code":null,"security_digit":null}';
     expect(normalizarCodigoPaquete(qr)).toBe('46123456789');
   });
 

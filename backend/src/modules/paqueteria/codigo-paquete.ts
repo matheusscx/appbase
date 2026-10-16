@@ -7,8 +7,8 @@ export const MAX_ENTRADA_CODIGO = 500;
 
 /**
  * Lo que entrega la pistola (el contenido del QR) o lo que se tipea → el código del paquete.
- * La etiqueta de Mercado Libre se supone un JSON con `id` (sin confirmar con una etiqueta real:
- * docs/features/paqueteria.md § 3.1): si lo es, el código es ese `id`; si no, el texto entero.
+ * La etiqueta de Mercado Libre trae un JSON con `id` entre comillas (confirmado con una etiqueta
+ * real el 2026-10-16: docs/features/paqueteria.md): el código es ese `id`; si no, el texto entero.
  * La misma función corre en el escaneo, el alta y la búsqueda, para que el código tipeado y el
  * escaneado sean el mismo paquete.
  */

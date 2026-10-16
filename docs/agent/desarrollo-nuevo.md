@@ -1189,9 +1189,9 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
   - **Precio por comuna o por repartidor** — hoy es un default por empresa con override por
     paquete.
   - **Importar CSV/Excel** — hoy se carga escaneando, uno a uno o por asignación masiva.
-  - **API de Mercado Libre** — traer dirección y destinatario con el id del envío, y
-    **confirmar qué trae el QR real** (hoy se supone un JSON con `id`; si no lo es, cambia solo
-    `codigo-paquete.ts`). Sin esto el paquete escaneado nace sin dirección ni destinatario.
+  - **API de Mercado Libre** — traer dirección y destinatario con el id del envío (el QR real
+    trae solo `id`, `sender_id`, `hash_code` y `security_digit`, confirmado el 2026-10-16). Sin
+    esto el paquete escaneado nace sin dirección ni destinatario.
   - **Contrarreembolso del valor del producto** — hoy se cobra solo el envío; el producto sería
     plata de un tercero.
   - **Que la rendición entre a una Caja** — hoy "Rendir" congela totales y no mueve plata; entrar
