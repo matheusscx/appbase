@@ -153,6 +153,9 @@ function motivoLabel(mov: Movimiento): string {
 
 // La columna Ubicación se dibuja siempre que hayBodegas (`docs/features/bodegas-y-traslados.md`,
 // «Frontend»): con una sola ubicación, todas las filas dirían lo mismo.
+// "Costo" y "Costo de la baja" eran dos columnas casi siempre en "—": una sola, y solo si alguna fila
+// tiene valor (auditoría UX 05.12; las dos cosas no coinciden en una fila: un ajuste de costo no es una baja).
+const hayCosto = computed(() => movimientos.value.some(m => esAjusteDeValor(m.motivo) || m.costoBaja != null))
 const columns = computed<TableColumn<Movimiento>[]>(() => [
   { accessorKey: 'creadoEl', header: 'Fecha' },
   { accessorKey: 'itemNombre', header: 'Producto' },
@@ -162,9 +165,10 @@ const columns = computed<TableColumn<Movimiento>[]>(() => [
   { accessorKey: 'tipo', header: 'Tipo' },
   { accessorKey: 'motivo', header: 'Motivo' },
   { accessorKey: 'cantidad', header: 'Cantidad', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { id: 'costoAjuste', header: 'Costo', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'stockResultante', header: 'Resultante', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'costoBaja', header: 'Costo de la baja', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  ...(hayCosto.value
+    ? [{ id: 'costo', header: 'Costo', meta: { class: { th: 'text-right', td: 'text-right' } } } as TableColumn<Movimiento>]
+    : []),
   { accessorKey: 'usuarioNombre', header: 'Usuario' },
 ])
 
@@ -372,6 +376,7 @@ async function registrarAjusteCosto() {
           vacio="No hay movimientos registrados."
           filtrado-texto="Ningún movimiento con esos filtros."
           :filtrado="hayFiltros"
+          :ui="{ th: 'py-2.5', td: 'py-2.5' }"
           @reintentar="fetchMovimientos"
           @quitar-filtros="quitarFiltros"
         >
@@ -415,24 +420,24 @@ async function registrarAjusteCosto() {
               {{ formatStock(row.original.cantidad, row.original.unidadMedida) }}
             </span>
           </template>
-          <template #costoAjuste-cell="{ row }">
+          <template #stockResultante-cell="{ row }">
+            <span class="font-medium">{{ formatStock(row.original.stockResultante, row.original.unidadMedida) }}</span>
+          </template>
+          <template #costo-cell="{ row }">
             <span v-if="esAjusteDeValor(row.original.motivo)">
               {{ formatMonto(row.original.costoAnterior, row.original.monedaId) }}
               <span class="text-muted">→</span>
               {{ formatMonto(row.original.costoUnitario, row.original.monedaId) }}
             </span>
-            <span v-else class="text-muted">—</span>
-          </template>
-          <template #stockResultante-cell="{ row }">
-            <span class="font-medium">{{ formatStock(row.original.stockResultante, row.original.unidadMedida) }}</span>
-          </template>
-          <template #costoBaja-cell="{ row }">
             <span
-              v-if="row.original.costoBaja != null"
-              class="font-medium"
-              :class="{ 'text-error': tipoMotivoBajaEsPerdida(row.original.motivoBajaTipo) }"
+              v-else-if="row.original.costoBaja != null"
+              title="Costo de la baja"
             >
-              {{ formatMonto(row.original.costoBaja, row.original.monedaId) }}
+              <span class="text-muted">Baja</span>
+              <span
+                class="font-medium"
+                :class="{ 'text-error': tipoMotivoBajaEsPerdida(row.original.motivoBajaTipo) }"
+              >{{ formatMonto(row.original.costoBaja, row.original.monedaId) }}</span>
             </span>
             <span v-else class="text-muted">—</span>
           </template>

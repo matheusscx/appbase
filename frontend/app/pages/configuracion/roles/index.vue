@@ -255,7 +255,8 @@ onMounted(cargar)
 
 const columns: TableColumn<Rol>[] = [
   { accessorKey: 'nombre', header: 'Nombre' },
-  { accessorKey: 'descripcion', header: 'Descripción' },
+  // Acotada: una descripción larga empujaba las acciones fuera de la tarjeta (auditoría UX 07.1).
+  { accessorKey: 'descripcion', header: 'Descripción', meta: { class: { th: 'max-w-xs truncate', td: 'max-w-xs truncate' } } },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 </script>
@@ -300,7 +301,7 @@ const columns: TableColumn<Rol>[] = [
         </template>
 
         <template #descripcion-cell="{ row }">
-          <span class="text-sm text-muted">{{ row.original.descripcion || 'Sin descripción' }}</span>
+          <span class="text-sm text-muted" :title="row.original.descripcion || undefined">{{ row.original.descripcion || 'Sin descripción' }}</span>
         </template>
 
         <template #acciones-cell="{ row }">

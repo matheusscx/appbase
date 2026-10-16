@@ -38,6 +38,9 @@ const RESUMEN: ResumenDescuadresDia = {
   efectivoSuma: '-9500',
 }
 
+const navigateToMock = vi.hoisted(() => vi.fn())
+mockNuxtImport('navigateTo', () => navigateToMock)
+
 const cargarPendientesRevision = vi.fn<() => Promise<CierrePendienteRevision[]>>()
 const cargarResumenDescuadresDia = vi.fn<() => Promise<ResumenDescuadresDia>>()
 const marcarRevisado = vi.fn<(cajaId: string) => Promise<void>>()
@@ -80,6 +83,7 @@ beforeEach(() => {
   cargarPendientesRevision.mockReset().mockResolvedValue(FILAS)
   cargarResumenDescuadresDia.mockReset().mockResolvedValue(RESUMEN)
   marcarRevisado.mockReset().mockResolvedValue(undefined)
+  navigateToMock.mockReset()
   useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
 })
 
@@ -177,5 +181,37 @@ describe('CajaPendientesRevision', () => {
     const wrapper = await mountSuspended(CajaPendientesRevision)
 
     expect(wrapper.find('[data-qa="marcar-visto-caja-1"]').exists()).toBe(false)
+  })
+})
+
+// Lote 4 (03.1): a 768 la tabla no puede dejar las acciones fuera de la tarjeta.
+describe('CajaPendientesRevision — forma de la tabla en tablet', () => {
+  it('"Marcar visto" queda en una columna fija a la derecha', async () => {
+    const wrapper = await mountSuspended(CajaPendientesRevision)
+    expect(wrapper.findAll('td[data-pinned="right"]')).toHaveLength(1)
+    expect(wrapper.find('td[data-pinned="right"] [data-qa="marcar-visto-caja-1"]').exists()).toBe(true)
+  })
+
+  it('la columna "Cajón" se oculta bajo lg', async () => {
+    const wrapper = await mountSuspended(CajaPendientesRevision)
+    const th = wrapper.findAll('th').find(t => t.text() === 'Cajón')
+    expect(th?.classes()).toContain('hidden')
+    expect(th?.classes()).toContain('lg:table-cell')
+  })
+
+  it('lo que dijo el cajero se acota a 2 líneas, sin ancho fijo', async () => {
+    const wrapper = await mountSuspended(CajaPendientesRevision)
+    const p = wrapper.findAll('p').find(e => e.text() === 'Le di vuelto de más a un cliente')
+    expect(p?.classes()).toContain('line-clamp-2')
+    expect(p?.classes()).not.toContain('max-w-xs')
+  })
+
+  it('la fila entera lleva a "Ver cierre"; "Marcar visto" no navega', async () => {
+    const wrapper = await mountSuspended(CajaPendientesRevision)
+    await wrapper.find('tbody tr').trigger('click')
+    expect(navigateToMock).toHaveBeenCalledWith('/cajas/caja-1')
+    navigateToMock.mockReset()
+    await wrapper.find('[data-qa="marcar-visto-caja-1"]').trigger('click')
+    expect(navigateToMock).not.toHaveBeenCalled()
   })
 })

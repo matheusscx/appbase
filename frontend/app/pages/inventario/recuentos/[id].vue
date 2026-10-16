@@ -492,7 +492,7 @@ const columns: TableColumn<LineaRow>[] = [
                 :items="motivoOverrideOpts(row.original.motivoDiferenciaId)"
                 value-key="value"
                 :disabled="readOnly || row.original.guardando"
-                class="w-56"
+                class="w-48"
                 @update:model-value="(v: string) => guardarMotivoLinea(row.original, v)"
               />
             </template>

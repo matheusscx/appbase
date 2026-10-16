@@ -35,14 +35,17 @@ const { items: historial, meta, page, loading, error, sinPermiso, fetch: fetchHi
   filters: listFilters,
 })
 
+// A 768 la tabla de siete columnas medía 822 px en 672 y "Diferencia" quedaba fuera de la vista.
+// Ahora: una sola fecha (la de apertura vive en el detalle), "Diferencia" pegada a "Caja" y
+// "Saldo inicial" solo desde lg (auditoría UX 03.2).
+const soloDesdeLg = { class: { th: 'hidden lg:table-cell text-right', td: 'hidden lg:table-cell text-right' } }
 const columns: TableColumn<Caja>[] = [
-  { accessorKey: 'fechaApertura', header: 'Apertura' },
   { accessorKey: 'fechaCierre', header: 'Cierre' },
   { accessorKey: 'cajonNombre', header: 'Caja' },
-  { accessorKey: 'estado', header: 'Estado' },
-  { accessorKey: 'saldoInicial', header: 'Saldo inicial', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'saldoFinal', header: 'Saldo final', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'diferenciaTotal', header: 'Diferencia', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'estado', header: 'Estado' },
+  { accessorKey: 'saldoInicial', header: 'Saldo inicial', meta: soloDesdeLg },
+  { accessorKey: 'saldoFinal', header: 'Saldo final', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 
 function diferenciaPositiva(val: string | null | undefined): boolean {
@@ -78,14 +81,9 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
         :ui="{ tr: 'cursor-pointer' }"
         @select="onSelectCaja"
       >
-        <template #fechaApertura-cell="{ row }">
-          <span class="text-default whitespace-nowrap">
-            {{ formatFecha(row.original.fechaApertura) }}
-          </span>
-        </template>
         <template #fechaCierre-cell="{ row }">
           <span class="text-default whitespace-nowrap">
-            {{ formatFecha(row.original.fechaCierre) }}
+            {{ row.original.fechaCierre ? formatFecha(row.original.fechaCierre) : `Abierta desde ${formatFecha(row.original.fechaApertura)}` }}
           </span>
         </template>
         <template #cajonNombre-cell="{ row }">

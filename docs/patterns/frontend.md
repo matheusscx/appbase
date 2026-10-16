@@ -396,6 +396,12 @@ como "No hay X" hacen creer al dueño que su catálogo se borró.
   `@reintentar` / `@quitar-filtros`. Sin filas muestra, en este orden: error o sin permiso, "Cargando…", el filtro
   que no encontró nada, el `#empty` de la pantalla o `vacio`. Una pantalla con carga propia (`cargar()`) lleva
   su `const errorCarga = ref(false)`: `false` al empezar, `true` en el `catch`.
+- **Columnas en `CrudTable`** (auditoría UX 00.9, 07.1): los slots `#<col>-cell` se leen en cada render, así
+  que una celda condicional (`<template v-if="puedePagar" #pago-cell>`) se dibuja cuando llegan los permisos.
+  La columna de id `acciones`/`accion` queda **fija a la derecha** (opaca) y `fijar-primera` fija la primera a
+  la izquierda. Una columna que sobra en tablet se declara con `meta.class` `hidden lg:table-cell` en `th` y
+  `td`; un texto largo, con `max-w-* truncate` y `:title` con el texto entero. Un `UTable` suelto repite
+  `:column-pinning="{ right: ['acciones'] }"` y `class="[&_[data-pinned=right]]:bg-default"`.
 - Fuera de `CrudTable` (un `UTable` suelto, el panel del catálogo, una gráfica) se usa `AppEstadoLista` directo,
   con las mismas props.
 - **Reintentar lo toca la persona.** Ningún estado de error vuelve a pedir solo (regla del proyecto); en el

@@ -116,12 +116,14 @@ function abrir(_e: Event, row: Row<CompraListItem>) {
   void router.push(`/compras/${row.original.id}`)
 }
 
+// Bajo lg (la tablet a 768) "Entra a" y "Líneas" se esconden: lo que importa es Estado y Pago (06.14).
+const soloDesdeLg = { class: { th: 'hidden lg:table-cell', td: 'hidden lg:table-cell' } }
 const columns = computed<TableColumn<CompraListItem>[]>(() => [
   { accessorKey: 'fechaDocumento', header: 'Fecha' },
   { accessorKey: 'proveedorNombre', header: 'Proveedor' },
   { accessorKey: 'folio', header: 'Documento' },
-  { accessorKey: 'ubicacionNombre', header: 'Entra a' },
-  { accessorKey: 'lineas', header: 'Líneas', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'ubicacionNombre', header: 'Entra a', meta: soloDesdeLg },
+  { accessorKey: 'lineas', header: 'Líneas', meta: { class: { th: 'hidden lg:table-cell text-right', td: 'hidden lg:table-cell text-right' } } },
   { accessorKey: 'total', header: 'Total', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'estado', header: 'Estado' },
   ...(puedePagar.value ? [{ id: 'pago', header: 'Pago' } as TableColumn<CompraListItem>] : []),

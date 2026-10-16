@@ -454,3 +454,17 @@ describe('traslados — el traslado precargado desde el toast de "no hay stock"'
     wrapper.unmount()
   })
 })
+
+// Lote 4 (05.13): a 768 la tabla de traslados medía 802 px en 672 y "Comentario" quedaba fuera.
+describe('traslados — forma de la tabla en tablet', () => {
+  function cabecera(texto: string) {
+    return Array.from(document.body.querySelectorAll('th')).find(th => th.textContent?.trim() === texto)
+  }
+
+  it('"Usuario" se oculta bajo lg y el comentario se acota', async () => {
+    await montar()
+    expect(cabecera('Usuario')?.className).toContain('hidden')
+    expect(cabecera('Usuario')?.className).toContain('lg:table-cell')
+    expect(cabecera('Comentario')?.className).toContain('max-w-40')
+  })
+})

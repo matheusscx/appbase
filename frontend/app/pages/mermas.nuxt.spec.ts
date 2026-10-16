@@ -592,3 +592,12 @@ describe('mermas — vista de comida del personal', () => {
     wrapper.unmount()
   })
 })
+
+// Lote 4 (05.13): a 768 la tabla de mermas medía 741 px en 672 y "Comentario" quedaba fuera.
+describe('mermas — forma de la tabla en tablet', () => {
+  it('el comentario se acota para que la tabla entre en la tarjeta', async () => {
+    await montar()
+    const th = Array.from(document.body.querySelectorAll('th')).find(t => t.textContent?.trim() === 'Comentario')
+    expect(th?.className).toContain('max-w-40')
+  })
+})

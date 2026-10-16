@@ -1,7 +1,7 @@
 <script setup lang="ts" generic="T">
 import type { TableColumn } from '@nuxt/ui'
 
-defineProps<{
+const props = defineProps<{
   data: T[]
   columns: TableColumn<T>[]
   loading?: boolean
@@ -20,28 +20,45 @@ defineProps<{
   filtrado?: boolean
   /** Texto propio para el caso filtrado (p. ej. el que nombra lo buscado). */
   filtradoTexto?: string
+  /** Deja la primera columna fija a la izquierda: en una tabla ancha el nombre no se pierde al deslizar. */
+  fijarPrimera?: boolean
 }>()
 
 const emit = defineEmits<{ reintentar: [], quitarFiltros: [] }>()
 // El botón "Quitar filtros" solo se ofrece si la pantalla escucha el evento.
 const escuchaQuitarFiltros = !!getCurrentInstance()?.vnode.props?.onQuitarFiltros
 
-const tableSlots = computed(() => {
-  const slots = useSlots()
-  return Object.keys(slots).filter(name => name !== 'footer' && name !== 'empty')
+// La columna de acciones queda pegada al borde derecho de la tarjeta: en una pantalla angosta el
+// lápiz y el basurero no se esconden detrás de un scroll sin pista (auditoría UX 07.1).
+// Las celdas fijas de Nuxt UI traen `bg-default/75`; la clase de la tarjeta las vuelve opacas.
+const COLUMNAS_DE_ACCIONES = ['acciones', 'accion']
+const idDeColumna = (c: TableColumn<T>) => (c as { id?: string, accessorKey?: string }).id ?? (c as { accessorKey?: string }).accessorKey
+const fijas = computed(() => {
+  const ids = props.columns.map(idDeColumna)
+  const right = ids.filter((id): id is string => !!id && COLUMNAS_DE_ACCIONES.includes(id))
+  const left = props.fijarPrimera && ids[0] ? [ids[0]] : []
+  return { left, right }
 })
+
+// Se lee en cada render, no en un `computed`: `useSlots()` no es reactivo, y una columna cuyo slot
+// aparece tarde (cuando cargan los permisos) quedaba sin celda (auditoría UX 00.9 / 06.26).
+const slots = useSlots()
+function nombresDeSlots() {
+  return Object.keys(slots).filter(name => name !== 'footer' && name !== 'empty')
+}
 </script>
 
 <template>
-  <UCard class="w-full">
+  <UCard class="w-full [&_[data-pinned=left]]:bg-default [&_[data-pinned=right]]:bg-default [&_[data-pinned=right]]:text-right">
     <UTable
       :data="error ? [] : data"
       :columns="columns"
       :loading="loading"
+      :column-pinning="fijas"
       v-bind="$attrs"
     >
       <template
-        v-for="slotName in tableSlots"
+        v-for="slotName in nombresDeSlots()"
         #[slotName]="slotProps"
       >
         <slot

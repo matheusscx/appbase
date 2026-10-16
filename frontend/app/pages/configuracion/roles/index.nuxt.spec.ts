@@ -91,3 +91,14 @@ describe('roles — Nuevo rol', () => {
     wrapper.unmount()
   })
 })
+
+// Lote 4 (07.1): una descripción larga empujaba lápiz y basurero fuera de la tarjeta.
+describe('roles — forma de la tabla', () => {
+  it('la descripción se acota y las acciones quedan fijas a la derecha', async () => {
+    const wrapper = await montar()
+    const th = wrapper.findAll('th').find(t => t.text() === 'Descripción')
+    expect(th?.classes()).toContain('max-w-xs')
+    expect(th?.classes()).toContain('truncate')
+    expect(wrapper.findAll('th[data-pinned="right"]')).toHaveLength(1)
+  })
+})

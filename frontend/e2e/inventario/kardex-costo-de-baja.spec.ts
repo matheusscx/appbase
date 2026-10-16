@@ -58,7 +58,9 @@ test.afterAll(async ({ request }) => {
 test('la merma se pinta como pérdida y la comida del personal no, cada una con su tipo', async ({ page }) => {
   await page.goto('/inventario')
 
-  await expect(page.getByRole('columnheader', { name: 'Costo de la baja' })).toBeVisible()
+  // Desde el Lote 4 (05.12) el costo de la baja comparte la columna "Costo".
+  await expect(page.getByRole('columnheader', { name: 'Costo', exact: true })).toBeVisible()
+  await expect(page.getByRole('columnheader', { name: 'Costo de la baja' })).toHaveCount(0)
   await expect(page.getByRole('columnheader', { name: 'Costo perdido' })).toHaveCount(0)
 
   const filaMerma = page.getByRole('row', { name: new RegExp(PRODUCTO) })

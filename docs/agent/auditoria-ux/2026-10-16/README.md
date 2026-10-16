@@ -45,8 +45,8 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☐ | [02.3](02-salones-y-mesas.md) | P1 | En tablet, los botones de la cuenta son chicos y quitan productos sin querer | medido | agente |
 | ☐ | [02.4](02-salones-y-mesas.md) | P1 | La cuenta no muestra qué líneas salieron a cocina y cuáles no | medido | agente |
 | ☐ | [02.5](02-salones-y-mesas.md) | P1 | Si la comanda no se imprime, la línea queda "enviada" y no se reimprime | medido en parte | owner |
-| ☐ | [03.1](03-caja.md) | P1 | En la tablet, "Ver cierre" y "Marcar visto" de Pendientes quedan fuera de vista | medido | agente |
-| ☐ | [03.2](03-caja.md) | P1 | En el historial de cajas a 768, la columna "Diferencia" queda fuera de vista | medido | agente |
+| ☑ | [03.1](03-caja.md) | P1 | En la tablet, "Ver cierre" y "Marcar visto" de Pendientes quedan fuera de vista — **hecho 2026-10-16** (la forma cambió; a 768 no se pudo medir: la base sembrada no tiene cierres pendientes) | medido | agente |
+| ☑ | [03.2](03-caja.md) | P1 | En el historial de cajas a 768, la columna "Diferencia" queda fuera de vista — **hecho 2026-10-16** (la forma cambió; a 768 no se pudo medir: la base sembrada no tiene historial) | medido | agente |
 | ☐ | [03.3](03-caja.md) | P1 | "Enviar conteo" congela el conteo sin pedir confirmar el número tecleado | medido | agente + owner |
 | ☐ | [04.1](04-inicio-y-reportes.md) | P1 | Inicio llama "Efectivo", en verde, a la suma de diferencias de cierre | medido | agente + owner |
 | ☐ | [04.2](04-inicio-y-reportes.md) | P1 | En Inicio, "Vendido" queda pegado al borde y lo demás bajo el pliegue | medido | agente + owner |
@@ -59,7 +59,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☐ | [06.3](06-compras-y-terceros.md) | P1 | "Confirmar recepción" no mira el total del documento y avisa recién después de confirmar — *parcial 2026-10-16: el rechazo se marca en el campo Total; no se agregó un gate previo (regla de plata, lote 1)* | medido | agente |
 | ☐ | [06.4](06-compras-y-terceros.md) | P1 | Al recargar "Nueva compra", el medio de pago sale vacío y el botón apagado | medido | agente |
 | ☐ | [06.6](06-compras-y-terceros.md) | P1 | Un pago hecho no se puede anular desde la pantalla, salvo que sobre plata | medido | owner |
-| ☐ | [07.1](07-configuracion.md) | P1 | En Configuración, la columna de acciones queda fuera de la tarjeta en 15 pantallas *(causa en 00.9)* | medido | agente |
+| ☑ | [07.1](07-configuracion.md) | P1 | En Configuración, la columna de acciones queda fuera de la tarjeta en 15 pantallas *(causa en 00.9)* — **hecho 2026-10-16** | medido | agente |
 | ☐ | [07.2](07-configuracion.md) | P1 | Los formularios de Configuración rechazan con avisos en inglés, sin marcar el campo *(es 00.11)* — *parcial 2026-10-16: traducción global y campos en Ítems, Impresoras, Descuentos, Recargos; faltan Salones/mesa e Impuestos (fiscal, frente aparte)* | medido | agente |
 | ☐ | [08.1](08-ingreso-y-cuenta.md) | P1 | Equivocarse en la "contraseña actual" cierra la sesión y manda al login | medido | agente |
 | ☐ | [09.1](09-tienda-y-suscripciones.md) | P1 | Al volver de Webpay, "Agregar tarjeta" cobra el primer período sin confirmar | código | owner |
@@ -506,7 +506,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [00.1](00-transversal.md) | P2 | El archivo de estilos de tarjetas y modales de la raíz no se carga — **hecho 2026-10-16** | owner |
 | ☑ | [00.7](00-transversal.md) | P2 | Las cifras de DM Sans no miden lo mismo: los montos no se alinean — **hecho 2026-10-16** (948e06e4) | owner |
 | ☑ | [00.8](00-transversal.md) | P2 | Verde, ámbar y rojo de los estados no tienen contraste suficiente sobre blanco — **hecho 2026-10-16** (tokens; los citados quedan por revisar uno por uno) *(ver 01.17, 02.17, 03.9, 03.10, 04.5, 04.6, 04.21, 05.17, 06.27, 07.16)* | agente + owner |
-| ☐ | [00.9](00-transversal.md) | P2 | En las tablas de lista, una columna puede no dibujarse y acciones queda fuera *(ver 06.26, 07.1)* | agente |
+| ☑ | [00.9](00-transversal.md) | P2 | En las tablas de lista, una columna puede no dibujarse y acciones queda fuera *(ver 06.26, 07.1)* — **hecho 2026-10-16** | agente |
 | ☑ | [00.12](00-transversal.md) | P2 | Pantallas que no se ven de Venka: tarjetas verdes y ámbar, montos en letra de terminal, MAYÚSCULAS — **hecho 2026-10-16** | agente |
 | ☑ | [00.2](00-transversal.md) | P3 | Los links se ven negros y no petróleo, y la guía dice otra cosa — **hecho 2026-10-16** | owner |
 | ☐ | [00.3](00-transversal.md) | P3 | Hay textos con voseo mezclados con tuteo en 49 archivos *(ver 01.21, 02.27, 03.19, 04.23, 05.21, 06.24, 07.28, 08.17, 09.18)* | agente |
@@ -531,7 +531,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [01.11](01-pos-y-ventas.md) | P2 | Una búsqueda sin resultados dice lo mismo que un catálogo vacío — **hecho 2026-10-16** | agente |
 | ☐ | [01.12](01-pos-y-ventas.md) | P2 | Si el cálculo falla, el carrito deja el total viejo como si fuera bueno | agente |
 | ☐ | [01.13](01-pos-y-ventas.md) | P2 | El carrito es angosto: nombres y precios se cortan o se solapan | agente |
-| ☐ | [01.14](01-pos-y-ventas.md) | P2 | A 768 el detalle de venta corta las líneas y pega etiquetas con valores | agente |
+| ☑ | [01.14](01-pos-y-ventas.md) | P2 | A 768 el detalle de venta corta las líneas y pega etiquetas con valores — **hecho 2026-10-16** (la forma cambió; es un drawer, no se midió a 768) | agente |
 | ☐ | [01.15](01-pos-y-ventas.md) | P2 | Sin impresora o sin QZ la boleta no sale y casi no se avisa | agente |
 | ☑ | [01.16](01-pos-y-ventas.md) | P2 | Entrar a Órdenes sin permiso muestra una lista vacía en vez de "sin permiso" — **hecho 2026-10-16** | agente |
 | ☑ | [01.17](01-pos-y-ventas.md) | P2 | La insignia "Pagada" y las cifras de estado no tienen contraste suficiente — **hecho 2026-10-16** *(ver 00.8)* | agente + owner |
@@ -642,7 +642,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [04.14](04-inicio-y-reportes.md) | P3 | La tarjeta Cajas no dice cuántas hay abiertas ni desde qué hora | agente |
 | ☐ | [04.15](04-inicio-y-reportes.md) | P3 | Ctrl/Cmd+clic en una tarjeta de Inicio no abre pestaña nueva | agente |
 | ☐ | [04.16](04-inicio-y-reportes.md) | P3 | En la tablet, "Actualizar" y los enlaces de Pérdidas miden 16 a 24 px | agente |
-| ☐ | [04.20](04-inicio-y-reportes.md) | P3 | Jerga en la tabla de Varianza y columnas clave fuera de vista a 768 | agente + owner |
+| ☑ | [04.20](04-inicio-y-reportes.md) | P3 | Jerga en la tabla de Varianza y columnas clave fuera de vista a 768 — **hecho 2026-10-16** | agente + owner |
 | ☐ | [04.22](04-inicio-y-reportes.md) | P3 | "Costos desfasados" repite el mismo texto dos veces y escribe "items" sin tilde | agente |
 | ☐ | [04.23](04-inicio-y-reportes.md) | P3 | Voseo en Inicio y Reportes *(lote 00.3)* | agente |
 | ☐ | [04.24](04-inicio-y-reportes.md) | P3 | Cuatro líneas seguidas dicen "vs. viernes pasado: —" | agente |
@@ -664,8 +664,8 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [05.9](05-inventario.md) | P2 | Una merma incompleta avisa siempre "Completa producto, cantidad y motivo", sin marcar cuál — **hecho 2026-10-16** | agente |
 | ☑ | [05.10](05-inventario.md) | P2 | "Confirmar traslado" queda apagado sin decir qué falta — **hecho 2026-10-16** | agente |
 | ☐ | [05.11](05-inventario.md) | P2 | Un traslado o merma mal tipeado no tiene resumen previo ni deshacer | agente + owner |
-| ☐ | [05.12](05-inventario.md) | P2 | El kardex tiene 10 columnas y deja Resultante, Costo y Usuario fuera de vista | agente + owner |
-| ☐ | [05.13](05-inventario.md) | P2 | A 768 faltan columnas en traslados y mermas y el selector de causa se corta | agente |
+| ☑ | [05.12](05-inventario.md) | P2 | El kardex tiene 10 columnas y deja Resultante, Costo y Usuario fuera de vista — **hecho 2026-10-16** (una sola columna de costo; a 768 el kardex sigue con scroll interno: 1077 de 672 px, antes 1221) | agente + owner |
+| ☑ | [05.13](05-inventario.md) | P2 | A 768 faltan columnas en traslados y mermas y el selector de causa se corta — **hecho 2026-10-16** (medido a 768: traslados y mermas entran, 672 de 672 px) | agente |
 | ☐ | [05.14](05-inventario.md) | P2 | El menú dice "Stock" pero la pantalla es una lista de movimientos, no el saldo | agente + owner |
 | ☑ | [05.15](05-inventario.md) | P2 | Un stock mínimo inválido muestra un aviso técnico a medias en inglés — **hecho 2026-10-16** | agente |
 | ☐ | [05.16](05-inventario.md) | P2 | Los dos campos de fecha de Mermas no dicen "Desde" ni "Hasta" | agente |
@@ -693,7 +693,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [06.11](06-compras-y-terceros.md) | P2 | Sin permiso de Terceros, la pantalla dice "No hay terceros registrados" — **parcial 2026-10-16** (hecha la mitad de pantalla: sin permiso dice "Sin acceso a los terceros", no el vacío falso; falta que quien carga compras pueda crear el proveedor, que es el frente de permisos del backend) | agente + owner |
 | ☐ | [06.12](06-compras-y-terceros.md) | P2 | Pagar en efectivo sin caja abierta falla con un aviso lejos del botón | agente |
 | ☐ | [06.13](06-compras-y-terceros.md) | P2 | "Pagar todo lo que debo" no tiene atajo y "Pagar" se apaga sin explicar | agente |
-| ☐ | [06.14](06-compras-y-terceros.md) | P2 | En la tablet, la columna "Pago" de la lista de compras queda fuera de vista | agente |
+| ☑ | [06.14](06-compras-y-terceros.md) | P2 | En la tablet, la columna "Pago" de la lista de compras queda fuera de vista — **hecho 2026-10-16** (medido a 768: la lista entra, 672 de 672 px) | agente |
 | ☑ | [06.15](06-compras-y-terceros.md) | P2 | Un XML con RUT mal formado da un mensaje técnico y no deja elegir otro — **hecho 2026-10-16** | agente |
 | ☐ | [06.16](06-compras-y-terceros.md) | P2 | El formulario de Terceros no valida nada y los errores llegan por toast — *parcial 2026-10-16: Nombre y correo junto al campo; el formato de RUT no, porque el servidor no lo valida hoy* | agente |
 | ☑ | [06.17](06-compras-y-terceros.md) | P2 | Un filtro de compras sin resultados dice "No hay compras registradas" — **hecho 2026-10-16** | agente |
@@ -702,7 +702,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [06.20](06-compras-y-terceros.md) | P2 | Los botones de uso frecuente de Compras miden 16 a 32 px en la tablet | agente |
 | ☐ | [06.22](06-compras-y-terceros.md) | P2 | En Por pagar, "Pagar" no se ve hasta tocar una fila de proveedor | agente |
 | ☐ | [06.23](06-compras-y-terceros.md) | P2 | El modal "¿Confirmar la recepción?" no muestra qué productos entran ni a qué costo | agente |
-| ☐ | [06.26](06-compras-y-terceros.md) | P2 | La columna "Pago" de la lista de compras sale vacía al recargar *(causa en 00.9)* | agente |
+| ☑ | [06.26](06-compras-y-terceros.md) | P2 | La columna "Pago" de la lista de compras sale vacía al recargar *(causa en 00.9)* — **hecho 2026-10-16** | agente |
 | ☐ | [06.21](06-compras-y-terceros.md) | P3 | Las filas de Compras no son enlaces: no abren en otra pestaña | agente |
 | ☐ | [06.24](06-compras-y-terceros.md) | P3 | Voseo en Compras y Terceros *(lote 00.3)* | agente |
 | ☐ | [06.25](06-compras-y-terceros.md) | P3 | El menú dice "Recepciones" y la pantalla dice "Compras" | owner |

@@ -1132,7 +1132,12 @@ function onNcOtrosDatos() {
               </span>
             </div>
           </template>
-          <UTable :data="filasDetalle" :columns="detalleColumns">
+          <UTable
+            :data="filasDetalle"
+            :columns="detalleColumns"
+            :column-pinning="{ right: ['monto'] }"
+            class="[&_[data-pinned=right]]:bg-default"
+          >
             <template #concepto-cell="{ row }">
               <!-- Las reglas y el cierre cuelgan de su ítem: la sangría es la
                    jerarquía, y el ítem es lo único a la izquierda del todo. -->
@@ -1248,7 +1253,9 @@ function onNcOtrosDatos() {
           </UTable>
         </UCard>
 
-        <div class="grid gap-4 md:grid-cols-2">
+        <!-- El drawer es angosto en una tablet: las columnas se deciden por SU ancho, no por el de la ventana (01.14). -->
+        <div class="@container">
+        <div class="grid gap-4 @xl:grid-cols-2">
           <UCard>
             <template #header>
               <h2 class="text-base font-semibold">
@@ -1256,7 +1263,7 @@ function onNcOtrosDatos() {
               </h2>
             </template>
             <dl class="space-y-2 text-sm">
-              <div class="flex justify-between">
+              <div class="flex justify-between gap-4">
                 <dt class="text-muted">
                   Subtotal bruto
                 </dt>
@@ -1264,7 +1271,7 @@ function onNcOtrosDatos() {
                   {{ formatMonto(venta.totalBruto) }}
                 </dd>
               </div>
-              <div class="flex justify-between">
+              <div class="flex justify-between gap-4">
                 <dt class="text-muted">
                   Descuentos
                 </dt>
@@ -1272,7 +1279,7 @@ function onNcOtrosDatos() {
                   -{{ formatMonto(venta.totalDescuentos) }}
                 </dd>
               </div>
-              <div class="flex justify-between">
+              <div class="flex justify-between gap-4">
                 <dt class="text-muted">
                   Recargos
                 </dt>
@@ -1280,7 +1287,7 @@ function onNcOtrosDatos() {
                   {{ formatMonto(venta.totalRecargos) }}
                 </dd>
               </div>
-              <div class="flex justify-between">
+              <div class="flex justify-between gap-4">
                 <dt class="text-muted">
                   Impuestos
                 </dt>
@@ -1288,7 +1295,7 @@ function onNcOtrosDatos() {
                   {{ formatMonto(venta.totalImpuestos) }}
                 </dd>
               </div>
-              <div class="flex justify-between border-t border-default pt-2 font-semibold">
+              <div class="flex justify-between gap-4 border-t border-default pt-2 font-semibold">
                 <dt>Total final</dt>
                 <dd>
                   {{ formatMonto(venta.totalFinal) }}
@@ -1307,7 +1314,7 @@ function onNcOtrosDatos() {
                 Cómo se redondeó
               </summary>
               <dl class="mt-2 space-y-1">
-                <div class="flex justify-between">
+                <div class="flex justify-between gap-4">
                   <dt class="text-muted">
                     Decimales de cálculo
                   </dt>
@@ -1315,7 +1322,7 @@ function onNcOtrosDatos() {
                     {{ venta.configCalculo.escalaCalculo }}
                   </dd>
                 </div>
-                <div class="flex justify-between">
+                <div class="flex justify-between gap-4">
                   <dt class="text-muted">
                     Redondeo
                   </dt>
@@ -1334,13 +1341,13 @@ function onNcOtrosDatos() {
               </h2>
             </template>
             <dl class="space-y-2 text-sm">
-              <div class="flex justify-between">
+              <div class="flex justify-between gap-4">
                 <dt class="text-muted">
                   % sugerido
                 </dt>
                 <dd>{{ new Decimal(venta.propina.porcentajeSugerido).mul(100).toFixed(0) }}%</dd>
               </div>
-              <div class="flex justify-between">
+              <div class="flex justify-between gap-4">
                 <dt class="text-muted">
                   Monto sugerido
                 </dt>
@@ -1348,13 +1355,13 @@ function onNcOtrosDatos() {
                   {{ formatMonto(venta.propina.montoSugerido) }}
                 </dd>
               </div>
-              <div class="flex justify-between font-semibold">
+              <div class="flex justify-between gap-4 font-semibold">
                 <dt>Monto pagado</dt>
                 <dd>
                   {{ formatMonto(venta.propina.montoPagado) }}
                 </dd>
               </div>
-              <div class="flex justify-between">
+              <div class="flex justify-between gap-4">
                 <dt class="text-muted">
                   Garzón
                 </dt>
@@ -1389,7 +1396,7 @@ function onNcOtrosDatos() {
                 :key="p.id"
                 class="flex flex-col gap-1 py-2"
               >
-                <div class="flex justify-between gap-2">
+                <div class="flex justify-between gap-4">
                   <span class="text-muted">Pago {{ i + 1 }}</span>
                   <span>{{ formatMonto(p.monto) }}</span>
                   <span v-if="p.vuelto && new Decimal(p.vuelto).gt(0)" class="text-xs text-muted">
@@ -1410,11 +1417,11 @@ function onNcOtrosDatos() {
             </ul>
 
             <div class="space-y-1 border-t border-default pt-3 text-sm">
-              <div class="flex justify-between">
+              <div class="flex justify-between gap-4">
                 <span class="text-muted">Monto pagado</span>
                 <span class="font-medium">{{ formatMonto(montoPagado) }}</span>
               </div>
-              <div class="flex justify-between">
+              <div class="flex justify-between gap-4">
                 <span class="text-muted">Saldo pendiente</span>
                 <span class="font-medium" :class="new Decimal(saldo).gt(0) ? 'text-warning' : ''">
                   {{ formatMonto(saldo) }}
@@ -1422,6 +1429,7 @@ function onNcOtrosDatos() {
               </div>
             </div>
           </UCard>
+        </div>
         </div>
 
         <UCard data-qa="documentos">

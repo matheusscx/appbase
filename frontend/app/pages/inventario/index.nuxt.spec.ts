@@ -591,10 +591,14 @@ describe('inventario — el kardex no llama pérdida a lo que no lo es', () => {
     return span!
   }
 
-  it('la columna se llama "Costo de la baja", no "Costo perdido"', async () => {
+  it('el costo de la baja va en la columna "Costo" (05.12), no en una propia ni como "Costo perdido"', async () => {
     const wrapper = await montar()
-    expect(wrapper.text()).toContain('Costo de la baja')
+    const cabeceras = wrapper.findAll('th').map(t => t.text())
+    expect(cabeceras).toContain('Costo')
+    expect(cabeceras).not.toContain('Costo de la baja')
     expect(wrapper.text()).not.toContain('Costo perdido')
+    // En la columna compartida, la baja se distingue con un rótulo visible (no solo `title`).
+    expect(wrapper.findAll('td').some(td => /^Baja\s*\$/.test(td.text()))).toBe(true)
     wrapper.unmount()
   })
 
@@ -699,6 +703,74 @@ describe('inventario — el filtro de motivo separa las bajas por tipo', () => {
     const todos = await elegir(wrapper, 'Todos los motivos')
     expect(todos.has('motivo')).toBe(false)
     expect(todos.has('motivoBajaTipo')).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+
+// Lote 4 (05.12, decisión del owner 2026-10-16): "Costo" y "Costo de la baja" son una sola columna,
+// que aparece solo si hay un valor que mostrar, y la fila se acorta para que el kardex entre.
+describe('inventario — kardex: una sola columna de costo', () => {
+  const mov = (id: string, extra: Record<string, unknown>) => ({
+    id,
+    itemId: HARINA.id,
+    itemNombre: 'Harina',
+    tipo: 'entrada',
+    motivo: 'compra',
+    cantidad: '1.0000',
+    stockAnterior: '10.0000',
+    stockResultante: '11.0000',
+    usuarioNombre: 'Admin',
+    comentario: null,
+    creadoEl: '2026-10-04T10:00:00.000Z',
+    unidadMedida: 'kg',
+    monedaId: 'clp-1',
+    itemEliminado: false,
+    ubicacionId: 'local-1',
+    ubicacionNombre: 'Local',
+    ...extra,
+  })
+
+  beforeEach(() => {
+    ubicacionesBackend = []
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('sin ningún movimiento con costo, la columna no aparece', async () => {
+    movimientosBackend = [mov('m1', {}), mov('m2', {})]
+    const wrapper = await montar()
+    expect(wrapper.findAll('th').map(t => t.text())).not.toContain('Costo')
+    wrapper.unmount()
+  })
+
+  it('con un ajuste de costo aparece, y el ajuste muestra del costo anterior al nuevo', async () => {
+    movimientosBackend = [mov('m1', { motivo: 'ajuste_costo', costoAnterior: '1000.0000', costoUnitario: '1500.0000' })]
+    const wrapper = await montar()
+    expect(wrapper.findAll('th').map(t => t.text())).toContain('Costo')
+    expect(wrapper.find('tbody').text()).toContain('$1.000')
+    expect(wrapper.find('tbody').text()).toContain('$1.500')
+    wrapper.unmount()
+  })
+
+  it('un ajuste y una baja comparten la misma columna', async () => {
+    movimientosBackend = [
+      mov('m1', { motivo: 'ajuste_costo', costoAnterior: '1000.0000', costoUnitario: '1500.0000' }),
+      mov('m2', { tipo: 'salida', motivo: 'merma', motivoBajaTipo: 'merma', motivoBajaNombre: 'Vencimiento', costoBaja: '700.0000' }),
+    ]
+    const wrapper = await montar()
+    const cabeceras = wrapper.findAll('th').map(t => t.text())
+    expect(cabeceras.filter(c => c.startsWith('Costo'))).toEqual(['Costo'])
+    const idx = cabeceras.indexOf('Costo')
+    const filas = wrapper.findAll('tbody tr')
+    expect(filas[0]!.findAll('td')[idx]!.text()).toContain('$1.500')
+    expect(filas[1]!.findAll('td')[idx]!.text()).toContain('$700')
+    wrapper.unmount()
+  })
+
+  it('la fila es más baja que la de siempre (py-2.5, no p-4)', async () => {
+    movimientosBackend = [mov('m1', {})]
+    const wrapper = await montar()
+    expect(wrapper.find('tbody td').classes()).toContain('py-2.5')
     wrapper.unmount()
   })
 })

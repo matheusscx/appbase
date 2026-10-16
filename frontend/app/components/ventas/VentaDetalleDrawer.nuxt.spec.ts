@@ -436,6 +436,30 @@ async function expandir(
   await new Promise(r => setTimeout(r, 0))
 }
 
+// Lote 4 (01.14): el drawer es angosto en una tablet, pero `md:` mira el ancho de la ventana.
+describe('VentaDetalleDrawer — forma en tablet', () => {
+  it('Totales y Propina se acomodan por el ancho del drawer, no por el de la ventana', async () => {
+    const wrapper = await montar()
+    const html = wrapper.html()
+    expect(html).not.toContain('md:grid-cols-2')
+    const contenedor = wrapper.find('.\\@container')
+    expect(contenedor.exists()).toBe(true)
+    expect(contenedor.find('.grid').classes()).toContain('@xl:grid-cols-2')
+  })
+
+  it('la etiqueta y el valor de Totales no se pegan ("Subtotal brutoS1.500")', async () => {
+    const wrapper = await montar()
+    const fila = wrapper.findAll('dt').find(dt => dt.text() === 'Subtotal bruto')!.element.parentElement!
+    expect(fila.className).toContain('gap-4')
+  })
+
+  it('el "Monto" de las líneas queda fijo a la derecha: no se sale del drawer', async () => {
+    const wrapper = await montar()
+    const fijas = wrapper.findAll('th[data-pinned="right"]').map(th => th.text())
+    expect(fijas).toEqual(['Monto'])
+  })
+})
+
 describe('VentaDetalleDrawer — promociones congeladas', () => {
   it('la promo lleva su propia familia, no la de un descuento de catálogo', async () => {
     const wrapper = await montar()

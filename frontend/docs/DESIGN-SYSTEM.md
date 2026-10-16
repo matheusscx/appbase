@@ -272,7 +272,7 @@ Patrón extraído de `configuracion/categorias.vue`. Ubicación: `app/components
 | Componente | Uso |
 |------------|-----|
 | `CrudPageHeader` | Título (`h2` o `h1` con `large`) + subtítulo + slot `#actions` |
-| `CrudTable` | `UCard` + `UTable` con empty state por defecto y ancho completo (`w-full`) |
+| `CrudTable` | `UCard` + `UTable` con empty state por defecto y ancho completo (`w-full`). Fija a la derecha la columna `acciones`/`accion` y, con `fijar-primera`, la primera a la izquierda; sus slots `#<col>-cell` pueden aparecer después del primer render |
 | `CrudListItem` | Celda nombre: título + subtítulo muted |
 | `CrudModal` | Confirmación de eliminación (cancel + confirm) |
 | `CrudPausarModal` | Confirmación de **pausa** sobre `CrudModal`: dice a cuántos ítems afecta y promete la reversibilidad. Va con `usePausaRegla()` |

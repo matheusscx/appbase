@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import type { TableColumn } from '@nuxt/ui'
+import type { Row } from '@tanstack/vue-table'
 import type { CierrePendienteRevision, ResumenDescuadresDia } from '~/stores/caja'
 
 const cajaStore = useCajaStore()
@@ -68,11 +69,16 @@ async function marcarVisto(cajaId: string) {
 const columns: TableColumn<CierrePendienteRevision>[] = [
   { accessorKey: 'fechaCierre', header: 'Cierre' },
   { accessorKey: 'usuarioNombre', header: 'Cajero' },
-  { accessorKey: 'cajonNombre', header: 'Cajón' },
+  // Bajo lg (la tablet a 768) la tabla no entra en la tarjeta: "Cajón" es lo que se puede perder.
+  { accessorKey: 'cajonNombre', header: 'Cajón', meta: { class: { th: 'hidden lg:table-cell', td: 'hidden lg:table-cell' } } },
   { accessorKey: 'peorDiferencia', header: 'Mayor diferencia', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'explicacionDescuadre', header: 'Qué dijo el cajero' },
   { accessorKey: 'acciones', header: '' },
 ]
+
+function verCierre(_e: Event, row: Row<CierrePendienteRevision>) {
+  navigateTo(`/cajas/${row.original.cajaId}`)
+}
 
 /** El signo del efectivo del turno; la magnitud que disparó va en otra columna. */
 function claseMonto(val: string | null): string {
@@ -141,7 +147,16 @@ function claseMonto(val: string | null): string {
         </div>
       </template>
 
-      <UTable :data="filas" :columns="columns" :loading="loading">
+      <!-- La fila entera lleva a "Ver cierre"; "Marcar visto" queda fijo a la derecha, siempre a la vista (03.1). -->
+      <UTable
+        :data="filas"
+        :columns="columns"
+        :loading="loading"
+        :column-pinning="{ right: ['acciones'] }"
+        :ui="{ tr: 'cursor-pointer' }"
+        class="[&_[data-pinned=right]]:bg-default"
+        @select="verCierre"
+      >
         <template #fechaCierre-cell="{ row }">
           <div class="space-y-0.5">
             <p class="text-sm text-default">
@@ -175,10 +190,10 @@ function claseMonto(val: string | null): string {
         </template>
 
         <template #explicacionDescuadre-cell="{ row }">
-          <p v-if="row.original.explicacionDescuadre" class="text-sm text-default max-w-xs">
+          <p v-if="row.original.explicacionDescuadre" class="text-sm text-default max-w-56 min-w-40 whitespace-normal line-clamp-2">
             {{ row.original.explicacionDescuadre }}
           </p>
-          <p v-else-if="row.original.comentarioCierre" class="text-sm text-muted max-w-xs">
+          <p v-else-if="row.original.comentarioCierre" class="text-sm text-muted max-w-56 min-w-40 whitespace-normal line-clamp-2">
             {{ row.original.comentarioCierre }}
           </p>
           <p v-else class="text-sm text-muted italic">
@@ -188,14 +203,6 @@ function claseMonto(val: string | null): string {
 
         <template #acciones-cell="{ row }">
           <div class="flex justify-end gap-2">
-            <UButton
-              :to="`/cajas/${row.original.cajaId}`"
-              variant="ghost"
-              color="neutral"
-              size="sm"
-              icon="i-lucide-eye"
-              label="Ver cierre"
-            />
             <UButton
               v-if="puedeMarcar"
               size="sm"

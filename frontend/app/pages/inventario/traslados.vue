@@ -473,8 +473,9 @@ const columns: TableColumn<TrasladoListItem>[] = [
   { accessorKey: 'destinoNombre', header: 'Destino' },
   { accessorKey: 'motivoNombre', header: 'Motivo' },
   { accessorKey: 'itemsMovidos', header: 'Ítems', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'usuarioNombre', header: 'Usuario' },
-  { accessorKey: 'comentario', header: 'Comentario' },
+  // A 768 la tabla de 802 px no entra en 672: "Usuario" sale bajo lg y el comentario se acota (05.13).
+  { accessorKey: 'usuarioNombre', header: 'Usuario', meta: { class: { th: 'hidden lg:table-cell', td: 'hidden lg:table-cell' } } },
+  { accessorKey: 'comentario', header: 'Comentario', meta: { class: { th: 'max-w-40 truncate', td: 'max-w-40 truncate' } } },
 ]
 
 const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
@@ -530,7 +531,7 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
             <span class="text-sm text-muted">{{ row.original.usuarioNombre || '—' }}</span>
           </template>
           <template #comentario-cell="{ row }">
-            <span class="text-sm text-muted">{{ row.original.comentario || '—' }}</span>
+            <span class="text-sm text-muted" :title="row.original.comentario || undefined">{{ row.original.comentario || '—' }}</span>
           </template>
         </CrudTable>
 

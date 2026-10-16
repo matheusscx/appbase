@@ -301,7 +301,8 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
   { accessorKey: 'motivoBajaNombre', header: 'Motivo' },
   { accessorKey: 'costoUnitario', header: 'Costo unit.', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'costoPerdido', header: esPersonal.value ? 'Costo' : 'Costo perdido', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'comentario', header: 'Comentario' },
+  // El comentario se acota para que a 768 la tabla entre en la tarjeta (05.13).
+  { accessorKey: 'comentario', header: 'Comentario', meta: { class: { th: 'max-w-40 truncate', td: 'max-w-40 truncate' } } },
 ])
 </script>
 
@@ -415,7 +416,7 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
         <span v-else class="text-muted">—</span>
       </template>
       <template #comentario-cell="{ row }">
-        <span class="text-sm text-muted">{{ row.original.comentario || '—' }}</span>
+        <span class="text-sm text-muted" :title="row.original.comentario || undefined">{{ row.original.comentario || '—' }}</span>
       </template>
     </CrudTable>
 

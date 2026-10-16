@@ -335,12 +335,12 @@ const DERECHA = { class: { th: 'text-right', td: 'text-right' } }
 const columns: TableColumn<VarianzaFila>[] = [
   { accessorKey: 'itemNombre', header: 'Producto' },
   { accessorKey: 'ubicacionNombre', header: 'Lugar' },
-  { id: 'ventana', header: 'Ventana' },
-  { accessorKey: 'teorico', header: 'Teórico', meta: DERECHA },
+  { id: 'ventana', header: 'Entre conteos' },
+  { accessorKey: 'teorico', header: 'Lo que se vendió', meta: DERECHA },
   { accessorKey: 'merma', header: 'Merma', meta: DERECHA },
   { accessorKey: 'cortesia', header: 'Cortesía', meta: DERECHA },
   { accessorKey: 'personal', header: 'Personal', meta: DERECHA },
-  { accessorKey: 'sinExplicacion', header: 'Sin explicación', meta: DERECHA },
+  { accessorKey: 'sinExplicacion', header: 'Faltante sin explicar', meta: DERECHA },
   { accessorKey: 'costoSinExplicacion', header: '$ sin explicación', meta: DERECHA },
   { accessorKey: 'otros', header: 'Otros', meta: DERECHA },
 ]
@@ -463,10 +463,9 @@ const columns: TableColumn<VarianzaFila>[] = [
                 </ul>
               </AppInfoButton>
             </span>
-            <span class="inline-flex items-center gap-1">
+            <span v-if="sinConteo.contadoUnaSolaVez.total > 0" class="inline-flex items-center gap-1">
               {{ sinConteo.contadoUnaSolaVez.total }} a medio contar
               <AppInfoButton
-                v-if="sinConteo.contadoUnaSolaVez.total > 0"
                 title="A medio contar"
               >
                 <p class="mb-2">
@@ -503,6 +502,7 @@ const columns: TableColumn<VarianzaFila>[] = [
         <CrudTable
           :data="filas"
           :columns="columns"
+          fijar-primera
           :loading="loading"
           :error="error"
           :sin-permiso="sinPermiso"

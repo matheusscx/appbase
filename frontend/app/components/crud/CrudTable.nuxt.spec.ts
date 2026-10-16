@@ -73,3 +73,76 @@ describe('CrudTable — filtro sin resultados', () => {
     expect(w.find('[data-qa="estado-quitar-filtros"]').exists()).toBe(false)
   })
 })
+
+// Lote 4 (00.9 / 06.26): un slot que aparece después del primer render (p. ej. cuando cargan los
+// permisos) tiene que dibujarse; antes `tableSlots` se calculaba una sola vez.
+describe('CrudTable — slots que aparecen tarde', () => {
+  it('la celda de una columna cuyo slot llega después del primer render se dibuja', async () => {
+    const Padre = defineComponent({
+      components: { CrudTable },
+      setup() {
+        const puedePagar = ref(false)
+        return { puedePagar, columns: [{ accessorKey: 'nombre', header: 'Nombre' }, { accessorKey: 'pago', header: 'Pago' }], data: [{ nombre: 'Compra 1', pago: 'x' }] }
+      },
+      template: `<CrudTable :data="data" :columns="columns">
+        <template v-if="puedePagar" #pago-cell><span data-qa="celda-pago">Pendiente de pago</span></template>
+      </CrudTable>`,
+    })
+    const w = await mountSuspended(Padre)
+    expect(w.find('[data-qa="celda-pago"]').exists()).toBe(false)
+    ;(w.vm as unknown as { puedePagar: boolean }).puedePagar = true
+    await nextTick()
+    expect(w.find('[data-qa="celda-pago"]').exists()).toBe(true)
+  })
+
+  it('un slot que desaparece deja de dibujarse', async () => {
+    const Padre = defineComponent({
+      components: { CrudTable },
+      setup() {
+        const ver = ref(true)
+        return { ver, columns: [{ accessorKey: 'pago', header: 'Pago' }], data: [{ pago: 'x' }] }
+      },
+      template: `<CrudTable :data="data" :columns="columns">
+        <template v-if="ver" #pago-cell><span data-qa="celda-pago">Pendiente</span></template>
+      </CrudTable>`,
+    })
+    const w = await mountSuspended(Padre)
+    expect(w.find('[data-qa="celda-pago"]').exists()).toBe(true)
+    ;(w.vm as unknown as { ver: boolean }).ver = false
+    await nextTick()
+    expect(w.find('[data-qa="celda-pago"]').exists()).toBe(false)
+  })
+})
+
+// Lote 4 (07.1): en una pantalla angosta la columna de acciones queda a la vista.
+describe('CrudTable — columnas fijas', () => {
+  const cols = [
+    { accessorKey: 'nombre', header: 'Nombre' },
+    { accessorKey: 'descripcion', header: 'Descripción' },
+    { id: 'acciones', header: '' },
+  ]
+  const data = [{ nombre: 'Rol', descripcion: 'x' }]
+
+  it('la columna `acciones` queda pegada a la derecha', async () => {
+    const w = await montar({ columns: cols, data })
+    const celdas = w.findAll('td[data-pinned="right"]')
+    expect(celdas).toHaveLength(1)
+    expect(w.findAll('th[data-pinned="right"]')).toHaveLength(1)
+  })
+
+  it('una tabla sin columna de acciones no fija nada', async () => {
+    const w = await montar({ columns: cols.slice(0, 2), data })
+    expect(w.find('[data-pinned="right"]').exists()).toBe(false)
+    expect(w.find('[data-pinned="left"]').exists()).toBe(false)
+  })
+
+  it('`fijarPrimera` deja la primera columna pegada a la izquierda', async () => {
+    const w = await montar({ columns: cols, data, fijarPrimera: true })
+    expect(w.findAll('td[data-pinned="left"]')).toHaveLength(1)
+  })
+
+  it('las celdas fijas son opacas: no dejan ver lo que pasa por debajo', async () => {
+    const w = await montar({ columns: cols, data })
+    expect(w.find('[data-slot="root"]').classes()).toContain('[&_[data-pinned=right]]:bg-default')
+  })
+})

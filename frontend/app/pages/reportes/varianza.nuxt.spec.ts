@@ -277,6 +277,38 @@ describe('varianza — tabla', () => {
   })
 })
 
+// Lote 4 (04.20, decisión del owner 2026-10-16): rótulos del local y primera columna fija.
+describe('varianza — tabla en palabras del local y a 768', () => {
+  it('los encabezados dicen lo que se vendió, entre conteos y faltante sin explicar', async () => {
+    const wrapper = await montar()
+    const encabezados = wrapper.findAll('thead th').map(th => th.text())
+    expect(encabezados).toContain('Lo que se vendió')
+    expect(encabezados).toContain('Entre conteos')
+    expect(encabezados).toContain('Faltante sin explicar')
+    for (const jerga of ['Teórico', 'Ventana', 'Sin explicación']) expect(encabezados).not.toContain(jerga)
+    wrapper.unmount()
+  })
+
+  it('el producto queda fijo a la izquierda mientras se desliza la tabla', async () => {
+    const wrapper = await montar()
+    expect(wrapper.findAll('thead th[data-pinned="left"]').map(th => th.text())).toEqual(['Producto'])
+    wrapper.unmount()
+  })
+
+  it('"0 a medio contar" no se muestra: con cero no hay nada que decir', async () => {
+    RESUMEN = {
+      ...RESUMEN_BASE,
+      sinConteo: { ...RESUMEN_BASE.sinConteo, contadoUnaSolaVez: { total: 0, items: [] } },
+    }
+    const wrapper = await montar()
+    const linea = wrapper.find('[data-qa="varianza-sin-conteo"]')
+    expect(linea.text()).toContain('2 productos sin contar')
+    expect(linea.text()).not.toContain('a medio contar')
+    wrapper.unmount()
+    RESUMEN = RESUMEN_BASE
+  })
+})
+
 describe('varianza — resumen', () => {
   // Spec 2026-10-04: la comida del personal tiene su total, pero no es pérdida.
   it('la tarjeta de Comida del personal muestra su total', async () => {

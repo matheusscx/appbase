@@ -90,3 +90,23 @@ describe('compras/index — el admin del tenant ve lo que su tenant contrató', 
     expect(document.body.querySelector('[data-qa="compras-filtro-estado-pago"]')).toBeNull()
   })
 })
+
+// Lote 4 (06.14 / 00.9): a 768 la tabla de quien paga tiene que mostrar "Pago".
+describe('compras/index — forma de la tabla en tablet', () => {
+  function cabecera(texto: string) {
+    return Array.from(document.body.querySelectorAll('th')).find(th => th.textContent?.trim() === texto)
+  }
+
+  it('"Entra a" y "Líneas" se ocultan bajo lg; "Pago" y "Estado" siguen siempre', async () => {
+    permisos = new Set(['Compras:Leer', 'Compras:Pagar'])
+    await montar()
+    for (const t of ['Entra a', 'Líneas']) {
+      expect(cabecera(t)?.className).toContain('lg:table-cell')
+      expect(cabecera(t)?.className).toContain('hidden')
+    }
+    for (const t of ['Estado', 'Pago']) {
+      expect(cabecera(t)).toBeTruthy()
+      expect(cabecera(t)?.className).not.toContain('hidden')
+    }
+  })
+})

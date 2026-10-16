@@ -11,6 +11,11 @@ import RecuentoDetalle from './[id].vue'
 const LOCAL = { id: 'local-1', nombre: 'Local', tipo: 'local', activo: true }
 const BODEGA = { id: 'bodega-1', nombre: 'Bodega centro', tipo: 'bodega', activo: true }
 
+const LINEA = {
+  lineaId: 'l1', itemId: 'i1', itemNombre: 'Harina', itemEliminado: false, unidadMedida: 'kg',
+  stockSistema: '10', cantidadContada: '8', diferencia: '-2', motivoDiferenciaId: null,
+}
+
 const DETALLE_EN_BODEGA = {
   id: 'recuento-1',
   ubicacionId: BODEGA.id,
@@ -23,6 +28,7 @@ const DETALLE_EN_BODEGA = {
   lineas: [],
 }
 
+let lineasBackend: typeof LINEA[] = []
 let ubicacionesBackend: typeof LOCAL[] = [LOCAL]
 
 mockNuxtImport('usePermissionsStore', () => {
@@ -40,7 +46,7 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     if (typeof url !== 'string') return Promise.resolve([])
     if (url.includes('/ubicaciones')) return Promise.resolve(ubicacionesBackend)
-    if (url.includes(`/recuentos/${DETALLE_EN_BODEGA.id}`)) return Promise.resolve(DETALLE_EN_BODEGA)
+    if (url.includes(`/recuentos/${DETALLE_EN_BODEGA.id}`)) return Promise.resolve({ ...DETALLE_EN_BODEGA, lineas: lineasBackend })
     if (url.includes('/motivos-diferencia-inventario')) return Promise.resolve([])
     return Promise.resolve([])
   }
@@ -70,5 +76,19 @@ describe('inventario/recuentos/[id] — la ubicación en el encabezado', () => {
     // encabezado cuando el tenant no tiene más de una ubicación.
     expect(wrapper.text()).not.toContain(BODEGA.nombre)
     wrapper.unmount()
+  })
+})
+
+// Lote 4 (05.13): a 768 el selector de causa se cortaba ("Usar la causa por de…"): tabla de 772 en 672.
+describe('inventario/recuentos/[id] — forma de la tabla en tablet', () => {
+  it('el selector de causa mide 192 px (w-48), no 224', async () => {
+    ubicacionesBackend = [LOCAL]
+    lineasBackend = [LINEA]
+    const wrapper = await montar()
+    const celda = wrapper.findAll('tbody td').at(-1)!
+    expect(celda.find('.w-48').exists()).toBe(true)
+    expect(celda.find('.w-56').exists()).toBe(false)
+    wrapper.unmount()
+    lineasBackend = []
   })
 })
