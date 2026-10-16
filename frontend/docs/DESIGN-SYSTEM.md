@@ -19,6 +19,10 @@ La marca de la app es **Venka** (fuente de la marca, fuera del monorepo:
   `font-display`, **solo** para títulos de pantalla (`AppNavbar`, `AppMarco`) y titulares de marca.
   Las dos se sirven desde `public/fonts/` (woff2 latino, variables, `font-display: swap`, con su
   `OFL-*.txt`) y se precargan en `nuxt.config.ts`; nada de Google Fonts ni `@nuxt/fonts`.
+  **Las cifras de DM Sans miden lo mismo** (modificada, ver el aviso en `OFL-dm-sans.txt`): el
+  original las trae proporcionales y sin `tnum`, así que se regenera con
+  `scripts/fuente-digitos-fijos.py` desde el TTF de origen. No hace falta `tabular-nums` para
+  alinear montos (con la fuente nueva es inocuo); `e2e/layout/marca.spec.ts` lo vigila.
 - **Logos:** `public/marca/venka-positivo.svg` (fondo claro), `venka-negativo.svg` (petróleo) y
   `venka-sello.svg` (cuadrado, menú colapsado). El texto va en trazos: no depende de la fuente.
 - **Dónde vive:** la escala, `menta`, `lima` y las fuentes en el `@theme static` de

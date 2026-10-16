@@ -72,4 +72,34 @@ test.describe('marca Venka', () => {
     const centro = (c: { y: number, height: number }) => c.y + c.height / 2
     expect(Math.abs(centro(cajaLink!) - centro(cajaRotulo!))).toBeLessThan(12)
   })
+
+  test('las cifras de DM Sans miden lo mismo', async ({ page }) => {
+    await page.goto('/login')
+    // La cara solo baja cuando algo la usa: se espera a que el título pinte y se la pide
+    // por nombre en cada peso que mide la prueba.
+    await expect(page.getByText('Contraseña', { exact: true })).toBeVisible()
+    const anchos = await page.evaluate(async () => {
+      const medir = (texto: string, peso: number) => {
+        const span = document.createElement('span')
+        span.textContent = texto
+        span.style.cssText = `position:absolute;visibility:hidden;white-space:nowrap;font:${peso} 32px 'DM Sans'`
+        document.body.appendChild(span)
+        const ancho = span.getBoundingClientRect().width
+        span.remove()
+        return ancho
+      }
+      await Promise.all([400, 700].map(p => document.fonts.load(`${p} 32px 'DM Sans'`, '0123456789')))
+      await document.fonts.ready
+      const cara = [...document.fonts].find(f => f.family.replace(/["']/g, '') === 'DM Sans')
+      return {
+        estado: cara?.status,
+        unos: [400, 700].map(p => medir('1111111111', p)),
+        ceros: [400, 700].map(p => medir('0000000000', p)),
+      }
+    })
+
+    expect(anchos.estado).toBe('loaded')
+    // Cifras de ancho fijo: la columna de montos se alinea sin `tabular-nums`.
+    for (const i of [0, 1]) expect(Math.abs(anchos.unos[i]! - anchos.ceros[i]!)).toBeLessThanOrEqual(0.5)
+  })
 })
