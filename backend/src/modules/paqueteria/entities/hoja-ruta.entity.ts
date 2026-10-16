@@ -45,7 +45,7 @@ export class HojaRuta {
   @Column({ name: 'rendida_el', type: 'timestamptz', nullable: true })
   rendidaEl: Date | null;
 
-  // Totales congelados al rendir; null mientras está abierta (spec § 2).
+  // Totales congelados al rendir; null mientras está abierta (docs/features/paqueteria.md, § Backend).
   @Column({ name: 'total_asignados', type: 'int', nullable: true })
   totalAsignados: number | null;
 

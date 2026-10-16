@@ -52,7 +52,8 @@ export class CreatePaqueteDto {
   @IsBoolean()
   cobroEnDestino: boolean;
 
-  // Ausentes = los defaults de la configuración, copiados al paquete (spec § 3 regla 1).
+  // Ausentes = los defaults de la configuración, copiados al paquete
+  // (docs/features/paqueteria.md, regla 1).
   @IsOptional()
   @IsNumberString()
   @IsDecimalNoNegativo()

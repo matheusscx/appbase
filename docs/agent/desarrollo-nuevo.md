@@ -1168,6 +1168,37 @@ hereda), que es lo que carga el formulario de ítems.
 un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya está construido
 (2026-09-09) y es el que la API tiene que espejar, no contradecir.
 
+- [ ] **Paquetería — fase 2** (producto + backend + frontend; el MVP se construyó el 2026-10-15,
+  [`features/paqueteria.md`](../features/paqueteria.md), y dejó esto afuera a propósito). Cada
+  punto abre su frente con spec; el documento tributario es **fiscal: frente propio**.
+  - **Login del repartidor** — hoy es una ficha que maneja la oficina; un usuario propio con
+    pantalla móvil suma rol, permisos y UI.
+  - **Permisos propios por rol** — hoy todo es `TenantAdminGuard`: un cajero no puede rendir
+    ni escanear, aunque la oficina quiera delegarlo.
+  - **Que el backend exija el contrato del módulo** — `Paquetería:Leer` solo lo lee el menú: un
+    admin de un tenant que no la contrató usa la API igual (borde comercial, no de aislamiento).
+  - **Precio por comuna o por repartidor** — hoy es un default por empresa con override por
+    paquete.
+  - **Importar CSV/Excel** — hoy se carga escaneando, uno a uno o por asignación masiva.
+  - **API de Mercado Libre** — traer dirección y destinatario con el id del envío, y
+    **confirmar qué trae el QR real** (hoy se supone un JSON con `id`; si no lo es, cambia solo
+    `codigo-paquete.ts`). Sin esto el paquete escaneado nace sin dirección ni destinatario.
+  - **Contrarreembolso del valor del producto** — hoy se cobra solo el envío; el producto sería
+    plata de un tercero.
+  - **Que la rendición entre a una Caja** — hoy "Rendir" congela totales y no mueve plata; entrar
+    a una Caja toca cajas (frente aparte).
+  - **Documento tributario del envío** — fiscal, ADR-010; el MVP no emite nada.
+  - **"$ a cobrar si entrega todo" en vivo en Escanear** — hoy la pantalla muestra la cantidad
+    de paquetes con cobro en destino, no el monto, porque sumar `precioEnvio` en el cliente
+    sería regla de negocio en la página; hace falta un campo nuevo en la respuesta de
+    `escanear`.
+  - **Menores diferidos del MVP que tienen efecto de usuario:** un código con byte NUL da 500
+    (patrón de todo el repo: `22021`; el arreglo natural es `normalizarCodigoPaquete`); la lista
+    de rechazados de Escanear no tiene tope ni deduplica (un código rechazado cien veces ocupa
+    cien filas); `GET /hojas-ruta` no acota el largo del rango; `nota` del paquete no tiene
+    `MaxLength`; un `id` numérico de más de 15 dígitos sin comillas en el QR pierde precisión
+    en `JSON.parse`.
+
 ---
 
 ## 3. Refactors — cambian nombres o lugares, no agregan funciones

@@ -33,7 +33,7 @@ export interface PaqueteFila {
   cobroEnDestino: boolean
   precioEnvio: string
   pagoRepartidor: string
-  estado: EstadoPaquete // derivado de las líneas (spec § 3 regla 2)
+  estado: EstadoPaquete // derivado de las líneas (docs/features/paqueteria.md, regla 2)
   hojaRutaId: string | null // la hoja de la línea en_ruta / entregado
   repartidorNombre: string | null
   bloqueado: boolean // entregado en una hoja rendida (regla 7)

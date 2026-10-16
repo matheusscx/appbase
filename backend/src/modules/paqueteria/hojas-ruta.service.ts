@@ -164,7 +164,7 @@ export class HojasRutaService {
   /**
    * Resuelve UN código por llamada: lo crea si no existe y lo asigna a la hoja del repartidor de
    * ese día. El `cobroEnDestino` del interruptor solo vale para un paquete que este escaneo
-   * crea: uno existente conserva el suyo (spec § 3 regla 5b).
+   * crea: uno existente conserva el suyo (docs/features/paqueteria.md, regla 5b).
    */
   async escanear(
     tenantId: string,
@@ -447,9 +447,10 @@ export class HojasRutaService {
   }
 
   /**
-   * Marca la hoja como rendida y le escribe los totales que `totales` calcula ahora. La usa
-   * `rendir` y el seed de la demo (sin usuario) para sus hojas de ejemplo: es la única forma de
-   * congelar, así lo congelado y lo calculado no pueden diferir.
+   * Envoltorio público de `congelar` (el que usa `rendir`): lo llama el seed de la demo, sin
+   * usuario, para sus hojas de ejemplo. Marca la hoja como rendida y le escribe los totales que
+   * `totales` calcula ahora; `congelar` es la única forma de hacerlo, así lo congelado y lo
+   * calculado no pueden diferir.
    *
    * Precondición: quien llama tiene la hoja bloqueada (`FOR UPDATE`) dentro de su transacción.
    * Se defiende sola de lo que quedaría mal: una hoja ya rendida (400) o con paquetes todavía en
@@ -641,9 +642,10 @@ export class HojasRutaService {
   }
 
   /**
-   * La ÚNICA consulta de totales (spec § 7): la usan el detalle, la lista y, al rendir, la que
-   * produce lo que se congela. Calcula en vivo sobre las líneas; leer lo congelado de una hoja
-   * rendida es cosa de quien la lee.
+   * La ÚNICA consulta de totales (docs/features/paqueteria.md, § Los totales salen de UNA
+   * consulta): la usan el detalle, la lista y, al rendir, la que produce lo que se congela.
+   * Calcula en vivo sobre las líneas; leer lo congelado de una hoja rendida es cosa de quien la
+   * lee.
    */
   async totales(
     tenantId: string,

@@ -72,6 +72,7 @@ startup-app/
 │   │       ├── idempotencia/     # Un cobro por intento: Idempotency-Key → respuesta (ADR-026)
 │   │       ├── caja/             # Gestión de cajas (física/virtual, movimientos, cierre)
 │   │       ├── propinas/         # Registro, distribución, liquidación y reportes agregados
+│   │       ├── paqueteria/       # Repartidores, paquetes y hojas de ruta con rendición (admin-only; docs/features/paqueteria.md)
 │   │       ├── resumen-negocio/  # Dashboard de inicio (zona "Hoy"): ventas, por cobrar, pérdidas, más vendidos
 │   │       ├── seeder/           # Seed de datos de desarrollo (corre al arrancar)
 │   │       └── test/             # Módulo de prueba para validación RBAC end-to-end

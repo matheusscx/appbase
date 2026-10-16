@@ -64,10 +64,11 @@ const FROM_PAQUETE_FILA = `
     ) ruta ON TRUE`;
 
 /**
- * Estado del paquete derivado de sus líneas (spec § 3 regla 2). Sin N+1: un LATERAL por fila,
- * apoyado en idx_hoja_ruta_paquetes_paquete. Una línea en_ruta o entregado como mucho por
- * paquete: el índice único y las reglas de asignar/marcar lo garantizan. Lo usan el listado,
- * `filaPorId` y el escaneo. Agregar un `WHERE p.tenant_id = $n AND p.eliminado_el IS NULL`.
+ * Estado del paquete derivado de sus líneas (docs/features/paqueteria.md, regla 2). Sin N+1: un
+ * LATERAL por fila, apoyado en idx_hoja_ruta_paquetes_paquete. Una línea en_ruta o entregado
+ * como mucho por paquete: el índice único y las reglas de asignar/marcar lo garantizan. Lo usan
+ * el listado, `filaPorId` y el escaneo. Agregar un
+ * `WHERE p.tenant_id = $n AND p.eliminado_el IS NULL`.
  */
 export const SELECT_PAQUETE_FILA = `${COLUMNAS_PAQUETE_FILA}${FROM_PAQUETE_FILA}`;
 
