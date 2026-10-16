@@ -330,7 +330,7 @@ async function confirmarCierre() {
       >
         <!-- A conciliar (obligatorias): efectivo primero -->
         <div class="space-y-3">
-          <p class="text-xs font-semibold uppercase text-muted">A conciliar</p>
+          <p class="text-xs font-semibold text-muted">A conciliar</p>
           <div
             v-for="l in obligatorias"
             :key="claveDe(l)"
@@ -351,7 +351,7 @@ async function confirmarCierre() {
               <span class="text-default">Diferencia</span>
               <span
                 v-if="diferenciaDe(l) !== null"
-                :class="diferenciaDe(l)!.gte(0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                :class="diferenciaDe(l)!.gte(0) ? 'text-success' : 'text-error'"
               >
                 {{ diferenciaDe(l)!.gte(0) ? '+' : '' }}{{ formatMonto(diferenciaDe(l)!) }}
               </span>
@@ -362,7 +362,7 @@ async function confirmarCierre() {
 
         <!-- Informativas (opcionales) -->
         <div v-if="informativas.length" class="space-y-3">
-          <p class="text-xs font-semibold uppercase text-muted">Informativas (opcional)</p>
+          <p class="text-xs font-semibold text-muted">Informativas (opcional)</p>
           <div
             v-for="l in informativas"
             :key="claveDe(l)"
@@ -380,7 +380,7 @@ async function confirmarCierre() {
             />
             <div v-if="diferenciaDe(l) !== null" class="flex justify-between text-sm">
               <span class="text-muted">Diferencia</span>
-              <span :class="diferenciaDe(l)!.gte(0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'">
+              <span :class="diferenciaDe(l)!.gte(0) ? 'text-success' : 'text-error'">
                 {{ diferenciaDe(l)!.gte(0) ? '+' : '' }}{{ formatMonto(diferenciaDe(l)!) }}
               </span>
             </div>
@@ -465,7 +465,7 @@ async function confirmarCierre() {
               <span class="text-default">Diferencia</span>
               <span
                 v-if="l.diferencia != null"
-                :class="new Decimal(l.diferencia).gte(0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                :class="new Decimal(l.diferencia).gte(0) ? 'text-success' : 'text-error'"
               >
                 {{ new Decimal(l.diferencia).gte(0) ? '+' : '' }}{{ formatMonto(l.diferencia) }}
               </span>
@@ -505,7 +505,6 @@ async function confirmarCierre() {
       <UButton
         type="submit"
         form="caja-cierre-form"
-        color="error"
         icon="i-lucide-lock"
         :loading="saving"
         :disabled="loading || (fase === 'conteo' ? !obligatoriasCompletas : !conciliacionCompleta)"

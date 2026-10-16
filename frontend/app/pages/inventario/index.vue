@@ -416,7 +416,7 @@ async function registrarAjusteCosto() {
             </span>
           </template>
           <template #costoAjuste-cell="{ row }">
-            <span v-if="esAjusteDeValor(row.original.motivo)" class="font-mono">
+            <span v-if="esAjusteDeValor(row.original.motivo)">
               {{ formatMonto(row.original.costoAnterior, row.original.monedaId) }}
               <span class="text-muted">→</span>
               {{ formatMonto(row.original.costoUnitario, row.original.monedaId) }}

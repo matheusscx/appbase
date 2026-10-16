@@ -35,7 +35,7 @@ const conMonto = computed(() =>
     >
       <UIcon name="i-lucide-tag" class="size-3.5 shrink-0" />
       <span class="min-w-0 flex-1 truncate">{{ promo.nombre }}</span>
-      <span class="shrink-0 font-mono">-{{ formatMonto(promo.monto) }}</span>
+      <span class="shrink-0">-{{ formatMonto(promo.monto) }}</span>
     </p>
   </div>
 </template>

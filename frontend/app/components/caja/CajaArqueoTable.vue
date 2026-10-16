@@ -134,7 +134,7 @@ async function guardar() {
             <td class="py-2 text-right">
               <span
                 v-if="l.diferencia != null"
-                :class="new Decimal(l.diferencia).gte(0) ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+                :class="new Decimal(l.diferencia).gte(0) ? 'text-success' : 'text-error'"
               >
                 {{ formatMonto(l.diferencia) }}
               </span>

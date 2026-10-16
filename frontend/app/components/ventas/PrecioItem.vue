@@ -11,9 +11,9 @@ const { formatMonto } = useFormatters()
 const { getConfig } = useMonedaConversion()
 
 const priceClass = computed(() => {
-  if (props.highlight) return 'text-highlighted font-semibold text-sm font-mono'
-  if (props.muted) return 'text-xs text-muted font-mono'
-  return 'text-sm font-mono text-default'
+  if (props.highlight) return 'text-highlighted font-semibold text-sm'
+  if (props.muted) return 'text-xs text-muted'
+  return 'text-sm text-default'
 })
 </script>
 

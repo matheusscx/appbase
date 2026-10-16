@@ -161,7 +161,7 @@ onMounted(cargar)
           <!-- Masthead -->
           <header class="flex items-start justify-between gap-4 border-b border-default pb-5">
             <div>
-              <p class="text-xs font-medium uppercase tracking-wider text-muted">
+              <p class="text-xs font-medium text-muted">
                 Comprobante de liquidación
               </p>
               <h1 class="mt-1 text-2xl font-semibold text-default">
@@ -179,7 +179,7 @@ onMounted(cargar)
           <!-- Hero: fondo total -->
           <div class="flex flex-wrap items-end justify-between gap-4 py-6">
             <div>
-              <p class="text-xs font-medium uppercase tracking-wider text-muted">
+              <p class="text-xs font-medium text-muted">
                 Fondo total repartido
               </p>
               <p class="mt-1 text-4xl font-bold tabular-nums tracking-tight text-default">
@@ -263,7 +263,7 @@ onMounted(cargar)
           >
             <header class="flex items-start justify-between gap-4 border-b border-default pb-5">
               <div>
-                <p class="text-xs font-medium uppercase tracking-wider text-muted">
+                <p class="text-xs font-medium text-muted">
                   {{ criterioLabel(g.criterio) }}
                 </p>
                 <h1 class="mt-1 text-2xl font-semibold text-default">{{ g.nombre }}</h1>
@@ -277,7 +277,7 @@ onMounted(cargar)
             </header>
 
             <div class="py-6">
-              <p class="text-xs font-medium uppercase tracking-wider text-muted">
+              <p class="text-xs font-medium text-muted">
                 Total del grupo
               </p>
               <p class="mt-1 text-4xl font-bold tabular-nums tracking-tight text-default">
@@ -322,7 +322,7 @@ onMounted(cargar)
           >
             <div class="flex items-start justify-between gap-4 border-b border-default pb-4">
               <div>
-                <p class="text-xs font-medium uppercase tracking-wider text-muted">
+                <p class="text-xs font-medium text-muted">
                   Comprobante de propina
                 </p>
                 <p class="mt-1 text-sm text-muted">

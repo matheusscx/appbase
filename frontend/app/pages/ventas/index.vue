@@ -72,6 +72,8 @@ const loadingResumen = ref(false)
 
 // Mostrar o no la línea es presentación, no una cuenta: el monto ya viene
 // calculado del backend.
+const saldoPendienteHay = computed(() => new Decimal(resumen.value?.saldoPendiente ?? '0').gt(0))
+
 const hayNotas = computed(() =>
   !!resumen.value && !new Decimal(resumen.value.totalNotasCredito).isZero(),
 )
@@ -230,7 +232,7 @@ const columns: TableColumn<VentaResumen>[] = [
         <!-- Resumen -->
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <div class="rounded-lg bg-muted p-3">
-            <p class="text-xs text-muted uppercase tracking-wide">
+            <p class="text-xs text-muted">
               Ventas registradas
             </p>
             <p class="text-lg font-semibold mt-1">
@@ -242,11 +244,11 @@ const columns: TableColumn<VentaResumen>[] = [
               </template>
             </p>
           </div>
-          <div class="rounded-lg bg-success/10 p-3">
-            <p class="text-xs text-success uppercase tracking-wide">
+          <div class="rounded-lg bg-muted p-3">
+            <p class="text-xs text-muted">
               Total facturado
             </p>
-            <p class="text-lg font-semibold text-success mt-1">
+            <p class="text-lg font-semibold text-highlighted mt-1">
               <template v-if="cargandoInicial">
                 —
               </template>
@@ -254,16 +256,16 @@ const columns: TableColumn<VentaResumen>[] = [
                 {{ formatMonto(resumen?.totalFacturado ?? '0') }}
               </template>
             </p>
-            <p v-if="hayNotas" class="text-xs text-success mt-1">
+            <p v-if="hayNotas" class="text-xs text-muted mt-1">
               bruto {{ formatMonto(resumen!.totalBruto) }}
               · notas de crédito −{{ formatMonto(resumen!.totalNotasCredito) }}
             </p>
           </div>
-          <div class="rounded-lg bg-warning/10 p-3">
-            <p class="text-xs text-warning uppercase tracking-wide">
+          <div class="rounded-lg bg-muted p-3">
+            <p class="text-xs text-muted">
               Saldo pendiente
             </p>
-            <p class="text-lg font-semibold text-warning mt-1">
+            <p class="text-lg font-semibold mt-1" :class="saldoPendienteHay ? 'text-warning' : 'text-highlighted'">
               <template v-if="cargandoInicial">
                 —
               </template>
@@ -364,13 +366,13 @@ const columns: TableColumn<VentaResumen>[] = [
             </div>
           </template>
           <template #totalFinal-cell="{ row }">
-            <span class="font-mono">{{ formatMonto(row.original.totalFinal) }}</span>
+            <span>{{ formatMonto(row.original.totalFinal) }}</span>
           </template>
           <template #montoPagado-cell="{ row }">
-            <span class="font-mono">{{ formatMonto(row.original.montoPagado) }}</span>
+            <span>{{ formatMonto(row.original.montoPagado) }}</span>
           </template>
           <template #saldo-cell="{ row }">
-            <span class="font-mono" :class="new Decimal(row.original.saldo).gt(0) ? 'text-warning' : ''">
+            <span :class="new Decimal(row.original.saldo).gt(0) ? 'text-warning' : ''">
               {{ formatMonto(row.original.saldo) }}
             </span>
           </template>

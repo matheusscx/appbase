@@ -158,7 +158,7 @@ async function confirmar() {
       <div class="flex flex-col gap-4">
         <div class="flex justify-between text-sm text-muted">
           <span>Disponible para reembolsar</span>
-          <span class="font-mono">{{ formatMonto(disponible) }}</span>
+          <span>{{ formatMonto(disponible) }}</span>
         </div>
 
         <div class="flex flex-col gap-1">

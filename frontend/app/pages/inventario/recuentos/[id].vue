@@ -338,7 +338,7 @@ const columns: TableColumn<LineaRow>[] = [
       <div class="w-full space-y-6">
         <ULink
           to="/inventario/recuentos"
-          class="text-sm text-highlighted inline-flex items-center gap-1"
+          class="text-sm text-primary inline-flex items-center gap-1"
         >
           <UIcon name="i-lucide-arrow-left" class="w-4 h-4" />
           Volver a recuentos

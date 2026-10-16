@@ -47,7 +47,7 @@ La marca de la app es **Venka** (fuente de la marca, fuera del monorepo:
   **`app/app.config.ts`**, el único: Nuxt 4 lee el de `app/` (srcDir). Hasta el 2026-10-16 había
   otro en la raíz de `frontend/` con alias y overrides de `card`, `modal` y `formField` que nunca se
   cargaron; se borró (owner, auditoría UX 00.1) y la app quedó con los rellenos por defecto de Nuxt UI.
-- **Lo que no cambia de color:** los colores financieros de Caja y el verde y rojo de sube/baja.
+- **Lo que no cambia de color:** el verde y el rojo de sube/baja y de entrada/salida. Caja ya no tiene excepción de paleta: usa `text-success` y `text-error` como el resto (ver Colores financieros).
 
 ## Semantic Color Tokens
 
@@ -58,9 +58,8 @@ La marca de la app es **Venka** (fuente de la marca, fuera del monorepo:
 - **text-muted**: Secondary text (descriptions, hints, meta)
   - Light: `text-gray-500`
   - Dark: `dark:text-gray-400`
-- **text-highlighted**: Accent text (links, primary actions)
-  - Light: `text-primary-600`
-  - Dark: `dark:text-primary-400`
+- **text-highlighted**: el gris más oscuro de la escala neutral (títulos de tarjeta, cifras grandes). **No es color de marca ni de link.**
+- **text-primary**: los links y el texto de acción, en petróleo (9,47:1 sobre blanco; owner 2026-10-16, auditoría UX 00.2 y 08.18).
 - **text-error / text-warning / text-success**: estados. Resuelven al 500 de `peligro`,
   `alerta` y `exito` (ver Identidad Venka); no usar `text-red-*` ni similares.
 
@@ -83,11 +82,24 @@ La marca de la app es **Venka** (fuente de la marca, fuera del monorepo:
   - Light: `divide-gray-100`
   - Dark: `dark:divide-gray-800`
 
-### Financial Semantic Colors (Context-Specific)
-These are intentionally retained in the Caja module for clarity:
-- **Green** (income, positive): `text-green-600 dark:text-green-400`, `bg-green-50 dark:bg-green-900/20`
-- **Red** (expense, negative): `text-red-600 dark:text-red-400`, `bg-red-50 dark:bg-red-900/20`
-- **Blue** (balance, neutral): `text-blue-600 dark:text-blue-400`, `bg-blue-50 dark:bg-blue-900/20`
+### Colores financieros (Caja)
+Sin excepción de paleta desde el 2026-10-16 (owner, auditoría UX 03.8): la excepción existía por
+contraste, y `green-600` medía 3,22:1. Las cifras de plata usan los tokens de estado, que ahora son
+verde petróleo y rojo legibles (5,36:1 y 6,42:1 sobre blanco):
+- **Entrada / positivo:** `text-success`. **Salida / negativo:** `text-error`.
+- Las tarjetas de resumen son neutras (`bg-muted`) con la cifra en `text-highlighted`; el color va
+  solo en la cifra de entrada/salida, nunca como fondo de tarjeta.
+- Los botones principales de Caja ("Enviar conteo", "Confirmar cierre", "Registrar entrada",
+  "Continuar conciliación") van en `primary`; el verde y el rojo quedan en el selector
+  Entrada/Salida y en las cifras.
+
+### Cifras, rótulos y tarjetas (auditoría UX 00.12)
+- **Montos y cifras en DM Sans**, que trae los dígitos de ancho fijo: nada de `font-mono`. Se queda
+  solo en identificadores técnicos (número de serie, folio, UUID, código de bulto, prefijo). La lista
+  explícita vive en `app/invariants/identidad-visual.invariant.spec.ts`.
+- **Rótulos en oración**, tono normal: sin `uppercase` ni `tracking-wide`.
+- **Tarjetas de resumen neutras** (`bg-muted`, cifra en `text-highlighted`). El color de estado se
+  reserva para un estado real (p. ej. saldo pendiente mayor que $0 en `text-warning`, nunca $0).
 
 ### Branding Exceptions (intentional `primary` palette)
 
@@ -99,9 +111,9 @@ Usar tokens semánticos en UI de producto; estas excepciones son **marca fija**,
 | Panel de marca del ingreso | `pages/login.vue` (slot `lateral` de `AppMarco`, solo ≥ `lg`) | `bg-primary` con texto blanco, `primary-100` y `primary-200` (≥ 6:1 medido); tarjeta de cierre en `bg-primary-600`; puntos `bg-menta` y `bg-lima` |
 | Menú lateral petróleo | `layouts/dashboard.vue` (`sobrePetroleo`) | Reasigna los tokens semánticos **dentro** del lateral a la escala clara, así los estados de `UNavigationMenu` salen solos sobre petróleo; la sección activa lleva una marca `bg-menta` de 3 px; el nombre del local usa `text-highlighted`, que ahí resuelve a `primary-50` |
 | `bg-primary-50 dark:bg-primary-950` | `index.vue` | Superficie de acento decorativa en la bienvenida |
-| Avatares de tenant | `select-tenant.vue` | `UAvatar` con colores semánticos Nuxt UI (`primary`, `secondary`, …) |
+| Avatares de tenant | `select-tenant.vue` | Tonos de petróleo y menta por `ui` (`bg-primary/10`, `bg-menta/40`, `bg-primary`); nunca colores de estado, que se leen como alerta |
 
-Links y acentos interactivos usan **`text-highlighted`**, no `text-primary-600`.
+Links y acentos interactivos usan **`text-primary`** (petróleo), no `text-highlighted` (que es gris) ni `text-primary-600`. Los títulos del ingreso (`AppMarco`) van en `text-primary-800`, la tinta petróleo de la maqueta.
 
 ## Espaciado (padding, margin, gap)
 

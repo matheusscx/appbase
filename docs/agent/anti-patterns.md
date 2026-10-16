@@ -522,10 +522,10 @@ qué hacer el resto de la operación.
 <p class="text-muted bg-default">
 ```
 
-Rompe el modo oscuro y el theming por tenant. Excepción única: colores financieros
-(verde/rojo/azul) en el módulo Caja.
+Rompe el modo oscuro y el theming por tenant. Sin excepciones (Caja usa
+`text-success` / `text-error`).
 → *AUTOMATIZADO: `frontend/scripts/check-design-tokens.mjs` (`npm run design:check` en el
-gate; `--staged` en el pre-commit) falla si un `.vue` fuera de `app/components/caja/` usa
+gate; `--staged` en el pre-commit) falla si un `.vue` usa
 neutrales hardcodeados (`*-gray-N`, `bg-white/black`, `dark:` sobre neutrales). Los
 colores de marca (`bg-primary-*`, `text-white` sobre marca) quedan fuera de alcance.*
 

@@ -352,7 +352,7 @@ function onReembolsoSuccess(payload: {
               <h2 class="text-base font-semibold">
                 Monto
               </h2>
-              <span class="font-mono text-lg font-semibold">{{ formatMonto(orden.monto) }}</span>
+              <span class="text-lg font-semibold">{{ formatMonto(orden.monto) }}</span>
             </div>
           </template>
           <p class="text-sm text-muted">
@@ -407,7 +407,7 @@ function onReembolsoSuccess(payload: {
               />
             </template>
             <template #monto-cell="{ row }">
-              <span class="font-mono">{{ row.original.monto ? formatMonto(row.original.monto) : '—' }}</span>
+              <span>{{ row.original.monto ? formatMonto(row.original.monto) : '—' }}</span>
             </template>
             <template #codigoAutorizacion-cell="{ row }">
               <span class="font-mono text-xs text-muted">{{ row.original.codigoAutorizacion ?? '—' }}</span>

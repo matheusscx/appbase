@@ -80,8 +80,8 @@ function claseMonto(val: string | null): string {
   const d = new Decimal(val)
   if (d.isZero()) return 'text-muted'
   return d.gt(0)
-    ? 'text-green-600 dark:text-green-400'
-    : 'text-red-600 dark:text-red-400'
+    ? 'text-success'
+    : 'text-error'
 }
 </script>
 
@@ -116,7 +116,7 @@ function claseMonto(val: string | null): string {
         </div>
         <div>
           <p class="text-xs text-muted">Efectivo del día</p>
-          <p class="text-lg font-semibold font-mono" :class="claseMonto(resumen.efectivoSuma)">
+          <p class="text-lg font-semibold" :class="claseMonto(resumen.efectivoSuma)">
             {{ formatMonto(resumen.efectivoSuma) }}
           </p>
         </div>
@@ -134,7 +134,7 @@ function claseMonto(val: string | null): string {
           <p class="text-sm text-muted">
             Marcar visto registra <strong>quién</strong> revisó y <strong>cuándo</strong>,
             y saca el cierre de esta lista. Los umbrales se configuran en
-            <ULink to="/configuracion/preferencias-financieras" class="text-highlighted">
+            <ULink to="/configuracion/preferencias-financieras" class="text-primary">
               Preferencias financieras
             </ULink>.
           </p>
@@ -165,10 +165,10 @@ function claseMonto(val: string | null): string {
 
         <template #peorDiferencia-cell="{ row }">
           <div class="space-y-0.5">
-            <p class="font-mono font-semibold text-error">
+            <p class="font-semibold text-error">
               {{ formatMonto(row.original.peorDiferencia) }}
             </p>
-            <p class="text-xs text-muted font-mono" :class="claseMonto(row.original.diferencia)">
+            <p class="text-xs text-muted" :class="claseMonto(row.original.diferencia)">
               Efectivo {{ row.original.diferencia != null ? formatMonto(row.original.diferencia) : '—' }}
             </p>
           </div>

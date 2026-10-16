@@ -205,7 +205,7 @@ watch(clienteDrawerOpen, (open) => {
       >
         <div class="min-w-0">
           <p class="text-sm font-medium text-default truncate">{{ customer.nombre }}</p>
-          <p v-if="customer.rut" class="text-xs text-muted font-mono truncate">{{ customer.rut }}</p>
+          <p v-if="customer.rut" class="text-xs text-muted truncate">{{ customer.rut }}</p>
         </div>
         <div class="flex items-center gap-1 shrink-0">
           <UButton
@@ -251,7 +251,7 @@ watch(clienteDrawerOpen, (open) => {
             <p v-if="linea.personalizacionResumen" class="text-xs text-muted truncate">
               {{ linea.personalizacionResumen }}
             </p>
-            <p class="text-xs text-muted font-mono">
+            <p class="text-xs text-muted">
               {{ precioUnitarioLinea(index) }} c/u · {{ unidadBaseItem(linea.item) }}
             </p>
             <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />

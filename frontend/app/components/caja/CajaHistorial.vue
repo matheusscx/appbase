@@ -101,10 +101,10 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
           </UBadge>
         </template>
         <template #saldoInicial-cell="{ row }">
-          <span class="font-mono">{{ formatMonto(row.original.saldoInicial) }}</span>
+          <span>{{ formatMonto(row.original.saldoInicial) }}</span>
         </template>
         <template #saldoFinal-cell="{ row }">
-          <span class="font-mono">{{ formatMonto(row.original.saldoFinal) }}</span>
+          <span>{{ formatMonto(row.original.saldoFinal) }}</span>
         </template>
         <!-- Suma de TODAS las líneas del arqueo, no solo el efectivo: con la
              columna sobre `diferencia` una caja cerrada con -500 en tarjeta se
@@ -112,14 +112,14 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
         <template #diferenciaTotal-cell="{ row }">
           <span
             v-if="row.original.diferenciaTotal != null"
-            class="font-mono"
+           
             :class="diferenciaPositiva(row.original.diferenciaTotal)
-              ? 'text-green-600 dark:text-green-400'
-              : 'text-red-600 dark:text-red-400'"
+              ? 'text-success'
+              : 'text-error'"
           >
             {{ diferenciaPositiva(row.original.diferenciaTotal) ? '+' : '' }}{{ formatMonto(row.original.diferenciaTotal) }}
           </span>
-          <span v-else class="font-mono text-muted">—</span>
+          <span v-else class="text-muted">—</span>
         </template>
         <template #empty>
           <AppEstadoLista

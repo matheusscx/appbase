@@ -159,18 +159,18 @@ onMounted(cargar)
         <!-- Resumen -->
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <div class="rounded-lg bg-muted p-3">
-            <p class="text-xs text-muted uppercase tracking-wide">
+            <p class="text-xs text-muted">
               Pagos registrados
             </p>
             <p class="text-lg font-semibold mt-1">
               {{ loadingResumen ? '…' : (resumen?.totalPagos ?? 0) }}
             </p>
           </div>
-          <div class="rounded-lg bg-success/10 p-3">
-            <p class="text-xs text-success uppercase tracking-wide">
+          <div class="rounded-lg bg-muted p-3">
+            <p class="text-xs text-muted">
               Total cobrado
             </p>
-            <p class="text-lg font-semibold text-success mt-1">
+            <p class="text-lg font-semibold text-highlighted mt-1">
               {{ loadingResumen ? '…' : formatMonto(resumen?.montoNeto ?? '0') }}
             </p>
             <p
@@ -186,11 +186,11 @@ onMounted(cargar)
               </template>
             </p>
           </div>
-          <div class="rounded-lg bg-primary/10 p-3">
-            <p class="text-xs text-primary uppercase tracking-wide">
+          <div class="rounded-lg bg-muted p-3">
+            <p class="text-xs text-muted">
               Cobrado hoy
             </p>
-            <p class="text-lg font-semibold text-primary mt-1">
+            <p class="text-lg font-semibold text-highlighted mt-1">
               {{ loadingResumen ? '…' : formatMonto(resumen?.netoHoy ?? '0') }}
               <span class="text-xs font-normal">({{ resumen?.pagosHoy ?? 0 }})</span>
             </p>
@@ -271,10 +271,10 @@ onMounted(cargar)
             <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
           </template>
           <template #monto-cell="{ row }">
-            <span class="font-mono">{{ formatMonto(row.original.monto) }}</span>
+            <span>{{ formatMonto(row.original.monto) }}</span>
           </template>
           <template #vuelto-cell="{ row }">
-            <span class="font-mono text-muted">
+            <span class="text-muted">
               {{ row.original.vuelto && new Decimal(row.original.vuelto).gt(0) ? formatMonto(row.original.vuelto) : '—' }}
             </span>
           </template>

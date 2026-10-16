@@ -281,7 +281,7 @@ async function confirmar() {
         <div class="flex flex-col gap-1">
           <div class="flex justify-between text-sm text-muted">
             <span>Disponible para nota de crédito</span>
-            <span class="font-mono">{{ formatMonto(disponible) }}</span>
+            <span>{{ formatMonto(disponible) }}</span>
           </div>
           <div
             v-for="p in mostrarPorPorcion ? porPorcion : []"
@@ -289,7 +289,7 @@ async function confirmar() {
             class="flex justify-between pl-3 text-xs text-dimmed"
           >
             <span class="capitalize">{{ p.clasificacion }}</span>
-            <span class="font-mono">{{ formatMonto(p.monto) }}</span>
+            <span>{{ formatMonto(p.monto) }}</span>
           </div>
         </div>
 

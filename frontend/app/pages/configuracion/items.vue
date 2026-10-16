@@ -1922,7 +1922,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
               {{ formatearBorradoPor(row.original) }}
             </p>
             <div class="text-sm text-muted mt-0.5 flex flex-wrap items-center gap-3">
-              <span class="font-mono">{{
+              <span>{{
                 row.original.tipo === 'ingrediente'
                   ? formatMonto('0', row.original.monedaId)
                   : formatMonto(row.original.precioBase, row.original.monedaId)
@@ -1940,7 +1940,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 <span v-else-if="row.original.tipo === 'producto' && row.original.modoInventario === 'lote'">(lotes)</span>
                 <span v-else>{{ row.original.unidadMedida }}</span>
               </span>
-              <span v-if="row.original.tipo === 'producto' || row.original.tipo === 'ingrediente'" class="font-mono">
+              <span v-if="row.original.tipo === 'producto' || row.original.tipo === 'ingrediente'">
                 · Costo: {{ row.original.costoActual ? formatMonto(row.original.costoActual, row.original.monedaId) : '—' }}
               </span>
               <UBadge
@@ -2203,7 +2203,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 </UFormField>
                 <UFormField v-else label="Costo vigente">
                   <div class="flex items-center justify-between gap-2">
-                    <span class="font-mono text-sm text-default">
+                    <span class="text-sm text-default">
                       {{ formCostoActual != null ? formatMonto(formCostoActual, form.monedaId) : '—' }}
                     </span>
                     <UButton
@@ -2331,7 +2331,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   class="flex items-center justify-between text-sm"
                 >
                   <span class="text-muted">{{ fila.nombre }}</span>
-                  <span class="font-mono">{{ formatStock(fila.stock, form.unidadMedida) }}</span>
+                  <span>{{ formatStock(fila.stock, form.unidadMedida) }}</span>
                 </div>
               </div>
             </div>
@@ -2363,7 +2363,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 </UFormField>
                 <UFormField v-else label="Costo vigente">
                   <div class="flex items-center justify-between gap-2">
-                    <span class="font-mono text-sm text-default">
+                    <span class="text-sm text-default">
                       {{ formCostoActual != null ? formatMonto(formCostoActual, form.monedaId) : '—' }}
                     </span>
                     <UButton
@@ -2398,7 +2398,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                   class="flex items-center justify-between text-sm"
                 >
                   <span class="text-muted">{{ fila.nombre }}</span>
-                  <span class="font-mono">{{ formatStock(fila.stock, form.unidadMedida) }}</span>
+                  <span>{{ formatStock(fila.stock, form.unidadMedida) }}</span>
                 </div>
               </div>
             </div>
@@ -3173,12 +3173,12 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             <span v-else>{{ row.original.cantidad }}</span>
           </template>
           <template #costoUnitario-cell="{ row }">
-            <span v-if="esAjusteDeValor(row.original.motivo)" class="font-mono">
+            <span v-if="esAjusteDeValor(row.original.motivo)">
               {{ formatMonto(row.original.costoAnterior, historialItemMonedaId) }}
               <span class="text-muted">→</span>
               {{ formatMonto(row.original.costoUnitario, historialItemMonedaId) }}
             </span>
-            <span v-else class="font-mono">
+            <span v-else>
               {{ row.original.costoUnitario ? formatMonto(row.original.costoUnitario, historialItemMonedaId) : '—' }}
             </span>
           </template>

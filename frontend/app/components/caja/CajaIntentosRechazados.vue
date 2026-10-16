@@ -93,7 +93,7 @@ const columns: TableColumn<IntentoRechazado>[] = [
           <NuxtLink
             v-if="row.original.ventaId"
             :to="{ path: '/ventas', query: { venta: row.original.ventaId } }"
-            class="text-xs text-highlighted hover:underline"
+            class="text-xs text-primary hover:underline"
           >
             Ver venta
           </NuxtLink>
@@ -105,7 +105,7 @@ const columns: TableColumn<IntentoRechazado>[] = [
         </span>
       </template>
       <template #montoSolicitado-cell="{ row }">
-        <span class="font-mono font-semibold text-red-600 dark:text-red-400">
+        <span class="font-semibold text-error">
           {{ formatMonto(row.original.montoSolicitado) }}
         </span>
       </template>

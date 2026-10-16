@@ -382,7 +382,7 @@ function moverAbajo(index: number) {
               >
                 <template #description="{ item }">
                   {{ item.description }}
-                  <span class="block font-mono text-xs mt-0.5 opacity-60">Ej: {{ item.example }}</span>
+                  <span class="block text-xs mt-0.5 opacity-60">Ej: {{ item.example }}</span>
                 </template>
               </URadioGroup>
             </UFormField>
@@ -437,7 +437,7 @@ function moverAbajo(index: number) {
               <p class="text-sm text-muted">
                 Dejá un umbral en <strong>0</strong> para apagarlo. Para elegir los
                 números, mirá primero la
-                <ULink to="/cajas/tendencia" class="text-highlighted">
+                <ULink to="/cajas/tendencia" class="text-primary">
                   tendencia de descuadres
                 </ULink>: sirve saber cuánto descuadra tu local de verdad.
               </p>

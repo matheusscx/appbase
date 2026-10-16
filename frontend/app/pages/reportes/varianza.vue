@@ -393,7 +393,7 @@ const columns: TableColumn<VarianzaFila>[] = [
               class="rounded-lg bg-muted p-4"
               :data-qa="`varianza-total-${t.clave}`"
             >
-              <p class="text-xs text-muted uppercase tracking-wide">
+              <p class="text-xs text-muted">
                 {{ t.titulo }}
               </p>
               <p class="text-lg font-semibold mt-1">

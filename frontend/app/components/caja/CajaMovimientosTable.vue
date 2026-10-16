@@ -152,7 +152,7 @@ const columns: TableColumn<typeof movimientos.value[number]>[] = [
               <NuxtLink
                 v-if="row.original.ventaId"
                 :to="{ path: '/ventas', query: { venta: row.original.ventaId } }"
-                class="text-xs text-highlighted hover:underline"
+                class="text-xs text-primary hover:underline"
               >
                 Ver venta
               </NuxtLink>
@@ -163,10 +163,10 @@ const columns: TableColumn<typeof movimientos.value[number]>[] = [
           </template>
           <template #monto-cell="{ row }">
             <span
-              class="font-mono font-semibold"
+              class="font-semibold"
               :class="row.original.tipo === 'entrada'
-                ? 'text-green-600 dark:text-green-400'
-                : 'text-red-600 dark:text-red-400'"
+                ? 'text-success'
+                : 'text-error'"
             >
               {{ row.original.tipo === 'entrada' ? '+' : '-' }}
               {{ formatMonto(row.original.monto) }}

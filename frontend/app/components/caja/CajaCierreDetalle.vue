@@ -36,7 +36,7 @@ const puedeFinalizar = computed(() => enConciliacion.value && !props.readonly)
         >
           <template #actions>
             <UButton
-              color="warning"
+              color="primary"
               variant="solid"
               size="sm"
               @click="() => { cierreDrawerOpen = true }"

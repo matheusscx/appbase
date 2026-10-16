@@ -5,7 +5,7 @@
 // Rompe el modo oscuro y el theming por tenant. Ver frontend/docs/DESIGN-SYSTEM.md y
 // docs/agent/anti-patterns.md.
 //
-// Excepción: colores financieros en app/components/caja/ (verde/rojo/azul).
+// Sin excepciones: ni siquiera Caja (las cifras de plata usan text-success / text-error).
 // Fuera de alcance a propósito: colores de MARCA (bg-primary-*, text-white sobre marca)
 // y `dark:` sobre colores de marca — no son neutrales y no rompen el sistema de tokens.
 //
@@ -26,7 +26,6 @@ const RULES = [
   { re: /\bbg-(white|black)\b/, hint: 'usá bg-default / bg-elevated / bg-inverted' },
   { re: /\bdark:(bg|text|border|divide|ring)-(gray|slate|zinc|neutral|stone|white|black)\b/, hint: 'no uses dark: sobre neutrales — los tokens semánticos ya adaptan el modo oscuro' },
 ]
-const EXCLUDE = 'app/components/caja/'
 
 function allVueFiles(dir) {
   const out = []
@@ -44,8 +43,7 @@ function stagedVueFiles() {
     .map((f) => join(root, f.startsWith('frontend/') ? f.slice('frontend/'.length) : f))
 }
 
-const files = (staged ? stagedVueFiles() : allVueFiles(join(root, 'app')))
-  .filter((f) => !relative(root, f).replace(/\\/g, '/').includes(EXCLUDE))
+const files = staged ? stagedVueFiles() : allVueFiles(join(root, 'app'))
 
 const violations = []
 for (const file of files) {
@@ -64,7 +62,6 @@ if (violations.length) {
   for (const v of violations) {
     console.error(`  ${v.file}:${v.line}  «${v.cls}»  → ${v.hint}`)
   }
-  console.error('\nExcepción única: colores financieros en app/components/caja/.')
   process.exit(1)
 }
 console.log(`✓ Design tokens OK (${files.length} .vue revisados, 0 neutrales hardcodeados).`)

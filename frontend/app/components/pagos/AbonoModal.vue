@@ -156,7 +156,7 @@ async function confirmar() {
     <template #body>
       <div class="flex flex-col gap-4">
         <div class="flex justify-between text-base font-semibold">
-          <span>Saldo pendiente</span><span class="font-mono">{{ formatMonto(saldo) }}</span>
+          <span>Saldo pendiente</span><span>{{ formatMonto(saldo) }}</span>
         </div>
 
         <div class="flex flex-col gap-2">
@@ -211,16 +211,16 @@ async function confirmar() {
 
         <div class="text-sm space-y-1 border-t border-default pt-2">
           <div class="flex justify-between text-muted">
-            <span>Pagado</span><span class="font-mono">{{ formatMonto(suma) }}</span>
+            <span>Pagado</span><span>{{ formatMonto(suma) }}</span>
           </div>
           <div class="flex justify-between text-muted">
-            <span>Restante</span><span class="font-mono">{{ formatMonto(resumen.restante) }}</span>
+            <span>Restante</span><span>{{ formatMonto(resumen.restante) }}</span>
           </div>
           <div
             class="flex justify-between font-medium"
             :class="new Decimal(resumen.vuelto).gt(0) ? 'text-success' : 'text-default'"
           >
-            <span>Vuelto</span><span class="font-mono">{{ formatMonto(resumen.vuelto) }}</span>
+            <span>Vuelto</span><span>{{ formatMonto(resumen.vuelto) }}</span>
           </div>
           <p v-if="resumen.excedenteSinVuelto" class="text-error text-xs">
             Los pagos con métodos sin vuelto superan el saldo: ese excedente no se puede devolver.

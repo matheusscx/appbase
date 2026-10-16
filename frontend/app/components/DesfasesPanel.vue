@@ -326,7 +326,7 @@ function onDescartar() {
                 {{ fila.afectados.map((i) => i.nombre).join(', ') }}
               </div>
             </td>
-            <td class="px-3 py-3 align-top text-right font-mono tabular-nums">
+            <td class="px-3 py-3 align-top text-right tabular-nums">
               <div class="text-default">
                 {{ formatMonto(fila.costoActual) }}
                 <span class="text-muted">→</span>

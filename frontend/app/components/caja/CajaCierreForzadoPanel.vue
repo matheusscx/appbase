@@ -283,7 +283,7 @@ const ESTADO_LABEL: Record<string, string> = {
       <div class="flex justify-end">
         <UButton
           data-qa="continuar-conciliacion"
-          color="warning"
+          color="primary"
           variant="solid"
           icon="i-lucide-scale"
           @click="() => { drawerOpen = true }"

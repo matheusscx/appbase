@@ -124,7 +124,6 @@ async function guardar() {
         type="submit"
         form="caja-movimiento-form"
         :loading="saving"
-        :color="form.tipo === 'entrada' ? 'success' : 'error'"
       >
         Registrar {{ form.tipo }}
       </UButton>

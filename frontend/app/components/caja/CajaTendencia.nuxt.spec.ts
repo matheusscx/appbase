@@ -140,15 +140,15 @@ describe('CajaTendencia', () => {
     const wrapper = await mountSuspended(CajaTendencia)
 
     expect(wrapper.text()).not.toContain('+$0')
-    expect(wrapper.html()).not.toContain('text-green-600')
+    expect(wrapper.html()).not.toContain('text-success')
   })
 
   it('pinta el faltante en rojo y el sobrante en verde', async () => {
     const wrapper = await mountSuspended(CajaTendencia)
     const html = wrapper.html()
 
-    expect(html).toContain('text-red-600')
-    expect(html).toContain('text-green-600')
+    expect(html).toContain('text-error')
+    expect(html).toContain('text-success')
   })
 
   // Task 5: la nota del día de negocio, debajo de los filtros de fecha.

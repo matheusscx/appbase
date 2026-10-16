@@ -26,11 +26,11 @@ const cuadro = computed(() => diferenciaTotal.value.isZero())
       <UIcon
         :name="cuadro ? 'i-lucide-circle-check' : 'i-lucide-triangle-alert'"
         class="w-5 h-5"
-        :class="cuadro ? 'text-green-600 dark:text-green-400' : 'text-red-600 dark:text-red-400'"
+        :class="cuadro ? 'text-success' : 'text-error'"
       />
       <span
         class="font-semibold"
-        :class="cuadro ? 'text-green-700 dark:text-green-300' : 'text-red-700 dark:text-red-300'"
+        :class="cuadro ? 'text-success' : 'text-error'"
       >
         <template v-if="cuadro">
           Cuadró

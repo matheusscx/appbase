@@ -9,11 +9,20 @@ onMounted(async () => {
   if (tenantStore.tenants.length === 0) {
     await tenantStore.fetchMyTenants()
   }
+  // Sin locales no hay nada que elegir: la pantalla "sin empresa" explica qué hacer.
+  if (tenantStore.tenants.length === 0 && !tenantStore.error) {
+    await navigateTo('/no-tenant')
+  }
 })
 
-const AVATAR_COLORS = ['primary', 'secondary', 'success', 'warning', 'error', 'info'] as const
-function avatarColor(name: string): typeof AVATAR_COLORS[number] {
-  return AVATAR_COLORS[name.charCodeAt(0) % AVATAR_COLORS.length]!
+// Tonos de la marca (petróleo y menta); los de estado (rojo, ámbar) se leen como alerta.
+const AVATAR_TONOS = [
+  { root: 'bg-primary/10', fallback: 'text-primary' },
+  { root: 'bg-menta/40', fallback: 'text-primary' },
+  { root: 'bg-primary', fallback: 'text-inverted' },
+] as const
+function avatarUi(name: string) {
+  return AVATAR_TONOS[name.charCodeAt(0) % AVATAR_TONOS.length]!
 }
 
 async function select(tenantId: string) {
@@ -62,7 +71,7 @@ const gridClass = computed(() =>
         <div class="relative shrink-0">
           <UAvatar
             :alt="tenant.nombre"
-            :color="avatarColor(tenant.nombre)"
+            :ui="avatarUi(tenant.nombre)"
             size="md"
             :class="switching === tenant.tenantId ? 'opacity-50' : ''"
           />

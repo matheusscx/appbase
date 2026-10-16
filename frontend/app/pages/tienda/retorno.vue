@@ -86,7 +86,7 @@ onMounted(async () => {
             <p class="text-sm text-muted">Tu compra fue registrada correctamente.</p>
             <div v-if="tipoPago" class="text-sm text-muted">
               <span>{{ formatTipoPago(tipoPago) }}</span>
-              <span v-if="tarjetaUltimos4" class="font-mono"> ····{{ tarjetaUltimos4 }}</span>
+              <span v-if="tarjetaUltimos4"> ····{{ tarjetaUltimos4 }}</span>
               <span v-if="numeroCuotas && numeroCuotas > 1"> · {{ numeroCuotas }} cuotas</span>
             </div>
             <UButton

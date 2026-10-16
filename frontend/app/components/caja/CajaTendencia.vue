@@ -94,8 +94,8 @@ function claseMonto(val: string): string {
   const d = new Decimal(val)
   if (d.isZero()) return 'text-muted'
   return d.gt(0)
-    ? 'text-green-600 dark:text-green-400'
-    : 'text-red-600 dark:text-red-400'
+    ? 'text-success'
+    : 'text-error'
 }
 
 function signo(val: string): string {
@@ -144,12 +144,12 @@ function onSelectFila(_e: Event, row: Row<TendenciaDescuadres>) {
       @select="onSelectFila"
     >
       <template #efectivoSuma-cell="{ row }">
-        <span class="font-mono font-semibold" :class="claseMonto(row.original.efectivoSuma)">
+        <span class="font-semibold" :class="claseMonto(row.original.efectivoSuma)">
           {{ signo(row.original.efectivoSuma) }}{{ formatMonto(row.original.efectivoSuma) }}
         </span>
       </template>
       <template #otrosMediosSuma-cell="{ row }">
-        <span class="font-mono" :class="claseMonto(row.original.otrosMediosSuma)">
+        <span :class="claseMonto(row.original.otrosMediosSuma)">
           {{ signo(row.original.otrosMediosSuma) }}{{ formatMonto(row.original.otrosMediosSuma) }}
         </span>
       </template>

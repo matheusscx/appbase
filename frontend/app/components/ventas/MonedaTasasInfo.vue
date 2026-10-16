@@ -33,7 +33,7 @@ const monedasExtranjeras = computed(() => monedasExtranjerasDeIds(props.monedaId
           <li
             v-for="moneda in monedasExtranjeras"
             :key="moneda.monedaId"
-            class="text-default font-mono text-xs"
+            class="text-default text-xs"
           >
             {{ formatTasa(moneda) }}
           </li>

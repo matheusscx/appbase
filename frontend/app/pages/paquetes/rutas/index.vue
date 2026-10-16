@@ -164,7 +164,7 @@ const columns: TableColumn<HojaRutaFila>[] = [
             <template #repartidorNombre-cell="{ row }">
               <NuxtLink
                 :to="`/paquetes/rutas/${row.original.id}`"
-                class="font-medium text-highlighted underline-offset-2 hover:underline focus-visible:underline"
+                class="font-medium text-primary underline-offset-2 hover:underline focus-visible:underline"
                 :data-qa="`rutas-fila-${row.original.id}`"
               >
                 {{ row.original.repartidorNombre }}
@@ -183,12 +183,12 @@ const columns: TableColumn<HojaRutaFila>[] = [
             </template>
 
             <template #montoCobradoDestino-cell="{ row }">
-              <span class="font-mono text-sm">{{ formatOficial(row.original.montoCobradoDestino) }}</span>
+              <span class="text-sm">{{ formatOficial(row.original.montoCobradoDestino) }}</span>
             </template>
 
             <template #netoARendir-cell="{ row }">
               <span
-                class="font-mono text-sm"
+                class="text-sm"
                 :class="presentarNeto(row.original.netoARendir).negativo ? 'font-semibold text-error' : 'text-highlighted'"
               >
                 {{ presentarNeto(row.original.netoARendir).texto }}

@@ -65,7 +65,7 @@ const { estadoColor, estadoLabel } = useEstadoVenta()
               <dt class="text-muted">
                 Monto
               </dt>
-              <dd class="font-mono font-medium">
+              <dd class="font-medium">
                 {{ formatMonto(pago.monto) }}
               </dd>
             </div>
@@ -73,7 +73,7 @@ const { estadoColor, estadoLabel } = useEstadoVenta()
               <dt class="text-muted">
                 Vuelto
               </dt>
-              <dd class="font-mono font-medium">
+              <dd class="font-medium">
                 {{ pago.vuelto && new Decimal(pago.vuelto).gt(0) ? formatMonto(pago.vuelto) : '—' }}
               </dd>
             </div>
@@ -115,7 +115,7 @@ const { estadoColor, estadoLabel } = useEstadoVenta()
               <dt class="text-muted">
                 Tarjeta
               </dt>
-              <dd class="font-mono font-medium">
+              <dd class="font-medium">
                 ····{{ pago.tarjetaUltimos4 }}
               </dd>
             </div>
@@ -154,7 +154,7 @@ const { estadoColor, estadoLabel } = useEstadoVenta()
               <dt class="text-muted">
                 Total venta
               </dt>
-              <dd class="font-mono font-medium">
+              <dd class="font-medium">
                 {{ formatMonto(pago.totalFinal) }}
               </dd>
             </div>

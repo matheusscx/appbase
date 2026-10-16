@@ -560,10 +560,10 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
             </template>
 
             <template #precioEnvio-cell="{ row }">
-              <span class="font-mono text-sm">{{ formatOficial(row.original.precioEnvio) }}</span>
+              <span class="text-sm">{{ formatOficial(row.original.precioEnvio) }}</span>
             </template>
             <template #pagoRepartidor-cell="{ row }">
-              <span class="font-mono text-sm">{{ formatOficial(row.original.pagoRepartidor) }}</span>
+              <span class="text-sm">{{ formatOficial(row.original.pagoRepartidor) }}</span>
             </template>
 
             <template #estado-cell="{ row }">

@@ -63,7 +63,7 @@ function claseMonto(val: string | null): string {
         <p class="text-xs text-muted">
           Efectivo
         </p>
-        <p class="text-lg font-semibold font-mono" :class="claseMonto(datos.efectivoSuma)">
+        <p class="text-lg font-semibold" :class="claseMonto(datos.efectivoSuma)">
           {{ formatMonto(datos.efectivoSuma) }}
         </p>
       </div>

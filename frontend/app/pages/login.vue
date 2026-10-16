@@ -180,7 +180,7 @@ async function onGoogle() {
       ¿No tienes cuenta?
       <NuxtLink
         to="/register"
-        class="text-highlighted hover:opacity-80 font-medium transition-opacity"
+        class="text-primary hover:underline font-medium"
       >
         Crear cuenta
       </NuxtLink>

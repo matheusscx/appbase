@@ -63,7 +63,7 @@ withDefaults(defineProps<{
           </div>
           <h1
             v-if="titulo"
-            class="font-display text-2xl font-bold tracking-tight text-highlighted sm:text-3xl"
+            class="font-display text-2xl font-bold tracking-tight text-primary-800 dark:text-highlighted sm:text-3xl"
           >
             {{ titulo }}
           </h1>

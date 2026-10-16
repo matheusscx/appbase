@@ -504,11 +504,11 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
 | ☑ | [00.1](00-transversal.md) | P2 | El archivo de estilos de tarjetas y modales de la raíz no se carga — **hecho 2026-10-16** | owner |
-| ☐ | [00.7](00-transversal.md) | P2 | Las cifras de DM Sans no miden lo mismo: los montos no se alinean | owner |
+| ☑ | [00.7](00-transversal.md) | P2 | Las cifras de DM Sans no miden lo mismo: los montos no se alinean — **hecho 2026-10-16** (948e06e4) | owner |
 | ☑ | [00.8](00-transversal.md) | P2 | Verde, ámbar y rojo de los estados no tienen contraste suficiente sobre blanco — **hecho 2026-10-16** (tokens; los citados quedan por revisar uno por uno) *(ver 01.17, 02.17, 03.9, 03.10, 04.5, 04.6, 04.21, 05.17, 06.27, 07.16)* | agente + owner |
 | ☐ | [00.9](00-transversal.md) | P2 | En las tablas de lista, una columna puede no dibujarse y acciones queda fuera *(ver 06.26, 07.1)* | agente |
-| ☐ | [00.12](00-transversal.md) | P2 | Pantallas que no se ven de Venka: tarjetas verdes y ámbar, montos en letra de terminal, MAYÚSCULAS | agente |
-| ☐ | [00.2](00-transversal.md) | P3 | Los links se ven negros y no petróleo, y la guía dice otra cosa | owner |
+| ☑ | [00.12](00-transversal.md) | P2 | Pantallas que no se ven de Venka: tarjetas verdes y ámbar, montos en letra de terminal, MAYÚSCULAS — **hecho 2026-10-16** | agente |
+| ☑ | [00.2](00-transversal.md) | P3 | Los links se ven negros y no petróleo, y la guía dice otra cosa — **hecho 2026-10-16** | owner |
 | ☐ | [00.3](00-transversal.md) | P3 | Hay textos con voseo mezclados con tuteo en 49 archivos *(ver 01.21, 02.27, 03.19, 04.23, 05.21, 06.24, 07.28, 08.17, 09.18)* | agente |
 | ☑ | [00.4](00-transversal.md) | P3 | Swagger y una variable todavía dicen "Prueba Técnica" — **hecho 2026-10-16** | agente |
 | ☑ | [00.5](00-transversal.md) | P3 | En el menú lateral, padre e hija se resaltan juntos y un nombre se corta — **hecho 2026-10-16** | agente |
@@ -597,8 +597,8 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [03.5](03-caja.md) | P2 | En una caja ajena se muestra el saldo esperado y se dice "a ciegas" | agente |
 | ☐ | [03.6](03-caja.md) | P2 | "Cerrar por el cajero" queda bajo el pliegue, después de las tablas | agente |
 | ☐ | [03.7](03-caja.md) | P2 | Los botones principales de caja miden 28 a 32 px en la tablet | agente |
-| ☐ | [03.8](03-caja.md) | P2 | Las cifras de plata en verde y rojo no tienen contraste suficiente | agente |
-| ☐ | [03.9](03-caja.md) | P2 | Los botones sólidos verde, rojo y ámbar de caja no tienen contraste con letra blanca *(ver 00.8)* | agente + owner |
+| ☑ | [03.8](03-caja.md) | P2 | Las cifras de plata en verde y rojo no tienen contraste suficiente — **hecho 2026-10-16** | agente |
+| ☑ | [03.9](03-caja.md) | P2 | Los botones sólidos verde, rojo y ámbar de caja no tienen contraste con letra blanca — **hecho 2026-10-16** *(ver 00.8)* | agente + owner |
 | ☐ | [03.10](03-caja.md) | P2 | El texto ámbar de caja ("Sin justificar", avisos) no tiene contraste suficiente *(ver 00.8)* | agente |
 | ☐ | [03.11](03-caja.md) | P2 | Las tarjetas de cajón no se pueden usar con teclado | agente |
 | ☐ | [03.12](03-caja.md) | P2 | Los dos campos de fecha de la tendencia no dicen "Desde" ni "Hasta" | agente |
@@ -626,7 +626,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
-| ☐ | [04.5](04-inicio-y-reportes.md) | P2 | La cifra de efectivo en Inicio es verde claro, con poco contraste y otra letra *(ver 00.8)* | agente |
+| ☑ | [04.5](04-inicio-y-reportes.md) | P2 | La cifra de efectivo en Inicio es verde claro, con poco contraste y otra letra — **hecho 2026-10-16** *(ver 00.8)* | agente |
 | ☐ | [04.6](04-inicio-y-reportes.md) | P2 | Las alertas de Inicio (stock bajo, pagos sin venta) usan colores sin contraste suficiente *(ver 00.8)* | agente |
 | ☑ | [04.7](04-inicio-y-reportes.md) | P2 | Si Inicio falla, las tarjetas dicen "Cargando" y "Sin conexión" a la vez — **hecho 2026-10-16** | agente |
 | ☑ | [04.8](04-inicio-y-reportes.md) | P2 | Un usuario sin permisos ve Inicio con "Bienvenido", "Ahora" y nada más — **hecho 2026-10-16** | agente |
@@ -770,12 +770,12 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [08.10](08-ingreso-y-cuenta.md) | P2 | Los avisos de error del ingreso tienen poco contraste y no se anuncian al lector | agente |
 | ☐ | [08.11](08-ingreso-y-cuenta.md) | P2 | Si falla elegir el local, "Reintentar" recarga la lista y hay que elegir otra vez | agente |
 | ☐ | [08.12](08-ingreso-y-cuenta.md) | P2 | En "Elegir local" los nombres largos se cortan y dos locales parecidos se ven iguales | agente |
-| ☐ | [08.13](08-ingreso-y-cuenta.md) | P3 | Los avatares de locales usan rojo y amarillo de alerta; la lista vacía queda en blanco | owner |
+| ☑ | [08.13](08-ingreso-y-cuenta.md) | P3 | Los avatares de locales usan rojo y amarillo de alerta; la lista vacía queda en blanco — **hecho 2026-10-16** | owner |
 | ☐ | [08.14](08-ingreso-y-cuenta.md) | P3 | Mayúscula en cada palabra del menú de usuario y tres palabras para "local" | agente |
 | ☐ | [08.15](08-ingreso-y-cuenta.md) | P3 | "Mi Cuenta" lleva a una pantalla que se llama "Configuración" | agente |
 | ☐ | [08.16](08-ingreso-y-cuenta.md) | P3 | El registro pide contraseña de 6 caracteres y el resto de 8 | owner |
 | ☐ | [08.17](08-ingreso-y-cuenta.md) | P3 | Voseo en el ingreso, incluidos mensajes que llegan desde el servidor *(lote 00.3)* | agente |
-| ☐ | [08.18](08-ingreso-y-cuenta.md) | P3 | El ingreso difiere de la maqueta aprobada en títulos, links y ancho de tarjeta *(ver 00.2)* | agente + owner |
+| ☐ | [08.18](08-ingreso-y-cuenta.md) | P3 | El ingreso difiere de la maqueta aprobada en títulos, links y ancho de tarjeta — **parcial 2026-10-16**: títulos y links en petróleo; falta el ancho de la tarjeta y los controles (ver 08.8) *(ver 00.2)* | agente + owner |
 | ☐ | [08.19](08-ingreso-y-cuenta.md) | P3 | Los placeholders del ingreso tienen poco contraste y el de contraseña parece escrito | agente |
 | ☐ | [08.20](08-ingreso-y-cuenta.md) | P3 | El correo de recuperación no ofrece autocompletado y los correos tienen corrector ortográfico | agente |
 | ☐ | [08.21](08-ingreso-y-cuenta.md) | P3 | Con sesión abierta, /login muestra el formulario y /no-tenant abre sin sesión | agente |

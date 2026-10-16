@@ -66,7 +66,7 @@ function presentacionLinea(linea: CarritoLinea): string {
         <li v-for="(linea, index) in lineas" :key="`${linea.item.id}-${index}`" class="py-2 flex items-center gap-2">
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium text-default truncate">{{ linea.item.nombre }}</p>
-            <p class="text-xs text-muted font-mono">
+            <p class="text-xs text-muted">
               {{ formatMonto(convertirAMonedaOficial(linea.item.precioBase, linea.item.monedaId)) }} c/u · {{ unidadBaseItem(linea.item) }}
             </p>
             <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />

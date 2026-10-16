@@ -312,8 +312,10 @@ Los patrones completos están en `docs/patterns/backend.md` y `docs/patterns/fro
   de escribir, invocar `nuxt-ui` y `frontend-design`, las dos, aunque sea un arreglo chico o
   un campo nuevo. `frontend-design` da la dirección visual, `nuxt-ui` los componentes; los
   tokens semánticos de abajo siguen mandando. El brief de un subagente de frontend lo exige.
-- **Design System:** tokens semánticos de Nuxt UI, nunca Tailwind hardcoded. Excepción:
-  colores financieros en el módulo Caja. Referencia: `frontend/docs/DESIGN-SYSTEM.md`
+- **Design System:** tokens semánticos de Nuxt UI, nunca Tailwind hardcoded, sin excepciones:
+  ni Caja (sus cifras usan `text-success` / `text-error`, verde petróleo y rojo ya legibles;
+  la excepción por contraste se retiró el 2026-10-16). Sin `font-mono` en cifras ni rótulos en
+  MAYÚSCULAS (`app/invariants/identidad-visual.invariant.spec.ts`). Referencia: `frontend/docs/DESIGN-SYSTEM.md`
   y `frontend/app/app.config.ts`.
 - **Archivos:** no crear uno nuevo si la implementación cabe en uno existente. Evitar
   `utils.ts`/`helpers.ts`/`common.ts`/`misc.ts`. Sin helpers de un solo uso; duplicar

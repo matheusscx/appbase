@@ -155,7 +155,7 @@ async function onGoogle() {
       ¿Ya tienes cuenta?
       <NuxtLink
         to="/login"
-        class="text-highlighted hover:opacity-80 font-medium transition-opacity"
+        class="text-primary hover:underline font-medium"
       >
         Iniciar sesión
       </NuxtLink>

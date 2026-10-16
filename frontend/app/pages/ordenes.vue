@@ -236,7 +236,7 @@ const columns: TableColumn<OrdenRow>[] = [
             <span class="font-mono text-xs text-muted">{{ row.original.codigoOrden }}</span>
           </template>
           <template #monto-cell="{ row }">
-            <span class="font-mono">{{ formatMonto(row.original.monto) }}</span>
+            <span>{{ formatMonto(row.original.monto) }}</span>
           </template>
           <template #estado-cell="{ row }">
             <UBadge

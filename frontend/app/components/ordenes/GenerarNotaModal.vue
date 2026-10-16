@@ -125,7 +125,7 @@ async function confirmar() {
         </p>
         <div class="flex justify-between text-sm">
           <span class="text-muted">Monto de la nota</span>
-          <span class="font-mono font-medium">{{ formatMonto(monto) }}</span>
+          <span class="font-medium">{{ formatMonto(monto) }}</span>
         </div>
 
         <USeparator />
