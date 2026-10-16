@@ -20,7 +20,7 @@ const api = usePropinaDistribucion()
 const garzonesApi = useGarzones()
 
 const puedeConfigurar = computed(
-  () => permissionsStore.esAdmin || permissionsStore.can('Propinas', 'Configurar'),
+  () => permissionsStore.can('Propinas', 'Configurar'),
 )
 
 const loading = ref(false)

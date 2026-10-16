@@ -22,10 +22,11 @@ const FILA = {
 }
 
 let permisos = new Set<string>()
+let esAdmin = false
 const llamadas: string[] = []
 
 mockNuxtImport('usePermissionsStore', () => () => ({
-  get esAdmin() { return false },
+  get esAdmin() { return esAdmin },
   can: (modulo: string, accion: string) => permisos.has(`${modulo}:${accion}`),
 }))
 
@@ -49,6 +50,7 @@ async function montar() {
 
 beforeEach(() => {
   permisos = new Set(['Compras:Leer'])
+  esAdmin = false
   llamadas.length = 0
   document.body.innerHTML = ''
 })
@@ -66,5 +68,25 @@ describe('compras/index — insignia y filtro de pago (decisión 12)', () => {
     await montar()
     expect(document.body.querySelector('[data-qa="compras-filtro-estado-pago"]')).toBeNull()
     expect(document.body.textContent).not.toContain('Te faltan')
+  })
+})
+
+describe('compras/index — el admin del tenant ve lo que su tenant contrató', () => {
+  // Sin atajo por `esAdmin` (owner, 2026-10-15): `mis-permisos` le trae al admin el
+  // catálogo entero de los módulos contratados, y nada de los otros.
+  it('con Compras contratado, ve "Nueva compra" y el filtro de pago', async () => {
+    esAdmin = true
+    permisos = new Set(['Compras:Leer', 'Compras:Crear', 'Compras:Actualizar', 'Compras:Anular', 'Compras:Pagar'])
+    await montar()
+    expect(document.body.textContent).toContain('Nueva compra')
+    expect(document.body.querySelector('[data-qa="compras-filtro-estado-pago"]')).toBeTruthy()
+  })
+
+  it('en un tenant que no contrató Compras, no ve "Nueva compra" ni el filtro de pago', async () => {
+    esAdmin = true
+    permisos = new Set(['Paquetería:Leer'])
+    await montar()
+    expect(document.body.textContent).not.toContain('Nueva compra')
+    expect(document.body.querySelector('[data-qa="compras-filtro-estado-pago"]')).toBeNull()
   })
 })

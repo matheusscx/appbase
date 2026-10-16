@@ -2260,7 +2260,7 @@ Dos superficies, cada una gateada por su módulo (links sueltos "Mi caja" y "Caj
   modo read-only). Botón "Ver historial del cajón" (`?cajonId=` de esa caja) en el header
   de la tarjeta + back-link "Volver a cajas". 403/404 → redirect a `/cajas`. Excepción: si
   la caja está `abierta` y es **ajena**, quien tiene `Cajas:Actualizar` (el encargado, o el
-  admin del tenant por su bypass) ve el botón "Cerrar por el cajero"
+  admin de un tenant que contrató Cajas, que lo recibe de `mis-permisos`) ve el botón "Cerrar por el cajero"
   (`CajaCierreForzadoPanel`, plan `testigo-cierre-forzado`, Task 6, permiso ampliado el
   2026-08-13).
 - `pages/caja/index.vue` — Compatibilidad: redirige a `/mi-caja` (bookmarks/enlaces
@@ -2309,8 +2309,8 @@ sin necesidad.
 - `components/caja/CajaCierreForzadoPanel.vue` — Vive en `pages/cajas/[id].vue` (plan
   `testigo-cierre-forzado`, Task 6). Gate `usePermisosCrud('Cajas').puedeActualizar`
   (decisión del owner 2026-08-13: forzar es operativo, no exclusivo del admin del tenant
-  — ver [Modelo de acceso](#modelo-de-acceso-por-permiso); `puedeActualizar` ya incluye al
-  admin por su primera condición, `esAdmin || can(...)`). Caja `abierta` ajena → tarjeta
+  — ver [Modelo de acceso](#modelo-de-acceso-por-permiso); al admin lo habilita
+  `mis-permisos`, que le trae el catálogo de Cajas si su tenant lo contrató). Caja `abierta` ajena → tarjeta
   con dueño + fecha de apertura y botón "Cerrar por el cajero"
   (abre `CajaCierreDrawer` con `forzado`). Caja `en_conciliacion` por un cierre forzado
   (`cerradaPor !== usuarioId`) → panel "Pedir firma" (garzones en turno vía

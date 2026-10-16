@@ -96,6 +96,12 @@ function errorApi(message: string) {
 
 // ⚠️ Nuxt instala su PROPIA instancia de Pinia, así que espiar un store creado
 // con `setActivePinia` no sirve: hay que mockear el auto-import.
+// El admin de un tenant que contrató Salones: `mis-permisos` le trae el catálogo completo
+// del módulo, sin atajo `esAdmin` en la pantalla.
+const ADMIN_SALONES = [
+  'Salones:Actualizar', 'Salones:Anular', 'Salones:Crear', 'Salones:Eliminar',
+  'Salones:Leer', 'Salones:Operar', 'Salones:Ver todas',
+]
 let esAdmin = false
 let permisos: string[] = []
 
@@ -466,6 +472,7 @@ describe('garzones — papelera: eliminar respeta el toggle', () => {
     garzonesBackend = [garzon()]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
   })
 
   afterEach(() => {
@@ -553,6 +560,7 @@ describe('garzones — papelera: restaurar', () => {
     garzonesBackend = [eliminado()]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
   })
 
   afterEach(() => {
@@ -662,6 +670,7 @@ describe('garzones — papelera: la carrera de `cargar()` bajo toggles rápidos'
     ]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
   })
 
   it('si la respuesta del primer toggle llega DESPUÉS que la del segundo, el listado final igual corresponde al último toggle', async () => {
@@ -717,6 +726,7 @@ describe('garzones — advertencias del backend', () => {
     garzonesBackend = [garzon()]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
   })
 
   afterEach(() => {
@@ -1203,6 +1213,7 @@ describe('garzones — el alta manda la cuenta elegida', () => {
     garzonesBackend = []
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
     miembrosBackend = [
       { usuarioId: 'user-1', nombre: 'Ana', apellido: 'Torres', esTotem: false },
     ]
@@ -1342,6 +1353,7 @@ describe('garzones — el aviso de "no puede operar el salón" trae con qué res
     garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
     miembrosBackend = [
       { usuarioId: 'user-1', nombre: 'Ana', apellido: 'Torres', esTotem: false },
     ]
@@ -1438,6 +1450,7 @@ describe('garzones — la ficha sabe lo que la cuenta puede y lo que no', () => 
   beforeEach(() => {
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
     miembrosBackend = [
       { usuarioId: 'user-1', nombre: 'Ana', apellido: 'Torres', esTotem: false },
     ]
@@ -1549,6 +1562,7 @@ describe('garzones — desvincular la cuenta desde el formulario', () => {
     garzonesBackend = [garzon({ usuarioId: 'user-1', pinFijado: false })]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
     miembrosBackend = [
       { usuarioId: 'user-1', nombre: 'Ana', apellido: 'Torres', esTotem: false },
     ]

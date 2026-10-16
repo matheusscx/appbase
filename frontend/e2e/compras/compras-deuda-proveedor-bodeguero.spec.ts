@@ -42,9 +42,9 @@ test('la navegación no ofrece "Por pagar"', async ({ page }) => {
 test('entrar por URL a /compras/por-pagar lo frena el middleware de ruta', async ({ page }) => {
   await entrarComo(page, ENCARGADO.email, ENCARGADO.password)
   await page.goto('/compras/por-pagar', { waitUntil: 'networkidle' })
-  // El middleware `permiso` redirige a `/ventas` (pattern frontend § 1.2):
+  // El middleware `permiso` redirige a Inicio (pattern frontend § 1.2):
   // la pantalla nunca llega a montarse, y ningún dato de pago viaja.
-  await page.waitForURL(url => url.pathname === '/ventas')
+  await page.waitForURL(url => url.pathname === '/')
   await expect(page.locator('[data-qa="por-pagar"]')).toHaveCount(0)
 })
 

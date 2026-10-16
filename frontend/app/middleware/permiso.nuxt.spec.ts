@@ -64,13 +64,13 @@ describe('middleware/permiso', () => {
     expect(navigateTo).not.toHaveBeenCalled()
   })
 
-  it('rebota a /ventas a quien no lo tiene, avisando por qué', async () => {
+  it('rebota a Inicio a quien no lo tiene, avisando por qué', async () => {
     permisos = ['MiCaja:Leer']
 
     await correr({ permiso: 'Cajas:Leer' })
     await new Promise(r => setTimeout(r, 10))
 
-    expect(navigateTo).toHaveBeenCalledWith('/ventas')
+    expect(navigateTo).toHaveBeenCalledWith('/')
     expect(avisos()).toContain('No tenés acceso al módulo Cajas')
   })
 
@@ -82,12 +82,27 @@ describe('middleware/permiso', () => {
     expect(avisos()).toContain('No tenés acceso al módulo Mi caja')
   })
 
-  it('el admin del tenant pasa sin el permiso listado', async () => {
+  it('el admin del tenant pasa a un módulo que su tenant contrató', async () => {
+    // `mis-permisos` le trae al admin todos los permisos de los módulos contratados.
     esAdmin = true
+    permisos = ['Cajas:Leer', 'Cajas:Actualizar']
 
     await correr({ permiso: 'Cajas:Leer' })
 
     expect(navigateTo).not.toHaveBeenCalled()
+  })
+
+  it('el admin del tenant rebota de un módulo que su tenant no contrató', async () => {
+    // El backend le contesta 403 también al admin: con un atajo por `esAdmin`, el
+    // tenant que solo contrató Paquetería abría /cajas y la pantalla fallaba.
+    esAdmin = true
+    permisos = ['Paquetería:Leer']
+
+    await correr({ permiso: 'Cajas:Leer' })
+    await new Promise(r => setTimeout(r, 10))
+
+    expect(navigateTo).toHaveBeenCalledWith('/')
+    expect(avisos()).toContain('No tenés acceso al módulo Cajas')
   })
 
   it('distingue el permiso: `Cajas:Leer` no habilita `MiCaja:Leer`', async () => {
@@ -95,7 +110,7 @@ describe('middleware/permiso', () => {
 
     await correr({ permiso: 'MiCaja:Leer' })
 
-    expect(navigateTo).toHaveBeenCalledWith('/ventas')
+    expect(navigateTo).toHaveBeenCalledWith('/')
   })
 
   it('espera la carga de permisos ANTES de decidir', async () => {

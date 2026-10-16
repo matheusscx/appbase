@@ -8,13 +8,13 @@ export interface PermisosCrud {
 }
 
 /**
- * Los permisos de escritura de un módulo, ya con el bypass del admin del tenant.
+ * Los permisos de escritura de un módulo.
  *
- * Existe porque la regla `esAdmin || can(modulo, permiso)` estaba copiada en 18
- * pantallas y componentes, y lo que se copiaba no era el `can` —eso es obvio— sino el
- * `esAdmin ||`. Olvidarlo en una sola copia le esconde los botones al admin de
- * ese tenant, que es el usuario con más motivos para no reportarlo como bug de
- * permisos: simplemente ve una pantalla de solo lectura y asume que es así.
+ * El admin del tenant no tiene atajo: `mis-permisos` ya le trae todos los permisos de
+ * los módulos que su tenant contrató, y el backend le contesta 403 en los demás
+ * (`userHasPermiso` mira `tenant_modulos` también para él). Hasta el 2026-10-15 esto
+ * era `esAdmin || can(...)`, y el tenant que contrató un solo módulo veía los botones
+ * de todos los otros (owner, 2026-10-15).
  *
  * Devuelve los cuatro permisos y cada pantalla desestructura los que usa: son
  * `computed`, así que los que no se leen no se evalúan.
@@ -35,9 +35,7 @@ export function usePermisosCrud(modulo: string | string[]): PermisosCrud {
   // lo reporta como bug de permisos.
   const modulos = Array.isArray(modulo) ? modulo : [modulo]
   const puede = (permiso: string) =>
-    computed(() =>
-      permissionsStore.esAdmin || modulos.some(m => permissionsStore.can(m, permiso)),
-    )
+    computed(() => modulos.some(m => permissionsStore.can(m, permiso)))
 
   return {
     puedeLeer: puede('Leer'),

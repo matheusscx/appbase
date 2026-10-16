@@ -34,24 +34,24 @@ const permissionsStore = usePermissionsStore()
         </div>
 
         <!-- Zona "Ahora": el turno en vivo, con refresco periódico (spec
-             `2026-09-18-dashboard-inicio-design.md` § 3.1 y § 6). Un bloque
-             que el tenant no contrató se muestra igual acá —el admin no
-             tiene cómo saberlo desde el frontend— y se esconde solo cuando
-             su propio `useRefrescoPeriodico` recibe el 403. -->
+             `2026-09-18-dashboard-inicio-design.md` § 3.1 y § 6). Sin atajo
+             para el admin: `mis-permisos` le trae solo los módulos que su
+             tenant contrató (owner, 2026-10-15). Si igual llega un 403, el
+             `useRefrescoPeriodico` del bloque lo esconde. -->
         <section class="space-y-3">
           <h3 class="text-sm font-medium text-muted">
             Ahora
           </h3>
           <div class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-            <InicioSalon v-if="permissionsStore.esAdmin || permissionsStore.can('Salones', 'Ver todas')" />
-            <InicioCajas v-if="permissionsStore.esAdmin || permissionsStore.can('Cajas', 'Leer')" />
-            <InicioCierres v-if="permissionsStore.esAdmin || permissionsStore.can('Cajas', 'Leer')" />
+            <InicioSalon v-if="permissionsStore.can('Salones', 'Ver todas')" />
+            <InicioCajas v-if="permissionsStore.can('Cajas', 'Leer')" />
+            <InicioCierres v-if="permissionsStore.can('Cajas', 'Leer')" />
             <!-- En "Ahora" y no en "Hoy": el stock cambia todo el turno con cada
                  venta, igual que salón y cajas. -->
-            <InicioStockBajo v-if="permissionsStore.esAdmin || permissionsStore.can('Inventario', 'Leer')" />
+            <InicioStockBajo v-if="permissionsStore.can('Inventario', 'Leer')" />
             <!-- Lo que la tienda cobró y no pudo registrar: plata del cliente
                  que espera una acción del local. -->
-            <InicioPagosSinVenta v-if="permissionsStore.esAdmin || permissionsStore.can('Pasarelas', 'Leer')" />
+            <InicioPagosSinVenta v-if="permissionsStore.can('Pasarelas', 'Leer')" />
           </div>
         </section>
 
@@ -59,9 +59,8 @@ const permissionsStore = usePermissionsStore()
              § 3.2 y § 6). Un solo componente —a diferencia de "Ahora"— porque
              sus cuatro bloques comparten UNA llamada a `/resumen-negocio/hoy`;
              `InicioHoy.vue` hace esa carga y esconde la zona entera si recibe
-             un 403 (mismo motivo que "Ahora": el frontend no sabe qué módulos
-             contrató el tenant). -->
-        <InicioHoy v-if="permissionsStore.esAdmin || permissionsStore.can('Resumen del negocio', 'Leer')" />
+             un 403. -->
+        <InicioHoy v-if="permissionsStore.can('Resumen del negocio', 'Leer')" />
       </div>
     </template>
   </UDashboardPanel>

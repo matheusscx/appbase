@@ -5,8 +5,8 @@
 // tenant) — `caja.controller.ts` resuelve `puedeForzar` a mano
 // (`resolverEscrituraCompartida`) contra `Cajas:Actualizar` y
 // `caja.service.ts` rechaza el cierre ajeno si `!puedeForzar`. El admin lo
-// conserva vía `usePermisosCrud` (`esAdmin || can(...)`), así que sigue
-// viendo el botón sin necesidad del permiso de módulo.
+// tiene porque `mis-permisos` le devuelve todos los permisos de los módulos que
+// su tenant contrató (ya no hay atajo `esAdmin ||` en el front).
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import CajaCierreForzadoPanel from './CajaCierreForzadoPanel.vue'
@@ -16,6 +16,8 @@ const USUARIO_ACTUAL_ID = 'admin-1'
 
 let esAdmin = false
 let permisos: string[] = []
+// Lo que `mis-permisos` le devuelve al admin de un tenant que contrató Cajas.
+const CAJAS_COMPLETO = ['Cajas:Actualizar', 'Cajas:Crear', 'Cajas:Eliminar', 'Cajas:Leer']
 let sesionesAbiertas: { garzonId: string, garzonNombre: string }[] = []
 
 mockNuxtImport('usePermissionsStore', () => {
@@ -80,12 +82,21 @@ beforeEach(() => {
 })
 
 describe('CajaCierreForzadoPanel — el botón de cerrar la caja de otro', () => {
-  it('la acción de cerrar la caja de otro aparece para el admin del tenant', async () => {
+  it('la acción de cerrar la caja de otro aparece para el admin de un tenant que contrató Cajas', async () => {
     esAdmin = true
+    permisos = CAJAS_COMPLETO
     const wrapper = await montar(cajaAjenaAbierta())
 
     expect(wrapper.find('[data-qa="cerrar-caja-ajena"]').exists()).toBe(true)
     expect(wrapper.text()).toContain('Bruno Cajero')
+  })
+
+  it('el admin de un tenant que no contrató Cajas no ve la acción de cerrar la caja de otro', async () => {
+    esAdmin = true
+    permisos = ['Paquetería:Leer']
+    const wrapper = await montar(cajaAjenaAbierta())
+
+    expect(wrapper.find('[data-qa="cerrar-caja-ajena"]').exists()).toBe(false)
   })
 
   it('también aparece para un encargado no-admin con Cajas:Actualizar', async () => {

@@ -310,8 +310,13 @@ let documentoActual: typeof VENTA = VENTA
  * `puedeAnular`... — acá siempre `false` porque `VENTA.estado === 'pagada'` —
  * y `Ventas:Nota de crédito` para `puedeCrearNC`).
  */
-let permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
-/** `false` para probar un rol con permisos sueltos: con `esAdmin` el bypass lo tapa todo. */
+const VENTAS_COMPLETO = [
+  'Ventas:Actualizar', 'Ventas:Anular', 'Ventas:Crear', 'Ventas:Eliminar',
+  'Ventas:Leer', 'Ventas:Nota de crédito', 'Ventas:Ver todas',
+]
+/** Por default, el admin de un tenant que contrató Ventas: `mis-permisos` le da todo el catálogo. */
+let permisos = VENTAS_COMPLETO
+/** `false` para probar un rol con permisos sueltos: el admin trae el catálogo completo de `Ventas`. */
 let esAdmin = true
 
 mockNuxtImport('usePermissionsStore', () => {
@@ -377,7 +382,7 @@ mockNuxtImport('useApiFetch', () => {
 afterEach(() => {
   useCajaStore().activa = null
   esAdmin = true
-  permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
+  permisos = VENTAS_COMPLETO
   patches = []
   borrados = []
 })
@@ -864,6 +869,7 @@ describe('VentaDetalleDrawer — anular', () => {
   })
 
   it('sin el permiso Ventas:Anular no se ofrece, aunque el backend diga `anulable`', async () => {
+    esAdmin = false
     permisos = ['Ventas:Nota de crédito']
     const wrapper = await montarCon({ estado: 'pendiente', pagos: [], anulable: true })
     expect(botonAnular(wrapper)).toBeUndefined()
@@ -1430,13 +1436,15 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
   }
 
   it('no aparece sin el permiso Ventas:Anular', async () => {
+    esAdmin = false
     permisos = ['Ventas:Nota de crédito']
     try {
       const wrapper = await montar()
       expect(botonReimprimir(wrapper)).toBeUndefined()
     }
     finally {
-      permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
+      esAdmin = true
+      permisos = VENTAS_COMPLETO
     }
   })
 
@@ -1479,6 +1487,7 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
    */
   describe('camino angosto: sin Ventas:Anular, con la caja propia', () => {
     it('aparece si la venta es de su caja y esa caja está abierta', async () => {
+      esAdmin = false
       permisos = ['Ventas:Nota de crédito']
       useCajaStore().activa = cajaActiva('abierta')
       try {
@@ -1486,11 +1495,13 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
         expect(botonReimprimir(wrapper)).toBeDefined()
       }
       finally {
-        permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
+        esAdmin = true
+        permisos = VENTAS_COMPLETO
       }
     })
 
     it('no aparece si la venta es de OTRA caja', async () => {
+      esAdmin = false
       permisos = ['Ventas:Nota de crédito']
       useCajaStore().activa = cajaActiva('abierta', 'caja-2')
       try {
@@ -1498,7 +1509,8 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
         expect(botonReimprimir(wrapper)).toBeUndefined()
       }
       finally {
-        permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
+        esAdmin = true
+        permisos = VENTAS_COMPLETO
       }
     })
 
@@ -1512,6 +1524,7 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
      * cumpliéndose).
      */
     it('no aparece si su propia caja está en conciliación', async () => {
+      esAdmin = false
       permisos = ['Ventas:Nota de crédito']
       useCajaStore().activa = cajaActiva('en_conciliacion')
       try {
@@ -1519,7 +1532,8 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
         expect(botonReimprimir(wrapper)).toBeUndefined()
       }
       finally {
-        permisos = ['Ventas:Anular', 'Ventas:Nota de crédito']
+        esAdmin = true
+        permisos = VENTAS_COMPLETO
       }
     })
   })

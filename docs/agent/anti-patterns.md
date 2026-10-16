@@ -84,7 +84,8 @@ comprobar que corresponde al estado actual (dos caras: cruce por índice stale �
 navegación que remonta la página antes de que cierre el último paso) · ✅ Tailwind
 hardcoded en vez de tokens · ❌ función de formato dentro de un `.vue` · ✅ fecha local
 armada con `toISOString()` · ❌ fricciones de `vue-tsc` estricto · ❌ dependencia nueva
-sin `optimizeDeps.include` · ❌ control con permiso propio anidado bajo el `v-if` de otro
+sin `optimizeDeps.include` · ❌ un gate que no es el que aplica el endpoint (dos caras: control
+anidado bajo el `v-if` de otro permiso · atajo por `esAdmin` delante del permiso del módulo)
 
 **Entorno de desarrollo** — ✅ resguardo que valida una cosa y destruye otra
 
@@ -618,7 +619,9 @@ Si no se pre-bundlea, el dev server recarga la página la primera vez que se eje
 la ruta que lo importa (peor con paquetes CJS). Al `npm install` de una dependencia
 nueva de runtime, sumarla a `include` en el mismo commit — no esperar a ver el warning.
 
-### ❌ Control con permiso propio anidado bajo el `v-if` de otro permiso
+### ❌ Un gate que no es el que aplica el endpoint — dos caras
+
+**(a) Control con permiso propio anidado bajo el `v-if` de otro permiso.**
 
 ```vue
 <!-- MAL — "Aplicar" hereda el gate de readOnly, que es el permiso de CONTAR -->
@@ -640,6 +643,23 @@ se quedaba sin la acción que le corresponde, rompiendo la asimetría que el dis
 para sostener. Los dos computeds eran correctos por separado: el defecto vivía en el
 anidamiento, así que ningún unit test de la lógica lo habría visto. Regla completa y
 trampa: `docs/patterns/frontend.md` §1.1.
+
+**(b) Un atajo por rol delante del permiso del módulo** (2026-10-15).
+
+```ts
+// MAL — el backend le contesta 403 al admin en un módulo que su tenant no contrató
+const puedePagar = computed(() => permissionsStore.esAdmin || permissionsStore.can('Compras', 'Pagar'))
+// BIEN — `mis-permisos` ya le trae al admin el catálogo de los módulos contratados
+const puedePagar = computed(() => permissionsStore.can('Compras', 'Pagar'))
+```
+
+`userHasPermiso` deja pasar al admin solo en los módulos de `tenant_modulos`; el `esAdmin ||`
+estaba copiado en 12 consumidores: el menú lateral y los reportes, más diez archivos (Inicio, el
+middleware `permiso`, `usePermisosCrud`, `/configuracion`, tres de Compras, uno de Caja, dos de
+Propinas). Con un tenant que contrató un solo módulo, el admin
+veía los otros, abría sus pantallas por URL y cada carga volvía con 403 — y como la pantalla de
+un módulo ajeno se esconde sola ante el 403, nadie lo notaba. `esAdmin` queda para lo que es del
+rol (pantallas `TenantAdminGuard`), nunca para un gate por módulo.
 
 ## Entorno de desarrollo
 

@@ -287,7 +287,8 @@ backend trata el módulo contratado como borde duro también para `es_fijo`).
 `pages/index.vue` pasa a ser el dashboard: el saludo queda arriba, más chico, y debajo
 la zona **"Ahora"** con tres bloques — Salón, Cajas y Cierres del día — cada uno un
 componente propio en `app/components/inicio/`. La página **solo los ordena**: monta
-cada bloque con `permissionsStore.esAdmin || permissionsStore.can(módulo, permiso)`
+cada bloque con `permissionsStore.can(módulo, permiso)` —sin atajo para el admin desde el
+2026-10-15: `mis-permisos` le trae solo los módulos que su tenant contrató—
 (`Salones`/`Ver todas` para Salón; `Cajas`/`Leer` para Cajas y Cierres) y no tiene
 lógica propia. **Un bloque no montado no hace su llamada** — es UX, la seguridad la da
 el guard de cada ruta (igual que el resto de la app).
@@ -310,9 +311,10 @@ const { datos, actualizadoEl, sinConexion, oculto } = useRefrescoPeriodico(
   "Sin conexión — se reintenta en el próximo ciclo" sin borrar el dato. Una carga
   exitosa la apaga y actualiza `actualizadoEl` (el "Actualizado HH:MM").
 - **Un 403 marca `oculto` y DETIENE el intervalo**: spec § 6 midió que el admin de un
-  tenant que no contrató el módulo pasa el `v-if` de la página (`esAdmin`) pero el
-  backend igual responde 403 — el frontend no tiene cómo saber qué módulos contrató el
-  tenant. Reintentar un 403 no lo iba a arreglar, así que el bloque se esconde en vez
+  tenant que no contrató el módulo pasaba el `v-if` de la página (`esAdmin`) y el
+  backend le respondía 403. Desde el 2026-10-15 el `v-if` ya no lo deja pasar (sin
+  atajo por `esAdmin`), y el 403 queda como red para un contrato dado de baja con la
+  sesión abierta. Reintentar un 403 no lo arregla, así que el bloque se esconde en vez
   de mostrar un error. El status se lee como `useApiFetch`/`apiErrorMsg`:
   `err?.status ?? err?.response?.status`.
 - `onScopeDispose` limpia el intervalo y el listener — no sobrevive al bloque que lo
@@ -342,13 +344,13 @@ frontend no comparten workspace). `AnulacionPorTipo['tipo']` importa `TipoMotivo
 de `useSalones.ts` en vez de duplicarlo una cuarta vez.
 
 **`InicioHoy.vue`** es la zona completa: `index.vue` la monta con
-`permissionsStore.esAdmin || permissionsStore.can('Resumen del negocio', 'Leer')`,
+`permissionsStore.can('Resumen del negocio', 'Leer')`,
 igual que los bloques de "Ahora", y no repite el chequeo. A diferencia de "Ahora", NO
 usa `useRefrescoPeriodico` — carga UNA vez al invocarse (mismo criterio: sin
 `onMounted`, se prueba con un spec plano) y tiene un botón "Actualizar" manual que
 vuelve a llamar la misma función, sin `setInterval` (spec § 6, "'Hoy' carga una vez").
-Un 403 esconde la zona ENTERA (`v-if="!oculto"`) sin aviso de error — mismo motivo que
-"Ahora": el frontend no sabe qué módulos contrató el tenant. Un fallo que no es 403
+Un 403 esconde la zona ENTERA (`v-if="!oculto"`) sin aviso de error — misma red que
+en "Ahora". Un fallo que no es 403
 muestra un toast (`apiErrorMsg`) y no oculta nada.
 
 `InicioHoy` pasa `datos.ventas`/`datos.porCobrar`/`datos.perdidas`/`datos.masVendidos`
@@ -466,8 +468,9 @@ posterior insiste; `intervaloMs` custom; `onScopeDispose` limpia intervalo y lis
 `Salones:Ver todas` no se pide `/salones/ocupacion`; sin `Cajas:Leer` no se piden las
 de caja; sin ningún permiso, ninguna de las tres rutas se pide; con `Cajas:Leer` se
 piden las dos rutas de caja; el texto de ocupación sale de la respuesta real; el
-bloque de Cajas muestra el cajón abierto y quién lo tiene, sin sus montos; y el caso
-403-con-`esAdmin` (spec § 6) oculta el bloque sin mostrar "Sin conexión". Los bodies
+bloque de Cajas muestra el cajón abierto y quién lo tiene, sin sus montos; el admin de
+un tenant que no contrató los módulos no pide ninguna ruta; y un 403 que igual llega
+oculta el bloque sin mostrar "Sin conexión". Los bodies
 simulados tienen la forma real de cada ruta (copiada de `caja.service.ts` y
 `salones.service.ts`), no una inventada.
 
@@ -522,8 +525,8 @@ de la app:
 - "Ahora" se refresca sola al minuto (`page.clock`); con la pestaña oculta no pide nada y
   al volver pide una vez; si el backend se corta, avisa "Sin conexión" y conserva el dato;
 - `encargado.salon@paris.cl` ve "Ahora" y no "Hoy";
-- el admin en "Demo Bodega", que no contrató el módulo, recibe 403 y "Hoy" no aparece, sin
-  error en pantalla;
+- el superadmin en "Demo Bodega", que no contrató el módulo, pasa el filtro del frontend
+  (`can` le da `true`), recibe 403 y "Hoy" no aparece, sin error en pantalla;
 - quien tiene `Resumen del negocio: Leer` **sin ser admin** (un rol armado por API, no el
   admin del seed: con admin un 403 ajeno se tapa) ve en la tarjeta de ventas lo que restó
   una nota de crédito.

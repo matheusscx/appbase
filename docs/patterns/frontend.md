@@ -44,13 +44,11 @@ Un grupo sin entradas visibles no se dibuja: se filtra en el computed, porque
 `UNavigationMenu` dibuja el encabezado y el separador aunque la lista llegue vacía.
 `pages/configuracion.nuxt.spec.ts` fija el árbol y el gate de cada entrada.
 
-**El menú lateral le muestra al admin solo los módulos que su tenant contrató** (owner,
-2026-10-15): `puede(modulo, permiso)` de `useMenuLateral` es `permissionsStore.can(…)`, sin el
-cortocircuito de `esAdmin`. `mis-permisos` ya le trae al admin todos los permisos de esos
-módulos, y el backend contesta 403 en los no contratados incluso a él, así que el link antes
-llevaba a un error. El superadmin sigue viendo todo (`can` le da `true`). Lo mismo vale para
-`useReportes`; las entradas de Configuración que son de un módulo (`lee()`) conservan el
-`admin ||`, salvo Paquetería, que pide `admin && can('Paquetería', 'Leer')`.
+El menú lateral, `useReportes` y estas entradas siguen la regla de § 1.1: el admin del tenant
+no tiene atajo y ve solo los módulos que su tenant contrató. En Configuración, una entrada de
+módulo pide `lee(modulo)` (`can(modulo, 'Leer')`), una admin-only pide `admin`, y Paquetería,
+que es las dos cosas (admin-only en el backend y de un módulo contratable), pide
+`admin && can('Paquetería', 'Leer')`.
 
 Pantallas CRUD simples pueden usar `app/components/crud/` (`CrudPageHeader`,
 `CrudTable`, `CrudListItem`, `CrudModal`) — ver `DESIGN-SYSTEM.md` § Componentes CRUD
@@ -119,10 +117,17 @@ const { puedeActualizar: puedeAplicar } = usePermisosCrud('Items')
 ```
 
 Devuelve `computed`s, así que se puede llamar en el setup aunque los permisos
-lleguen después por fetch. El composable existe por el `esAdmin ||`, no por el
-`can`: la regla estaba copiada en 18 pantallas y componentes, y olvidar el bypass deja
-al admin de ese tenant con una pantalla de solo lectura — el usuario con más
-motivos para no reportarlo como bug de permisos, porque asume que es así.
+lleguen después por fetch.
+
+**El admin del tenant no tiene atajo** (owner, 2026-10-15): todo gate por módulo —botones,
+menú lateral, `useReportes`, entradas de Configuración, Inicio, el middleware `permiso`— es
+`can(modulo, permiso)`, nunca `esAdmin || can(...)`. `mis-permisos` ya le trae al admin el
+catálogo entero de los módulos que su tenant contrató, y en los demás el backend le contesta
+403 (`userHasPermiso` mira `tenant_modulos` también para él; vale para las rutas con
+`@RequiresPermiso`, no para las admin-only como Paquetería, que todavía no exigen el contrato). Con el atajo, el tenant que
+contrató un solo módulo veía —y abría por URL— los de todos los otros. El superadmin sigue
+viendo todo: `can` le da `true`. `esAdmin` queda para lo que es del **rol**, no del módulo:
+las pantallas admin-only (`TenantAdminGuard`) y la etiqueta "Administrador".
 
 **Primero preguntar qué exige el endpoint, no de qué carpeta es la pantalla.**
 En `configuracion/` conviven las dos clases: 15 pantallas son admin-only
@@ -188,8 +193,9 @@ definePageMeta({
 })
 ```
 
-`admin` redirige a `/configuracion`; `permiso` a `/ventas`, avisando por toast
-cuál es el módulo que falta. Tres razones para preferirlos al `v-if`:
+`admin` redirige a `/configuracion`; `permiso` a Inicio (`/`), avisando por toast
+cuál es el módulo que falta. A Inicio y no a Ventas porque Inicio existe para todos, y
+Ventas puede ser justo un módulo que el tenant no contrató (owner, 2026-10-15). Tres razones para preferirlos al `v-if`:
 
 - **Cubre la URL escrita a mano**, que el `v-if` no cubre: esconderla del menú
   no impide navegar, la lectura de esos endpoints es abierta y la tabla carga
@@ -1309,12 +1315,12 @@ const { datos, actualizadoEl, sinConexion, oculto } = useRefrescoPeriodico(
 - **Un 403 marca `oculto` y DETIENE el intervalo** — no es una falla de red, es un
   módulo que el tenant no contrató. Insistir no lo arregla. El status se lee con el
   mismo idioma que `apiErrorMsg`/`useApiFetch`: `err?.status ?? err?.response?.status`.
-  El componente esconde el bloque entero (`v-if="!oculto"`) sin mostrar error — la
-  razón de fondo (spec § 6): el `v-if` de la página deja pasar al admin por `esAdmin`
-  sin consultar `/rbac/mis-permisos`, que a un admin le devuelve los permisos de los
-  módulos que su tenant contrató (no `[]`; `rbac.service.ts → getMisPermisos`). Esa
-  pantalla no lo usa para el admin, así que el 403 en vivo es lo que esconde el
-  bloque del módulo no contratado.
+  El componente esconde el bloque entero (`v-if="!oculto"`) sin mostrar error. Desde el
+  2026-10-15 el `v-if` de la página ya no deja pasar al admin a un módulo no contratado
+  (sin atajo por `esAdmin`, § de `usePermisosCrud`; `mis-permisos` le trae al admin los
+  permisos de los módulos contratados, no `[]`). El 403 queda como red de lo que el
+  frontend no puede saber: un contrato dado de baja con la sesión abierta, y el
+  superadmin, a quien `can` le da `true` en cualquier tenant.
 - `onScopeDispose` limpia el intervalo y el listener de `visibilitychange`: no
   sobrevive al bloque que lo agendó (mismo criterio que el debounce de
   `useCalculoPrecios.ts` — `if (getCurrentScope()) onScopeDispose(...)`).

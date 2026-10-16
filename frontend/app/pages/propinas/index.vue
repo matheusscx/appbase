@@ -41,7 +41,7 @@ const turnos = ref<Turno[]>([])
 const garzones = ref<Garzon[]>([])
 
 const puedeLiquidar = computed(
-  () => permissions.esAdmin || permissions.can('Propinas', 'Liquidar'),
+  () => permissions.can('Propinas', 'Liquidar'),
 )
 
 const tabs = computed(() => [
@@ -161,7 +161,7 @@ onMounted(async () => {
   if (!permissions.permisos.length && !permissions.loading) {
     await permissions.fetchPermisos()
   }
-  if (!permissions.esAdmin && !permissions.can('Propinas', 'Leer')) {
+  if (!permissions.can('Propinas', 'Leer')) {
     await navigateTo('/')
     return
   }

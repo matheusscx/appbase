@@ -50,8 +50,9 @@ mockNuxtImport('useCajaStore', () => () => ({
 // Permisos: `can` decide si el botón de marcar visto se ofrece. Se reasigna en
 // cada test que necesita el otro lado del eje.
 let puedeActualizar = true
+let esAdmin = false
 mockNuxtImport('usePermissionsStore', () => () => ({
-  esAdmin: false,
+  get esAdmin() { return esAdmin },
   can: (modulo: string, accion: string) =>
     modulo === 'Cajas' && accion === 'Actualizar' ? puedeActualizar : false,
 }))
@@ -75,6 +76,7 @@ const MONEDA_CLP = {
 
 beforeEach(() => {
   puedeActualizar = true
+  esAdmin = false
   cargarPendientesRevision.mockReset().mockResolvedValue(FILAS)
   cargarResumenDescuadresDia.mockReset().mockResolvedValue(RESUMEN)
   marcarRevisado.mockReset().mockResolvedValue(undefined)
@@ -164,5 +166,16 @@ describe('CajaPendientesRevision', () => {
     expect(wrapper.find('[data-qa="marcar-visto-caja-1"]').exists()).toBe(false)
     // La lectura sí: el supervisor con solo `Cajas:Leer` ve la bandeja entera.
     expect(wrapper.text()).toContain('Ana Pérez')
+  })
+
+  it('el admin no tiene atajo: sin Cajas:Actualizar en sus permisos, no se ofrece marcar visto', async () => {
+    // Sin `esAdmin ||` (owner, 2026-10-15): al admin lo habilita `mis-permisos`, que le
+    // trae el catálogo de los módulos que su tenant contrató.
+    esAdmin = true
+    puedeActualizar = false
+
+    const wrapper = await mountSuspended(CajaPendientesRevision)
+
+    expect(wrapper.find('[data-qa="marcar-visto-caja-1"]').exists()).toBe(false)
   })
 })

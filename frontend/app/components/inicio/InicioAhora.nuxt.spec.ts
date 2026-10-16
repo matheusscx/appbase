@@ -164,11 +164,23 @@ describe('zona "Ahora" — con permiso, pide y muestra', () => {
     wrapper.unmount()
   })
 
-  it('un admin de un tenant que no contrató el módulo (403) lo oculta sin aviso de error', async () => {
-    // `esAdmin` deja pasar el `v-if` de la página (spec § 6: el frontend no
-    // sabe qué módulos contrató el tenant) — el bloque se esconde solo cuando
-    // su propio `useRefrescoPeriodico` recibe el 403 de `/salones/ocupacion`.
+  it('el admin de un tenant que no contrató los módulos no pide ninguna ruta', async () => {
+    // Sin atajo por `esAdmin` (owner, 2026-10-15): `mis-permisos` le trae al admin solo
+    // los módulos contratados. Antes la página montaba los seis bloques y cada uno
+    // volvía con 403 en el tenant que solo contrató Paquetería.
     esAdmin = true
+    permisos = ['Paquetería:Leer']
+    const wrapper = await montar()
+
+    expect(llamadas).toEqual([])
+
+    wrapper.unmount()
+  })
+
+  it('si el backend igual contesta 403, el bloque se oculta sin aviso de error', async () => {
+    // La red que queda: un permiso que el frontend cree tener y el backend ya no da
+    // (un contrato dado de baja con la sesión abierta). `useRefrescoPeriodico` lo esconde.
+    permisos = ['Salones:Ver todas']
     falla403 = ['/salones/ocupacion']
     const wrapper = await montar()
 

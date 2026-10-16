@@ -34,7 +34,10 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // Mismo criterio que el middleware `admin`.
   if (permissionsStore.error) return
 
-  if (permissionsStore.esAdmin || permissionsStore.can(modulo, accion)) return
+  // Sin atajo para el admin del tenant: `mis-permisos` le trae todos los permisos de los
+  // módulos que su tenant contrató, y el backend le contesta 403 en los demás (owner,
+  // 2026-10-15). El superadmin pasa igual: `can` le da `true`.
+  if (permissionsStore.can(modulo, accion)) return
 
   // `useToast` fuera de un componente funciona —los toasts viven en un
   // `useState` compartido, así que el aviso aparece cuando monta el toaster—,
@@ -44,7 +47,9 @@ export default defineNuxtRouteMiddleware(async (to) => {
     title: `No tenés acceso al módulo ${to.meta.permisoLabel ?? modulo}`,
     color: 'warning',
   })
-  return navigateTo('/ventas')
+  // A Inicio y no a Ventas: Inicio existe para todos, y Ventas puede ser justo un módulo
+  // que el tenant no contrató (owner, 2026-10-15).
+  return navigateTo('/')
 })
 
 declare module '#app' {

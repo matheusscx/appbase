@@ -538,7 +538,7 @@ del mismo permiso `Tienda Online:Leer`; las otras dos dicen abajo cómo se llega
   filtro por estado; acciones pausar/reanudar/cancelar (mismo modal, en
   tercera persona) y eliminar (solo canceladas, con confirmación). Entrada
   propia "Suscripciones" en el sidebar, gated
-  `esAdmin || can('Suscripciones', 'Leer')`; los botones se gatean por
+  `can('Suscripciones', 'Leer')` (sin atajo de admin, 2026-10-15); los botones se gatean por
   `Actualizar`/`Eliminar` (`/suscripciones`).
 - `pages/tienda/medios-pago.vue` — tarjetas inscritas vía Oneclick,
   agregar/eliminar/preferida (ver sección "Mis medios de pago (inscripción

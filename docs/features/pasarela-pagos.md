@@ -486,7 +486,8 @@ se decide junto con el resumen diario de descuadres.
 
 ### Permisos
 
-El link a cada pantalla aparece para el admin o con `Pasarelas:Leer`, y cada botón que
+El link a cada pantalla aparece con `Pasarelas:Leer` (el admin del tenant lo recibe de
+`mis-permisos` si su tenant contrató Pasarelas; sin atajo de admin desde el 2026-10-15), y cada botón que
 escribe, con el permiso de su endpoint (`Crear`, `Actualizar` y `Eliminar` en
 Configuración; `Reembolsar` en el drawer de Órdenes). Es UX: el candado es el
 `@RequiresPermiso` de cada ruta (invariante 6).

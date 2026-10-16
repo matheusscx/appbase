@@ -69,8 +69,11 @@ function sugerir(base: string, vivos: string[]): string {
 
 // ⚠️ Nuxt instala su PROPIA instancia de Pinia, así que espiar un store creado
 // con `setActivePinia` no sirve: hay que mockear el auto-import.
+// El admin de un tenant que contrató Cajas: `mis-permisos` le trae el catálogo completo
+// del módulo, sin atajo `esAdmin` en la pantalla.
+const ADMIN_CAJAS = ['Cajas:Actualizar', 'Cajas:Crear', 'Cajas:Eliminar', 'Cajas:Leer']
 let esAdmin = true
-let permisos: string[] = []
+let permisos: string[] = ADMIN_CAJAS
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -219,7 +222,7 @@ async function escribirNombre(valor: string) {
 
 function reset() {
   esAdmin = true
-  permisos = []
+  permisos = ADMIN_CAJAS
   overrideConEliminados = null
   overrideSinEliminados = null
   postsRestaurar = []

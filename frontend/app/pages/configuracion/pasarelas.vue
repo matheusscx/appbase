@@ -36,8 +36,7 @@ const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 const toast = useToast()
 const { formatFecha } = useFormatters()
-// Cada control con el permiso de SU endpoint; el `esAdmin ||` vive en el
-// composable para no volver a copiarlo mal.
+// Cada control con el permiso de SU endpoint.
 const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Pasarelas')
 
 const tab = ref('config')

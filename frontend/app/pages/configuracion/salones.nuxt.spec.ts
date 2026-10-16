@@ -124,6 +124,12 @@ function errorApi(message: string) {
 
 // ⚠️ Nuxt instala su PROPIA instancia de Pinia, así que espiar un store creado
 // con `setActivePinia` no sirve: hay que mockear el auto-import.
+// El admin de un tenant que contrató Salones: `mis-permisos` le trae el catálogo completo
+// del módulo, sin atajo `esAdmin` en la pantalla.
+const ADMIN_SALONES = [
+  'Salones:Actualizar', 'Salones:Anular', 'Salones:Crear', 'Salones:Eliminar',
+  'Salones:Leer', 'Salones:Operar', 'Salones:Ver todas',
+]
 let esAdmin = false
 let permisos: string[] = []
 
@@ -472,9 +478,9 @@ describe('salones — cada control con el permiso de SU endpoint', () => {
     wrapper.unmount()
   })
 
-  it('el admin del tenant ve los controles sin permisos listados', async () => {
+  it('el admin del tenant ve los controles en un módulo que su tenant contrató', async () => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_SALONES
 
     const wrapper = await montar()
 
@@ -485,6 +491,21 @@ describe('salones — cada control con el permiso de SU endpoint', () => {
 
     wrapper.unmount()
   })
+
+  it('el admin de un tenant que no contrató Salones no ve los controles', async () => {
+    esAdmin = true
+    permisos = ['Paquetería:Leer']
+
+    const wrapper = await montar()
+
+    expect(tieneBoton(wrapper, 'Nuevo salón')).toBe(false)
+    expect(tieneBoton(wrapper, 'Agregar mesa')).toBe(false)
+    expect(cuentaPorTitulo(wrapper, 'Editar salón')).toBe(0)
+    expect(cuentaPorTitulo(wrapper, 'Eliminar salón')).toBe(0)
+    expect(wrapper.find('[aria-label="Ver eliminados"]').exists()).toBe(false)
+
+    wrapper.unmount()
+  })
 })
 
 describe('salones — papelera: eliminar salón respeta el toggle', () => {
@@ -492,6 +513,7 @@ describe('salones — papelera: eliminar salón respeta el toggle', () => {
     salonesBackend = [salon()]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
   })
 
   it('con "Ver eliminados" activo, borrar el salón lo deja visible como eliminado', async () => {
@@ -533,6 +555,7 @@ describe('salones — papelera: eliminar mesa respeta el toggle', () => {
     salonesBackend = [salon({ mesas: [mesa()] })]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
   })
 
   it('con "Ver eliminados" activo, borrar la mesa la deja visible como eliminada (fuera del plano)', async () => {
@@ -580,6 +603,7 @@ describe('salones — papelera: restaurar salón (endpoint de SALONES)', () => {
     salonesBackend = [salonEliminado()]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
   })
 
   it('restaurar el salón lo devuelve al estado vivo sin recargar la página', async () => {
@@ -655,6 +679,7 @@ describe('salones — papelera: restaurar mesa (endpoint de MESAS, distinto del 
     salonesBackend = [salon({ mesas: [mesaEliminada()] })]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
   })
 
   it('restaurar la mesa le pega al endpoint de MESAS, no al de salones, y la devuelve al plano', async () => {
@@ -733,6 +758,7 @@ describe('salones — papelera: la carrera de `cargar()` bajo toggles rápidos',
     ]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
   })
 
   it('si la respuesta del primer toggle llega DESPUÉS que la del segundo, el listado final igual corresponde al último toggle', async () => {
@@ -784,6 +810,7 @@ describe('salones — plano: la mesa que otra sesión borró', () => {
     ]
     reset()
     esAdmin = true
+    permisos = ADMIN_SALONES
   })
 
   /** Lo que hace el plano al arrastrar y soltar una mesa: `move` y `dragend`. */

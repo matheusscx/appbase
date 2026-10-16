@@ -10,9 +10,10 @@ import type { CompraDetalle } from '~/composables/useCompras'
 import CompraConfirmada from './CompraConfirmada.vue'
 
 let permisos = new Set<string>()
+let esAdmin = false
 
 mockNuxtImport('usePermissionsStore', () => () => ({
-  get esAdmin() { return false },
+  get esAdmin() { return esAdmin },
   can: (modulo: string, accion: string) => permisos.has(`${modulo}:${accion}`),
 }))
 
@@ -59,6 +60,7 @@ const hay = (w: Awaited<ReturnType<typeof montar>>, qa: string) =>
 
 beforeEach(() => {
   permisos = new Set()
+  esAdmin = false
 })
 
 describe('CompraConfirmada — acciones por permiso', () => {
@@ -219,5 +221,29 @@ describe('CompraConfirmada — historial', () => {
     expect(historial).toContain('Precio')
     expect(historial).toContain('1.500')
     expect(historial).toContain('Encargado')
+  })
+})
+
+describe('CompraConfirmada — el admin del tenant ve lo que su tenant contrató', () => {
+  // Sin atajo por `esAdmin` (owner, 2026-10-15): `mis-permisos` le trae al admin el
+  // catálogo entero de los módulos contratados, y nada de los otros.
+  const conPago = () => compra({ estadoPago: 'parcial', deuda: '20000', aplicado: '10000', vencida: false })
+
+  it('con Compras contratado, corrige, anula y ve el pago', async () => {
+    esAdmin = true
+    permisos = new Set(['Compras:Leer', 'Compras:Crear', 'Compras:Actualizar', 'Compras:Anular', 'Compras:Pagar'])
+    const w = await montar(conPago())
+    expect(hay(w, 'compra-corregir-')).toBe(true)
+    expect(hay(w, 'compra-anular-abrir')).toBe(true)
+    expect(hay(w, 'compra-pago')).toBe(true)
+  })
+
+  it('en un tenant que no contrató Compras, no ve ninguna acción ni el pago', async () => {
+    esAdmin = true
+    permisos = new Set(['Paquetería:Leer'])
+    const w = await montar(conPago())
+    expect(hay(w, 'compra-corregir-')).toBe(false)
+    expect(hay(w, 'compra-anular-abrir')).toBe(false)
+    expect(hay(w, 'compra-pago')).toBe(false)
   })
 })

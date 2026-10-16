@@ -45,7 +45,7 @@ const { puedeCrear } = usePermisosCrud('Compras')
 // y `[id].vue`. La insignia y el filtro de pago son SOLO de quien tiene
 // `Compras:Pagar` (spec § 8, decisión 12) — sin él, el backend ni manda
 // `estadoPago` en las filas, y el filtro `estadoPago` es 403.
-const puedePagar = computed(() => permissionsStore.esAdmin || permissionsStore.can('Compras', 'Pagar'))
+const puedePagar = computed(() => permissionsStore.can('Compras', 'Pagar'))
 
 // ── Filtros ────────────────────────────────────────────────────────────────
 

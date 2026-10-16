@@ -59,7 +59,7 @@ const { puedeCrear } = usePermisosCrud('Compras')
 const permissionsStore = usePermissionsStore()
 // `Pagar` no es uno de los cuatro CRUD de `usePermisosCrud`: mismo molde que
 // `puedeAnular` en `CompraConfirmada.vue`.
-const puedePagar = computed(() => permissionsStore.esAdmin || permissionsStore.can('Compras', 'Pagar'))
+const puedePagar = computed(() => permissionsStore.can('Compras', 'Pagar'))
 const intentoCobro = useIntentoCobro()
 
 const esNueva = computed(() => route.params.id === 'nueva')

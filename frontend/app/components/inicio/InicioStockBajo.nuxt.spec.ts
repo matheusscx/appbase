@@ -16,14 +16,12 @@ import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Index from '~/pages/index.vue'
 
 let permisos: string[] = []
-let esAdmin = false
 let llamadas: string[] = []
 let falla403 = false
 let resumen: unknown = null
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
-    get esAdmin() { return esAdmin },
     can: (modulo: string, permiso: string) => permisos.includes(`${modulo}:${permiso}`),
   })
 })
@@ -51,7 +49,6 @@ async function montar() {
 
 beforeEach(() => {
   permisos = []
-  esAdmin = false
   llamadas = []
   falla403 = false
   resumen = { total: 0, porUbicacion: [] }
@@ -123,7 +120,9 @@ describe('bloque "Stock bajo" del inicio', () => {
   })
 
   it('un 403 lo oculta sin aviso de error', async () => {
-    esAdmin = true
+    // Un permiso que el frontend cree tener y el backend ya no da (un contrato dado de
+    // baja con la sesión abierta).
+    permisos = ['Inventario:Leer']
     falla403 = true
     const wrapper = await montar()
 

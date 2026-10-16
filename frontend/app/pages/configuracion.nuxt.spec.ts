@@ -23,6 +23,15 @@ mockNuxtImport('usePermissionsStore', () => {
 
 type Arbol = Record<string, string[]>
 
+// Lo que `mis-permisos` le devuelve al admin de un tenant que contrató los módulos
+// de este menú: el catálogo completo de cada uno (sin atajo `esAdmin` en el menú).
+const PERMISOS_ADMIN = [
+  ...['Actualizar', 'Crear', 'Eliminar', 'Leer'].flatMap(p => [`Items:${p}`, `Cajas:${p}`, `Impresoras:${p}`]),
+  ...['Actualizar', 'Crear', 'Eliminar', 'Leer', 'Reembolsar'].map(p => `Pasarelas:${p}`),
+  ...['Actualizar', 'Configurar', 'Crear', 'Eliminar', 'Leer', 'Liquidar'].map(p => `Propinas:${p}`),
+  ...['Actualizar', 'Anular', 'Crear', 'Eliminar', 'Leer', 'Operar', 'Ver todas'].map(p => `Salones:${p}`),
+]
+
 // Una entrada por pantalla, por su ruta: las dos "Motivos de diferencia" se
 // distinguen por el grupo, y acá por el `href`.
 const ARBOL_ADMIN: Arbol = {
@@ -94,10 +103,10 @@ beforeEach(() => {
 })
 
 describe('menú de configuración agrupado', () => {
-  it('el admin ve los nueve grupos, en orden, con cada pantalla una sola vez', async () => {
+  it('el admin de un tenant que contrató todos los módulos ve los nueve grupos, en orden, con cada pantalla una sola vez', async () => {
     esAdmin = true
     // Paquetería se ve solo si el tenant la contrató: `mis-permisos` le trae `Paquetería:Leer`.
-    permisos = ['Paquetería:Leer']
+    permisos = [...PERMISOS_ADMIN, 'Paquetería:Leer']
 
     const { arbol, separadores } = await arbolMontado()
 
@@ -114,6 +123,7 @@ describe('menú de configuración agrupado', () => {
   // pendientes son del dueño del local. Sin ser admin, ni el link ni la ruta.
   it('Boleta electrónica la ve el admin del tenant, entre Razones sociales y Usuarios', async () => {
     esAdmin = true
+    permisos = PERMISOS_ADMIN
 
     const { arbol } = await arbolMontado()
 
@@ -124,6 +134,33 @@ describe('menú de configuración agrupado', () => {
       '/configuracion/usuarios',
       '/configuracion/roles',
     ])
+  })
+
+  // Un tenant que solo contrató Paquetería: `mis-permisos` no le trae ningún módulo de este
+  // menú. Las entradas de admin (endpoints sin módulo) siguen; las de módulo no, aunque sea admin.
+  it('el admin de un tenant que no contrató ninguno de los módulos ve las entradas de admin pero no las de módulo', async () => {
+    esAdmin = true
+    permisos = ['Paquetería:Leer']
+
+    const { arbol } = await arbolMontado()
+    const rutas = Object.values(arbol).flat()
+
+    expect(rutas).toContain('/configuracion/empresa')
+    expect(rutas).toContain('/configuracion/usuarios')
+    expect(rutas).toContain('/configuracion/categorias')
+    expect(rutas).toContain('/configuracion/boleta-electronica')
+    for (const ruta of [
+      '/configuracion/items',
+      '/configuracion/pasarelas',
+      '/configuracion/cajas',
+      '/configuracion/salones',
+      '/configuracion/garzones',
+      '/configuracion/turnos',
+      '/configuracion/propinas-distribucion',
+      '/configuracion/impresoras',
+    ]) {
+      expect(rutas).not.toContain(ruta)
+    }
   })
 
   it('quien no es admin no la ve, aunque tenga otros permisos', async () => {

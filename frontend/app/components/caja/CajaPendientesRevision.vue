@@ -20,7 +20,7 @@ const marcando = ref<string | null>(null)
  * ofrecerla. El supervisor con solo `Cajas:Leer` ve la bandeja y no marca.
  */
 const puedeMarcar = computed(
-  () => permisos.esAdmin || permisos.can('Cajas', 'Actualizar'),
+  () => permisos.can('Cajas', 'Actualizar'),
 )
 
 async function cargar() {

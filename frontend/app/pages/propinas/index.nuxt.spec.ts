@@ -6,7 +6,7 @@
 // `components/caja/CajaTendencia.nuxt.spec.ts`, `salones/anulaciones.nuxt.spec.ts`
 // y el smoke Playwright de `ordenes.vue`). Molde: `mermas.nuxt.spec.ts` →
 // describe "nota del día de negocio".
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Propinas from './index.vue'
 
@@ -14,18 +14,30 @@ import Propinas from './index.vue'
  *  defecto (sin corte, la `DiaNegocioNota` no se dibuja). */
 let horaCorteBackend = 0
 
+/** El admin de un tenant que contrató Propinas: `mis-permisos` le trae el catálogo entero. */
+const ADMIN_PROPINAS = [
+  'Propinas:Leer', 'Propinas:Crear', 'Propinas:Actualizar', 'Propinas:Eliminar',
+  'Propinas:Configurar', 'Propinas:Liquidar',
+]
+let permisos: string[] = ADMIN_PROPINAS
+let llamadas: string[] = []
+
+const { navigateTo } = vi.hoisted(() => ({ navigateTo: vi.fn() }))
+mockNuxtImport('navigateTo', () => navigateTo)
+
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
     get esAdmin() { return true },
-    permisos: ['x'],
+    get permisos() { return permisos },
     loading: false,
-    can: () => true,
+    can: (modulo: string, permiso: string) => permisos.includes(`${modulo}:${permiso}`),
   })
 })
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     if (typeof url !== 'string') return Promise.resolve([])
+    llamadas.push(url)
     if (url.includes('/tenants/me')) {
       return Promise.resolve({ horaCorte: horaCorteBackend, diaNegocioHoy: '2026-09-18' })
     }
@@ -48,6 +60,12 @@ async function montar() {
   return wrapper
 }
 
+beforeEach(() => {
+  permisos = ADMIN_PROPINAS
+  llamadas = []
+  navigateTo.mockClear()
+})
+
 describe('propinas — nota del día de negocio', () => {
   beforeEach(() => {
     horaCorteBackend = 0
@@ -66,6 +84,27 @@ describe('propinas — nota del día de negocio', () => {
     const wrapper = await montar()
 
     expect(wrapper.text()).not.toContain('Tu día va de')
+    wrapper.unmount()
+  })
+})
+
+describe('propinas — el admin del tenant entra solo si su tenant contrató Propinas', () => {
+  // Sin atajo por `esAdmin` (owner, 2026-10-15): `mis-permisos` le trae al admin el
+  // catálogo de los módulos contratados, y el backend le contesta 403 en los demás.
+  it('con Propinas contratado, carga la pantalla sin rebotar', async () => {
+    const wrapper = await montar()
+
+    expect(navigateTo).not.toHaveBeenCalled()
+    expect(llamadas.some(u => u.includes('/propinas/liquidaciones'))).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('en un tenant que no contrató Propinas, rebota a Inicio sin pedir nada de propinas', async () => {
+    permisos = ['Paquetería:Leer']
+    const wrapper = await montar()
+
+    expect(navigateTo).toHaveBeenCalledWith('/')
+    expect(llamadas.some(u => u.includes('/propinas'))).toBe(false)
     wrapper.unmount()
   })
 })

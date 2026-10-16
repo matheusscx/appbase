@@ -13,6 +13,10 @@ import DesfasesPanel from './DesfasesPanel.vue'
 let esAdmin = false
 let permisos: string[] = []
 
+// El admin del tenant recibe de `mis-permisos` TODOS los permisos de los módulos que su
+// tenant contrató: así se simula, sin el atajo viejo `esAdmin ||`.
+const ITEMS_COMPLETO = ['Items:Actualizar', 'Items:Crear', 'Items:Eliminar', 'Items:Leer']
+
 // ⚠️ Nuxt instala su PROPIA instancia de Pinia, así que espiar un store creado
 // con `setActivePinia` no sirve: hay que mockear el auto-import.
 // Sin moneda resuelta, `MoneyInput` se monta deshabilitado y el prefill no se
@@ -103,15 +107,28 @@ describe('DesfasesPanel — gate de Items:Actualizar', () => {
     expect(labels.some(t => t.includes('Descartar'))).toBe(true)
   })
 
-  it('el admin del tenant los ve sin tener el permiso listado', async () => {
+  it('el admin del tenant los ve en un módulo que su tenant contrató', async () => {
     esAdmin = true
-    permisos = []
+    permisos = ITEMS_COMPLETO
 
     const wrapper = await mountSuspended(DesfasesPanel, {
       props: { filas: FILAS as never },
     })
 
     expect(textos(wrapper).some(t => t.includes('Aplicar'))).toBe(true)
+  })
+
+  it('el admin de un tenant que no contrató Items no los ve', async () => {
+    esAdmin = true
+    permisos = ['Paquetería:Leer']
+
+    const wrapper = await mountSuspended(DesfasesPanel, {
+      props: { filas: FILAS as never },
+    })
+
+    const labels = textos(wrapper)
+    expect(labels.some(t => t.includes('Aplicar'))).toBe(false)
+    expect(labels.some(t => t.includes('Descartar'))).toBe(false)
   })
 
   it('"Después" no se gatea: no escribe nada', async () => {
@@ -188,7 +205,7 @@ void vi
 describe('DesfasesPanel — descartar manda el costo que se está mostrando', () => {
   it('emite el `costoPropuesto` de cada fila seleccionada, no solo su id', async () => {
     esAdmin = true
-    permisos = []
+    permisos = ITEMS_COMPLETO
 
     const wrapper = await mountSuspended(DesfasesPanel, {
       props: { filas: FILAS as never },
@@ -260,7 +277,7 @@ describe('DesfasesPanel — la sugerencia se aplica en la escala de la moneda', 
 
   it('con una sugerencia de 4 decimales, aplica el entero que se ve en pantalla', async () => {
     esAdmin = true
-    permisos = []
+    permisos = ITEMS_COMPLETO
 
     const wrapper = await mountSuspended(DesfasesPanel, {
       props: { filas: [FILA_CON_SUGERENCIA] as never },
@@ -287,7 +304,7 @@ describe('DesfasesPanel — la sugerencia se aplica en la escala de la moneda', 
    */
   it('una fila en otra moneda se prellena y se aplica en la escala de SU moneda', async () => {
     esAdmin = true
-    permisos = []
+    permisos = ITEMS_COMPLETO
     const filaUsd = {
       ...FILA_CON_SUGERENCIA,
       itemId: 'receta-usd',
@@ -324,7 +341,7 @@ describe('DesfasesPanel — la sugerencia se aplica en la escala de la moneda', 
    */
   it('si la moneda llega DESPUÉS que las filas, el prefill se rehace', async () => {
     esAdmin = true
-    permisos = []
+    permisos = ITEMS_COMPLETO
     monedaOficialRef.value = null
 
     const wrapper = await mountSuspended(DesfasesPanel, {
@@ -368,7 +385,7 @@ describe('DesfasesPanel — la sugerencia se aplica en la escala de la moneda', 
    */
   it('rehacer el prefill NO revierte las filas que la persona destildó', async () => {
     esAdmin = true
-    permisos = []
+    permisos = ITEMS_COMPLETO
     monedaOficialRef.value = null
 
     const otra = { ...FILA_CON_SUGERENCIA, itemId: 'combo-2', nombre: 'Combo Dos' }

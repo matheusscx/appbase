@@ -19,8 +19,9 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
   // `Leer`, no `Crear`: lo que la pantalla pide para abrirse es el permiso de
   // lectura. Con `Crear` el link quedaba escondido para quien solo tiene
   // `Actualizar` o `Eliminar` —que sí puede trabajar ahí—, el mismo colapso de
-  // permisos que los gates por control vienen a evitar.
-  const lee = (modulo: string) => admin || permissionsStore.can(modulo, 'Leer')
+  // permisos que los gates por control vienen a evitar. Sin atajo para el admin:
+  // `mis-permisos` le trae solo los módulos que su tenant contrató (owner, 2026-10-15).
+  const lee = (modulo: string) => permissionsStore.can(modulo, 'Leer')
 
   const grupos: { label: string, items: (NavigationMenuItem | false)[] }[] = [
     {
@@ -97,9 +98,9 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
     {
       label: 'Paquetería',
       items: [
-        // Admin-only en el backend, y además solo si el tenant contrató el módulo: `lee()` no sirve
-        // acá porque con `admin ||` siempre da `true` para el admin. `can` sí mira `mis-permisos`,
-        // que al admin le trae solo los módulos contratados.
+        // Admin-only en el backend y, además, de un módulo que el tenant contrata: hace falta ser
+        // admin Y tenerlo en `mis-permisos`. `lee()` solo pide lo segundo, y en `mis-permisos`
+        // `Paquetería:Leer` también puede tenerlo un rol que no es admin.
         admin && permissionsStore.can('Paquetería', 'Leer')
         && { label: 'Repartidores', icon: 'i-lucide-bike', to: '/configuracion/repartidores' },
         admin && permissionsStore.can('Paquetería', 'Leer')

@@ -359,6 +359,31 @@ que se consumió al venderlo" (owner, 2026-09-29) quedaron sin entradas abiertas
 [`resueltos.md`](resueltos.md). Lo que sigue no pertenecía a ninguno de los dos: colgaba de esos
 encabezados por orden de llegada.
 
+- [ ] **27 pantallas del dashboard se abren por URL sin el permiso de su módulo** (frontend; anotado
+  el 2026-10-15 al sacar el atajo de admin de los gates por módulo; el owner decidió ese día que va
+  como frente aparte, con el mismo criterio). Solo 12 pantallas declaran
+  `definePageMeta({ middleware: ['auth', 'permiso'], permiso: '<Modulo>:<Accion>' })`; estas 27 tienen
+  `auth` a secas: `compras/index`, `compras/[id]`, `desfases`, `inventario/index`,
+  `inventario/traslados`, `inventario/recuentos/index`, `inventario/recuentos/[id]`, `mermas`,
+  `ordenes`, `pagos/index`, `propinas/index`, `propinas/liquidaciones/index`,
+  `propinas/liquidaciones/[id]/imprimir`, `reportes/index`, `salones/anulaciones`, `sesiones-garzon`,
+  `suscripciones`, `terceros`, `tienda/index`, `tienda/medios-pago`, `tienda/pasarela`,
+  `tienda/retorno`, `tienda/suscripciones`, `ventas/index`, `ventas/[id]`, `ventas/historial`,
+  `ventas/pos`. Aparte, 13 hijas de `configuracion/` no declaran middleware propio (heredan el `auth`
+  del padre): `cajas`, `garzones`, `impresoras`, `salones`, `turnos`, `propinas-distribucion`, `mermas`,
+  `inventario`, `recetas-desfases`, `sesiones-garzon`, `roles/[id]`, `index`, `perfil`; y `items` y
+  `pasarelas` tienen `auth` a secas.
+  **La escena:** el cajero de un restaurante (o el admin de la empresa que solo contrató Paquetería)
+  escribe `/compras` en la barra: la pantalla abre y cada carga vuelve con 403. El servidor ya
+  rechaza —no es de seguridad—, pero se ve roto.
+  **Cómo se cierra:** a cada pantalla, el permiso que pide **su endpoint de lectura** (el
+  `@RequiresPermiso` del controller, no el nombre de la carpeta), con su test. **Medir primero**:
+  esta lista sale del `definePageMeta`, no de lo que llama cada pantalla. Hay que clasificarlas a
+  mano antes de tocar: `propinas/index` ya rebota sola en su `onMounted`, `reportes/index` muestra
+  solo los reportes visibles, algunas de `tienda/` pueden ser del comprador y no del local, y las
+  hijas de `configuracion/` pueden ser admin-only (`TenantAdminGuard`, middleware `admin`) en vez de
+  ir por módulo.
+
 - [ ] **En una pasarela modo Mall, el código de comercio hijo lo escribe el propio local y nadie
   verifica que sea suyo** (producto + proceso de alta; anotado el 2026-10-08 al cerrar "la
   configuración de la pasarela no se valida", [`resueltos.md`](resueltos.md)). En Configuración ▸

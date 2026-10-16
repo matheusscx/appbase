@@ -43,15 +43,28 @@ describe('usePermisosCrud', () => {
       .toEqual([false, false, true, false])
   })
 
-  it('el admin del tenant los tiene todos sin permisos listados', () => {
-    // El `esAdmin ||` es lo que de verdad se copiaba mal en cada pantalla:
-    // olvidarlo deja al admin con una pantalla de solo lectura y sin saber por qué.
+  it('el admin del tenant tiene todo lo de un módulo que su tenant contrató', () => {
+    // `mis-permisos` le trae al admin todos los permisos de los módulos contratados.
     esAdmin.value = true
+    permisos.value = ['Salones:Leer', 'Salones:Crear', 'Salones:Actualizar', 'Salones:Eliminar']
 
     const { puedeLeer, puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones')
 
     expect([puedeLeer.value, puedeCrear.value, puedeActualizar.value, puedeEliminar.value])
       .toEqual([true, true, true, true])
+  })
+
+  it('el admin del tenant no tiene nada de un módulo que su tenant no contrató', () => {
+    // El backend le contesta 403 también al admin (`userHasPermiso` mira `tenant_modulos`):
+    // con un atajo por `esAdmin`, el tenant que solo contrató Paquetería veía botones de
+    // Salones que rebotaban.
+    esAdmin.value = true
+    permisos.value = ['Paquetería:Leer']
+
+    const { puedeLeer, puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Salones')
+
+    expect([puedeLeer.value, puedeCrear.value, puedeActualizar.value, puedeEliminar.value])
+      .toEqual([false, false, false, false])
   })
 
   it('respeta el módulo: un permiso de otro módulo no habilita', () => {

@@ -27,10 +27,11 @@ const EFECTIVO = { id: 'medio-efectivo', nombre: 'Efectivo', esEfectivo: true }
 const TARJETA = { id: 'medio-tarjeta', nombre: 'Tarjeta', esEfectivo: false }
 
 let permisos = new Set(['Compras:Leer', 'Compras:Crear', 'Compras:Pagar'])
+let esAdmin = false
 let enviados: { url: string, method?: string, body?: unknown, headers?: Record<string, string> }[] = []
 
 mockNuxtImport('usePermissionsStore', () => {
-  return () => ({ get esAdmin() { return false }, can: (m: string, a: string) => permisos.has(`${m}:${a}`) })
+  return () => ({ get esAdmin() { return esAdmin }, can: (m: string, a: string) => permisos.has(`${m}:${a}`) })
 })
 mockNuxtImport('useRoute', () => () => ({ params: { id: 'nueva' }, query: {} }))
 mockNuxtImport('useToast', () => () => ({ add: () => {} }))
@@ -151,6 +152,7 @@ async function abrirConfirmar(wrapper: Wrapper) {
 
 beforeEach(() => {
   permisos = new Set(['Compras:Leer', 'Compras:Crear', 'Compras:Pagar'])
+  esAdmin = false
   enviados = []
 })
 
@@ -188,6 +190,18 @@ describe('compras/[id] — "¿La pagaste ya?" (spec § 7, § 10 y decisión 7/12
     expect(enviados).toHaveLength(1)
     expect(enviados[0]!.body).toEqual({})
     expect(enviados[0]!.headers).toBeUndefined()
+    wrapper.unmount()
+  })
+
+  it('el admin no tiene atajo: sin Compras:Pagar en sus permisos, la sección no aparece', async () => {
+    // Sin `esAdmin ||` (owner, 2026-10-15): al admin lo habilita `mis-permisos`, que le
+    // trae el catálogo de los módulos que su tenant contrató.
+    esAdmin = true
+    permisos = new Set(['Compras:Leer', 'Compras:Crear'])
+    const wrapper = await montar()
+    await prepararParaConfirmar(wrapper, 'credito-fchvenc.xml')
+    await abrirConfirmar(wrapper)
+    expect(document.body.querySelector('[data-qa="compra-pago-seccion"]')).toBeNull()
     wrapper.unmount()
   })
 

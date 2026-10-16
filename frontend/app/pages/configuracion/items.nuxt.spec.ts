@@ -37,6 +37,9 @@ afterAll(() => {
   window.getComputedStyle = getComputedStyleOriginal
 })
 
+// El admin de un tenant que contrató Items: `mis-permisos` le trae el catálogo completo
+// del módulo, sin atajo `esAdmin` en la pantalla.
+const ADMIN_ITEMS = ['Items:Actualizar', 'Items:Crear', 'Items:Eliminar', 'Items:Leer']
 let esAdmin = false
 let permisos: string[] = []
 
@@ -456,14 +459,24 @@ describe('configuracion/items — permisos de módulo, no esAdmin', () => {
     expect(cuentaPorTitulo(wrapper, 'Más acciones')).toBeGreaterThan(0)
   })
 
-  it('el admin del tenant ve crear y editar sin permisos listados', async () => {
+  it('el admin del tenant ve crear y editar en un módulo que su tenant contrató', async () => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_ITEMS
 
     const wrapper = await montar()
 
     expect(tieneTexto(wrapper, 'Nuevo item')).toBe(true)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBeGreaterThan(0)
+  })
+
+  it('el admin de un tenant que no contrató Items no ve crear ni editar', async () => {
+    esAdmin = true
+    permisos = ['Paquetería:Leer']
+
+    const wrapper = await montar()
+
+    expect(tieneTexto(wrapper, 'Nuevo item')).toBe(false)
+    expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
   })
 })
 
@@ -473,7 +486,7 @@ describe('configuracion/items — permisos de módulo, no esAdmin', () => {
 describe('configuracion/items — una regla pausada ya asociada se nombra', () => {
   beforeEach(() => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_ITEMS
     impuestosMock = [IMPUESTO_IVA, IMPUESTO_OTRO, IMPUESTO_OTRO_PAUSADO]
     impuestosPromiseOverride = null
     descuentosMock = [DESCUENTO_ACTIVO, DESCUENTO_PAUSADO]
@@ -574,7 +587,7 @@ describe('configuracion/items — una regla pausada ya asociada se nombra', () =
 describe('configuracion/items — chip fijo del IVA', () => {
   beforeEach(() => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_ITEMS
     impuestosMock = [IMPUESTO_IVA, IMPUESTO_OTRO]
     impuestosPromiseOverride = null
   })
@@ -704,7 +717,7 @@ describe('configuracion/items — papelera: eliminar respeta el toggle', () => {
 
   beforeEach(() => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_ITEMS
     impuestosMock = [IMPUESTO_IVA, IMPUESTO_OTRO]
     impuestosPromiseOverride = null
     itemPapeleraBackend = {
@@ -790,7 +803,7 @@ describe('configuracion/items — papelera: la carrera del toggle vía usePagina
 
   beforeEach(() => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_ITEMS
     impuestosMock = [IMPUESTO_IVA, IMPUESTO_OTRO]
     impuestosPromiseOverride = null
     itemPapeleraBackend = {
@@ -886,7 +899,7 @@ describe('configuracion/items — guard de reentrancia de "Eliminar"', () => {
 
   beforeEach(() => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_ITEMS
     impuestosMock = [IMPUESTO_IVA, IMPUESTO_OTRO]
     impuestosPromiseOverride = null
     usoCalls = []
@@ -1054,7 +1067,7 @@ describe('configuracion/items — los campos de dinero siguen a la moneda', () =
 describe('configuracion/items — la unidad manda en costo y precio', () => {
   beforeEach(() => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_ITEMS
   })
 
   async function abrirAlta() {
@@ -1166,7 +1179,7 @@ describe('configuracion/items — la unidad manda en costo y precio', () => {
 describe('configuracion/items — cambiar la moneda vacía la plata del formulario', () => {
   beforeEach(() => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_ITEMS
     itemDetalleMock = ITEM_PRODUCTO
   })
 
@@ -1803,7 +1816,7 @@ describe('configuracion/items — cambiar la moneda vacía la plata del formular
 describe('configuracion/items — cambiar la unidad de un ítem guardado', () => {
   beforeEach(() => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_ITEMS
     itemDetalleMock = ITEM_PRODUCTO
     // Los tests de acá desmontan con el drawer abierto, y `unmount()` **no** se lleva el
     // contenido teleportado: queda un `[role="dialog"]` fantasma con su propio "Cancelar" y
@@ -2011,7 +2024,7 @@ describe('configuracion/items — cambiar la unidad de un ítem guardado', () =>
 describe('configuracion/items — lo que una opción no tipea lo hereda del grupo', () => {
   beforeEach(() => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_ITEMS
     enviados = []
   })
 
@@ -2070,7 +2083,7 @@ describe('configuracion/items — lo que una opción no tipea lo hereda del grup
 describe('configuracion/items — el costo cuenta lo que el ítem ya usa, esté o no en la primera página', () => {
   beforeEach(() => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_ITEMS
     llamadasPorIds = []
   })
 

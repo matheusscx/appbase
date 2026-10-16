@@ -168,6 +168,16 @@ const CASOS: Caso[] = [
   },
 ]
 
+// Lo que `mis-permisos` le devuelve al admin de un tenant que contrató el módulo: el catálogo
+// completo, sin atajo `esAdmin` en las pantallas.
+const CATALOGO_ADMIN: Record<string, string[]> = {
+  Salones: [
+    'Salones:Actualizar', 'Salones:Anular', 'Salones:Crear', 'Salones:Eliminar',
+    'Salones:Leer', 'Salones:Operar', 'Salones:Ver todas',
+  ],
+  Impresoras: ['Impresoras:Actualizar', 'Impresoras:Crear', 'Impresoras:Eliminar', 'Impresoras:Leer'],
+}
+
 describe.each(CASOS)('$pagina — cada control con el permiso de SU endpoint', (caso) => {
   beforeEach(() => {
     esAdmin = false
@@ -220,12 +230,22 @@ describe.each(CASOS)('$pagina — cada control con el permiso de SU endpoint', (
     esperar(wrapper, { crear: false, actualizar: false, eliminar: true })
   })
 
-  it('el admin del tenant ve los tres sin permisos listados', async () => {
+  it('el admin del tenant ve los tres en un módulo que su tenant contrató', async () => {
     esAdmin = true
+    permisos = CATALOGO_ADMIN[caso.modulo]!
 
     const wrapper = await montar(caso.componente)
 
     esperar(wrapper, { crear: true, actualizar: true, eliminar: true })
+  })
+
+  it(`el admin de un tenant que no contrató ${caso.modulo} no ve ningún control de escritura`, async () => {
+    esAdmin = true
+    permisos = ['Paquetería:Leer']
+
+    const wrapper = await montar(caso.componente)
+
+    esperar(wrapper, { crear: false, actualizar: false, eliminar: false })
   })
 })
 

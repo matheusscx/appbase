@@ -69,6 +69,9 @@ function errorApi(message: string) {
 
 // ⚠️ Nuxt instala su PROPIA instancia de Pinia, así que espiar un store creado
 // con `setActivePinia` no sirve: hay que mockear el auto-import.
+// El admin de un tenant que contrató Impresoras: `mis-permisos` le trae el catálogo
+// completo del módulo, sin atajo `esAdmin` en la pantalla.
+const ADMIN_IMPRESORAS = ['Impresoras:Actualizar', 'Impresoras:Crear', 'Impresoras:Eliminar', 'Impresoras:Leer']
 let esAdmin = false
 let permisos: string[] = []
 
@@ -261,15 +264,26 @@ describe('impresoras — cada control con el permiso de SU endpoint', () => {
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBeGreaterThan(0)
   })
 
-  it('el admin del tenant ve los tres sin permisos listados', async () => {
+  it('el admin del tenant ve los tres en un módulo que su tenant contrató', async () => {
     esAdmin = true
-    permisos = []
+    permisos = ADMIN_IMPRESORAS
 
     const wrapper = await montar()
 
     expect(tieneBoton(wrapper, 'Nueva impresora')).toBe(true)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBeGreaterThan(0)
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBeGreaterThan(0)
+  })
+
+  it('el admin de un tenant que no contrató Impresoras no ve crear, editar ni eliminar', async () => {
+    esAdmin = true
+    permisos = ['Paquetería:Leer']
+
+    const wrapper = await montar()
+
+    expect(tieneBoton(wrapper, 'Nueva impresora')).toBe(false)
+    expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
+    expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
   })
 })
 
@@ -278,6 +292,7 @@ describe('impresoras — papelera: eliminar respeta el toggle', () => {
     impresorasBackend = [impresora()]
     reset()
     esAdmin = true
+    permisos = ADMIN_IMPRESORAS
   })
 
   it('con "Ver eliminados" activo, borrar deja la fila visible como eliminada (no la saca de la lista)', async () => {
@@ -359,6 +374,7 @@ describe('impresoras — papelera: restaurar', () => {
     impresorasBackend = [eliminada()]
     reset()
     esAdmin = true
+    permisos = ADMIN_IMPRESORAS
   })
 
   it('restaurar devuelve la fila al estado vivo sin recargar la página', async () => {
@@ -439,6 +455,7 @@ describe('impresoras — papelera: la carrera de `cargar()` bajo toggles rápido
     ]
     reset()
     esAdmin = true
+    permisos = ADMIN_IMPRESORAS
   })
 
   it('si la respuesta del primer toggle llega DESPUÉS que la del segundo, el listado final igual corresponde al último toggle', async () => {

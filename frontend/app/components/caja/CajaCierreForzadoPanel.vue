@@ -11,9 +11,8 @@ import type { Caja } from '~/stores/caja'
  * tenant) — `caja.controller.ts` resuelve `puedeForzar` a mano
  * (`resolverEscrituraCompartida`, sin `@RequiresPermiso` en la ruta) contra
  * `Cajas:Actualizar`, y `caja.service.ts` rechaza el cierre ajeno si
- * `!puedeForzar`. `puedeActualizar` ya incluye al admin por su primera
- * condición (`esAdmin || can(...)`), así que no hace falta gatear los dos
- * por separado.
+ * `!puedeForzar`. El admin no se gatea aparte: `mis-permisos` le trae
+ * `Cajas:Actualizar` si su tenant contrató Cajas.
  *
  * `usuarioActualId` llega como prop (no `useAuthStore()` acá adentro): así el
  * componente no depende del store de auth para decidir "¿es mi caja?", que es

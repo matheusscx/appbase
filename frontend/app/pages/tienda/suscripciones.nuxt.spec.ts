@@ -28,12 +28,17 @@ import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Suscripciones from './suscripciones.vue'
 import { AVISO_ALTA_REPETIDA } from '~/composables/useSuscripciones'
 
+// El admin del tenant recibe de `mis-permisos` todos los permisos de los módulos que su
+// tenant contrató; el gate ("Nueva suscripción") es `Tienda Online:Crear`.
+const TIENDA_ONLINE_COMPLETO = ['Tienda Online:Crear', 'Tienda Online:Leer']
+
 let esAdmin = true
+let permisos: string[] = TIENDA_ONLINE_COMPLETO
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
     get esAdmin() { return esAdmin },
-    can: () => false,
+    can: (modulo: string, permiso: string) => permisos.includes(`${modulo}:${permiso}`),
   })
 })
 
@@ -166,6 +171,7 @@ afterEach(() => {
 
 beforeEach(() => {
   esAdmin = true
+  permisos = TIENDA_ONLINE_COMPLETO
   urlsCatalogo = []
   calculos = []
   falloCalculo = null

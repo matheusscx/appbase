@@ -222,8 +222,9 @@ test('el encargado de salón ve el turno y no el día del dueño', async ({ brow
 test('en un tenant sin el módulo, "Hoy" no aparece y no hay error', async ({ browser }) => {
   const page = await entrarComo(browser, 'admin@sistema.com', 'Demo Bodega')
   try {
-    // El admin pasa el filtro del frontend (`esAdmin`), el backend contesta 403
-    // y la zona se oculta. Se recarga con el listener ya puesto: la primera
+    // `admin@sistema.com` es superadmin: `can` le da `true` y pasa el filtro del
+    // frontend, el backend contesta 403 (el tenant no contrató el módulo) y la zona
+    // se oculta. El admin de un tenant, sin atajo por `esAdmin`, ni lo pide. Se recarga con el listener ya puesto: la primera
     // carga pudo haber respondido antes de que el test empezara a escuchar.
     const respuesta = page.waitForResponse(r => r.url().includes('/api/resumen-negocio/hoy'))
     await page.reload()

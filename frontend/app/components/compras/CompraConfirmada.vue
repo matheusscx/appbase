@@ -25,12 +25,12 @@ const permissionsStore = usePermissionsStore()
 // `Pagar` no es uno de los cuatro CRUD de `usePermisosCrud` (mismo molde que
 // `puedeAnular`, acá abajo): los datos de pago (spec § 8, decisión 12) son
 // SOLO de quien tiene `Compras:Pagar`, nunca de `Leer` a secas.
-const puedePagar = computed(() => permissionsStore.esAdmin || permissionsStore.can('Compras', 'Pagar'))
+const puedePagar = computed(() => permissionsStore.can('Compras', 'Pagar'))
 
 const confirmada = computed(() => props.compra.estado === 'confirmada')
 const puedeCorregir = computed(() => confirmada.value && puedeActualizar.value)
 const puedeAnular = computed(() =>
-  confirmada.value && (permissionsStore.esAdmin || permissionsStore.can('Compras', 'Anular')),
+  confirmada.value && permissionsStore.can('Compras', 'Anular'),
 )
 // El descuento se reparte según el valor de cada línea: sin todos los precios
 // no hay cómo (el backend responde 400).

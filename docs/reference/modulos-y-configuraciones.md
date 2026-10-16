@@ -51,8 +51,8 @@ Fuera de los módulos:
 El menú lateral lo arma `frontend/app/composables/useMenuLateral.ts` (el layout
 `dashboard.vue` solo lo dibuja) **agrupado por módulo** desde el 2026-10-02: un módulo con
 varias pantallas es un grupo que se despliega, y uno de una sola, un link suelto. Cada pantalla
-se muestra si el usuario es admin o tiene el permiso indicado, y un grupo, si le queda al menos
-una pantalla visible (en orden de aparición):
+se muestra si el usuario tiene el permiso indicado —también el admin, sin atajo (ver abajo)—, y
+un grupo, si le queda al menos una pantalla visible (en orden de aparición):
 
 | Grupo | Pantalla | Ruta | Módulo · permiso que la muestra |
 |---|---|---|---|
@@ -93,8 +93,9 @@ pantallas que el menú plano tenía, cada una una vez; más las 3 de Paquetería
 
 **Quién ve cada entrada:** el gate es el permiso de la columna *Permiso* y nada más. El admin
 del tenant no tiene atajo (owner, 2026-10-15): ve los módulos que su tenant contrató —los
-permisos que le devuelve `mis-permisos`—, porque el backend contesta 403 en los demás incluso
-a él. El superadmin ve todo.
+permisos que le devuelve `mis-permisos`—, porque el backend contesta 403 incluso a él en los
+módulos no contratados que van con `@RequiresPermiso` (Paquetería es admin-only y todavía no
+exige el contrato: [`paqueteria.md`](../features/paqueteria.md)). El superadmin ve todo.
 
 Pagos y Órdenes viven en Ventas y Costos desfasados en Inventario aunque su permiso sea de
 otro módulo: son decisiones del owner (el porqué, en
@@ -232,7 +233,7 @@ Los criterios de reparto de propinas son `PARTES_IGUALES`, `VENTAS_NETAS`,
 
 El gate es `admin` **y** `Paquetería:Leer` (que en `mis-permisos` aparece si el tenant
 contrató el módulo, y también si un rol propio lo recibió en Roles): el backend de las dos es admin-only, y el `lee()` del resto de la página
-no sirve acá porque con `admin ||` siempre da `true`.
+no alcanza porque solo pide el permiso, no ser admin.
 
 ### Rutas que solo redirigen
 

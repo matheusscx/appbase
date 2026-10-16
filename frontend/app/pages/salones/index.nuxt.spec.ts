@@ -24,6 +24,20 @@ import Salones from './index.vue'
 import { AVISO_COBRO_REPETIDO, useIntentoCobro } from '~/composables/useIntentoCobro'
 
 /**
+ * El admin del tenant en este spec: `esAdmin` más el catálogo COMPLETO de los módulos que la
+ * pantalla consulta (Salones, Inventario, Ventas), que es lo que `mis-permisos` le devuelve a
+ * un tenant que los contrató. Ya no hay atajo `esAdmin ||` en el front: `esAdmin` solo no abre
+ * ningún botón.
+ */
+const PERMISOS_ADMIN = [
+  'Salones:Actualizar', 'Salones:Anular', 'Salones:Crear', 'Salones:Eliminar',
+  'Salones:Leer', 'Salones:Operar', 'Salones:Ver todas',
+  'Inventario:Actualizar', 'Inventario:Crear', 'Inventario:Leer', 'Inventario:Ver todas',
+  'Ventas:Actualizar', 'Ventas:Anular', 'Ventas:Crear', 'Ventas:Eliminar',
+  'Ventas:Leer', 'Ventas:Nota de crédito', 'Ventas:Ver todas',
+]
+
+/**
  * Para poder CERRAR un drawer real en un test —el panel de personalización de una receta, en
  * *"… tampoco entra una receta confirmada desde su panel ya abierto"*—. La transición de salida
  * de `reka-ui` `Presence` guarda el objeto vivo de `getComputedStyle()` en un `ref`, y Vue le
@@ -2319,6 +2333,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     catalogoItemsMock = [producto('3.0000', '1.0000')]
     cuentasDeLaMesa = [cuentaConPedido('1.0000')]
     usePermissionsStore().esAdmin = true
+    usePermissionsStore().permisos = PERMISOS_ADMIN
     patchCantidadRechazoEnriquecido = {
       data: {
         message: 'Stock insuficiente de "Carne" en el local: quedan 1 unidad y se necesitan 3 — hay 10.0000 en Bodega Subsuelo',
@@ -5180,6 +5195,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
   it('la franja de la boleta electrónica se ve arriba y se vuelve a leer después de cobrar la cuenta', async () => {
     // Quien vende (`Ventas:Crear`): sin el permiso la franja ni se monta.
     usePermissionsStore().esAdmin = true
+    usePermissionsStore().permisos = PERMISOS_ADMIN
     estadoEmisionMock = {
       activa: true,
       avisos: [{ codigo: 'POCOS_FOLIOS', mensaje: 'Quedan 40 folios de boleta (39)' }],
@@ -6807,6 +6823,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
      * la propina.
      */
     usePermissionsStore().esAdmin = true
+    usePermissionsStore().permisos = PERMISOS_ADMIN
     garzonesLista = [
       { id: 'g1', nombre: 'Ana', activo: true },
       { id: 'g2', nombre: 'Bruno', activo: true },
@@ -6858,6 +6875,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
      * único, y sin él sobrevivía la suite entera.
      */
     usePermissionsStore().esAdmin = true
+    usePermissionsStore().permisos = PERMISOS_ADMIN
     garzonesLista = [
       { id: 'g1', nombre: 'Ana', activo: true },
       { id: 'g2', nombre: 'Bruno', activo: true },
@@ -6935,6 +6953,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
      * su cuenta adentro en vez de releer la activa.
      */
     usePermissionsStore().esAdmin = true
+    usePermissionsStore().permisos = PERMISOS_ADMIN
     garzonesLista = [
       { id: 'g1', nombre: 'Ana', activo: true },
       { id: 'g2', nombre: 'Bruno', activo: true },
@@ -6982,6 +7001,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
      * tercera puerta.
      */
     usePermissionsStore().esAdmin = true
+    usePermissionsStore().permisos = PERMISOS_ADMIN
     // **Un solo garzón activo, y las dos cuentas con responsables distintos.** Es
     // lo que hace observable la otra mitad del congelado: `garzonesTransferibles`
     // saca al responsable de la cuenta, así que leído de `activeCuenta` la lista

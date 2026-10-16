@@ -76,6 +76,9 @@ function errorApi(message: string) {
 // con `setActivePinia` no sirve: hay que mockear el auto-import.
 let esAdmin = false
 let permisos: string[] = []
+// Lo que `mis-permisos` le devuelve al admin de un tenant que contrató Terceros: todo el
+// catálogo del módulo (ya no hay atajo `esAdmin ||` en el front).
+const TERCEROS_COMPLETO = ['Terceros:Actualizar', 'Terceros:Crear', 'Terceros:Eliminar', 'Terceros:Leer']
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -305,15 +308,26 @@ describe('terceros — cada control con el permiso de SU endpoint', () => {
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBeGreaterThan(0)
   })
 
-  it('el admin del tenant ve los tres sin permisos listados', async () => {
+  it('el admin del tenant ve los tres en un módulo que su tenant contrató', async () => {
     esAdmin = true
-    permisos = []
+    permisos = TERCEROS_COMPLETO
 
     const wrapper = await montar()
 
     expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(true)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBeGreaterThan(0)
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBeGreaterThan(0)
+  })
+
+  it('el admin de un tenant que no contrató Terceros no ve ninguno de los tres', async () => {
+    esAdmin = true
+    permisos = ['Paquetería:Leer']
+
+    const wrapper = await montar()
+
+    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(false)
+    expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
+    expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
   })
 })
 
@@ -322,6 +336,7 @@ describe('terceros — papelera: eliminar respeta el toggle', () => {
     tercerosBackend = [tercero()]
     reset()
     esAdmin = true
+    permisos = TERCEROS_COMPLETO
   })
 
   it('con "Ver eliminados" activo, borrar deja la fila visible como eliminada (no la saca de la lista)', async () => {
@@ -403,6 +418,7 @@ describe('terceros — papelera: restaurar', () => {
     tercerosBackend = [eliminado()]
     reset()
     esAdmin = true
+    permisos = TERCEROS_COMPLETO
   })
 
   it('restaurar devuelve la fila al estado vivo sin recargar la página', async () => {
@@ -483,6 +499,7 @@ describe('terceros — papelera: la carrera de `cargar()` bajo toggles rápidos'
     ]
     reset()
     esAdmin = true
+    permisos = TERCEROS_COMPLETO
   })
 
   it('si la respuesta del primer toggle llega DESPUÉS que la del segundo, el listado final igual corresponde al último toggle', async () => {
@@ -527,6 +544,7 @@ describe('terceros — "Plazo de pago (días)" (spec compras-deuda-proveedor § 
   beforeEach(() => {
     reset()
     esAdmin = true
+    permisos = TERCEROS_COMPLETO
   })
 
   it('al editar, precarga el plazo actual', async () => {
