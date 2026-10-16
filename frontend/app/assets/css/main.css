@@ -1,2 +1,45 @@
 @import "tailwindcss";
 @import "@nuxt/ui";
+
+/* Tipografías de marca: woff2 latino, variables, servidas por la app (sin CDN).
+   `font-display: swap` pinta con la de respaldo mientras baja: nunca texto invisible. */
+@font-face {
+  font-family: 'DM Sans';
+  src: url('/fonts/dm-sans.woff2') format('woff2');
+  font-weight: 100 1000;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Bricolage Grotesque';
+  src: url('/fonts/bricolage-grotesque.woff2') format('woff2');
+  font-weight: 200 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+/* `static`: las variables se emiten siempre. Nuxt UI arma `--ui-color-primary-*` en
+   runtime con `var(--color-venka-*)` y Tailwind, sin `static`, descartaría las que
+   ningún utility usa. */
+@theme static {
+  --font-sans: 'DM Sans', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'Bricolage Grotesque', var(--font-sans);
+
+  /* Token suelto de marca: sello, marca de la sección activa, acentos sobre petróleo. */
+  --color-menta: #7FD8C3;
+
+  /* Petróleo de marca. Nuxt UI resuelve `--ui-primary` en claro al tono 500, así que
+     el 500 es exactamente #0E4D57. Mismo matiz (OKLCH) en todos los tonos. */
+  --color-venka-50: #E9F8FB;
+  --color-venka-100: #D9ECEF;
+  --color-venka-200: #B9D3D8;
+  --color-venka-300: #8EB2B9;
+  --color-venka-400: #588993;
+  --color-venka-500: #0E4D57;
+  --color-venka-600: #003E48;
+  --color-venka-700: #003038;
+  --color-venka-800: #002329;
+  --color-venka-900: #00181D;
+  --color-venka-950: #000D11;
+}

@@ -9,6 +9,21 @@ export default defineNuxtConfig({
   ssr: false,
   devtools: { enabled: true },
   css: ['~/assets/css/main.css'],
+  app: {
+    head: {
+      title: 'Venka',
+      htmlAttrs: { lang: 'es' },
+      link: [
+        { rel: 'icon', href: '/favicon.ico', sizes: 'any' },
+        { rel: 'icon', type: 'image/png', sizes: '192x192', href: '/icon-192.png' },
+        { rel: 'icon', type: 'image/png', sizes: '512x512', href: '/icon-512.png' },
+        { rel: 'apple-touch-icon', href: '/apple-touch-icon.png' },
+        // Las dos tipografías de marca, para que la letra no salte al cargar.
+        { rel: 'preload', href: '/fonts/dm-sans.woff2', as: 'font', type: 'font/woff2', crossorigin: '' },
+        { rel: 'preload', href: '/fonts/bricolage-grotesque.woff2', as: 'font', type: 'font/woff2', crossorigin: '' },
+      ],
+    },
+  },
   modules: ['@nuxt/ui', '@pinia/nuxt', ...(process.env.NODE_ENV !== 'production' ? ['@nuxt/test-utils/module'] : [])],
   colorMode: {
     preference: 'light',
