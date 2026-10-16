@@ -62,6 +62,7 @@ const ARBOL_ADMIN: Arbol = {
     '/configuracion/propinas-distribucion',
     '/configuracion/impresoras',
   ],
+  'Paquetería': ['/configuracion/repartidores', '/configuracion/paqueteria'],
 }
 
 const PERFIL: Arbol = { 'Mi cuenta': ['/configuracion/perfil'] }
@@ -93,8 +94,10 @@ beforeEach(() => {
 })
 
 describe('menú de configuración agrupado', () => {
-  it('el admin ve los ocho grupos, en orden, con cada pantalla una sola vez', async () => {
+  it('el admin ve los nueve grupos, en orden, con cada pantalla una sola vez', async () => {
     esAdmin = true
+    // Paquetería se ve solo si el tenant la contrató: `mis-permisos` le trae `Paquetería:Leer`.
+    permisos = ['Paquetería:Leer']
 
     const { arbol, separadores } = await arbolMontado()
 
@@ -102,9 +105,9 @@ describe('menú de configuración agrupado', () => {
     // `toEqual` no mira el orden de las claves; el de los grupos es decisión.
     expect(Object.keys(arbol)).toEqual(Object.keys(ARBOL_ADMIN))
     const rutas = Object.values(arbol).flat()
-    expect(rutas).toHaveLength(28)
-    expect(new Set(rutas).size).toBe(28)
-    expect(separadores).toBe(7)
+    expect(rutas).toHaveLength(30)
+    expect(new Set(rutas).size).toBe(30)
+    expect(separadores).toBe(8)
   })
 
   // La ve todo admin del tenant (spec `2026-10-14-boleta-desde-la-venta` § 8.3): el interruptor de la emisión y el botón de las
@@ -129,6 +132,33 @@ describe('menú de configuración agrupado', () => {
     const { arbol } = await arbolMontado()
 
     expect(Object.values(arbol).flat()).not.toContain('/configuracion/boleta-electronica')
+  })
+
+  // Admin-only en el backend (`TenantAdminGuard`) y, además, solo si el tenant contrató el módulo.
+  it('el admin de un tenant que contrató Paquetería ve Repartidores y Valores por defecto', async () => {
+    esAdmin = true
+    permisos = ['Paquetería:Leer']
+
+    const { arbol } = await arbolMontado()
+
+    expect(arbol['Paquetería']).toEqual(['/configuracion/repartidores', '/configuracion/paqueteria'])
+  })
+
+  it('el admin de un tenant que no la contrató no ve el grupo', async () => {
+    esAdmin = true
+    permisos = ['Items:Leer']
+
+    const { arbol } = await arbolMontado()
+
+    expect(arbol).not.toHaveProperty('Paquetería')
+  })
+
+  it('quien no es admin no ve el grupo, aunque tenga Paquetería:Leer', async () => {
+    permisos = ['Paquetería:Leer', 'Items:Leer']
+
+    const { arbol } = await arbolMontado()
+
+    expect(arbol).not.toHaveProperty('Paquetería')
   })
 
   it('sin permisos queda solo Perfil, sin encabezados de grupos vacíos', async () => {

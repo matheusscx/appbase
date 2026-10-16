@@ -13,7 +13,8 @@ import { entrarComo } from '../support/ui'
  * que ya entra como él.
  */
 
-/** Las 26 pantallas del menú plano anterior: agrupar no puede perder ni duplicar ninguna. */
+/** Las 26 pantallas del menú plano anterior —agrupar no puede perder ni duplicar ninguna— más las
+ * 3 de Paquetería, que Paris (el tenant del e2e) contrata. */
 const PANTALLAS = [
   '/', '/mi-caja', '/cajas',
   '/ventas/pos', '/ventas', '/pagos', '/ordenes',
@@ -24,10 +25,11 @@ const PANTALLAS = [
   '/inventario', '/inventario/recuentos', '/inventario/traslados', '/mermas',
   '/inventario/stock-minimo', '/desfases',
   '/compras', '/compras/por-pagar',
+  '/paquetes/escanear', '/paquetes', '/paquetes/rutas',
   '/reportes', '/admin',
 ]
 
-const GRUPOS = ['Ventas', 'Salones', 'Tienda Online', 'Inventario', 'Compras']
+const GRUPOS = ['Ventas', 'Salones', 'Tienda Online', 'Inventario', 'Compras', 'Paquetería']
 
 function menuLateral(page: Page) {
   return page.locator('[data-qa="menu-lateral"]')

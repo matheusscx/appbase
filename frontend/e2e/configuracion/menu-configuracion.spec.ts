@@ -17,23 +17,24 @@ function menuConfiguracion(page: Page) {
   return page.locator('nav').filter({ has: page.getByRole('link', { name: 'Perfil', exact: true }) })
 }
 
-test('el admin ve los ocho grupos en orden y ninguna etiqueta se corta', async ({ page }) => {
+test('el admin ve los nueve grupos en orden y ninguna etiqueta se corta', async ({ page }) => {
   await page.goto('/configuracion/perfil')
   const menu = menuConfiguracion(page)
 
   await expect(menu.locator('[data-slot="label"]')).toHaveText([
-    'Mi cuenta', 'Organización', 'Catálogo', 'Precios', 'Cobros', 'Caja', 'Inventario', 'Restaurante',
+    'Mi cuenta', 'Organización', 'Catálogo', 'Precios', 'Cobros', 'Caja', 'Inventario', 'Restaurante', 'Paquetería',
   ])
   // 27 de siempre + Boleta electrónica, que ve todo admin del tenant (el del e2e lo es; el que no
-  // es superadmin, en el test de más abajo): `configuracion.nuxt.spec.ts` fija el árbol.
-  await expect(menu.getByRole('link')).toHaveCount(28)
+  // es superadmin, en el test de más abajo) + las 2 de Paquetería, que Paris contrata:
+  // `configuracion.nuxt.spec.ts` fija el árbol.
+  await expect(menu.getByRole('link')).toHaveCount(30)
 
   // `truncate` corta con elipsis sin avisar: el texto completo sigue en el DOM, así que
   // un `toHaveText` pasa igual. Lo que delata el corte es el ancho.
   // Contadas antes de medir: sobre un locator vacío `evaluateAll` devuelve `[]` y pasa.
   // Acotadas a los links: el encabezado de cada grupo también lleva un `linkLabel`.
   const etiquetas = menu.locator('[data-slot="link"] [data-slot="linkLabel"]')
-  await expect(etiquetas).toHaveCount(28)
+  await expect(etiquetas).toHaveCount(30)
   const cortadas = await etiquetas.evaluateAll(els =>
     els.filter(el => el.scrollWidth > el.clientWidth).map(el => el.textContent),
   )
@@ -70,7 +71,8 @@ test.describe('admin de un comercio, sin ser superadmin', () => {
 
     await page.goto('/configuracion/perfil')
     const menu = menuConfiguracion(page)
-    await expect(menu.getByRole('link')).toHaveCount(28)
+    // 28 + Paquetería (2): `mis-permisos` le trae `Paquetería:Leer` porque Paris la contrata.
+    await expect(menu.getByRole('link')).toHaveCount(30)
 
     await menu.getByRole('link', { name: 'Boleta electrónica', exact: true }).click()
     await page.waitForURL('**/configuracion/boleta-electronica')

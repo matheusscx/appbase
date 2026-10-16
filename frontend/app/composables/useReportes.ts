@@ -38,7 +38,9 @@ export function useReportes() {
 
   const visibles = computed<Reporte[]>(() =>
     CATALOGO
-      .filter(r => permissionsStore.esAdmin || permissionsStore.can(r.modulo, r.accion))
+      // Sin atajo de admin, igual que el menú lateral: el admin ve los reportes de los módulos
+      // que su tenant contrató (`mis-permisos`), no uno que el backend le contestaría con 403.
+      .filter(r => permissionsStore.can(r.modulo, r.accion))
       .map(({ modulo: _m, accion: _a, ...r }) => r),
   )
 

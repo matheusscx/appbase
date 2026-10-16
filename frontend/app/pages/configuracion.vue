@@ -94,6 +94,18 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
         lee('Impresoras') && { label: 'Impresoras', icon: 'i-lucide-printer', to: '/configuracion/impresoras' },
       ],
     },
+    {
+      label: 'Paquetería',
+      items: [
+        // Admin-only en el backend, y además solo si el tenant contrató el módulo: `lee()` no sirve
+        // acá porque con `admin ||` siempre da `true` para el admin. `can` sí mira `mis-permisos`,
+        // que al admin le trae solo los módulos contratados.
+        admin && permissionsStore.can('Paquetería', 'Leer')
+        && { label: 'Repartidores', icon: 'i-lucide-bike', to: '/configuracion/repartidores' },
+        admin && permissionsStore.can('Paquetería', 'Leer')
+        && { label: 'Valores por defecto', icon: 'i-lucide-badge-dollar-sign', to: '/configuracion/paqueteria' },
+      ],
+    },
   ]
 
   return grupos

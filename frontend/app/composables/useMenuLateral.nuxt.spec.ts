@@ -17,8 +17,10 @@ const ruta = reactive({ path: '/' })
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
     get esAdmin() { return esAdmin.value },
+    // Igual que `can()` del store real: el superadmin pasa, todos los demás (el admin
+    // del tenant incluido) por lo que `mis-permisos` les trajo.
     can: (modulo: string, permiso: string) =>
-      permisos.value.includes(`${modulo}:${permiso}`),
+      esSuperadmin.value || permisos.value.includes(`${modulo}:${permiso}`),
   })
 })
 mockNuxtImport('useAuthStore', () => {
@@ -63,6 +65,10 @@ const GATE_POR_RUTA: Record<string, string> = {
   '/compras/por-pagar': 'Compras:Pagar',
   '/desfases': 'Items:Leer',
   '/ordenes': 'Pasarelas:Leer',
+  // Admin-only en el backend: `Paquetería:Leer` solo marca que el tenant contrató el módulo.
+  '/paquetes/escanear': 'Paquetería:Leer',
+  '/paquetes': 'Paquetería:Leer',
+  '/paquetes/rutas': 'Paquetería:Leer',
 }
 
 /** El árbol aprobado por el owner el 2026-10-02 (docs/patterns/frontend.md § 1). */
@@ -100,6 +106,11 @@ const ARBOL_DEL_ADMIN = [
   ['Compras', [
     ['Recepciones', '/compras'],
     ['Por pagar', '/compras/por-pagar'],
+  ]],
+  ['Paquetería', [
+    ['Escanear', '/paquetes/escanear'],
+    ['Paquetes', '/paquetes'],
+    ['Rutas', '/paquetes/rutas'],
   ]],
   ['Reportes', '/reportes'],
   ['Administración', '/admin'],
@@ -142,12 +153,14 @@ describe('useMenuLateral', () => {
 
   describe('el árbol', () => {
     beforeEach(() => {
+      // Superadmin: `can()` lo deja pasar por todo. Antes alcanzaba con `esAdmin`, que
+      // cortocircuitaba `puede()`; hoy el admin del tenant ve solo lo que contrató.
       esAdmin.value = true
       esSuperadmin.value = true
       reportesVisibles.value = [{ to: '/reportes/varianza' }]
     })
 
-    it('el admin ve el árbol aprobado, en orden', () => {
+    it('el superadmin ve el árbol aprobado, en orden', () => {
       const { items } = montarMenu()
 
       expect(forma(items.value)).toEqual(ARBOL_DEL_ADMIN)
@@ -204,6 +217,38 @@ describe('useMenuLateral', () => {
       expect(pantallas(items.value)).toContain('/admin')
     })
 
+    // `mis-permisos` le trae al admin del tenant todos los permisos de los módulos que su
+    // tenant contrató (`rbac.service.ts → getMisPermisos`). El menú ya no lo cortocircuita por
+    // `esAdmin`: le mostraba módulos que el backend le contestaba con 403.
+    it('el admin de un tenant que solo contrató Paquetería ve Inicio y su grupo, y nada más', () => {
+      esAdmin.value = true
+      permisos.value = ['Paquetería:Leer']
+      const { items } = montarMenu()
+
+      expect(forma(items.value)).toEqual([
+        ['Inicio', '/'],
+        ['Paquetería', [
+          ['Escanear', '/paquetes/escanear'],
+          ['Paquetes', '/paquetes'],
+          ['Rutas', '/paquetes/rutas'],
+        ]],
+      ])
+    })
+
+    it('el admin de un tenant que no contrató Paquetería no ve el grupo, ni ningún módulo fuera de sus permisos', () => {
+      esAdmin.value = true
+      permisos.value = ['Ventas:Leer', 'Ventas:Crear']
+      const { items } = montarMenu()
+
+      expect(forma(items.value)).toEqual([
+        ['Inicio', '/'],
+        ['Ventas', [
+          ['Punto de venta', '/ventas/pos'],
+          ['Historial', '/ventas'],
+        ]],
+      ])
+    })
+
     it('un módulo de varias pantallas sigue siendo grupo aunque el rol vea una sola', () => {
       // El bodeguero recibe y no paga (decisión del owner, 2026-10-02): ve el
       // grupo Compras con "Recepciones" adentro, no un link suelto.
@@ -233,7 +278,8 @@ describe('useMenuLateral', () => {
 
   describe('el grupo de la pantalla actual', () => {
     beforeEach(() => {
-      esAdmin.value = true
+      // Superadmin y no `esAdmin`: ya no cortocircuita, y estos casos necesitan el menú entero.
+      esSuperadmin.value = true
     })
 
     it('queda marcado también en un detalle, y ningún otro', () => {
@@ -253,13 +299,15 @@ describe('useMenuLateral', () => {
 
     it('tras un F5 se abre cuando llegan los permisos, no solo al montar', async () => {
       // El acordeón del componente lee `defaultOpen` una vez, al montarse; tras un
-      // F5 el menú se monta con el store vacío (`esAdmin` arranca en `false`).
-      esAdmin.value = false
+      // F5 el menú se monta con el store vacío (sin permisos). Los permisos de un rol del
+      // tenant son lo que llega tarde; el superadmin del `beforeEach` los saltea, por eso
+      // acá se apaga.
+      esSuperadmin.value = false
       ruta.path = '/inventario/recuentos'
       const { gruposAbiertos } = montarMenu()
       expect(gruposAbiertos.value).toEqual([])
 
-      esAdmin.value = true
+      permisos.value = ['Inventario:Leer']
       await nextTick()
 
       expect(gruposAbiertos.value).toEqual(['inventario'])

@@ -15,6 +15,8 @@ interface Pantalla {
  * - Cada pantalla conserva el gate exacto que tenía como entrada plana. Casi todas
  *   piden `Leer`, pero no todas: Punto de venta, Mesas, Anulaciones y Por pagar.
  * - Un grupo existe solo si al usuario le queda al menos una pantalla adentro.
+ * - El admin del tenant no tiene atajo: ve los módulos que su tenant contrató, que son los
+ *   permisos que le devuelve `mis-permisos`.
  */
 export function useMenuLateral() {
   const route = useRoute()
@@ -23,7 +25,11 @@ export function useMenuLateral() {
   const { visibles: reportesVisibles } = useReportes()
 
   function puede(modulo: string, permiso: string) {
-    return permissionsStore.esAdmin || permissionsStore.can(modulo, permiso)
+    // El admin ve lo que su tenant contrató: `mis-permisos` ya le trae todos los permisos de esos
+    // módulos (owner, 2026-10-15). Antes se cortocircuitaba con `esAdmin` y el menú le mostraba
+    // módulos que el backend le contesta con 403 (`userHasPermiso` mira `tenant_modulos` también
+    // para el admin). El superadmin sigue viendo todo: `can` le da `true`.
+    return permissionsStore.can(modulo, permiso)
   }
 
   function grupo(value: string, label: string, icon: string, hijas: (Pantalla | false)[]): NavigationMenuItem[] {
@@ -105,6 +111,13 @@ export function useMenuLateral() {
       // pregunta "¿puede pagar?", porque TODA la pantalla es de quien paga).
       puede('Compras', 'Pagar') && { label: 'Por pagar', icon: 'i-lucide-hand-coins', to: '/compras/por-pagar' },
     ]))
+    menu.push(...grupo('paqueteria', 'Paquetería', 'i-lucide-package', [
+      // El backend es admin-only (`TenantAdminGuard`); `Paquetería:Leer` es solo la marca de que el
+      // tenant lo contrató, y en `mis-permisos` solo la tiene el admin.
+      puede('Paquetería', 'Leer') && { label: 'Escanear', icon: 'i-lucide-scan-barcode', to: '/paquetes/escanear' },
+      puede('Paquetería', 'Leer') && { label: 'Paquetes', icon: 'i-lucide-package', to: '/paquetes' },
+      puede('Paquetería', 'Leer') && { label: 'Rutas', icon: 'i-lucide-route', to: '/paquetes/rutas' },
+    ]))
     // Visible si el usuario puede ver al menos un reporte: el catálogo y el
     // chequeo viven en `useReportes`, compartidos con el índice `/reportes`.
     if (reportesVisibles.value.length > 0) {
@@ -118,7 +131,7 @@ export function useMenuLateral() {
 
   // Los grupos desplegados. El acordeón del componente lee `defaultOpen` una sola
   // vez, al montarse, y tras un F5 el menú se monta antes de que lleguen los
-  // permisos (`esAdmin` arranca en `false`): con `defaultOpen`, el grupo de la
+  // permisos (`permisos` arranca vacío): con `defaultOpen`, el grupo de la
   // pantalla actual quedaría cerrado. Por eso el estado es propio y solo suma: lo
   // que el usuario abrió a mano sigue abierto, y lo que cerró no se le reabre
   // hasta que navegue.

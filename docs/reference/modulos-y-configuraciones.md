@@ -37,6 +37,7 @@ Eliminar, Ver todas, Reembolsar, Nota de crédito, Operar, Configurar, Liquidar,
 | Resumen del negocio | `/` | Leer | Dashboard "Hoy" del dueño (separado de Ventas a propósito) |
 | Compras | `/compras` | Leer, Crear, Actualizar, Anular, Pagar | Recepción de compras y deuda con proveedores |
 | Varianza | `/reportes/varianza` | Leer | Reporte de varianza real vs. teórico (AVT) |
+| Paquetería | `/paquetes` | Leer | Gestión de paquetes y hojas de ruta. Admin-only en el backend (`TenantAdminGuard`): `Leer` solo marca que el tenant lo contrató, y en `mis-permisos` solo lo tiene el admin |
 
 Fuera de los módulos:
 
@@ -79,13 +80,21 @@ una pantalla visible (en orden de aparición):
 | Inventario | Costos desfasados | `/desfases` | Items · Leer |
 | Compras | Recepciones | `/compras` | Compras · Leer |
 | Compras | Por pagar | `/compras/por-pagar` | Compras · Pagar |
+| Paquetería | Escanear | `/paquetes/escanear` | Paquetería · Leer |
+| Paquetería | Paquetes | `/paquetes` | Paquetería · Leer |
+| Paquetería | Rutas | `/paquetes/rutas` | Paquetería · Leer |
 | — | Reportes | `/reportes` | Algún reporte visible (hoy solo *Varianza* · Leer) |
 | — | Administración | `/admin` | Solo superadmin |
 | *(abajo)* | Configuración | `/configuracion/perfil` | Siempre visible (abre el menú de §3) |
 | *(abajo)* | Cerrar sesión | — | Siempre visible |
 
 Suma: 8 sueltas + Ventas 4 + Salones 3 + Tienda Online 3 + Inventario 6 + Compras 2 = las 26
-pantallas que el menú plano tenía, cada una una vez; más las 2 de abajo.
+pantallas que el menú plano tenía, cada una una vez; más las 3 de Paquetería y las 2 de abajo.
+
+**Quién ve cada entrada:** el gate es el permiso de la columna *Permiso* y nada más. El admin
+del tenant no tiene atajo (owner, 2026-10-15): ve los módulos que su tenant contrató —los
+permisos que le devuelve `mis-permisos`—, porque el backend contesta 403 en los demás incluso
+a él. El superadmin ve todo.
 
 Pagos y Órdenes viven en Ventas y Costos desfasados en Inventario aunque su permiso sea de
 otro módulo: son decisiones del owner (el porqué, en
@@ -136,7 +145,7 @@ owner eligió cada una en el selector, y la razón es la de la opción elegida:
   título de la pantalla de inventario sigue diciendo "(inventario)".
 
 Suma: Mi cuenta 1 + Organización 4 + Catálogo 3 + Precios 6 + Cobros 2 + Caja 2 + Inventario 4
-+ Restaurante 5 = las 27 entradas del menú plano anterior, cada una una vez.
++ Restaurante 5 = las 27 entradas del menú plano anterior, cada una una vez; más Paquetería 2.
 
 ### Mi cuenta
 
@@ -213,6 +222,17 @@ reparto los necesita—, pero el link del menú pide `Salones:Leer`.
 
 Los criterios de reparto de propinas son `PARTES_IGUALES`, `VENTAS_NETAS`,
 `HORAS_TRABAJADAS`, `CANTIDAD_CUENTAS` y `MANUAL` (por pesos o por montos).
+
+### Paquetería
+
+| Pantalla | Quién | Qué se configura |
+|---|---|---|
+| **Repartidores** | Admin del tenant que contrató Paquetería | Nombre, teléfono y activo; no se puede eliminar uno con hojas de ruta: se desactiva |
+| **Valores por defecto** | Admin del tenant que contrató Paquetería | Precio de envío y pago al repartidor con que nace cada paquete; hasta guardarlos no se pueden escanear paquetes nuevos |
+
+El gate es `admin` **y** `Paquetería:Leer` (que en `mis-permisos` solo aparece si el tenant
+contrató el módulo): el backend de las dos es admin-only, y el `lee()` del resto de la página
+no sirve acá porque con `admin ||` siempre da `true`.
 
 ### Rutas que solo redirigen
 

@@ -44,6 +44,14 @@ Un grupo sin entradas visibles no se dibuja: se filtra en el computed, porque
 `UNavigationMenu` dibuja el encabezado y el separador aunque la lista llegue vacía.
 `pages/configuracion.nuxt.spec.ts` fija el árbol y el gate de cada entrada.
 
+**El menú lateral le muestra al admin solo los módulos que su tenant contrató** (owner,
+2026-10-15): `puede(modulo, permiso)` de `useMenuLateral` es `permissionsStore.can(…)`, sin el
+cortocircuito de `esAdmin`. `mis-permisos` ya le trae al admin todos los permisos de esos
+módulos, y el backend contesta 403 en los no contratados incluso a él, así que el link antes
+llevaba a un error. El superadmin sigue viendo todo (`can` le da `true`). Lo mismo vale para
+`useReportes`; las entradas de Configuración que son de un módulo (`lee()`) conservan el
+`admin ||`, salvo Paquetería, que pide `admin && can('Paquetería', 'Leer')`.
+
 Pantallas CRUD simples pueden usar `app/components/crud/` (`CrudPageHeader`,
 `CrudTable`, `CrudListItem`, `CrudModal`) — ver `DESIGN-SYSTEM.md` § Componentes CRUD
 y `configuracion/categorias.vue`.
@@ -1302,10 +1310,11 @@ const { datos, actualizadoEl, sinConexion, oculto } = useRefrescoPeriodico(
   módulo que el tenant no contrató. Insistir no lo arregla. El status se lee con el
   mismo idioma que `apiErrorMsg`/`useApiFetch`: `err?.status ?? err?.response?.status`.
   El componente esconde el bloque entero (`v-if="!oculto"`) sin mostrar error — la
-  razón de fondo (spec § 6): el frontend no tiene cómo distinguir "el tenant no
-  contrató este módulo" de "a este admin no le tocaría verlo", porque
-  `/rbac/mis-permisos` le devuelve `[]` a un admin y el `v-if` de la página lo deja
-  pasar igual por `esAdmin` — el 403 en vivo es la única señal que sí lo sabe.
+  razón de fondo (spec § 6): el `v-if` de la página deja pasar al admin por `esAdmin`
+  sin consultar `/rbac/mis-permisos`, que a un admin le devuelve los permisos de los
+  módulos que su tenant contrató (no `[]`; `rbac.service.ts → getMisPermisos`). Esa
+  pantalla no lo usa para el admin, así que el 403 en vivo es lo que esconde el
+  bloque del módulo no contratado.
 - `onScopeDispose` limpia el intervalo y el listener de `visibilitychange`: no
   sobrevive al bloque que lo agendó (mismo criterio que el debounce de
   `useCalculoPrecios.ts` — `if (getCurrentScope()) onScopeDispose(...)`).
