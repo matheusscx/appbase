@@ -43,7 +43,7 @@ async function onGoogle() {
 <template>
   <AppMarco titulo="Crea tu cuenta">
     <!-- Card -->
-    <div class="bg-default rounded-2xl shadow-sm border border-default p-8 space-y-5">
+    <div class="bg-default rounded-2xl border border-default p-7 space-y-5">
 
       <!-- Enviado: reemplaza al formulario, no lo acompaña. Volver a
            mandarlo sólo reenviaría el mismo link. -->

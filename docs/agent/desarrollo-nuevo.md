@@ -350,6 +350,15 @@ Eran tres: la tercera —el reporte de varianza— se construyó y está en [`re
   hoy. El reporte agregado de Mermas no existe, y la regla 6 es un requisito para cuando se
   construya, así que vive acá.
 
+- [ ] **El rubro del local, para mostrar su línea de Venka** (frontend + dato; owner,
+  2026-10-13, al aprobar la identidad: *"no mostrarla por ahora, dejarlo en pendiente para
+  guardar el dato y mostrar"*). El menú lateral muestra solo el nombre del local; la maqueta
+  aprobada lleva debajo la línea ("Venka Restaurante" o "Venka Almacén"). Falta **guardar** si
+  un local es restaurante o almacén y mostrarlo ahí. Se descartó **deducirlo de los módulos
+  contratados**: es una regla de negocio nueva y etiqueta mal a un local que tiene las dos
+  cosas. Antes de diseñarlo, preguntar al owner qué pasa con un local que es las dos.
+  Contexto: `frontend/docs/DESIGN-SYSTEM.md` § Identidad Venka.
+
 ---
 
 ## 2. Proyectos con spec propia

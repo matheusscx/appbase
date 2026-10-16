@@ -3,6 +3,32 @@
 ## Overview
 All pages and components use Nuxt UI v4 semantic design tokens for colors, spacing, and typography. This ensures consistency across the entire application and makes dark mode support automatic.
 
+## Identidad Venka
+
+La marca de la app es **Venka** (fuente de la marca, fuera del monorepo:
+`/Users/m2pro/cmatheus/publicidad/marca/IDENTIDAD.md`). Paleta "Petróleo y menta", fondo blanco.
+
+| Token | Valor | Uso |
+|---|---|---|
+| `primary` = escala `venka` | 50 `#E9F8FB` · 100 `#D9ECEF` · 200 `#B9D3D8` · 300 `#8EB2B9` · 400 `#588993` · **500 `#0E4D57`** · 600 `#003E48` · 700 `#003038` · 800 `#002329` · 900 `#00181D` · 950 `#000D11` | `--ui-primary` en claro es el 500, el petróleo de marca exacto (blanco encima: 9,47:1) |
+| `neutral` | `slate` | Grises fríos de Nuxt UI |
+| `menta` (`bg-menta`, `text-menta`) | `#7FD8C3` | Sello, marca de la sección activa, acentos sobre petróleo |
+| `lima` (`bg-lima`) | `#C9E77E` | Acento de la línea Almacén (sin validar por el owner) |
+
+- **Letras:** DM Sans es `--font-sans`, la de toda la interfaz. Bricolage Grotesque es
+  `font-display`, **solo** para títulos de pantalla (`AppNavbar`, `AppMarco`) y titulares de marca.
+  Las dos se sirven desde `public/fonts/` (woff2 latino, variables, `font-display: swap`, con su
+  `OFL-*.txt`) y se precargan en `nuxt.config.ts`; nada de Google Fonts ni `@nuxt/fonts`.
+- **Logos:** `public/marca/venka-positivo.svg` (fondo claro), `venka-negativo.svg` (petróleo) y
+  `venka-sello.svg` (cuadrado, menú colapsado). El texto va en trazos: no depende de la fuente.
+- **Dónde vive:** la escala, `menta`, `lima` y las fuentes en el `@theme static` de
+  `app/assets/css/main.css` (`static` porque Nuxt UI arma `--ui-color-primary-*` en runtime y
+  Tailwind descartaría las variables sin uso); la asignación `primary`/`neutral` en
+  **`app/app.config.ts`**. ⚠️ El `frontend/app.config.ts` de la raíz **no lo carga Nuxt 4** (lee el
+  de `app/`): sus alias y sus overrides de `card`, `modal` y `formField` no se aplican. Activarlos o
+  borrarlos lo decide el owner.
+- **Lo que no cambia de color:** los colores financieros de Caja y el verde y rojo de sube/baja.
+
 ## Semantic Color Tokens
 
 ### Text Colors
@@ -48,11 +74,12 @@ These are intentionally retained in the Caja module for clarity:
 
 Usar tokens semánticos en UI de producto; estas excepciones son **marca fija**, no deuda pendiente:
 
-| Patrón | Archivos | Motivo |
-|--------|----------|--------|
-| `bg-primary-600` + `text-white` en logo/avatar | `login`, `register`, `forgot-password`, `select-tenant`, `layouts/dashboard.vue` | Icono de producto sobre fondo de marca |
-| `bg-primary-50 dark:bg-primary-950` | `index.vue`, `no-tenant.vue` | Superficie de acento decorativa en pantallas de bienvenida |
-| `text-white` sobre `bg-primary-*` | Iconos dentro del logo | Contraste sobre marca |
+| Patrón | Dónde | Motivo |
+|--------|-------|--------|
+| Marco de las pantallas sin layout | `components/AppMarco.vue`, usado por `login`, `register`, `forgot-password`, `select-tenant`, `no-tenant` y las tres de link (`confirmacion`, `verificar`, `invitacion`) | Logo positivo arriba, título en `font-display`; el ícono de la acción va en una placa `bg-primary/10` con `text-primary` |
+| Panel de marca del ingreso | `pages/login.vue` (slot `lateral` de `AppMarco`, solo ≥ `lg`) | `bg-primary` con texto blanco, `primary-100` y `primary-200` (≥ 6:1 medido); tarjeta de cierre en `bg-primary-600`; puntos `bg-menta` y `bg-lima` |
+| Menú lateral petróleo | `layouts/dashboard.vue` (`sobrePetroleo`) | Reasigna los tokens semánticos **dentro** del lateral a la escala clara, así los estados de `UNavigationMenu` salen solos sobre petróleo; la sección activa lleva una marca `bg-menta` de 3 px; el nombre del local usa `text-highlighted`, que ahí resuelve a `primary-50` |
+| `bg-primary-50 dark:bg-primary-950` | `index.vue` | Superficie de acento decorativa en la bienvenida |
 | Avatares de tenant | `select-tenant.vue` | `UAvatar` con colores semánticos Nuxt UI (`primary`, `secondary`, …) |
 
 Links y acentos interactivos usan **`text-highlighted`**, no `text-primary-600`.
@@ -75,7 +102,7 @@ Escala estándar del proyecto. Usar estas clases de Tailwind de forma consistent
 
 1. **Página de configuración** — contenedor raíz con `space-y-6` entre header, card(s) y drawer.
 2. **Formularios** — `space-y-4` entre campos; bloques temáticos (ej. datos + permisos) con `space-y-6`.
-3. **Shell con borde** (`AppDrawer`, `UCard`, `UModal`) — padding horizontal **`px-6`**, vertical **`py-4`** en header/body/footer. Ya aplicado en `AppDrawer` y `app.config.ts` (card/modal).
+3. **Shell con borde** (`AppDrawer`, `UCard`, `UModal`) — padding horizontal **`px-6`**, vertical **`py-4`** en header/body/footer. Ya aplicado en `AppDrawer`; los overrides de card/modal del `frontend/app.config.ts` de la raíz no se cargan (ver [Identidad Venka](#identidad-venka)).
 4. **Componente anidado con borde propio** — un nivel menos: **`px-4`** en trigger/body para que iconos y texto no queden pegados al borde. Ejemplo: `UAccordion` dentro del drawer vía prop `ui`:
    ```vue
    :ui="{ trigger: 'px-4 gap-2', body: 'px-4 pb-4' }"
@@ -297,13 +324,7 @@ When in doubt, reference these files.
 
 ## Configuration
 
-Design tokens are configured in `frontend/app.config.ts` via Nuxt UI's `ui` property. Modify this file to adjust:
-- Color palette
-- Component defaults
-- Spacing scales
-- Typography
-
-All changes propagate globally via Tailwind CSS and Vue component injection.
+La paleta y las letras viven en el `@theme static` de `frontend/app/assets/css/main.css`; la asignación de colores de Nuxt UI (`ui.colors`) y los defaults de componentes, en **`frontend/app/app.config.ts`**, que es el que Nuxt 4 carga. El `frontend/app.config.ts` de la raíz no se carga (ver [Identidad Venka](#identidad-venka)).
 
 ## Dark Mode Support
 

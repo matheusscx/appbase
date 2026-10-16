@@ -314,7 +314,7 @@ Los patrones completos están en `docs/patterns/backend.md` y `docs/patterns/fro
   tokens semánticos de abajo siguen mandando. El brief de un subagente de frontend lo exige.
 - **Design System:** tokens semánticos de Nuxt UI, nunca Tailwind hardcoded. Excepción:
   colores financieros en el módulo Caja. Referencia: `frontend/docs/DESIGN-SYSTEM.md`
-  y `frontend/app.config.ts`.
+  y `frontend/app/app.config.ts` (el de la raíz de `frontend/` no lo carga Nuxt 4).
 - **Archivos:** no crear uno nuevo si la implementación cabe en uno existente. Evitar
   `utils.ts`/`helpers.ts`/`common.ts`/`misc.ts`. Sin helpers de un solo uso; duplicar
   dos veces es aceptable, se extrae a la tercera.

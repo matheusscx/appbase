@@ -63,5 +63,13 @@ test.describe('marca Venka', () => {
     const link = page.getByRole('link', { name: '¿Olvidaste tu contraseña?' })
     await expect(link).toBeVisible()
     await expect(link).toHaveAttribute('href', '/forgot-password')
+
+    // "Junto al rótulo": mismo renglón (centros verticales a menos de 12 px).
+    const rotulo = page.getByText('Contraseña', { exact: true })
+    const [cajaLink, cajaRotulo] = [await link.boundingBox(), await rotulo.boundingBox()]
+    expect(cajaLink).not.toBeNull()
+    expect(cajaRotulo).not.toBeNull()
+    const centro = (c: { y: number, height: number }) => c.y + c.height / 2
+    expect(Math.abs(centro(cajaLink!) - centro(cajaRotulo!))).toBeLessThan(12)
   })
 })

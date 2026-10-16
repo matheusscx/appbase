@@ -961,13 +961,17 @@ cambios sincronizados con debounce 300 ms. Uso:
 
 Orden de trabajo (siempre): **1)** `frontend-design` decide dirección estética
 (paleta 4-6 hex nombrados, tipografía, layout, elemento firma) → **2)** traducir ese
-plan a `frontend/app.config.ts` **antes** de escribir componentes → **3)** `nuxt-ui`
+plan a tokens **antes** de escribir componentes —escalas en el `@theme static` de `frontend/app/assets/css/main.css`, asignación en `frontend/app/app.config.ts` (el de la raíz no lo carga Nuxt 4)— → **3)** `nuxt-ui`
 construye con componentes reales consumiendo esos tokens.
 
 Puntos de choque (resueltos por ese orden):
 - **Hex sueltos:** la paleta nunca se escribe literal en un `.vue` (nada de
-  `bg-[#F4F1EA]`); se mapea a escalas `primary`/`neutral` o alias semánticos en
-  `app.config.ts` (patrón `text.highlighted`).
+  `bg-[#F4F1EA]`); las escalas viven en el `@theme static` de
+  `app/assets/css/main.css` y se asignan a `primary`/`neutral` en `ui.colors` de
+  `app/app.config.ts`. Para cambiar los colores **dentro de una zona** (como el menú
+  lateral petróleo) se reasignan los tokens `--ui-*` en esa zona (ejemplo vivo:
+  `sobrePetroleo` en `layouts/dashboard.vue`), no se pisa cada slot. Ejemplo vivo: la
+  identidad Venka en `frontend/docs/DESIGN-SYSTEM.md` § Identidad Venka.
 - **CSS bespoke:** preferir prop `ui`/`class` del componente; markup verdaderamente
   custom va en componente propio con `<style scoped>`, nunca selectores globales
   (revisar `.nuxt/ui/<component>.ts` antes de escribir CSS custom).

@@ -51,7 +51,8 @@ async function onGoogle() {
             <div class="flex items-center justify-between text-sm text-primary-200">
               <span>Cierre de caja · Turno noche</span>
               <span class="inline-flex items-center gap-1.5 rounded-full bg-menta px-2.5 py-0.5 text-xs font-medium text-primary">
-                ✓ Cuadró
+                <UIcon name="i-lucide-check" class="size-3.5" />
+                Cuadró
               </span>
             </div>
             <dl class="mt-2.5 text-sm">

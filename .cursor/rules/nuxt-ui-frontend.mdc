@@ -8,7 +8,7 @@ alwaysApply: false
 
 Al editar archivos en `frontend/`, usa estas fuentes en este orden de prioridad:
 
-1. **Proyecto** — `frontend/docs/DESIGN-SYSTEM.md`, `docs/patterns/frontend.md`, `frontend/app.config.ts`
+1. **Proyecto** — `frontend/docs/DESIGN-SYSTEM.md`, `docs/patterns/frontend.md`, `frontend/app/app.config.ts`, `@theme` de `frontend/app/assets/css/main.css`
 2. **Índice Nuxt UI** — `docs/reference/nuxt-ui-llms.txt` (catálogo de componentes y enlaces a docs)
 3. **API concreta** — MCP `nuxt-ui` (`get_component`, `get_component_metadata`, `search_components`)
 

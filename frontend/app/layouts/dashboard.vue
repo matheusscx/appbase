@@ -84,7 +84,7 @@ const ui = {
           <ClientOnly>
             <span
               v-if="!collapsed"
-              class="truncate text-sm font-medium text-white"
+              class="truncate text-sm font-medium text-highlighted"
               :title="nombreLocal"
             >
               {{ nombreLocal }}
