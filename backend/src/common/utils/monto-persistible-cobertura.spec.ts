@@ -26,6 +26,7 @@ import { RecetaIngrediente } from '../../modules/items/entities/receta-ingredien
 import { StockUbicacion } from '../../modules/items/entities/stock-ubicacion.entity';
 import { RecetaExtraPermitido } from '../../modules/items/entities/receta-extra-permitido.entity';
 import { Pago } from '../../modules/pagos/entities/pago.entity';
+import { PaqueteConfiguracion } from '../../modules/paqueteria/entities/paquete-configuracion.entity';
 import { Promocion } from '../../modules/promociones/entities/promocion.entity';
 import { LiquidacionPropinasGrupo } from '../../modules/propinas/entities/liquidacion-propinas-grupo.entity';
 import { LiquidacionPropinasParticipante } from '../../modules/propinas/entities/liquidacion-propinas-participante.entity';
@@ -103,6 +104,12 @@ const COLUMNAS: Record<string, [Entidad, string][]> = {
     [ItemGrupoModificadorOpcion, 'precioExtra'],
   ],
   'pagos/PagoItemDto.monto': [[Pago, 'monto']],
+  'paqueteria/PutPaqueteConfiguracionDto.precioEnvioDefecto': [
+    [PaqueteConfiguracion, 'precioEnvioDefecto'],
+  ],
+  'paqueteria/PutPaqueteConfiguracionDto.pagoRepartidorDefecto': [
+    [PaqueteConfiguracion, 'pagoRepartidorDefecto'],
+  ],
   'promociones/CreatePromocionDto.valorMonto': [[Promocion, 'valorMonto']],
   'propinas/MontoManualDto.monto': [[LiquidacionPropinasParticipante, 'monto']],
   'propinas/UpdateLiquidacionParticipanteDto.monto': [
