@@ -2006,6 +2006,7 @@ Response (200):
       "tenantId": "uuid",
       "usuarioId": "uuid",
       "cajonNombre": "Mostrador",
+      "usuarioNombre": "Ana Pérez",   // null si la caja no tuvo dueño o ya no existe (2026-10-16)
       "tipo": "fisica",
       "estado": "cerrada",
       "saldoInicial": "500.0000",
@@ -2246,14 +2247,21 @@ Dos superficies, cada una gateada por su módulo (links sueltos "Mi caja" y "Caj
   `/mi-caja`.
 - `pages/cajas/index.vue` — Grid de **todos los cajones activos** del tenant y su estado
   (`CajaCajonesGrid`), read-only. **Sin apertura** (la caja se abre en `/mi-caja`). El botón
-  "Ver historial" abre `/cajas/historial`. Gate: `Cajas:Leer`.
+  "Ver historial" abre `/cajas/historial`. "Pendientes de revisar" lleva la cantidad de la
+  bandeja (sin número si es cero o si no se pudo contar: un fallo no se lee como "cero").
+  Gate: `Cajas:Leer`.
 - `pages/cajas/pendientes-revision.vue` — Bandeja de cierres de nivel alto sin revisar
   (`CajaPendientesRevision`), con el resumen del día arriba. Gate: `Cajas:Leer`; el botón
   "Marcar visto" además se esconde sin `Cajas:Actualizar` (esconder no es el control —lo es
   el guard— pero ofrecer una acción que va a rebotar con 403 es peor que no ofrecerla).
+  **"Marcar visto" pregunta antes** (`CajaMarcarVisto`, 2026-10-16): no se puede deshacer
+  —el backend rechaza revisar dos veces—, así que el primer toque abre una confirmación en vez
+  de actuar; la misma que usa el detalle de la caja.
 - `pages/cajas/historial.vue` — Historial de **todos los cajeros** del tenant
   (`CajaHistorial` con `todas`; alcance fijo, sin toggle). Soporta `?usuarioId=` (por
-  cajero) y `?cajonId=` (por cajón). El alcance "solo propias" vive en `/mi-caja/historial`,
+  cajero) y `?cajonId=` (por cajón); cuando el filtro llega por la URL, un chip dice por quién
+  ("Cajero: Ana Pérez") con "Quitar filtro". El cajero de cada fila va bajo el nombre de la caja.
+  El estado sale con palabras del local (Abierta / En conciliación / Cerrada). El alcance "solo propias" vive en `/mi-caja/historial`,
   y también pide `Cajas:Leer`.
 - `pages/cajas/[id].vue` — Detalle **read-only** de cualquier caja (sin botones de operar
   el turno propio, aunque sea la propia): KPIs + movimientos (`CajaActivaDashboard` en
@@ -2262,7 +2270,11 @@ Dos superficies, cada una gateada por su módulo (links sueltos "Mi caja" y "Caj
   la caja está `abierta` y es **ajena**, quien tiene `Cajas:Actualizar` (el encargado, o el
   admin de un tenant que contrató Cajas, que lo recibe de `mis-permisos`) ve el botón "Cerrar por el cajero"
   (`CajaCierreForzadoPanel`, plan `testigo-cierre-forzado`, Task 6, permiso ampliado el
-  2026-08-13).
+  2026-08-13). Ese panel va **arriba**, antes del resumen y los movimientos (2026-10-16), y su
+  texto depende del modo del local: sin ciego se ve el esperado y se cierra "contando el
+  efectivo"; con ciego, "a ciegas, sin ver lo que se esperaba". Una caja cerrada o en
+  conciliación con diferencia muestra la tarjeta *Revisión del descuadre*
+  (`CajaRevisionDescuadre`): qué dijo el cajero, qué tan grande fue y "Marcar visto".
 - `pages/caja/index.vue` — Compatibilidad: redirige a `/mi-caja` (bookmarks/enlaces
   internos previos al refactor).
 - `pages/configuracion/motivos-diferencia.vue` — CRUD admin-only del catálogo de motivos

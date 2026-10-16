@@ -33,6 +33,8 @@ mockNuxtImport('useSesionesGarzon', () => {
 
 const cajaStoreMock = {
   testigos: [] as unknown[],
+  // Lo carga el dashboard de la misma pantalla; `ciego` decide qué promete el texto (03.5).
+  resumenTurno: null as { ciego: boolean } | null,
   cargarTestigos: vi.fn(async () => {}),
   solicitarTestigos: vi.fn(async () => {}),
 }
@@ -77,8 +79,37 @@ beforeEach(() => {
   permisos = []
   sesionesAbiertas = []
   cajaStoreMock.testigos = []
+  cajaStoreMock.resumenTurno = null
   cajaStoreMock.cargarTestigos.mockClear()
   cajaStoreMock.solicitarTestigos.mockClear()
+})
+
+describe('CajaCierreForzadoPanel — lo que promete el texto de la caja ajena (03.5, 03.23)', () => {
+  it('sin modo ciego no dice "a ciegas": la pantalla muestra el esperado', async () => {
+    permisos = ['Cajas:Actualizar']
+    cajaStoreMock.resumenTurno = { ciego: false }
+    const wrapper = await montar(cajaAjenaAbierta())
+
+    expect(wrapper.text()).not.toContain('a ciegas')
+    expect(wrapper.text()).toContain('contando el efectivo')
+  })
+
+  it('con modo ciego dice que el conteo es sin ver el esperado', async () => {
+    permisos = ['Cajas:Actualizar']
+    cajaStoreMock.resumenTurno = { ciego: true }
+    const wrapper = await montar(cajaAjenaAbierta())
+
+    expect(wrapper.text()).toContain('a ciegas')
+    expect(wrapper.text()).toContain('sin ver lo que se esperaba')
+  })
+
+  it('la frase de la fecha no termina con doble punto', async () => {
+    permisos = ['Cajas:Actualizar']
+    const wrapper = await montar(cajaAjenaAbierta())
+
+    expect(wrapper.text()).toContain('abierta desde')
+    expect(wrapper.text()).not.toContain('..')
+  })
 })
 
 describe('CajaCierreForzadoPanel — el botón de cerrar la caja de otro', () => {

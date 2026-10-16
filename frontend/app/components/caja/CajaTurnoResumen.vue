@@ -30,7 +30,7 @@ const { formatMonto } = useFormatters()
       <p class="text-xs text-muted">
         Saldo esperado
       </p>
-      <p class="text-2xl font-bold text-highlighted mt-1">
+      <p class="text-2xl font-bold text-highlighted mt-1 tabular-nums">
         <template v-if="loading">
           —
         </template>
@@ -54,12 +54,16 @@ const { formatMonto } = useFormatters()
         <p class="text-xs text-muted">
           Entradas
         </p>
-        <p class="text-base font-semibold text-success mt-1">
+        <p
+          data-qa="total-entradas"
+          class="text-base font-semibold mt-1 tabular-nums"
+          :class="totalEntradas.isZero() ? 'text-muted' : 'text-success'"
+        >
           <template v-if="loading">
             —
           </template>
           <template v-else>
-            + {{ formatMonto(totalEntradas) }}
+            {{ totalEntradas.isZero() ? '' : '+ ' }}{{ formatMonto(totalEntradas) }}
           </template>
         </p>
       </div>
@@ -67,12 +71,16 @@ const { formatMonto } = useFormatters()
         <p class="text-xs text-muted">
           Salidas
         </p>
-        <p class="text-base font-semibold text-error mt-1">
+        <p
+          data-qa="total-salidas"
+          class="text-base font-semibold mt-1 tabular-nums"
+          :class="totalSalidas.isZero() ? 'text-muted' : 'text-error'"
+        >
           <template v-if="loading">
             —
           </template>
           <template v-else>
-            - {{ formatMonto(totalSalidas) }}
+            {{ totalSalidas.isZero() ? '' : '- ' }}{{ formatMonto(totalSalidas) }}
           </template>
         </p>
       </div>

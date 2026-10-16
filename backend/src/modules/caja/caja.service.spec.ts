@@ -2682,6 +2682,30 @@ describe('CajaService', () => {
       expect(result.data).toHaveLength(1);
     });
 
+    it('(c2) cada fila trae el nombre del cajero (columna "Cajero" del historial)', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 2 }])
+        .mockResolvedValueOnce([
+          { ...mockRow, usuario_nombre: 'Ana', usuario_apellido: 'Pérez' },
+          {
+            ...mockRow,
+            caja_id: 'sin-dueno',
+            usuario_nombre: null,
+            usuario_apellido: null,
+          },
+        ]);
+
+      const result = await service.historial(
+        TENANT_ID,
+        USUARIO_ID,
+        { todas: true },
+        true,
+      );
+
+      expect(result.data[0].usuarioNombre).toBe('Ana Pérez');
+      expect(result.data[1].usuarioNombre).toBeNull();
+    });
+
     it('(d) lanza ForbiddenException si usuarioId ajeno sin Ver todas', async () => {
       await expect(
         service.historial(

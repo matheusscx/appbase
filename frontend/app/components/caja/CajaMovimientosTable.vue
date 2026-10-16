@@ -121,79 +121,81 @@ const columns: TableColumn<typeof movimientos.value[number]>[] = [
     </template>
 
     <div v-show="!colapsable || abierto">
-      <div v-if="loading" class="py-8 text-center text-sm text-muted">
-        <UIcon name="i-lucide-loader" class="w-5 h-5 animate-spin mx-auto mb-1" />
-        Cargando movimientos…
-      </div>
-
-      <template v-else>
-        <UTable
-          :data="movimientos"
-          :columns="columns"
-          :ui="{
-            root: 'max-h-[min(480px,60vh)] overflow-y-auto',
-            thead: 'sticky top-0 z-10 bg-default',
-          }"
-        >
-          <template #fecha-cell="{ row }">
-            <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
-          </template>
-          <template #tipo-cell="{ row }">
-            <UBadge
-              :color="row.original.tipo === 'entrada' ? 'success' : 'error'"
-              variant="subtle"
-              size="sm"
-              :label="row.original.tipo === 'entrada' ? 'Entrada' : 'Salida'"
-            />
-          </template>
-          <template #concepto-cell="{ row }">
-            <div class="min-w-0">
-              <p class="truncate">{{ row.original.concepto }}</p>
-              <NuxtLink
-                v-if="row.original.ventaId"
-                :to="{ path: '/ventas', query: { venta: row.original.ventaId } }"
-                class="text-xs text-primary hover:underline"
-              >
-                Ver venta
-              </NuxtLink>
-            </div>
-          </template>
-          <template #referencia-cell="{ row }">
-            <span class="text-muted">{{ row.original.referencia ?? '—' }}</span>
-          </template>
-          <template #monto-cell="{ row }">
-            <span
-              class="font-semibold"
-              :class="row.original.tipo === 'entrada'
-                ? 'text-success'
-                : 'text-error'"
-            >
-              {{ row.original.tipo === 'entrada' ? '+' : '-' }}
-              {{ formatMonto(row.original.monto) }}
-            </span>
-          </template>
-          <template #empty>
-            <AppEstadoLista
-              recurso="los movimientos de la caja"
-              vacio="Sin movimientos registrados en este turno."
-              filtrado-texto="Ningún movimiento coincide con los filtros."
-              :error="error"
-              :sin-permiso="sinPermiso"
-              :filtrado="hayFiltrosActivos"
-              @reintentar="recargarMovimientos"
-              @quitar-filtros="limpiarFiltros"
-            />
-          </template>
-        </UTable>
-
-        <div v-if="meta.total > pageSize" class="flex justify-end pt-4">
-          <UPagination
-            v-model:page="page"
-            :items-per-page="pageSize"
-            :total="meta.total"
+      <!-- La tabla no se desmonta al recargar (03.29): las filas se quedan, atenuadas, hasta que
+           llegan las nuevas, y el punto de lectura no se pierde. -->
+      <UTable
+        :data="movimientos"
+        :columns="columns"
+        :loading="loading"
+        :class="{ 'opacity-60': loading && movimientos.length > 0 }"
+        :ui="{
+          root: 'max-h-[min(480px,60vh)] overflow-y-auto',
+          thead: 'sticky top-0 z-10 bg-default',
+        }"
+      >
+        <template #fecha-cell="{ row }">
+          <span class="whitespace-nowrap">{{ formatFecha(row.original.fecha) }}</span>
+        </template>
+        <template #tipo-cell="{ row }">
+          <UBadge
+            :color="row.original.tipo === 'entrada' ? 'success' : 'error'"
+            variant="subtle"
+            size="sm"
+            :label="row.original.tipo === 'entrada' ? 'Entrada' : 'Salida'"
           />
-        </div>
-      </template>
+        </template>
+        <template #concepto-cell="{ row }">
+          <div class="min-w-0">
+            <p class="truncate">{{ row.original.concepto }}</p>
+            <NuxtLink
+              v-if="row.original.ventaId"
+              :to="{ path: '/ventas', query: { venta: row.original.ventaId } }"
+              class="text-xs text-primary hover:underline"
+            >
+              Ver venta
+            </NuxtLink>
+          </div>
+        </template>
+        <template #referencia-cell="{ row }">
+          <span class="text-muted">{{ row.original.referencia ?? '—' }}</span>
+        </template>
+        <template #monto-cell="{ row }">
+          <span
+            class="font-semibold tabular-nums"
+            :class="row.original.tipo === 'entrada'
+              ? 'text-success'
+              : 'text-error'"
+          >
+            {{ row.original.tipo === 'entrada' ? '+' : '-' }}
+            {{ formatMonto(row.original.monto) }}
+          </span>
+        </template>
+        <template #empty>
+          <div v-if="loading" class="py-8 text-center text-sm text-muted">
+            <UIcon name="i-lucide-loader" class="w-5 h-5 animate-spin mx-auto mb-1" />
+            Cargando movimientos…
+          </div>
+          <AppEstadoLista
+            v-else
+            recurso="los movimientos de la caja"
+            vacio="Sin movimientos registrados en este turno."
+            filtrado-texto="Ningún movimiento coincide con los filtros."
+            :error="error"
+            :sin-permiso="sinPermiso"
+            :filtrado="hayFiltrosActivos"
+            @reintentar="recargarMovimientos"
+            @quitar-filtros="limpiarFiltros"
+          />
+        </template>
+      </UTable>
+
+      <div v-if="meta.total > pageSize" class="flex justify-end pt-4">
+        <UPagination
+          v-model:page="page"
+          :items-per-page="pageSize"
+          :total="meta.total"
+        />
+      </div>
     </div>
   </UCard>
 </template>

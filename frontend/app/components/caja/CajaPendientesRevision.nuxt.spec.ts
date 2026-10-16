@@ -78,6 +78,7 @@ const MONEDA_CLP = {
 }
 
 beforeEach(() => {
+  document.body.innerHTML = ''
   puedeActualizar = true
   esAdmin = false
   cargarPendientesRevision.mockReset().mockResolvedValue(FILAS)
@@ -149,10 +150,17 @@ describe('CajaPendientesRevision', () => {
     expect(texto).not.toContain('No hay cierres pendientes de revisar')
   })
 
-  it('marcar visto llama al backend y recarga la bandeja', async () => {
+  it('marcar visto pregunta antes y recién al confirmar llama al backend (03.26)', async () => {
     const wrapper = await mountSuspended(CajaPendientesRevision)
 
     await wrapper.find('[data-qa="marcar-visto-caja-1"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    // Primer toque: pregunta, no actúa. Una fila bajo el dedo no se marca por accidente.
+    expect(marcarRevisado).not.toHaveBeenCalled()
+    expect(document.body.textContent).toContain('¿Marcar visto el cierre de Ana Pérez?')
+
+    ;(document.body.querySelector('[data-qa="marcar-visto-confirmar"]') as HTMLButtonElement).click()
     await new Promise(r => setTimeout(r, 20))
 
     expect(marcarRevisado).toHaveBeenCalledWith('caja-1')
@@ -194,7 +202,7 @@ describe('CajaPendientesRevision — forma de la tabla en tablet', () => {
 
   it('la columna "Cajón" se oculta bajo lg', async () => {
     const wrapper = await mountSuspended(CajaPendientesRevision)
-    const th = wrapper.findAll('th').find(t => t.text() === 'Cajón')
+    const th = wrapper.findAll('th').find(t => t.text() === 'Caja')
     expect(th?.classes()).toContain('hidden')
     expect(th?.classes()).toContain('lg:table-cell')
   })

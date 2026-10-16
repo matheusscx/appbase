@@ -13,7 +13,6 @@ const filas = ref<CierrePendienteRevision[]>([])
 const resumen = ref<ResumenDescuadresDia | null>(null)
 const loading = ref(false)
 const fallo = ref(false)
-const marcando = ref<string | null>(null)
 
 /**
  * Esconder el botón NO es el control —lo es el guard de `Cajas:Actualizar` en
@@ -51,26 +50,11 @@ async function cargar() {
 
 onMounted(cargar)
 
-async function marcarVisto(cajaId: string) {
-  marcando.value = cajaId
-  try {
-    await cajaStore.marcarRevisado(cajaId)
-    toast.add({ title: 'Cierre marcado como revisado', color: 'success' })
-    await cargar()
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'No se pudo marcar como revisado'), color: 'error' })
-  }
-  finally {
-    marcando.value = null
-  }
-}
-
 const columns: TableColumn<CierrePendienteRevision>[] = [
   { accessorKey: 'fechaCierre', header: 'Cierre' },
   { accessorKey: 'usuarioNombre', header: 'Cajero' },
-  // Bajo lg (la tablet a 768) la tabla no entra en la tarjeta: "Cajón" es lo que se puede perder.
-  { accessorKey: 'cajonNombre', header: 'Cajón', meta: { class: { th: 'hidden lg:table-cell', td: 'hidden lg:table-cell' } } },
+  // Bajo lg (la tablet a 768) la tabla no entra en la tarjeta: la caja es lo que se puede perder.
+  { accessorKey: 'cajonNombre', header: 'Caja', meta: { class: { th: 'hidden lg:table-cell', td: 'hidden lg:table-cell' } } },
   { accessorKey: 'peorDiferencia', header: 'Mayor diferencia', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'explicacionDescuadre', header: 'Qué dijo el cajero' },
   { accessorKey: 'acciones', header: '' },
@@ -180,7 +164,7 @@ function claseMonto(val: string | null): string {
 
         <template #peorDiferencia-cell="{ row }">
           <div class="space-y-0.5">
-            <p class="font-semibold text-error">
+            <p class="font-semibold text-error tabular-nums">
               {{ formatMonto(row.original.peorDiferencia) }}
             </p>
             <p class="text-xs text-muted" :class="claseMonto(row.original.diferencia)">
@@ -203,15 +187,11 @@ function claseMonto(val: string | null): string {
 
         <template #acciones-cell="{ row }">
           <div class="flex justify-end gap-2">
-            <UButton
+            <CajaMarcarVisto
               v-if="puedeMarcar"
-              size="sm"
-              color="primary"
-              icon="i-lucide-check"
-              label="Marcar visto"
-              :loading="marcando === row.original.cajaId"
-              :data-qa="`marcar-visto-${row.original.cajaId}`"
-              @click="marcarVisto(row.original.cajaId)"
+              :caja-id="row.original.cajaId"
+              :cajero="row.original.usuarioNombre"
+              @marcado="cargar"
             />
           </div>
         </template>

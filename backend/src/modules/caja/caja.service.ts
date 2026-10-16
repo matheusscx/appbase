@@ -360,6 +360,8 @@ export interface CajaHistorialItem {
   fechaCierre: Date | null;
   comentario: string | null;
   cajonNombre: string | null;
+  /** Nombre del cajero dueño; `null` si la caja no tuvo dueño o ya no existe. */
+  usuarioNombre: string | null;
 }
 
 @Injectable()
@@ -1728,6 +1730,8 @@ export class CajaService {
       fecha_cierre: Date | null;
       comentario: string | null;
       cajon_nombre: string | null;
+      usuario_nombre: string | null;
+      usuario_apellido: string | null;
     }[] = await this.db.query(
       `SELECT c.caja_id,
               c.tenant_id,
@@ -1742,9 +1746,15 @@ export class CajaService {
               c.fecha_apertura,
               c.fecha_cierre,
               c.comentario,
-              cj.nombre AS cajon_nombre
+              cj.nombre AS cajon_nombre,
+              u.nombre AS usuario_nombre,
+              u.apellido AS usuario_apellido
        FROM cajas c
        LEFT JOIN cajones cj ON cj.cajon_id = c.cajon_id AND cj.eliminado_el IS NULL
+       -- Nombre del cajero para la columna "Cajero" del supervisor. Es un JOIN a
+       -- 1 fila por caja (sin N+1). Un usuario dado de baja deja el nombre en
+       -- NULL en vez de esconder la caja: el historial es rastro, no lista viva.
+       LEFT JOIN usuarios u ON u.usuario_id = c.usuario_id AND u.eliminado_el IS NULL
        -- Lateral y no un JOIN + GROUP BY: una sola query para todas las filas
        -- (sin N+1) y sin agrupar por las 13 columnas de arriba. Una caja abierta
        -- todavía no tiene arqueo congelado → NULL, que el front muestra como "—".
@@ -1809,6 +1819,8 @@ export class CajaService {
     fecha_cierre: Date | null;
     comentario: string | null;
     cajon_nombre: string | null;
+    usuario_nombre?: string | null;
+    usuario_apellido?: string | null;
   }): CajaHistorialItem {
     return {
       id: r.caja_id,
@@ -1830,6 +1842,11 @@ export class CajaService {
       fechaCierre: r.fecha_cierre,
       comentario: r.comentario,
       cajonNombre: r.cajon_nombre,
+      usuarioNombre:
+        [r.usuario_nombre, r.usuario_apellido]
+          .filter((p): p is string => Boolean(p))
+          .join(' ')
+          .trim() || null,
     };
   }
 

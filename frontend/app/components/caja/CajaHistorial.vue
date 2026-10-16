@@ -2,7 +2,7 @@
 import Decimal from 'decimal.js'
 import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
-import type { Caja } from '~/stores/caja'
+import { ESTADO_CAJA_LABEL, type Caja } from '~/stores/caja'
 
 const props = defineProps<{ usuarioId?: string; cajonId?: string; basePath: string; todas?: boolean }>()
 
@@ -53,6 +53,28 @@ function diferenciaPositiva(val: string | null | undefined): boolean {
   return new Decimal(val).gte(0)
 }
 
+// Cero no es ni sobrante ni faltante: sin signo y sin color (03.22).
+function diferenciaEsCero(val: string): boolean {
+  return new Decimal(val).isZero()
+}
+
+// Por quién (o qué caja) está filtrado el listado, para que el título no mienta (03.16).
+// Solo el filtro que llegó por la URL se puede quitar; el que fija la pantalla (props) no.
+const filtroDeLaUrl = computed(() => {
+  const nombre = historial.value[0]
+  if (!props.usuarioId && usuarioIdEfectivo.value) {
+    return `Cajero: ${nombre?.usuarioNombre ?? 'el elegido'}`
+  }
+  if (!props.cajonId && cajonIdEfectivo.value) {
+    return `Caja: ${nombre?.cajonNombre ?? 'la elegida'}`
+  }
+  return null
+})
+
+function quitarFiltro() {
+  navigateTo({ path: route.path, query: {} })
+}
+
 function onSelectCaja(_e: Event, row: Row<Caja>) {
   navigateTo(`${props.basePath}/${row.original.id}`)
 }
@@ -67,6 +89,17 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
           ({{ meta.total }})
         </span>
       </h2>
+      <div v-if="filtroDeLaUrl" class="mt-2 flex items-center gap-2" data-qa="filtro-activo">
+        <UBadge color="neutral" variant="subtle" :label="filtroDeLaUrl" />
+        <UButton
+          label="Quitar filtro"
+          icon="i-lucide-x"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          @click="quitarFiltro"
+        />
+      </div>
     </template>
 
     <div v-if="loading" class="py-8 text-center text-sm text-muted">
@@ -88,21 +121,25 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
         </template>
         <template #cajonNombre-cell="{ row }">
           <span class="text-default">{{ row.original.cajonNombre ?? '—' }}</span>
+          <!-- El cajero va bajo la caja y no en columna propia: a 768 la tabla ya no tenía ancho (03.2). -->
+          <p v-if="row.original.usuarioNombre" class="text-xs text-muted">
+            {{ row.original.usuarioNombre }}
+          </p>
         </template>
         <template #estado-cell="{ row }">
           <UBadge
-            :color="row.original.estado === 'abierta' ? 'success' : 'neutral'"
+            :color="row.original.estado === 'abierta' ? 'success' : row.original.estado === 'en_conciliacion' ? 'warning' : 'neutral'"
             variant="subtle"
             size="sm"
           >
-            {{ row.original.estado }}
+            {{ ESTADO_CAJA_LABEL[row.original.estado] ?? row.original.estado }}
           </UBadge>
         </template>
         <template #saldoInicial-cell="{ row }">
-          <span>{{ formatMonto(row.original.saldoInicial) }}</span>
+          <span class="tabular-nums">{{ formatMonto(row.original.saldoInicial) }}</span>
         </template>
         <template #saldoFinal-cell="{ row }">
-          <span>{{ formatMonto(row.original.saldoFinal) }}</span>
+          <span class="tabular-nums" data-qa="saldo-final">{{ formatMonto(row.original.saldoFinal) }}</span>
         </template>
         <!-- Suma de TODAS las líneas del arqueo, no solo el efectivo: con la
              columna sobre `diferencia` una caja cerrada con -500 en tarjeta se
@@ -110,12 +147,15 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
         <template #diferenciaTotal-cell="{ row }">
           <span
             v-if="row.original.diferenciaTotal != null"
-           
-            :class="diferenciaPositiva(row.original.diferenciaTotal)
-              ? 'text-success'
-              : 'text-error'"
+            data-qa="diferencia-total"
+            class="tabular-nums"
+            :class="diferenciaEsCero(row.original.diferenciaTotal)
+              ? 'text-muted'
+              : diferenciaPositiva(row.original.diferenciaTotal)
+                ? 'text-success'
+                : 'text-error'"
           >
-            {{ diferenciaPositiva(row.original.diferenciaTotal) ? '+' : '' }}{{ formatMonto(row.original.diferenciaTotal) }}
+            {{ !diferenciaEsCero(row.original.diferenciaTotal) && diferenciaPositiva(row.original.diferenciaTotal) ? '+' : '' }}{{ formatMonto(row.original.diferenciaTotal) }}
           </span>
           <span v-else class="text-muted">—</span>
         </template>

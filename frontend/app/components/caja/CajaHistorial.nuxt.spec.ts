@@ -17,6 +17,7 @@ const CAJAS = vi.hoisted(() => ([
     saldoInicial: '10000',
     saldoFinal: '50000',
     diferenciaTotal: '-500',
+    usuarioNombre: 'Ana Pérez',
   },
   {
     id: 'caja-2',
@@ -27,12 +28,24 @@ const CAJAS = vi.hoisted(() => ([
     saldoInicial: '10000',
     saldoFinal: null,
     diferenciaTotal: null,
+    usuarioNombre: null,
+  },
+  {
+    id: 'caja-3',
+    cajonNombre: 'Caja 3',
+    estado: 'en_conciliacion',
+    fechaApertura: '2026-08-26T13:00:00.000Z',
+    fechaCierre: null,
+    saldoInicial: '10000',
+    saldoFinal: null,
+    diferenciaTotal: '0',
+    usuarioNombre: 'Luis Soto',
   },
 ]))
 
 mockNuxtImport('usePaginatedList', () => () => ({
   items: ref(CAJAS),
-  meta: ref({ page: 1, pageSize: 15, total: 2, totalPages: 1 }),
+  meta: ref({ page: 1, pageSize: 15, total: 3, totalPages: 1 }),
   page: ref(1),
   loading: ref(false),
   error: ref(false),
@@ -45,7 +58,12 @@ const MONEDA_CLP = {
   separadorDecimal: ',', separadorMiles: '.', locale: 'es-CL', habilitada: true, esOficial: true, valorDelDia: null,
 }
 
-async function montar() {
+// El filtro llega por la URL; el middleware de auth no deja navegar de verdad en el spec.
+let query: Record<string, string> = {}
+mockNuxtImport('useRoute', () => () => ({ path: '/cajas/historial', query }))
+
+async function montar(q: Record<string, string> = {}) {
+  query = q
   useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
   return mountSuspended(CajaHistorial, { props: { basePath: '/cajas', todas: true } })
 }
@@ -82,5 +100,57 @@ describe('CajaHistorial — forma de la tabla en tablet', () => {
     const w = await montar()
     const fila = w.findAll('tbody tr')[0]!
     expect(fila.text()).toContain('500')
+  })
+})
+
+// Auditoría UX 03.15 y 03.16.
+describe('CajaHistorial — estado legible y cajero', () => {
+  it('el estado sale con palabras del local, no el valor de la base', async () => {
+    const w = await montar()
+    const texto = w.findAll('tbody tr').map(f => f.text()).join(' | ')
+    expect(texto).toContain('Cerrada')
+    expect(texto).toContain('Abierta')
+    expect(texto).toContain('En conciliación')
+    expect(texto).not.toContain('en_conciliacion')
+    expect(texto).not.toContain('cerrada ')
+  })
+
+  it('cada fila dice de qué cajero es la caja', async () => {
+    const w = await montar()
+    const filas = w.findAll('tbody tr')
+    expect(filas[0]!.text()).toContain('Ana Pérez')
+    expect(filas[2]!.text()).toContain('Luis Soto')
+  })
+
+  it('una diferencia en cero no se pinta verde ni lleva signo (03.22)', async () => {
+    const w = await montar()
+    const celda = w.findAll('tbody tr')[2]!.find('[data-qa="diferencia-total"]')
+    expect(celda.text()).not.toContain('+')
+    expect(celda.classes()).toContain('text-muted')
+    expect(celda.classes()).not.toContain('text-success')
+  })
+
+  it('las cifras de las columnas de plata alinean los dígitos (03.21)', async () => {
+    const w = await montar()
+    expect(w.find('[data-qa="saldo-final"]').classes()).toContain('tabular-nums')
+    expect(w.find('[data-qa="diferencia-total"]').classes()).toContain('tabular-nums')
+  })
+
+  it('sin filtro no hay chip de filtro', async () => {
+    const w = await montar()
+    expect(w.find('[data-qa="filtro-activo"]').exists()).toBe(false)
+  })
+
+  it('filtrado por cajero, el título dice por quién y se puede quitar', async () => {
+    const w = await montar({ usuarioId: 'u-1' })
+    const chip = w.find('[data-qa="filtro-activo"]')
+    expect(chip.exists()).toBe(true)
+    expect(chip.text()).toContain('Cajero: Ana Pérez')
+    expect(chip.text()).toContain('Quitar filtro')
+  })
+
+  it('filtrado por caja, el chip nombra la caja', async () => {
+    const w = await montar({ cajonId: 'c-1' })
+    expect(w.find('[data-qa="filtro-activo"]').text()).toContain('Caja: Caja 1')
   })
 })

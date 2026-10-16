@@ -104,7 +104,7 @@ async function abrir() {
       </UCard>
     </div>
 
-    <AppDrawer v-model:open="drawerOpen" width="40%">
+    <AppDrawer v-model:open="drawerOpen" width="md">
       <template #header>
         <span class="font-semibold text-default">{{ drawerTitle }}</span>
       </template>

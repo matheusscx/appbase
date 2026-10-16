@@ -41,6 +41,13 @@ export interface Caja {
   revisadoEl?: string | null
 }
 
+/** El estado de una caja con las palabras del local, no el valor de la base (03.15). */
+export const ESTADO_CAJA_LABEL: Record<string, string> = {
+  abierta: 'Abierta',
+  en_conciliacion: 'En conciliación',
+  cerrada: 'Cerrada',
+}
+
 /** 'aviso' se le advierte al cajero; 'alto' además va a la bandeja del encargado. */
 export type NivelDescuadre = 'ninguno' | 'aviso' | 'alto'
 

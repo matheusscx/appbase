@@ -32,6 +32,9 @@ const seleccionados = ref<Set<string>>(new Set())
 const cargandoGarzones = ref(false)
 const solicitando = ref(false)
 
+// Lo resuelve el servidor (`resumenTurno.ciego`) y lo carga el dashboard de la misma pantalla.
+const ciego = computed(() => cajaStore.resumenTurno?.ciego ?? false)
+
 const esAjenaAbierta = computed(() =>
   puedeActualizar.value
   && props.caja.estado === 'abierta'
@@ -181,11 +184,18 @@ const ESTADO_LABEL: Record<string, string> = {
       <div class="space-y-3">
         <p class="text-sm text-default">
           Esta caja es de <span class="font-medium">{{ caja.usuarioNombre ?? 'otro usuario' }}</span>,
-          abierta desde {{ formatFecha(caja.fechaApertura) }}.
+          abierta desde {{ formatFecha(caja.fechaApertura) }}
         </p>
+        <!-- Lo que promete el texto lo decide el modo del local (03.5): el servidor retiene el
+             esperado solo en ciego, y la pantalla de arriba lo muestra en cualquier otro caso. -->
         <p class="text-sm text-muted">
-          Si el cajero ya no está, puedes cerrarla tú con el conteo a ciegas. Si nadie firma como
-          testigo, vas a tener que explicar qué pasó.
+          <template v-if="ciego">
+            Si el cajero ya no está, puedes cerrarla tú con el conteo a ciegas, sin ver lo que se esperaba.
+          </template>
+          <template v-else>
+            Si el cajero ya no está, puedes cerrarla tú contando el efectivo.
+          </template>
+          Si nadie firma como testigo, vas a tener que explicar qué pasó.
         </p>
         <UButton
           data-qa="cerrar-caja-ajena"

@@ -23,3 +23,11 @@ describe('CajaAperturaGrid — se opera con teclado', () => {
     expect(document.body.textContent).toContain('Abrir caja — Caja 1')
   })
 })
+
+// Auditoría UX 03.24: el drawer de apertura medía 40 % y cortaba el campo "Comentario" en la tablet.
+describe('CajaAperturaGrid — el panel de apertura', () => {
+  it('usa el ancho md de los demás drawers de caja, no un porcentaje', async () => {
+    const w = await mountSuspended(CajaAperturaGrid)
+    expect(w.findComponent({ name: 'AppDrawer' }).props('width')).toBe('md')
+  })
+})

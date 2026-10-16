@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { ESTADO_CAJA_LABEL } from '~/stores/caja'
+
 const props = defineProps<{
   caja: {
     estado: string
@@ -37,7 +39,7 @@ const puedeOperar = computed(
           {{ caja.cajonNombre ?? 'Caja' }}
         </h2>
         <UBadge :color="badgeColor" variant="soft">
-          {{ caja.estado.toUpperCase() }}
+          {{ ESTADO_CAJA_LABEL[caja.estado] ?? caja.estado }}
         </UBadge>
       </div>
       <p class="text-sm text-muted mt-0.5">

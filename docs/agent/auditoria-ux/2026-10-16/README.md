@@ -594,31 +594,31 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
 | ☐ | [03.4](03-caja.md) | P2 | Al cerrar la caja el resultado queda solo en un aviso de 5 segundos | agente |
-| ☐ | [03.5](03-caja.md) | P2 | En una caja ajena se muestra el saldo esperado y se dice "a ciegas" | agente |
-| ☐ | [03.6](03-caja.md) | P2 | "Cerrar por el cajero" queda bajo el pliegue, después de las tablas | agente |
+| ☑ | [03.5](03-caja.md) | P2 | En una caja ajena se muestra el saldo esperado y se dice "a ciegas" — **hecho 2026-10-16** (el texto depende del modo ciego del servidor; el servidor no cambió qué devuelve) | agente |
+| ☑ | [03.6](03-caja.md) | P2 | "Cerrar por el cajero" queda bajo el pliegue, después de las tablas — **hecho 2026-10-16** | agente |
 | ☐ | [03.7](03-caja.md) | P2 | Los botones principales de caja miden 28 a 32 px en la tablet | agente |
 | ☑ | [03.8](03-caja.md) | P2 | Las cifras de plata en verde y rojo no tienen contraste suficiente — **hecho 2026-10-16** | agente |
 | ☑ | [03.9](03-caja.md) | P2 | Los botones sólidos verde, rojo y ámbar de caja no tienen contraste con letra blanca — **hecho 2026-10-16** *(ver 00.8)* | agente + owner |
-| ☐ | [03.10](03-caja.md) | P2 | El texto ámbar de caja ("Sin justificar", avisos) no tiene contraste suficiente *(ver 00.8)* | agente |
+| ☑ | [03.10](03-caja.md) | P2 | El texto ámbar de caja ("Sin justificar", avisos) no tiene contraste suficiente — **hecho 2026-10-16** (resuelto por el lote 00.8: `text-warning` ahora es el ámbar `#C53C00`, 5,22:1 sobre blanco y 4,52:1 sobre su fondo suave) *(ver 00.8)* | agente |
 | ☑ | [03.11](03-caja.md) | P2 | Las tarjetas de cajón no se pueden usar con teclado — **hecho 2026-10-16** | agente |
 | ☑ | [03.12](03-caja.md) | P2 | Los dos campos de fecha de la tendencia no dicen "Desde" ni "Hasta" — **hecho 2026-10-16** | agente |
 | ☑ | [03.13](03-caja.md) | P2 | Los datos que faltan en caja se avisan con un toast, no junto al campo — **hecho 2026-10-16** | agente |
 | ☑ | [03.14](03-caja.md) | P2 | "Enviar conteo" y "Confirmar cierre" quedan apagados sin decir qué falta — **hecho 2026-10-16** | agente |
-| ☐ | [03.15](03-caja.md) | P2 | El estado de caja sale crudo: "EN_CONCILIACION", "cerrada" a 10 px | agente |
-| ☐ | [03.16](03-caja.md) | P2 | El historial del encargado no tiene columna de cajero ni dice por quién se filtró | agente |
-| ☐ | [03.17](03-caja.md) | P2 | "Pendientes de revisar" no dice cuántos hay | agente |
-| ☐ | [03.18](03-caja.md) | P2 | Revisar un descuadre exige ir y volver: el detalle no muestra la explicación | agente |
+| ☑ | [03.15](03-caja.md) | P2 | El estado de caja sale crudo: "EN_CONCILIACION", "cerrada" a 10 px — **hecho 2026-10-16** | agente |
+| ☑ | [03.16](03-caja.md) | P2 | El historial del encargado no tiene columna de cajero ni dice por quién se filtró — **hecho 2026-10-16** (el listado trae `usuarioNombre`; el cajero va bajo el nombre de la caja y no en columna propia, para no devolver el problema de ancho de 03.2; hay chip «Cajero: …» / «Caja: …» con «Quitar filtro») | agente |
+| ☑ | [03.17](03-caja.md) | P2 | "Pendientes de revisar" no dice cuántos hay — **hecho 2026-10-16** (cuenta los de la bandeja; si no pudo contar, no muestra número) | agente |
+| ☑ | [03.18](03-caja.md) | P2 | Revisar un descuadre exige ir y volver: el detalle no muestra la explicación — **hecho 2026-10-16** (tarjeta «Revisión del descuadre» en el detalle, con «Marcar visto») | agente |
 | ☑ | [03.19](03-caja.md) | P3 | Voseo en los textos de caja *(lote 00.3)* — **hecho 2026-10-16** | agente |
-| ☐ | [03.20](03-caja.md) | P3 | Palabras de sistema en caja: "tenant", y Caja, Cajón y caja para lo mismo | agente |
-| ☐ | [03.21](03-caja.md) | P3 | Las cifras de las tablas de caja usan otra letra (monoespaciada) que el resto | agente |
-| ☐ | [03.22](03-caja.md) | P3 | Sin movimientos el resumen pinta "+ $0" en verde y "- $0" en rojo | agente |
-| ☐ | [03.23](03-caja.md) | P3 | Una frase de caja termina con doble punto después de la fecha | agente |
-| ☐ | [03.24](03-caja.md) | P3 | El panel de apertura de caja mide 40% y corta el campo "Comentario" | agente |
+| ☑ | [03.20](03-caja.md) | P3 | Palabras de sistema en caja: "tenant", y Caja, Cajón y caja para lo mismo — **hecho 2026-10-16** (el resto ya estaba en los lotes 4 y 6; faltaba el encabezado «Cajón» de la bandeja) | agente |
+| ☑ | [03.21](03-caja.md) | P3 | Las cifras de las tablas de caja usan otra letra (monoespaciada) que el resto — **hecho 2026-10-16** (`font-mono` ya no estaba; se agregó `tabular-nums` a las columnas de plata) | agente |
+| ☑ | [03.22](03-caja.md) | P3 | Sin movimientos el resumen pinta "+ $0" en verde y "- $0" en rojo — **hecho 2026-10-16** (resumen del turno y columna «Diferencia» del historial) | agente |
+| ☑ | [03.23](03-caja.md) | P3 | Una frase de caja termina con doble punto después de la fecha — **hecho 2026-10-16** | agente |
+| ☑ | [03.24](03-caja.md) | P3 | El panel de apertura de caja mide 40% y corta el campo "Comentario" — **hecho 2026-10-16** | agente |
 | ☑ | [03.25](03-caja.md) | P3 | El selector Entrada/Salida no anuncia cuál está elegido — **hecho 2026-10-16** | agente |
-| ☐ | [03.26](03-caja.md) | P3 | "Marcar visto" actúa al primer toque y no se puede deshacer | agente |
+| ☑ | [03.26](03-caja.md) | P3 | "Marcar visto" actúa al primer toque y no se puede deshacer — **hecho 2026-10-16** (pregunta antes de marcar; no hay «Deshacer» porque el backend rechaza revisar dos veces) | agente |
 | ☑ | [03.27](03-caja.md) | P3 | Entrar a "Mi caja" sin permiso lleva a Ventas con tres avisos, uno en voseo — **hecho 2026-10-16** | agente |
 | ☐ | [03.28](03-caja.md) | P3 | Idea: fondo sugerido por caja y atajos para los conceptos de movimiento | owner |
-| ☐ | [03.29](03-caja.md) | P3 | La tabla de movimientos parpadea y pierde el punto de lectura al paginar | agente |
+| ☑ | [03.29](03-caja.md) | P3 | La tabla de movimientos parpadea y pierde el punto de lectura al paginar — **hecho 2026-10-16** | agente |
 
 ### 04 · Inicio y reportes
 

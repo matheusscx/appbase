@@ -16,6 +16,20 @@ const loading = ref(true)
 
 const cajaId = computed(() => route.params.id as string)
 
+// Solo un cierre con diferencia tiene algo que revisar; el nivel viene congelado del cierre.
+const conRevision = computed(() => {
+  const d = cajaStore.detalle
+  return !!d
+    && (d.estado === 'cerrada' || d.estado === 'en_conciliacion')
+    && !!d.nivelDescuadre
+    && d.nivelDescuadre !== 'ninguno'
+})
+
+// Marcar visto lo decide el backend (quién y cuándo): se recarga el detalle, no se parchea.
+async function recargarDetalle() {
+  await cajaStore.cargarDetalle(cajaId.value)
+}
+
 const historialCajonUrl = computed(() => {
   const cajonId = cajaStore.detalle?.cajonId
   return cajonId ? `/cajas/historial?cajonId=${cajonId}` : '/cajas/historial'
@@ -69,14 +83,22 @@ onMounted(async () => {
         </div>
 
         <div v-else-if="cajaStore.detalle" class="space-y-6">
+          <!-- Lo que el encargado viene a hacer (cerrar la caja de un cajero que se fue) va primero:
+               debajo de las tarjetas y la tabla de movimientos quedaba bajo el pliegue (03.6). -->
+          <CajaCierreForzadoPanel :caja="cajaStore.detalle" :usuario-actual-id="authStore.user?.id" />
+
+          <CajaRevisionDescuadre
+            v-if="conRevision"
+            :caja="cajaStore.detalle"
+            @marcado="recargarDetalle"
+          />
+
           <CajaActivaDashboard
             :caja="cajaStore.detalle"
             :readonly="true"
             :historial-url="historialCajonUrl"
             historial-label="Ver historial"
           />
-
-          <CajaCierreForzadoPanel :caja="cajaStore.detalle" :usuario-actual-id="authStore.user?.id" />
 
           <!-- Rastro de los intentos rechazados: vive acá y no en la pantalla
                del cajero porque es supervisión (`Cajas:Leer`, el mismo permiso

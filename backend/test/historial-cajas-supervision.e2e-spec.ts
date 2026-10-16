@@ -185,6 +185,18 @@ describe('Historial de cajas: de supervisión, no del cajero (e2e)', () => {
       );
       expect(ids).toContain(cajaCerradaId);
     });
+
+    it('cada fila trae el nombre del cajero dueño (la columna "Cajero")', async () => {
+      const res = await get(
+        '/api/caja?todas=true&pageSize=100',
+        tokenSupervisor,
+      );
+      expect(res.status).toBe(200);
+      const fila = (
+        res.body as { data: { id: string; usuarioNombre: string | null }[] }
+      ).data.find((c) => c.id === cajaCerradaId);
+      expect(fila?.usuarioNombre).toEqual(expect.stringMatching(/\S/));
+    });
   });
 
   describe('el detalle de una caja propia ya cerrada', () => {

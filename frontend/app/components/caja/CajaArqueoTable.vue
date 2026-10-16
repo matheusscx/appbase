@@ -125,13 +125,13 @@ async function guardar() {
             <td class="py-2 text-default">
               {{ l.nombre }}
             </td>
-            <td class="py-2 text-right text-default">
+            <td class="py-2 text-right text-default tabular-nums">
               {{ l.esperado != null ? formatMonto(l.esperado) : '—' }}
             </td>
-            <td class="py-2 text-right text-default">
+            <td class="py-2 text-right text-default tabular-nums">
               {{ l.contado != null ? formatMonto(l.contado) : '—' }}
             </td>
-            <td class="py-2 text-right">
+            <td class="py-2 text-right tabular-nums">
               <span
                 v-if="l.diferencia != null"
                 :class="new Decimal(l.diferencia).gte(0) ? 'text-success' : 'text-error'"

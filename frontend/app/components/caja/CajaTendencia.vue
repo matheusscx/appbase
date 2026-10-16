@@ -144,12 +144,12 @@ function onSelectFila(_e: Event, row: Row<TendenciaDescuadres>) {
       @select="onSelectFila"
     >
       <template #efectivoSuma-cell="{ row }">
-        <span class="font-semibold" :class="claseMonto(row.original.efectivoSuma)">
+        <span class="font-semibold tabular-nums" :class="claseMonto(row.original.efectivoSuma)">
           {{ signo(row.original.efectivoSuma) }}{{ formatMonto(row.original.efectivoSuma) }}
         </span>
       </template>
       <template #otrosMediosSuma-cell="{ row }">
-        <span :class="claseMonto(row.original.otrosMediosSuma)">
+        <span class="tabular-nums" :class="claseMonto(row.original.otrosMediosSuma)">
           {{ signo(row.original.otrosMediosSuma) }}{{ formatMonto(row.original.otrosMediosSuma) }}
         </span>
       </template>

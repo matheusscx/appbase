@@ -4,6 +4,20 @@ definePageMeta({
   permiso: 'Cajas:Leer',
   layout: 'dashboard',
 })
+
+const cajaStore = useCajaStore()
+
+// Cuántos cierres esperan revisión (03.17). Si no se pudo contar queda en `null` y el botón no dice
+// nada: afirmar "0" cuando falló sería lo mismo que decir que no hay descuadres.
+const pendientes = ref<number | null>(null)
+onMounted(async () => {
+  try {
+    pendientes.value = (await cajaStore.cargarPendientesRevision()).length
+  }
+  catch {
+    pendientes.value = null
+  }
+})
 </script>
 
 <template>
@@ -25,7 +39,17 @@ definePageMeta({
               color="neutral"
               icon="i-lucide-inbox"
               label="Pendientes de revisar"
-            />
+            >
+              <template v-if="pendientes" #trailing>
+                <UBadge
+                  data-qa="pendientes-cantidad"
+                  color="error"
+                  variant="solid"
+                  size="sm"
+                  :label="String(pendientes)"
+                />
+              </template>
+            </UButton>
             <UButton
               to="/cajas/tendencia"
               variant="outline"
