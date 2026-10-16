@@ -219,7 +219,7 @@ export class AuthService {
     );
     if (!fila) {
       throw new BadRequestException(
-        'Ese link ya no sirve: puede estar vencido o ya usado. Vuelve a registrarte y te mandamos uno nuevo.',
+        'Puede estar vencido o ya usado. Vuelve a registrarte con el mismo correo y te mandamos uno nuevo.',
       );
     }
     await this.db.transaccion(async (manager) => {
@@ -247,16 +247,35 @@ export class AuthService {
   async verificarToken(
     token: string,
     tipo: TipoTokenAcceso,
-  ): Promise<{ correo: string }> {
+  ): Promise<{ correo: string; tenant?: string | null }> {
     const fila = await this.tokens.buscarVigente(token, tipo);
     if (!fila) {
-      throw new BadRequestException(
-        'Ese link ya no sirve: puede estar vencido o ya usado. Pide uno nuevo.',
-      );
+      throw new BadRequestException('Puede estar vencido o ya usado.');
     }
     const user = await this.usersService.findById(fila.usuarioId);
     if (!user) throw new BadRequestException('Ese link ya no sirve');
-    return { correo: user.correo };
+    if (tipo !== TipoTokenAcceso.INVITACION) return { correo: user.correo };
+    return { correo: user.correo, tenant: await this.empresaInvitada(user.id) };
+  }
+
+  /**
+   * La empresa a la que sumaron a esta cuenta, para que quien abre la invitación
+   * sepa a qué se está uniendo antes de fijar su contraseña (auditoría UX 08.6).
+   * El token de invitación no guarda el tenant: la cuenta se crea en la misma
+   * transacción que su membresía, así que la más antigua es la que invitó.
+   * `null` si la empresa o la membresía se dieron de baja mientras tanto.
+   */
+  private async empresaInvitada(usuarioId: string): Promise<string | null> {
+    const [fila] = await this.db.query<{ nombre: string }[]>(
+      `SELECT t.nombre
+         FROM usuarios_tenants ut
+         JOIN tenants t ON t.tenant_id = ut.tenant_id AND t.eliminado_el IS NULL
+        WHERE ut.usuario_id = $1 AND ut.eliminado_el IS NULL
+        ORDER BY ut.creado_el ASC
+        LIMIT 1`,
+      [usuarioId],
+    );
+    return fila?.nombre ?? null;
   }
 
   /**

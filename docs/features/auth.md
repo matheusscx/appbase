@@ -44,7 +44,7 @@ Request:
 {
   "nombre": "John Doe",
   "correo": "john@example.com",
-  "contrasena": "SecurePass123"  (min 6 chars)
+  "contrasena": "SecurePass123"  (min 8 chars, igual que elegirla por link y cambiarla en Mi cuenta)
 }
 
 Response (200) — SIEMPRE la misma, exista o no el correo:
@@ -88,6 +88,24 @@ si fuera antes, sería el mismo oráculo de enumeración que se acaba de cerrar.
 El correo se sella por tres caminos, y ninguno es el registro: este link, aceptar
 una invitación (llegó al mail y lo abrió), y Google **sólo** si el perfil trae
 `email_verified`.
+
+### Links de invitación, reset y confirmación (auditoría UX 08, 2026-10-16)
+
+- `GET /auth/invitacion/:token` devuelve `{ correo, tenant }`: la empresa que invitó (la membresía
+  más antigua de la cuenta; `null` si se dio de baja), para que quien abre el link sepa a qué se
+  une antes de fijar su contraseña. `GET /auth/recuperar/:token` devuelve solo `{ correo }`.
+- El motivo de un link inválido es **solo la causa** ("Puede estar vencido o ya usado."): la
+  pantalla ya lo titula "Este link ya no sirve" y pone la salida, que depende de quién puede
+  reenviarlo (reset: "Pedir otro link"; invitación y confirmación: "Pídele a quien te invitó").
+- Guardar la contraseña desde un link **no abre sesión**: la pantalla manda al login y el botón
+  dice "Guardar contraseña". Abrirla sola exige emitir tokens (invariante 4) y está pendiente del
+  owner.
+- `PATCH /me/contrasena` con la contraseña actual equivocada responde **400**, no 401: el
+  interceptor del front lee todo 401 como sesión vencida y la cierra.
+- Los DTO de registro, perfil y cambio de contraseña traen sus mensajes en español.
+- Login, registro y recuperar usan el middleware `invitado` (con sesión completa llevan a `/`); un
+  token sin empresa no cuenta, porque ahí vive el aviso de "no pudimos entrar a tu empresa".
+  `/no-tenant` pide sesión.
 
 ### Login (Email + Password)
 

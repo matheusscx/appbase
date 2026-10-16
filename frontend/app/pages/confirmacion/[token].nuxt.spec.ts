@@ -116,6 +116,15 @@ describe('confirmacion/[token] — el link del mail', () => {
     expect(boton(wrapper, 'quiero sumarme')).toBeFalsy()
   })
 
+  // 08.4: sin "Pedí uno nuevo" ni salida única al login: quien lo mandó es quien lo reenvía.
+  it('el link vencido manda a pedírselo a quien invitó', async () => {
+    datosToken = null
+
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('Pídele a quien te invitó que te envíe uno nuevo')
+  })
+
   it('aceptar postea al mismo token y manda a iniciar sesión', async () => {
     const wrapper = await montar()
 

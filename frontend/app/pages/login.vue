@@ -1,5 +1,5 @@
 <script setup lang="ts">
-definePageMeta({ layout: false })
+definePageMeta({ layout: false, middleware: 'invitado' })
 
 const store = useAuthStore()
 
@@ -8,7 +8,6 @@ const state = reactive({
   password: '',
   keepSession: false,
 })
-const showPassword = ref(false)
 
 async function onLogin() {
   const ok = await store.login(state.email, state.password)
@@ -95,6 +94,7 @@ async function onGoogle() {
         variant="subtle"
         :description="store.error"
         icon="i-lucide-circle-alert"
+        role="alert"
       />
 
       <!-- Form -->
@@ -103,8 +103,10 @@ async function onGoogle() {
           <UInput
             v-model="state.email"
             type="email"
+            name="email"
             placeholder="tu@email.com"
             autocomplete="email"
+            spellcheck="false"
             :disabled="store.loading"
             size="xl"
             :ui="{ base: 'min-h-11' }"
@@ -121,29 +123,13 @@ async function onGoogle() {
               ¿Olvidaste tu contraseña?
             </NuxtLink>
           </template>
-          <UInput
+          <AppInputContrasena
             v-model="state.password"
-            :type="showPassword ? 'text' : 'password'"
-            placeholder="••••••••"
+            name="password"
+            placeholder="Tu contraseña"
             autocomplete="current-password"
             :disabled="store.loading"
-            size="xl"
-            :ui="{ base: 'min-h-11' }"
-            class="w-full"
-          >
-            <template #trailing>
-              <UButton
-                :icon="showPassword ? 'i-lucide-eye-off' : 'i-lucide-eye'"
-                color="neutral"
-                variant="link"
-                size="xl"
-                class="size-11 justify-center"
-                :aria-label="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
-                :aria-pressed="showPassword"
-                @click="() => { showPassword = !showPassword }"
-              />
-            </template>
-          </UInput>
+          />
         </UFormField>
 
         <UCheckbox

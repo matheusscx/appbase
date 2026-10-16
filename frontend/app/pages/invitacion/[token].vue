@@ -25,6 +25,8 @@ const cargando = ref(true)
 /** Motivo por el que el link no sirve. `null` mientras sirva. */
 const linkInvalido = ref<string | null>(null)
 const correo = ref('')
+/** La empresa que invitó (solo en la invitación); `null` si no llegó. */
+const tenant = ref<string | null>(null)
 
 const form = ref({ contrasena: '', confirmar: '' })
 const guardando = ref(false)
@@ -56,11 +58,19 @@ const titulo = computed(() => {
   if (linkInvalido.value) return 'Este link ya no sirve'
   return esInvitacion ? 'Elige tu contraseña' : 'Elige una contraseña nueva'
 })
+/**
+ * Qué hacer con un link vencido (08.4). El motivo ya lo trae el servidor; acá va
+ * la salida, que cambia según quién pueda reenviarlo: el reset se pide solo, la
+ * invitación la reenvía quien invitó.
+ */
+const salidaLinkInvalido = esInvitacion
+  ? 'Pídele a quien te invitó que te envíe uno nuevo.'
+  : 'Pide otro desde el botón de abajo.'
 const subtitulo = computed(() => {
-  if (cargando.value) return 'Verificando el link…'
-  if (linkInvalido.value) return linkInvalido.value
+  if (cargando.value) return undefined
+  if (linkInvalido.value) return `${linkInvalido.value} ${salidaLinkInvalido}`
   return esInvitacion
-    ? `Te sumaron a un equipo con ${correo.value}. Elige una contraseña para entrar.`
+    ? `Te sumaron a ${tenant.value ?? 'un equipo'} con ${correo.value}. Elige una contraseña para entrar.`
     : `Vas a cambiar la contraseña de ${correo.value}.`
 })
 
@@ -71,13 +81,14 @@ const subtitulo = computed(() => {
  */
 onMounted(async () => {
   try {
-    const res = await $fetch<{ correo: string }>(
+    const res = await $fetch<{ correo: string, tenant?: string | null }>(
       `${apiUrl}/auth/${recurso}/${token}`,
     )
     correo.value = res.correo
+    tenant.value = res.tenant ?? null
   }
   catch (e: unknown) {
-    linkInvalido.value = apiErrorMsg(e, 'Ese link ya no sirve')
+    linkInvalido.value = apiErrorMsg(e, 'Puede estar vencido o ya usado.')
   }
   finally {
     cargando.value = false
@@ -93,7 +104,7 @@ async function guardar() {
       method: 'POST',
       body: { contrasena: form.value.contrasena },
     })
-    toast.add({ title: 'Listo, ya puedes entrar', color: 'success' })
+    toast.add({ title: 'Contraseña guardada. Ya puedes entrar.', color: 'success' })
     await navigateTo('/login')
   }
   catch (e: unknown) {
@@ -106,13 +117,23 @@ async function guardar() {
 </script>
 
 <template>
-  <AppMarco :titulo="titulo" :subtitulo="subtitulo" icono="i-lucide-key-round">
-    <UButton v-if="linkInvalido" to="/login" block variant="subtle">
-      Ir a iniciar sesión
-    </UButton>
+  <AppMarco
+    :titulo="titulo"
+    :subtitulo="subtitulo"
+    icono="i-lucide-key-round"
+    :cargando="cargando ? 'Verificando el link…' : undefined"
+  >
+    <template v-if="linkInvalido">
+      <UButton v-if="!esInvitacion" to="/forgot-password" block size="xl" class="min-h-11">
+        Pedir otro link
+      </UButton>
+      <UButton v-else to="/login" block size="xl" class="min-h-11" variant="subtle">
+        Ir a iniciar sesión
+      </UButton>
+    </template>
 
     <UForm
-      v-else-if="!cargando"
+      v-else
       :state="form"
       class="space-y-4"
       @submit="guardar"
@@ -122,15 +143,20 @@ async function guardar() {
         required
         :hint="`Mínimo ${LARGO_MINIMO} caracteres`"
       >
-        <UInput
+        <AppInputContrasena
           v-model="form.contrasena"
-          type="password"
+          name="password"
+          autocomplete="new-password"
           autofocus
-          class="w-full"
         />
       </UFormField>
       <UFormField label="Repítela" required>
-        <UInput v-model="form.confirmar" type="password" class="w-full" @blur="confirmarTocado = true" />
+        <AppInputContrasena
+          v-model="form.confirmar"
+          name="password-confirmar"
+          autocomplete="new-password"
+          @blur="confirmarTocado = true"
+        />
       </UFormField>
 
       <p
@@ -143,8 +169,16 @@ async function guardar() {
         {{ error }}
       </p>
 
-      <UButton type="submit" block :loading="guardando" :disabled="!puedeGuardar">
-        Guardar y entrar
+      <!-- No dice "entrar": al guardar se vuelve al login, la sesión no se abre sola. -->
+      <UButton
+        type="submit"
+        block
+        size="xl"
+        class="min-h-11"
+        :loading="guardando"
+        :disabled="!puedeGuardar"
+      >
+        Guardar contraseña
       </UButton>
     </UForm>
   </AppMarco>

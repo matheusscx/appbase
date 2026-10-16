@@ -76,7 +76,7 @@ Response (200):
 }
 
 Errors:
-- 401: Contraseña actual incorrecta
+- 400: Contraseña actual incorrecta (no 401: el front lee todo 401 como sesión vencida y la cierra; auditoría UX 08.1)
 - 400: Las contraseñas no coinciden
 - 400: Usuario sin contraseña (OAuth)
 ```

@@ -61,7 +61,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☐ | [06.6](06-compras-y-terceros.md) | P1 | Un pago hecho no se puede anular desde la pantalla, salvo que sobre plata | medido | owner |
 | ☑ | [07.1](07-configuracion.md) | P1 | En Configuración, la columna de acciones queda fuera de la tarjeta en 15 pantallas *(causa en 00.9)* — **hecho 2026-10-16** | medido | agente |
 | ☐ | [07.2](07-configuracion.md) | P1 | Los formularios de Configuración rechazan con avisos en inglés, sin marcar el campo *(es 00.11)* — *parcial 2026-10-16: traducción global y campos en Ítems, Impresoras, Descuentos, Recargos; faltan Salones/mesa e Impuestos (fiscal, frente aparte)* | medido | agente |
-| ☐ | [08.1](08-ingreso-y-cuenta.md) | P1 | Equivocarse en la "contraseña actual" cierra la sesión y manda al login | medido | agente |
+| ☑ | [08.1](08-ingreso-y-cuenta.md) | P1 | Equivocarse en la "contraseña actual" cierra la sesión y manda al login — **hecho 2026-10-16** (el servidor contesta 400 y no 401 a una contraseña actual equivocada; el token no se tocó) | medido | agente |
 | ☐ | [09.1](09-tienda-y-suscripciones.md) | P1 | Al volver de Webpay, "Agregar tarjeta" cobra el primer período sin confirmar | código | owner |
 | ☐ | [09.2](09-tienda-y-suscripciones.md) | P1 | Al volver de Webpay el carrito se vacía, aunque el aviso dice lo contrario | medido + código | agente |
 
@@ -759,29 +759,29 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
-| ☐ | [08.2](08-ingreso-y-cuenta.md) | P2 | Los errores de registro y de Mi cuenta salen en inglés y con nombres internos *(parte en 00.11)* — *parcial 2026-10-16: Mi cuenta (nombre, contraseñas) y traducción del validador; faltan los mensajes en español en los DTO del backend* | agente |
-| ☐ | [08.3](08-ingreso-y-cuenta.md) | P2 | "Guardar y entrar" manda al login y hay que escribir la contraseña de nuevo | agente |
-| ☐ | [08.4](08-ingreso-y-cuenta.md) | P2 | Un link vencido no deja pedir otro desde ahí y está en voseo | agente |
-| ☐ | [08.5](08-ingreso-y-cuenta.md) | P2 | Tras registrarse, la pantalla dice "Si ese correo no tenía cuenta…" sin nombrar el correo | agente |
-| ☐ | [08.6](08-ingreso-y-cuenta.md) | P2 | La invitación no dice a qué empresa te están sumando | agente |
+| ☑ | [08.2](08-ingreso-y-cuenta.md) | P2 | Los errores de registro y de Mi cuenta salen en inglés y con nombres internos *(parte en 00.11)* — **hecho 2026-10-16** (mensajes en español en los DTO de registro, perfil y cambio de contraseña; el barrido de los demás DTO de la app queda fuera de este grupo) | agente |
+| ☐ | [08.3](08-ingreso-y-cuenta.md) | P2 | "Guardar y entrar" manda al login y hay que escribir la contraseña de nuevo | agente — *parcial 2026-10-16: el botón dice "Guardar contraseña" y el aviso "Contraseña guardada"; volver a escribir la contraseña sigue, porque entrar solo exige emitir tokens (invariante 4), pendiente del owner* |
+| ☑ | [08.4](08-ingreso-y-cuenta.md) | P2 | Un link vencido no deja pedir otro desde ahí y está en voseo — **hecho 2026-10-16** | agente |
+| ☑ | [08.5](08-ingreso-y-cuenta.md) | P2 | Tras registrarse, la pantalla dice "Si ese correo no tenía cuenta…" sin nombrar el correo — **hecho 2026-10-16** | agente |
+| ☑ | [08.6](08-ingreso-y-cuenta.md) | P2 | La invitación no dice a qué empresa te están sumando — **hecho 2026-10-16** (la consulta de la invitación devuelve la empresa) | agente |
 | ☐ | [08.7](08-ingreso-y-cuenta.md) | P2 | "Mantener sesión iniciada" no hace nada | owner |
-| ☐ | [08.8](08-ingreso-y-cuenta.md) | P2 | Los controles del ingreso miden 32 px y los enlaces 16 px — **parcial 2026-10-16** (login, registro, recuperar contraseña y "Cerrar sesión" a 44 px; quedan el menú de usuario, Mi cuenta e invitación) | agente |
-| ☐ | [08.9](08-ingreso-y-cuenta.md) | P2 | El ojo de mostrar contraseña no se alcanza con Tab ni tiene nombre — **parcial 2026-10-16** (el ojo del login y del registro es un botón con nombre, alcanzable con Tab y de 44 px; queda ponerlo en invitación, recuperar y Mi cuenta) | agente |
-| ☐ | [08.10](08-ingreso-y-cuenta.md) | P2 | Los avisos de error del ingreso tienen poco contraste y no se anuncian al lector | agente |
-| ☐ | [08.11](08-ingreso-y-cuenta.md) | P2 | Si falla elegir el local, "Reintentar" recarga la lista y hay que elegir otra vez | agente |
-| ☐ | [08.12](08-ingreso-y-cuenta.md) | P2 | En "Elegir local" los nombres largos se cortan y dos locales parecidos se ven iguales | agente |
+| ☑ | [08.8](08-ingreso-y-cuenta.md) | P2 | Los controles del ingreso miden 32 px y los enlaces 16 px — **hecho 2026-10-16** | agente |
+| ☑ | [08.9](08-ingreso-y-cuenta.md) | P2 | El ojo de mostrar contraseña no se alcanza con Tab ni tiene nombre — **hecho 2026-10-16** | agente |
+| ☑ | [08.10](08-ingreso-y-cuenta.md) | P2 | Los avisos de error del ingreso tienen poco contraste y no se anuncian al lector — **hecho 2026-10-16** (el contraste lo resolvió 00.8; `role="alert"` en los tres avisos) | agente |
+| ☑ | [08.11](08-ingreso-y-cuenta.md) | P2 | Si falla elegir el local, "Reintentar" recarga la lista y hay que elegir otra vez — **hecho 2026-10-16** | agente |
+| ☑ | [08.12](08-ingreso-y-cuenta.md) | P2 | En "Elegir local" los nombres largos se cortan y dos locales parecidos se ven iguales — **hecho 2026-10-16** | agente |
 | ☑ | [08.13](08-ingreso-y-cuenta.md) | P3 | Los avatares de locales usan rojo y amarillo de alerta; la lista vacía queda en blanco — **hecho 2026-10-16** | owner |
 | ☑ | [08.14](08-ingreso-y-cuenta.md) | P3 | Mayúscula en cada palabra del menú de usuario y tres palabras para "local" — **hecho 2026-10-16** | agente |
 | ☑ | [08.15](08-ingreso-y-cuenta.md) | P3 | "Mi Cuenta" lleva a una pantalla que se llama "Configuración" — **hecho 2026-10-16** | agente |
-| ☐ | [08.16](08-ingreso-y-cuenta.md) | P3 | El registro pide contraseña de 6 caracteres y el resto de 8 | owner |
+| ☑ | [08.16](08-ingreso-y-cuenta.md) | P3 | El registro pide contraseña de 6 caracteres y el resto de 8 — **hecho 2026-10-16** (8 en la pantalla y en el servidor) | owner |
 | ☑ | [08.17](08-ingreso-y-cuenta.md) | P3 | Voseo en el ingreso, incluidos mensajes que llegan desde el servidor *(lote 00.3)* — **hecho 2026-10-16** | agente |
-| ☐ | [08.18](08-ingreso-y-cuenta.md) | P3 | El ingreso difiere de la maqueta aprobada en títulos, links y ancho de tarjeta — **parcial 2026-10-16**: títulos y links en petróleo; falta el ancho de la tarjeta y los controles (ver 08.8) *(ver 00.2)* | agente + owner |
-| ☐ | [08.19](08-ingreso-y-cuenta.md) | P3 | Los placeholders del ingreso tienen poco contraste y el de contraseña parece escrito | agente |
-| ☐ | [08.20](08-ingreso-y-cuenta.md) | P3 | El correo de recuperación no ofrece autocompletado y los correos tienen corrector ortográfico | agente |
-| ☐ | [08.21](08-ingreso-y-cuenta.md) | P3 | Con sesión abierta, /login muestra el formulario y /no-tenant abre sin sesión | agente |
-| ☐ | [08.22](08-ingreso-y-cuenta.md) | P3 | Los estados de "cargando" del ingreso se ven distintos entre pantallas | agente |
-| ☐ | [08.23](08-ingreso-y-cuenta.md) | P3 | En link inválido, título y párrafo dicen la misma frase seguida | agente |
-| ☐ | [08.24](08-ingreso-y-cuenta.md) | P3 | En Mi cuenta los campos miden 167 px y uno se corta a 768 | agente |
+| ☑ | [08.18](08-ingreso-y-cuenta.md) | P3 | El ingreso difiere de la maqueta aprobada en títulos, links y ancho de tarjeta *(ver 00.2)* — **hecho 2026-10-16** (tarjeta de 420 px; títulos y links, antes) | agente + owner |
+| ☑ | [08.19](08-ingreso-y-cuenta.md) | P3 | Los placeholders del ingreso tienen poco contraste y el de contraseña parece escrito — **hecho 2026-10-16** (global en `app.config.ts`: `placeholder:text-muted`) | agente |
+| ☑ | [08.20](08-ingreso-y-cuenta.md) | P3 | El correo de recuperación no ofrece autocompletado y los correos tienen corrector ortográfico — **hecho 2026-10-16** | agente |
+| ☑ | [08.21](08-ingreso-y-cuenta.md) | P3 | Con sesión abierta, /login muestra el formulario y /no-tenant abre sin sesión — **hecho 2026-10-16** (middleware `invitado`; `/no-tenant` pide sesión) | agente |
+| ☑ | [08.22](08-ingreso-y-cuenta.md) | P3 | Los estados de "cargando" del ingreso se ven distintos entre pantallas — **hecho 2026-10-16** (`AppMarco` con `cargando`) | agente |
+| ☑ | [08.23](08-ingreso-y-cuenta.md) | P3 | En link inválido, título y párrafo dicen la misma frase seguida — **hecho 2026-10-16** | agente |
+| ☑ | [08.24](08-ingreso-y-cuenta.md) | P3 | En Mi cuenta los campos miden 167 px y uno se corta a 768 — **hecho 2026-10-16** | agente |
 | ☐ | [08.25](08-ingreso-y-cuenta.md) | P3 | "Continuar con Google" puede llevar a una página de error si no está configurado | owner |
 | ☑ | [08.26](08-ingreso-y-cuenta.md) | P3 | "Las contraseñas no coinciden" aparece desde la primera letra de la repetición — **hecho 2026-10-16** | agente |
 

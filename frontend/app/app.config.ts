@@ -11,6 +11,10 @@ export default {
       warning: 'alerta',
       error: 'peligro',
     },
+    // El placeholder de Nuxt UI (`text-dimmed`) mide 2,63:1 sobre blanco; `text-muted` mide
+    // 4,76:1 (auditoría UX 08.19).
+    input: { slots: { base: 'placeholder:text-muted' } },
+    textarea: { slots: { base: 'placeholder:text-muted' } },
     // Ninguna insignia por debajo de 12 px (owner, 2026-10-16, auditoría UX 01.17 y 05.17):
     // `xs` y `sm` venían en 8 y 10 px. Se conserva su relleno compacto.
     badge: {

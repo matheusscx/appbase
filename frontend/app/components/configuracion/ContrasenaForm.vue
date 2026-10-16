@@ -59,18 +59,18 @@ async function guardar() {
 
     <UForm :state="form" class="space-y-4" @submit="guardar">
       <UFormField label="Contraseña actual" required :error="errores.contrasenaActual">
-        <UInput v-model="form.contrasenaActual" type="password" placeholder="Tu contraseña actual" @update:model-value="limpiar('contrasenaActual')" />
+        <AppInputContrasena v-model="form.contrasenaActual" compacto name="contrasena-actual" autocomplete="current-password" placeholder="Tu contraseña actual" @update:model-value="limpiar('contrasenaActual')" />
       </UFormField>
 
       <UFormField label="Nueva contraseña" required :error="errores.contrasenaNueva">
-        <UInput v-model="form.contrasenaNueva" type="password" placeholder="Mínimo 8 caracteres" @update:model-value="limpiar('contrasenaNueva')" />
+        <AppInputContrasena v-model="form.contrasenaNueva" compacto name="contrasena-nueva" autocomplete="new-password" placeholder="Mínimo 8 caracteres" @update:model-value="limpiar('contrasenaNueva')" />
       </UFormField>
 
       <UFormField label="Confirmar nueva contraseña" required :error="errores.confirmarContrasena">
-        <UInput v-model="form.confirmarContrasena" type="password" placeholder="Repite la nueva contraseña" @update:model-value="limpiar('confirmarContrasena')" />
+        <AppInputContrasena v-model="form.confirmarContrasena" compacto name="contrasena-confirmar" autocomplete="new-password" placeholder="Repite la nueva" @update:model-value="limpiar('confirmarContrasena')" />
       </UFormField>
 
-      <UButton type="submit" :loading="loading">
+      <UButton type="submit" size="xl" :loading="loading">
         Actualizar contraseña
       </UButton>
     </UForm>

@@ -54,7 +54,7 @@ async function verificar() {
     mensaje.value = res.message
   }
   catch (e: unknown) {
-    linkInvalido.value = apiErrorMsg(e, 'Ese link ya no sirve')
+    linkInvalido.value = apiErrorMsg(e, 'Puede estar vencido o ya usado.')
   }
   finally {
     verificando.value = false
@@ -67,15 +67,15 @@ async function verificar() {
     <!-- A registrarse y no a entrar: sin el correo verificado el login
          corta igual, así que mandarla al login sería un callejón. Volver a
          registrarse con la misma dirección reenvía el link. -->
-    <UButton v-if="linkInvalido" to="/register" block variant="subtle">
+    <UButton v-if="linkInvalido" to="/register" block size="xl" class="min-h-11" variant="subtle">
       Pedir un link nuevo
     </UButton>
 
-    <UButton v-else-if="mensaje" to="/login" block>
+    <UButton v-else-if="mensaje" to="/login" block size="xl" class="min-h-11">
       Iniciar sesión
     </UButton>
 
-    <UButton v-else block :loading="verificando" @click="verificar">
+    <UButton v-else block size="xl" class="min-h-11" :loading="verificando" @click="verificar">
       Verificar mi correo
     </UButton>
   </AppMarco>

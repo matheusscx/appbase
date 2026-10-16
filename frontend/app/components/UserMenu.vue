@@ -45,7 +45,7 @@ const items = computed<DropdownMenuItem[][]>(() => {
 </script>
 
 <template>
-  <UDropdownMenu :items="items">
+  <UDropdownMenu :items="items" :ui="{ item: 'min-h-10' }">
     <button
       type="button"
       class="flex items-center gap-2 rounded-lg px-2 py-1 -my-1 hover:bg-elevated/50 transition-colors cursor-pointer"

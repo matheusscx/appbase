@@ -44,25 +44,25 @@ async function guardar() {
     <UForm :state="form" class="space-y-4" @submit="guardar">
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <UFormField label="Nombre" required :error="errores.nombre">
-          <UInput v-model="form.nombre" placeholder="Tu nombre" @update:model-value="limpiar('nombre')" />
+          <UInput v-model="form.nombre" size="xl" class="w-full" name="nombre" autocomplete="given-name" placeholder="Tu nombre" @update:model-value="limpiar('nombre')" />
         </UFormField>
 
         <UFormField label="Apellido">
-          <UInput v-model="form.apellido" placeholder="Tu apellido" />
+          <UInput v-model="form.apellido" size="xl" class="w-full" name="apellido" autocomplete="family-name" placeholder="Tu apellido" />
         </UFormField>
       </div>
 
       <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <UFormField label="Teléfono">
-          <UInput v-model="form.telefono" placeholder="+56 9 1234 5678" />
+          <UInput v-model="form.telefono" size="xl" class="w-full" type="tel" inputmode="tel" name="telefono" autocomplete="tel" placeholder="+56 9 1234 5678" />
         </UFormField>
 
         <UFormField label="Correo electrónico">
-          <UInput :model-value="authStore.user?.correo" disabled />
+          <UInput :model-value="authStore.user?.correo" size="xl" class="w-full" disabled />
         </UFormField>
       </div>
 
-      <UButton type="submit" :loading="loading">
+      <UButton type="submit" size="xl" :loading="loading">
         Guardar cambios
       </UButton>
     </UForm>

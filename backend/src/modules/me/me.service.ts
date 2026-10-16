@@ -1,8 +1,4 @@
-import {
-  BadRequestException,
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import * as bcrypt from 'bcryptjs';
@@ -69,7 +65,10 @@ export class MeService {
       );
     }
     const valid = await bcrypt.compare(dto.contrasenaActual, user.contrasena);
-    if (!valid) throw new UnauthorizedException('Contraseña actual incorrecta');
+    // 400 y no 401: el front lee todo 401 como "tu sesión no vale", intenta
+    // refrescar y, si falla, cierra la sesión. Equivocarse al tipear la
+    // contraseña actual no puede sacar a nadie del sistema (auditoría UX 08.1).
+    if (!valid) throw new BadRequestException('Contraseña actual incorrecta');
     const hashed = await bcrypt.hash(dto.contrasenaNueva, 10);
     await this.repo.update(userId, { contrasena: hashed });
     await this.refreshRepo.delete({ userId });

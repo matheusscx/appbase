@@ -47,7 +47,7 @@ onMounted(async () => {
     tenant.value = res.tenant
   }
   catch (e: unknown) {
-    linkInvalido.value = apiErrorMsg(e, 'Ese link ya no sirve')
+    linkInvalido.value = apiErrorMsg(e, 'Puede estar vencido o ya usado.')
   }
   finally {
     cargando.value = false
@@ -62,8 +62,8 @@ const titulo = computed(() => {
   return `Te están sumando a ${tenant.value}`
 })
 const subtitulo = computed(() => {
-  if (cargando.value) return 'Verificando el link…'
-  if (linkInvalido.value) return linkInvalido.value
+  if (cargando.value) return undefined
+  if (linkInvalido.value) return `${linkInvalido.value} Pídele a quien te invitó que te envíe uno nuevo.`
   if (declinado.value) {
     return `No te sumamos a ${tenant.value} y tu cuenta quedó igual que antes. Si cambias de idea, vuelve a abrir el link del mail antes de que venza.`
   }
@@ -95,15 +95,22 @@ async function confirmar() {
 </script>
 
 <template>
-  <AppMarco :titulo="titulo" :subtitulo="subtitulo" icono="i-lucide-building-2">
-    <UButton v-if="linkInvalido || declinado" to="/login" block variant="subtle">
+  <AppMarco
+    :titulo="titulo"
+    :subtitulo="subtitulo"
+    icono="i-lucide-building-2"
+    :cargando="cargando ? 'Verificando el link…' : undefined"
+  >
+    <UButton v-if="linkInvalido || declinado" to="/login" block size="xl" class="min-h-11" variant="subtle">
       Ir a iniciar sesión
     </UButton>
 
-    <template v-else-if="!cargando">
+    <template v-else>
       <div class="space-y-2">
         <UButton
           block
+          size="xl"
+          class="min-h-11"
           :loading="confirmando"
           @click="confirmar"
         >
@@ -111,6 +118,8 @@ async function confirmar() {
         </UButton>
         <UButton
           block
+          size="xl"
+          class="min-h-11"
           color="neutral"
           variant="ghost"
           :disabled="confirmando"

@@ -6,6 +6,7 @@
  *
  * - `icono`: el ícono de **la acción** de la pantalla (llave, sobre, edificio).
  *   Va como una placa suave arriba del título; el logo no se reemplaza, se suma.
+ * - `cargando`: texto del estado de carga; reemplaza al contenido.
  * - slot `lateral`: panel de marca para escritorio. A partir de `lg` la página
  *   pasa a dos columnas iguales (panel a la izquierda, formulario a la derecha)
  *   y el logo positivo se oculta —ya lo trae el panel—. Por debajo de `lg` el
@@ -17,11 +18,18 @@ withDefaults(defineProps<{
   /** Ícono de la acción, `i-lucide-*`. */
   icono?: string
   ancho?: 'sm' | 'lg'
+  /**
+   * Estado de carga único de las pantallas de ingreso (auditoría UX 08.22): el
+   * texto que acompaña al indicador. Con él, el marco conserva logo y título y
+   * reemplaza el contenido por el indicador.
+   */
+  cargando?: string
 }>(), {
   titulo: undefined,
   subtitulo: undefined,
   icono: undefined,
   ancho: 'sm',
+  cargando: undefined,
 })
 </script>
 
@@ -42,7 +50,7 @@ withDefaults(defineProps<{
       <div
         data-qa="marco-columna"
         class="w-full"
-        :class="ancho === 'lg' ? 'max-w-lg' : 'max-w-sm'"
+        :class="ancho === 'lg' ? 'max-w-lg' : 'max-w-105'"
       >
         <header
           class="mb-6 text-center"
@@ -72,7 +80,15 @@ withDefaults(defineProps<{
           </p>
         </header>
 
-        <slot />
+        <div
+          v-if="cargando"
+          role="status"
+          class="flex items-center justify-center gap-2 py-8 text-sm text-muted"
+        >
+          <UIcon name="i-lucide-loader" class="size-5 animate-spin text-primary" />
+          {{ cargando }}
+        </div>
+        <slot v-else />
       </div>
     </main>
   </div>

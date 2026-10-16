@@ -49,4 +49,15 @@ describe('ContrasenaForm', () => {
     expect(enviados).toHaveLength(0)
     expect(wrapper.findAll('[data-slot="error"]').map(e => e.text())).toEqual(['Escribe tu contraseña actual'])
   })
+
+  // 08.9, 08.20, 08.24
+  it('los tres campos llevan ojo con nombre, autocompletado propio y ancho completo', async () => {
+    const wrapper = await mountSuspended(ContrasenaForm)
+    expect(wrapper.findAll('button[aria-label="Mostrar contraseña"]')).toHaveLength(3)
+    expect(wrapper.findAll('input').map(i => i.attributes('autocomplete'))).toEqual([
+      'current-password', 'new-password', 'new-password',
+    ])
+    for (const i of wrapper.findAll('input')) expect(i.element.closest('div')!.className).toContain('w-full')
+    expect(wrapper.find('input[placeholder="Repite la nueva"]').exists()).toBe(true)
+  })
 })

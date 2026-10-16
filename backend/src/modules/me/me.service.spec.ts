@@ -1,6 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { BadRequestException } from '@nestjs/common';
 import * as bcrypt from 'bcryptjs';
 import { MeService } from './me.service';
 import { Usuario } from '../users/usuario.entity';
@@ -59,7 +59,7 @@ describe('MeService', () => {
           ...dtoValido,
           contrasenaActual: 'no-es-esta',
         }),
-      ).rejects.toBeInstanceOf(UnauthorizedException);
+      ).rejects.toBeInstanceOf(BadRequestException);
 
       expect(usuarioRepo.update).not.toHaveBeenCalled();
       expect(refreshRepo.delete).not.toHaveBeenCalled();

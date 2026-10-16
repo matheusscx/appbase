@@ -54,4 +54,16 @@ describe('PerfilForm', () => {
     expect(avisos.map(a => a.title)).toEqual(['Nombre: es obligatorio'])
     expect(wrapper.find('[data-slot="error"]').text()).toBe('Es obligatorio')
   })
+
+  // 08.24: los campos ocupan el ancho de su columna, el teléfono es de teléfono, y
+  // los controles miden 40 px (Mi cuenta no es mostrador, no hacen falta 44).
+  it('los campos llenan su columna y el teléfono declara su tipo', async () => {
+    const wrapper = await montar('Ana')
+    const campos = wrapper.findAll('input:not([disabled])')
+    expect(campos.length).toBe(3)
+    for (const c of campos) expect(c.element.closest('div')!.className, c.attributes('placeholder')).toContain('w-full')
+    const tel = wrapper.find('input[type="tel"]')
+    expect(tel.attributes('inputmode')).toBe('tel')
+    expect(tel.attributes('autocomplete')).toBe('tel')
+  })
 })

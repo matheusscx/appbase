@@ -59,7 +59,35 @@ describe('AppMarco', () => {
     const sm = await mountSuspended(AppMarco, { props: { titulo: 'Hola' } })
     const lg = await mountSuspended(AppMarco, { props: { titulo: 'Hola', ancho: 'lg' } })
 
-    expect(sm.find('[data-qa="marco-columna"]').classes()).toContain('max-w-sm')
+    expect(sm.find('[data-qa="marco-columna"]').classes()).toContain('max-w-105')
     expect(lg.find('[data-qa="marco-columna"]').classes()).toContain('max-w-lg')
+  })
+
+  // 08.18: la tarjeta de la maqueta mide ~420 px (la columna era de 384).
+  it('la columna estándar mide 420 px, como la maqueta', async () => {
+    const sm = await mountSuspended(AppMarco, { props: { titulo: 'Hola' } })
+    expect(sm.find('[data-qa="marco-columna"]').classes()).not.toContain('max-w-sm')
+  })
+
+  // 08.22: un solo estado de carga para las pantallas de ingreso: el marco con
+  // logo y un indicador con su texto, en lugar del contenido.
+  it('con `cargando` muestra el indicador con su texto y esconde el contenido', async () => {
+    const w = await mountSuspended(AppMarco, {
+      props: { titulo: 'Hola', cargando: 'Verificando el link…' },
+      slots: { default: '<p>formulario</p>' },
+    })
+    const estado = w.find('[role="status"]')
+    expect(estado.text()).toContain('Verificando el link…')
+    expect(w.find('img[alt="Venka"]').exists()).toBe(true)
+    expect(w.text()).not.toContain('formulario')
+  })
+
+  it('sin `cargando` muestra el contenido', async () => {
+    const w = await mountSuspended(AppMarco, {
+      props: { titulo: 'Hola' },
+      slots: { default: '<p>formulario</p>' },
+    })
+    expect(w.find('[role="status"]').exists()).toBe(false)
+    expect(w.text()).toContain('formulario')
   })
 })

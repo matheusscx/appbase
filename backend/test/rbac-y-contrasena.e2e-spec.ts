@@ -448,6 +448,20 @@ describe('RBAC y cambio de contraseña (e2e)', () => {
       expect(resRefresh.status).toBe(401);
     });
 
+    it('el registro exige 8 caracteres y lo dice en español', async () => {
+      const res = await request(app.getHttpServer())
+        .post('/api/auth/register')
+        .send({
+          nombre: 'Clave Corta',
+          correo: `corta-${Date.now()}@example.com`,
+          contrasena: '1234567',
+        });
+      expect(res.status).toBe(400);
+      expect((res.body as { message: string[] }).message).toEqual([
+        'La contraseña debe tener al menos 8 caracteres',
+      ]);
+    });
+
     it('una contraseña actual incorrecta no mata la sesión', async () => {
       const { token, cookie } = await registrar('fallido');
 
@@ -459,7 +473,9 @@ describe('RBAC y cambio de contraseña (e2e)', () => {
           contrasenaNueva: 'la-nueva-5678',
           confirmarContrasena: 'la-nueva-5678',
         });
-      expect(resCambio.status).toBe(401);
+      // 400 y no 401: el front lee todo 401 como "tu sesión no vale" y la cierra
+      // (auditoría UX 08.1). Equivocarse al tipear no puede sacar a nadie.
+      expect(resCambio.status).toBe(400);
 
       const resRefresh = await request(app.getHttpServer())
         .post('/api/auth/refresh')

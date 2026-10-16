@@ -8,7 +8,7 @@
  * enumerador público de correos registrados. La pantalla no puede "mejorar" ese
  * mensaje sin devolver la fuga.
  */
-definePageMeta({ layout: false })
+definePageMeta({ layout: false, middleware: 'invitado' })
 
 const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
@@ -61,6 +61,9 @@ async function pedir() {
         <UInput
           v-model="correo"
           type="email"
+          name="email"
+          autocomplete="email"
+          spellcheck="false"
           autofocus
           :maxlength="100"
           size="xl"

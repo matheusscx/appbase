@@ -16,8 +16,8 @@ export class UpdatePerfilDto {
     typeof value === 'string' ? value.trim() : value,
   )
   @ValidateIf((_o, v) => v !== undefined)
-  @IsString()
-  @IsNotEmpty()
+  @IsString({ message: 'Escribe tu nombre' })
+  @IsNotEmpty({ message: 'Escribe tu nombre' })
   nombre?: string;
 
   // `apellido` y `telefono` NO llevan el mismo trato: sus columnas son

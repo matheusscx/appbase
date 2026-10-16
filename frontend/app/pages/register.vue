@@ -1,5 +1,5 @@
 <script setup lang="ts">
-definePageMeta({ layout: false })
+definePageMeta({ layout: false, middleware: 'invitado' })
 
 const store = useAuthStore()
 
@@ -8,7 +8,7 @@ const state = reactive({
   correo: '',
   password: '',
 })
-const showPassword = ref(false)
+const LARGO_MINIMO = 8
 
 /**
  * El mensaje del backend, y la señal de que ya se envió el formulario.
@@ -19,7 +19,7 @@ const showPassword = ref(false)
  * tampoco puede decir si la cuenta se creó. De ahí que el texto hable de "si
  * ese correo no tenía cuenta" en vez de afirmar un alta.
  */
-const enviado = ref<string | null>(null)
+const enviado = ref(false)
 
 /**
  * El error de esta pantalla, y no `store.error`: ése es el del login, que
@@ -32,8 +32,12 @@ async function onRegister() {
   errorRegistro.value = null
   const resultado = await store.register(state.nombre, state.correo, state.password)
   if ('error' in resultado) errorRegistro.value = resultado.error
-  else enviado.value = resultado.mensaje
+  else enviado.value = true
 }
+
+const puedeCrear = computed(
+  () => !!state.nombre && !!state.correo && state.password.length >= LARGO_MINIMO,
+)
 
 async function onGoogle() {
   store.loginWithGoogle()
@@ -41,7 +45,7 @@ async function onGoogle() {
 </script>
 
 <template>
-  <AppMarco titulo="Crea tu cuenta">
+  <AppMarco :titulo="enviado ? 'Revisa tu correo' : 'Crea tu cuenta'">
     <!-- Card -->
     <div class="bg-default rounded-2xl border border-default p-7 space-y-5">
 
@@ -49,8 +53,11 @@ async function onGoogle() {
            mandarlo sólo reenviaría el mismo link. -->
       <div v-if="enviado" class="space-y-4 text-center">
         <UIcon name="i-lucide-mail-check" class="w-10 h-10 text-primary" />
+        <!-- El condicional se queda: el servidor no dice si el correo ya tenía
+             cuenta (no se puede enumerar qué correos existen). Se nombra el correo
+             para que un error de tipeo se note. -->
         <p class="text-sm text-default">
-          {{ enviado }}
+          Si {{ state.correo }} no tenía cuenta, te enviamos un link para verificarla. Si no llega, revisa el spam.
         </p>
         <p class="text-xs text-muted">
           Abre el link para verificar tu correo. Sin ese paso la cuenta todavía no se puede usar.
@@ -68,6 +75,7 @@ async function onGoogle() {
         variant="subtle"
         :description="errorRegistro"
         icon="i-lucide-circle-alert"
+        role="alert"
       />
 
       <!-- Google -->
@@ -98,6 +106,7 @@ async function onGoogle() {
           <UInput
             v-model="state.nombre"
             type="text"
+            name="nombre"
             placeholder="Tu nombre"
             autocomplete="given-name"
             :disabled="store.loading"
@@ -111,8 +120,10 @@ async function onGoogle() {
           <UInput
             v-model="state.correo"
             type="email"
+            name="email"
             placeholder="tu@email.com"
             autocomplete="email"
+            spellcheck="false"
             :disabled="store.loading"
             size="xl"
             :ui="{ base: 'min-h-11' }"
@@ -120,30 +131,13 @@ async function onGoogle() {
           />
         </UFormField>
 
-        <UFormField label="Contraseña" name="password">
-          <UInput
+        <UFormField label="Contraseña" name="password" :hint="`Mínimo ${LARGO_MINIMO} caracteres`">
+          <AppInputContrasena
             v-model="state.password"
-            :type="showPassword ? 'text' : 'password'"
-            placeholder="Mínimo 6 caracteres"
+            name="password"
             autocomplete="new-password"
             :disabled="store.loading"
-            size="xl"
-            :ui="{ base: 'min-h-11' }"
-            class="w-full"
-          >
-            <template #trailing>
-              <UButton
-                :icon="showPassword ? 'i-lucide-eye-off' : 'i-lucide-eye'"
-                color="neutral"
-                variant="link"
-                size="xl"
-                class="size-11 justify-center"
-                :aria-label="showPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'"
-                :aria-pressed="showPassword"
-                @click="() => { showPassword = !showPassword }"
-              />
-            </template>
-          </UInput>
+          />
         </UFormField>
 
         <UButton
@@ -152,7 +146,7 @@ async function onGoogle() {
           size="xl"
           class="min-h-11"
           :loading="store.loading"
-          :disabled="store.loading || !state.nombre || !state.correo || !state.password"
+          :disabled="store.loading || !puedeCrear"
         >
           Crear cuenta
         </UButton>

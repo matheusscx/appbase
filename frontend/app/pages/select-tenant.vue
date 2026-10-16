@@ -4,6 +4,8 @@ definePageMeta({ layout: false })
 const tenantStore = useTenantStore()
 const authStore = useAuthStore()
 const switching = ref<string | null>(null)
+/** La empresa cuya elección falló, para que "Reintentar" repita esa y no la lista. */
+const eleccionFallida = ref<string | null>(null)
 
 onMounted(async () => {
   if (tenantStore.tenants.length === 0) {
@@ -28,39 +30,39 @@ function avatarUi(name: string) {
 async function select(tenantId: string) {
   switching.value = tenantId
   await tenantStore.switchTenant(tenantId)
+  eleccionFallida.value = tenantStore.error ? tenantId : null
   switching.value = null
 }
 
-const gridClass = computed(() =>
-  tenantStore.tenants.length <= 4
-    ? 'grid grid-cols-1 sm:grid-cols-2 gap-3'
-    : 'flex flex-col gap-2'
-)
+function reintentar() {
+  if (eleccionFallida.value) return select(eleccionFallida.value)
+  return tenantStore.fetchMyTenants()
+}
 </script>
 
 <template>
   <AppMarco
     titulo="¿En qué empresa vas a trabajar?"
-    subtitulo="Selecciona el espacio de trabajo para esta sesión."
+    subtitulo="Elige la empresa para esta sesión."
     ancho="lg"
+    :cargando="tenantStore.loading && !tenantStore.tenants.length && !tenantStore.error ? 'Cargando tus empresas…' : undefined"
   >
+    <!-- El aviso va encima y la lista se queda: si falla entrar a un local, la
+         persona ve cuál eligió y reintenta con un toque. -->
     <div v-if="tenantStore.error" class="mb-4">
       <UAlert
         color="error"
         variant="subtle"
         :description="tenantStore.error"
         icon="i-lucide-circle-alert"
+        role="alert"
       />
-      <UButton class="mt-3" size="sm" variant="ghost" @click="tenantStore.fetchMyTenants()">
+      <UButton class="mt-3 min-h-11" size="xl" variant="ghost" :disabled="!!switching" @click="reintentar">
         Reintentar
       </UButton>
     </div>
 
-    <div v-else-if="tenantStore.loading && tenantStore.tenants.length === 0" class="py-12 text-center">
-      <UIcon name="i-lucide-loader" class="w-6 h-6 text-highlighted animate-spin mx-auto" />
-    </div>
-
-    <div v-else :class="gridClass">
+    <div v-if="tenantStore.tenants.length" class="flex flex-col gap-2">
       <button
         v-for="tenant in tenantStore.tenants"
         :key="tenant.tenantId"
@@ -81,7 +83,7 @@ const gridClass = computed(() =>
             class="absolute inset-0 m-auto w-5 h-5 animate-spin text-highlighted"
           />
         </div>
-        <span class="min-w-0 font-medium text-default text-sm flex-1 truncate">
+        <span class="min-w-0 flex-1 text-sm font-medium text-default line-clamp-2" :title="tenant.nombre">
           {{ tenant.nombre }}
         </span>
         <UIcon

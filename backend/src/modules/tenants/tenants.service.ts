@@ -1311,9 +1311,7 @@ export class TenantsService {
       TipoTokenAcceso.CONFIRMACION,
     );
     if (!fila || !fila.datos) {
-      throw new BadRequestException(
-        'Ese link ya no sirve: puede estar vencido o ya usado. Pide uno nuevo.',
-      );
+      throw new BadRequestException('Puede estar vencido o ya usado.');
     }
     return { fila, datos: fila.datos };
   }

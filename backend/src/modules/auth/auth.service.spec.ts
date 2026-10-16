@@ -1,5 +1,6 @@
 import { Test, type TestingModule } from '@nestjs/testing';
 import { TokensAccesoService } from './tokens-acceso.service';
+import { TipoTokenAcceso } from './entities/token-acceso.entity';
 import { MailService } from '../mail/mail.service';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
@@ -53,6 +54,7 @@ describe('AuthService', () => {
   };
   let dataSource: { query: jest.Mock; transaction: jest.Mock };
   let usersService: { findById: jest.Mock; [k: string]: jest.Mock };
+  let tokensAcceso: { buscarVigente: jest.Mock };
 
   beforeEach(async () => {
     dataSource = {
@@ -151,6 +153,7 @@ describe('AuthService', () => {
     }).compile();
 
     service = module.get<AuthService>(AuthService);
+    tokensAcceso = module.get(TokensAccesoService);
   });
 
   describe('generateTokens', () => {
@@ -467,6 +470,51 @@ describe('AuthService', () => {
       await expect(
         service.switchTenant('usuario-uuid', 'tenant-uuid', 'rt-vencido'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
+
+  describe('verificarToken', () => {
+    const fila = { id: 'tok-1', usuarioId: 'user-uuid-1' };
+
+    it('la invitación dice a qué empresa suman a la persona', async () => {
+      tokensAcceso.buscarVigente.mockResolvedValue(fila);
+      usersService.findById.mockResolvedValue({ correo: 'ana@example.com' });
+      dataSource.query.mockResolvedValue([{ nombre: 'Almacén Los Andes' }]);
+
+      const res = await service.verificarToken(
+        'abc',
+        TipoTokenAcceso.INVITACION,
+      );
+
+      expect(res).toEqual({
+        correo: 'ana@example.com',
+        tenant: 'Almacén Los Andes',
+      });
+      const [sql] = dataSource.query.mock.calls[0] as [string];
+      expect(sql).toMatch(/eliminado_el IS NULL/);
+    });
+
+    // 08.23: la pantalla ya titula "Este link ya no sirve"; el motivo no puede
+    // repetir la misma frase justo debajo.
+    it('el link vencido da solo el motivo, sin repetir el título de la pantalla', async () => {
+      tokensAcceso.buscarVigente.mockResolvedValue(null);
+
+      await expect(
+        service.verificarToken('abc', TipoTokenAcceso.INVITACION),
+      ).rejects.toThrow('Puede estar vencido o ya usado.');
+      await expect(service.verificarCorreo('abc')).rejects.toThrow(
+        /^Puede estar vencido o ya usado\./,
+      );
+    });
+
+    it('el reset no consulta empresa: devuelve solo el correo', async () => {
+      tokensAcceso.buscarVigente.mockResolvedValue(fila);
+      usersService.findById.mockResolvedValue({ correo: 'ana@example.com' });
+
+      const res = await service.verificarToken('abc', TipoTokenAcceso.RESET);
+
+      expect(res).toEqual({ correo: 'ana@example.com' });
+      expect(dataSource.query).not.toHaveBeenCalled();
     });
   });
 

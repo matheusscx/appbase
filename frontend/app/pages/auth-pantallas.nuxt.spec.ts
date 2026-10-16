@@ -98,7 +98,7 @@ describe('login y registro — cada uno con su aviso de error', () => {
 
   it('un registro rechazado no aparece al volver al login', async () => {
     respuestas['/auth/register'] = () => Promise.reject({ data: { message: 'El correo no es válido' } })
-    const registro = await registrarCon('Ana', 'a@b.com', 'secreta')
+    const registro = await registrarCon('Ana', 'a@b.com', 'secreta123')
     expect(registro.text()).toContain('El correo no es válido')
     registro.unmount()
 
@@ -108,14 +108,14 @@ describe('login y registro — cada uno con su aviso de error', () => {
 
   it('el registro limpia su aviso al volver a enviar', async () => {
     respuestas['/auth/register'] = () => Promise.reject({ data: { message: 'El correo no es válido' } })
-    const registro = await registrarCon('Ana', 'a@b.com', 'secreta')
+    const registro = await registrarCon('Ana', 'a@b.com', 'secreta123')
     expect(registro.text()).toContain('El correo no es válido')
 
     respuestas['/auth/register'] = () => Promise.resolve({ message: 'Si ese correo no tenía cuenta, te llega un link.' })
     await (registro.vm as unknown as RegisterVm).onRegister()
     await registro.vm.$nextTick()
     expect(registro.text()).not.toContain('El correo no es válido')
-    expect(registro.text()).toContain('te llega un link')
+    expect(registro.text()).toContain('te enviamos un link')
   })
 
   it('el aviso de "no pudimos entrar a tu empresa" sigue llegando al login', async () => {
@@ -160,5 +160,69 @@ describe.each([
       expect(input.classes().join(' '), `campo ${input.attributes('placeholder')}`).toMatch(CUARENTA_Y_CUATRO)
     }
     expect(w.find('button[type="submit"]').classes().join(' ')).toMatch(CUARENTA_Y_CUATRO)
+  })
+})
+
+// Auditoría UX 08.10, 08.19, 08.20: el aviso de error se anuncia al lector, el
+// placeholder de la contraseña no son puntos (parece ya escrita) y los campos
+// declaran su autocompletado.
+describe('login — aviso, placeholder y autocompletado', () => {
+  beforeEach(() => {
+    respuestas = {}
+    vi.stubGlobal('$fetch', (url: string) => {
+      const ruta = Object.keys(respuestas).find(r => url.endsWith(r))
+      return ruta ? respuestas[ruta]!() : Promise.reject(new Error(`sin respuesta para ${url}`))
+    })
+    useAuthStore().clearAuth()
+    useAuthStore().error = null
+  })
+
+  it('el aviso de credenciales inválidas se anuncia (role="alert")', async () => {
+    respuestas['/auth/login'] = () => Promise.reject({ data: { message: 'Credenciales inválidas' } })
+    const login = await loginCon('a@b.com', 'mala')
+    expect(login.find('[role="alert"]').text()).toContain('Credenciales inválidas')
+  })
+
+  it('la contraseña no lleva puntos de placeholder y el correo no pasa por el corrector', async () => {
+    const w = await mountSuspended(Login)
+    expect(w.find('input[autocomplete="current-password"]').attributes('placeholder') ?? '').not.toContain('•')
+    expect(w.find('input[type="email"]').attributes('spellcheck')).toBe('false')
+  })
+})
+
+describe('registro — 8 caracteres, y qué pasó al enviar', () => {
+  beforeEach(() => {
+    respuestas = {}
+    vi.stubGlobal('$fetch', (url: string) => {
+      const ruta = Object.keys(respuestas).find(r => url.endsWith(r))
+      return ruta ? respuestas[ruta]!() : Promise.reject(new Error(`sin respuesta para ${url}`))
+    })
+    useAuthStore().clearAuth()
+  })
+
+  async function llenar(password: string) {
+    const w = await mountSuspended(Register)
+    await w.find('input[autocomplete="given-name"]').setValue('Ana')
+    await w.find('input[type="email"]').setValue('ana@tulocal.cl')
+    await w.find('input[autocomplete="new-password"]').setValue(password)
+    return w
+  }
+
+  it('con 7 caracteres no deja crear la cuenta y dice el mínimo; con 8 sí', async () => {
+    const corta = await llenar('1234567')
+    expect(corta.find('button[type="submit"]').attributes('disabled')).toBeDefined()
+    expect(corta.text()).toContain('Mínimo 8 caracteres')
+    const ok = await llenar('12345678')
+    expect(ok.find('button[type="submit"]').attributes('disabled')).toBeUndefined()
+  })
+
+  it('tras enviar, el título es "Revisa tu correo" y nombra el correo y el spam', async () => {
+    respuestas['/auth/register'] = () => Promise.resolve({ message: 'Si ese correo no tenía cuenta, te llega un link.' })
+    const w = await llenar('12345678')
+    await (w.vm as unknown as RegisterVm).onRegister()
+    await w.vm.$nextTick()
+    expect(w.find('h1').text()).toBe('Revisa tu correo')
+    expect(w.text()).toContain('Si ana@tulocal.cl no tenía cuenta, te enviamos un link para verificarla.')
+    expect(w.text()).toContain('revisa el spam')
   })
 })
