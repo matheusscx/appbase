@@ -151,6 +151,7 @@ describe('ColaDteService', () => {
       detalle_sii: null,
       envio_estado_sii: '1',
       envio_ultimo_error: 'El SII contestó un código que no conocemos',
+      tenant_dado_de_baja: false,
     };
 
     it('hace una sola consulta y pasa de snake_case a camelCase', async () => {
@@ -187,6 +188,7 @@ describe('ColaDteService', () => {
           detalleSii: null,
           envioEstadoSii: '1',
           envioUltimoError: 'El SII contestó un código que no conocemos',
+          tenantDadoDeBaja: false,
         },
         expect.objectContaining({
           documentoId: 'aaaaaaaa-8888-4777-8666-555555555555',
@@ -206,7 +208,7 @@ describe('ColaDteService', () => {
       await expect(service.problemasDeTodos()).resolves.toEqual([]);
     });
 
-    it('cruza tenants a propósito, sin parámetros, y filtra lo dado de baja en cada join', async () => {
+    it('cruza tenants a propósito, sin parámetros, y filtra lo dado de baja en cada join menos el del tenant', async () => {
       db.query.mockResolvedValueOnce([]);
       await service.problemasDeTodos();
 
@@ -214,7 +216,6 @@ describe('ColaDteService', () => {
       expect(params ?? []).toEqual([]);
       expect(sql).not.toContain('d.tenant_id =');
       expect(sql).toContain('d.eliminado_el IS NULL');
-      expect(sql).toContain('t.eliminado_el IS NULL');
       expect(sql).toContain('rs.eliminado_el IS NULL');
       expect(sql).toContain('LEFT JOIN razones_sociales rs');
       expect(sql).toContain(
@@ -224,6 +225,26 @@ describe('ColaDteService', () => {
       expect(sql).toContain(COND_RECHAZADA);
       expect(sql).toContain('ORDER BY d.emitido_el, d.folio');
       expect(sql).toContain('LIMIT 200');
+    });
+
+    it('pasa tenant_dado_de_baja a tenantDadoDeBaja', async () => {
+      db.query.mockResolvedValueOnce([{ ...FILA, tenant_dado_de_baja: true }]);
+
+      const [fila] = await service.problemasDeTodos();
+
+      expect(fila.tenantDadoDeBaja).toBe(true);
+    });
+
+    it('no filtra el tenant dado de baja: su boleta se sigue enviando, así que soporte la ve', async () => {
+      db.query.mockResolvedValueOnce([]);
+      await service.problemasDeTodos();
+
+      const [sql] = db.query.mock.calls[0] as [string];
+      expect(sql).toContain('JOIN tenants t ON t.tenant_id = d.tenant_id\n');
+      expect(sql).not.toContain('t.eliminado_el IS NULL');
+      expect(sql).toContain(
+        't.eliminado_el IS NOT NULL AS tenant_dado_de_baja',
+      );
     });
   });
 });

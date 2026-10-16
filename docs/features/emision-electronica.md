@@ -526,6 +526,13 @@ esquema antes de mandarlo y el de consulta lee los cuatro estados por boleta del
   lista desde el primer día: habría estado siempre vacía, porque nadie emitía.
 - **Boleta con más de 1 hora sin llegar:** se sigue reintentando **sin tope** y queda "atrasada"
   (ver más abajo). Se descartó frenar las ventas: un SII caído dejaría al local sin vender.
+- **Un local dado de baja sigue enviando sus boletas** (owner, 2026-10-15, por AskUserQuestion, con el
+  costo de cada opción). Las boletas ya se entregaron al cliente: no enviarlas es infracción del
+  local (Art. 97 n.º 10 del Código Tributario). Los dos jobs (`GRUPOS_LISTOS` en
+  `enviar-boletas.job.ts`, `ENVIOS_LISTOS` en `consultar-envios.job.ts`) **no miran si el tenant
+  está vivo, a propósito**, y lo dicen en un comentario para que nadie los "arregle". Se
+  descartaron frenar la baja de un local con boletas sin confirmar y dejar de enviarlas. Soporte las
+  ve en el panel, con la marca (ver [Boletas con problemas](#boletas-con-problemas)).
 
 ### Los datos
 
@@ -1144,7 +1151,9 @@ rechazada**. Con reparos es válida y no avisa.
   `sin_emitir` (dos subselects), así que no suma una ida a la base. Con la emisión apagada sigue
   siendo una sola consulta, la del interruptor, y devuelve 0. Los reparos no cuentan.
 - **Panel de soporte:** es la única lectura del frente que cruza tenants, y la consulta lo dice. No
-  recibe `tenant_id` de ningún lado. Una consulta, con `JOIN` a tenants vivos y `LEFT JOIN` a la
+  recibe `tenant_id` de ningún lado. Una consulta, con `JOIN` a tenants **sin filtrar los dados de
+  baja** (excepción deliberada al soft delete, con su porqué escrito en la consulta: sus boletas se
+  siguen enviando, así que soporte tiene que verlas; cada fila trae `tenantDadoDeBaja`) y `LEFT JOIN` a la
   razón social (la boleta se ve aunque la razón social esté dada de baja) y `LEFT JOIN` a
   `dte_envios` (vivo): una pendiente no tiene envío, y un envío dado de baja no explica nada. Cada
   fila trae `tenantId`, nombre del local, razón social, ambiente, tipo, folio, `emitidaEl`, `grupo`,
@@ -1183,8 +1192,9 @@ trae `estado: 'RCH'`, pero quien falló fue el sistema.
   problemas en el SII: avisa al encargado"* o *"Hay N boletas con problemas en el SII: avisa al
   encargado"*, sin punto final.
 - **Soporte** (`pages/admin.vue`): la tarjeta *"Boletas con problemas en el SII"* con la tabla de
-  todos los locales; el último error, el detalle del SII y, si hay envío, su estado y su último
-  error se despliegan por fila. Sin ninguna: *"Ningún local tiene boletas con problemas."*.
+  todos los locales, con una marca *"Dado de baja"* junto al nombre de un local dado de baja; el
+  último error, el detalle del SII y, si hay envío, su estado y su último error se despliegan por
+  fila. Sin ninguna: *"Ningún local tiene boletas con problemas."*.
 - **Si la lectura falla, ninguna de las dos tarjetas dice el vacío**: muestran *"No se pudo leer el
   estado de las boletas en el SII."* además del toast, porque "no hay problemas" sería mentira.
   Monto o motivo en null se muestran "—".
@@ -1220,13 +1230,18 @@ se usa en el `LEFT JOIN` y el primero es elegible para el conteo del cajero (un 
   atrasadas y rechazadas y no reparos ni recientes, y vale 0 con la emisión apagada; en el panel de
   soporte, el superadmin, en otro tenant, ve las boletas de Paris (con el estado y el último error
   de su envío), y un admin común recibe 403; el cajero recibe 403 en la lista del admin y la lista
-  del admin da 401 sin sesión. El envío con una boleta que no cumple el esquema, de punta a punta,
-  en `backend/test/dte-cola.e2e-spec.ts`.
+  del admin da 401 sin sesión; con Paris dado de baja (restaurado en un `finally`), el panel sigue
+  mostrando sus boletas con `tenantDadoDeBaja: true` y las de los demás con `false`. El envío con una boleta que no cumple el esquema, de punta a punta,
+  en `backend/test/dte-cola.e2e-spec.ts`, que también prueba que con el tenant dado de baja el job
+  arma y manda el sobre igual y que la consulta lo consulta.
 - **Mutantes** (2026-10-15, revertidos con `cp` y `cmp`, medidos contra unitarios y e2e por
   separado): `RLV` de vuelta a desconocido, los reparos sin la ventana de 30 días, el conteo del
   cajero sumando reparos, el panel de soporte sin `SuperadminGuard` y el job sin validar el sobre.
   Los cinco caen. Dos caen en una sola capa: `RLV` solo en `resultado-sii.spec.ts` (ningún e2e
   hace llegar un `RLV` del SII falso) y el guard solo en el e2e (el controller no tiene unitario).
+  Los dos de después (2026-10-15, local dado de baja), también revertidos con `cp` y `cmp`: volver a poner `t.eliminado_el IS
+  NULL` en el panel de soporte (cae su unitario y el e2e de soporte) y filtrar por tenant vivo en
+  `GRUPOS_LISTOS` y en `ENVIOS_LISTOS` (caen los dos e2e de `dte-cola`).
 - **Playwright:** `frontend/e2e/configuracion/boletas-con-problemas.spec.ts` (la tarjeta del admin),
   `frontend/e2e/ventas/boleta-electronica-pos.spec.ts` (la franja) y
   `frontend/e2e/tenants/soporte-boletas.spec.ts` (el panel, como superadmin). Playwright no llega a la
@@ -1249,9 +1264,6 @@ cd backend && npx jest --config ./test/jest-e2e.json test/boleta-desde-la-venta.
 - **Una `sin_emitir` del grupo `boleta`** sigue sin salida salvo anular la venta.
 - **El panel de soporte ordena por fecha ascendente con tope de 200**: las rechazadas viejas (que no
   tienen salida) pueden tapar a las atrasadas nuevas pasadas las 200.
-- **Un tenant dado de baja** no sale en el panel de soporte (el `JOIN` a tenants es a los vivos), y
-  los jobs de envío no miran si el tenant está vivo, así que sus boletas se siguen enviando. Es una
-  decisión de producto del owner, pendiente.
 - **`venta_documentos.dte_documento_id` no es único.** Hoy es 1:1 por construcción; si dos documentos
   de venta apuntaran a la misma boleta, la lista del admin la mostraría dos veces.
 - **La copia del esquema** (formato v4.2) es nuestra: si está mal, la validación previa rechazaría

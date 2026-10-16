@@ -117,6 +117,8 @@ export interface BoletaConProblemaSoporte {
   /** Del sobre en que viajó: el motivo de una atrasada `enviado` trabada vive acá, no en la boleta. */
   envioEstadoSii: string | null
   envioUltimoError: string | null
+  /** El local se dio de baja, pero sus boletas se siguen enviando: por eso soporte las ve. */
+  tenantDadoDeBaja: boolean
 }
 
 const ETIQUETA_GRUPO_SOPORTE: Record<GrupoProblemaSoporte, { label: string, color: 'warning' | 'error' }> = {

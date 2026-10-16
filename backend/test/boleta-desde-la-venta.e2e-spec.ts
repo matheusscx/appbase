@@ -2125,6 +2125,7 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
       detalleSii: unknown;
       envioEstadoSii: string | null;
       envioUltimoError: string | null;
+      tenantDadoDeBaja: boolean;
     }
 
     it('GET /admin/dte/boletas-con-problemas: el superadmin ve las atrasadas y rechazadas de otro tenant, sin las demás', async () => {
@@ -2152,6 +2153,7 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
         ultimoError: null,
         envioEstadoSii: 'XYZ',
         envioUltimoError: ERROR_DEL_ENVIO,
+        tenantDadoDeBaja: false,
       });
       expect(de(B)).toMatchObject({
         tenantId: TENANT_ID,
@@ -2170,6 +2172,38 @@ describe('La venta emite la boleta electrónica (e2e)', () => {
       // Ni la con reparos (C), ni la de hace más de 30 días (D), ni la dada de baja (E), ni la
       // de hace 10 minutos (F) son un problema para soporte.
       for (const fuera of [C, D, E, F]) expect(de(fuera)).toBeUndefined();
+    });
+
+    it('GET /admin/dte/boletas-con-problemas: un local dado de baja sigue en el panel, marcado; los vivos salen con false', async () => {
+      const tokenSuper = await loginComo(ADMIN_FALABELLA, FALABELLA_TENANT_ID);
+      // Paris se da de baja por SQL (lo que hace `DELETE /admin/tenants/:id`: soft delete). Sus
+      // boletas se siguen enviando, así que soporte tiene que verlas. El `finally` lo restaura:
+      // el resto de la suite (y las demás) siguen usando a Paris.
+      await ds.query(
+        'UPDATE tenants SET eliminado_el = now() WHERE tenant_id = $1',
+        [TENANT_ID],
+      );
+      try {
+        const res = await getCon(tokenSuper, 'admin/dte/boletas-con-problemas');
+
+        expect(res.status).toBe(200);
+        const filas = res.body as BoletaSoporteRes[];
+        for (const b of [A, B]) {
+          const fila = filas.find((f) => f.documentoId === b.documentoId);
+          expect(fila).toMatchObject({
+            tenantId: TENANT_ID,
+            tenantDadoDeBaja: true,
+          });
+        }
+        // Todo lo que no es de Paris sigue vivo: ninguna fila sale marcada por error.
+        for (const f of filas.filter((x) => x.tenantId !== TENANT_ID))
+          expect(f.tenantDadoDeBaja).toBe(false);
+      } finally {
+        await ds.query(
+          'UPDATE tenants SET eliminado_el = NULL WHERE tenant_id = $1',
+          [TENANT_ID],
+        );
+      }
     });
 
     it('GET /admin/dte/boletas-con-problemas: un envío dado de baja no explica nada', async () => {

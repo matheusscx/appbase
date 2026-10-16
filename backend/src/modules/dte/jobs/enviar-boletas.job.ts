@@ -39,6 +39,10 @@ export function espera(n: number): number {
 // Las razones sociales con un lote listo: 50 pendientes, o la más antigua ya esperó 5 minutos.
 // Lo comparten el tick (¿hay algo que hacer?) y `enviarLotes` (qué hacer). Una boleta que volvió
 // a la cola cuenta solo cuando su `proximo_intento_el` llegó: la espera creciente es por boleta.
+// NO cruza `tenants` a propósito, ni acá ni en `TOMAR_LOTE`: una boleta ya emitida se sigue
+// enviando aunque el local se dé de baja (decisión del owner, 2026-10-15: las boletas ya se
+// entregaron al cliente, no enviarlas es infracción del local). No "arreglar" filtrando por
+// `tenants.eliminado_el`. Soporte las ve en el panel, con la marca de local dado de baja.
 const GRUPOS_LISTOS = `
   SELECT razon_social_id, tenant_id, ambiente, min(emitido_el) AS mas_antigua
     FROM dte_documentos

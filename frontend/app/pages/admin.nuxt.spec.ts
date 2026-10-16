@@ -30,6 +30,7 @@ function fila(over: Partial<BoletaConProblemaSoporte> = {}): BoletaConProblemaSo
     detalleSii: null,
     envioEstadoSii: null,
     envioUltimoError: null,
+    tenantDadoDeBaja: false,
     ...over,
   }
 }
@@ -90,6 +91,25 @@ describe('pages/admin — panel de soporte', () => {
     expect(texto).toContain('13-10-2026')
     expect(tarjeta.find('[data-qa="soporte-sin-problemas"]').exists()).toBe(false)
     expect(tarjeta.find('[data-qa="soporte-error"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('un local dado de baja lleva la marca "Dado de baja"; uno vivo, no', async () => {
+    filas = [
+      fila({ documentoId: 'doc-baja', tenant: 'Almacén Cerrado', tenantDadoDeBaja: true }),
+      fila({ documentoId: 'doc-viva', tenant: 'Almacén Abierto', tenantDadoDeBaja: false }),
+    ]
+
+    const wrapper = await montar()
+    const filasTabla = wrapper.findAll('tbody tr')
+    const filaBaja = filasTabla.at(0)!
+    const filaViva = filasTabla.at(1)!
+
+    expect(filaBaja.text()).toContain('Almacén Cerrado')
+    expect(filaBaja.find('[data-qa="soporte-local-de-baja"]').text()).toBe('Dado de baja')
+    expect(filaViva.text()).toContain('Almacén Abierto')
+    expect(filaViva.find('[data-qa="soporte-local-de-baja"]').exists()).toBe(false)
+    expect(filaViva.text()).not.toContain('Dado de baja')
     wrapper.unmount()
   })
 

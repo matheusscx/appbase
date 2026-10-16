@@ -33,6 +33,9 @@ const MENSAJE_SIN_BOLETAS = 'El envío no tiene boletas vivas que consultar';
 // Los envíos que ya se mandaron, sin resultado final, y cuya consulta venció. Lo comparten el
 // tick (¿hay algo que hacer?) y la reserva (qué hacer). `estado_sii` NULL no pasa por el
 // `NOT IN` (NULL no es verdadero ni falso), de ahí el `IS NULL` aparte. $1 = los estados finales.
+// NO cruza `tenants` a propósito: un sobre ya enviado se sigue consultando aunque el local se dé de
+// baja (decisión del owner, 2026-10-15; mismo porqué que `GRUPOS_LISTOS` en `enviar-boletas.job.ts`).
+// No "arreglar" filtrando por `tenants.eliminado_el`.
 const ENVIOS_LISTOS = `
   FROM dte_envios
  WHERE trackid IS NOT NULL AND consultar_desde <= now() AND eliminado_el IS NULL

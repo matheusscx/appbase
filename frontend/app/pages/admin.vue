@@ -83,6 +83,19 @@ const textoDetalle = (detalle: unknown) => JSON.stringify(detalle, null, 2)
               @click="row.toggleExpanded()"
             />
           </template>
+          <template #tenant-cell="{ row }">
+            <div class="flex items-center gap-2">
+              <span>{{ row.original.tenant }}</span>
+              <UBadge
+                v-if="row.original.tenantDadoDeBaja"
+                label="Dado de baja"
+                color="neutral"
+                variant="subtle"
+                size="sm"
+                data-qa="soporte-local-de-baja"
+              />
+            </div>
+          </template>
           <template #razonSocial-cell="{ row }">
             {{ row.original.razonSocial ?? '—' }}
           </template>

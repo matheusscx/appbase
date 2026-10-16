@@ -574,6 +574,33 @@ describe('Cola de envío al SII (e2e)', () => {
       );
     });
 
+    it('un local dado de baja sigue enviando sus boletas (decisión del owner, 2026-10-15)', async () => {
+      await reiniciar();
+      await vender(6);
+      await envejecer();
+      // Paris se da de baja por SQL, como lo hace `DELETE /admin/tenants/:id` (soft delete). La
+      // cola no mira `tenants` a propósito. El `finally` lo restaura: el resto de la suite lo usa.
+      await ds.query(
+        'UPDATE tenants SET eliminado_el = now() WHERE tenant_id = $1',
+        [PARIS_TENANT_ID],
+      );
+      try {
+        const mensaje = await job.enviarLotes();
+
+        expect(mensaje).toContain('1 sobres enviados');
+        expect(sobres()).toHaveLength(1);
+        expect(foliosEnviados()).toEqual([4007, 4008, 4009, 4010, 4011, 4012]);
+        expect((await documentos()).map((d) => d.estado)).toEqual(
+          Array(6).fill('enviado'),
+        );
+      } finally {
+        await ds.query(
+          'UPDATE tenants SET eliminado_el = NULL WHERE tenant_id = $1',
+          [PARIS_TENANT_ID],
+        );
+      }
+    });
+
     it('con 50 boletas recién emitidas sale sin esperar; la 51 queda para el próximo lote', async () => {
       await reiniciar(4100);
       await vender(51);
@@ -1429,6 +1456,28 @@ describe('Cola de envío al SII (e2e)', () => {
       ]);
       await consulta.consultar();
       expect(falso.pedidosDe('consulta')).toHaveLength(1);
+    });
+
+    it('un local dado de baja sigue consultando sus envíos (decisión del owner, 2026-10-15)', async () => {
+      await enviadas(2);
+      falso.responder('consulta', respuestaConsulta({ estado: 'PRD' }));
+      // Por SQL, como `DELETE /admin/tenants/:id` (soft delete); el `finally` lo restaura.
+      await ds.query(
+        'UPDATE tenants SET eliminado_el = now() WHERE tenant_id = $1',
+        [PARIS_TENANT_ID],
+      );
+      try {
+        const mensaje = await consulta.consultar();
+
+        expect(mensaje).toContain('1 siguen en proceso');
+        expect(falso.pedidosDe('consulta')).toHaveLength(1);
+        expect(await envio()).toMatchObject({ estado_sii: 'PRD' });
+      } finally {
+        await ds.query(
+          'UPDATE tenants SET eliminado_el = NULL WHERE tenant_id = $1',
+          [PARIS_TENANT_ID],
+        );
+      }
     });
 
     it('PRD (en proceso): las boletas siguen enviadas y se vuelve a consultar en 5 minutos', async () => {
