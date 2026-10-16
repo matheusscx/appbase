@@ -29,7 +29,7 @@ const listFilters = computed(() => ({
   todas: !usuarioIdEfectivo.value && !cajonIdEfectivo.value && props.todas ? 'true' : undefined,
 }))
 
-const { items: historial, meta, page, loading } = usePaginatedList<Caja>({
+const { items: historial, meta, page, loading, error, sinPermiso, fetch: fetchHistorial } = usePaginatedList<Caja>({
   path: '/caja',
   pageSize,
   filters: listFilters,
@@ -122,10 +122,13 @@ function onSelectCaja(_e: Event, row: Row<Caja>) {
           <span v-else class="font-mono text-muted">—</span>
         </template>
         <template #empty>
-          <div class="py-10 text-center text-sm text-muted">
-            <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-            No hay cajas en el historial.
-          </div>
+          <AppEstadoLista
+            recurso="el historial de cajas"
+            vacio="No hay cajas en el historial."
+            :error="error"
+            :sin-permiso="sinPermiso"
+            @reintentar="fetchHistorial"
+          />
         </template>
       </UTable>
 

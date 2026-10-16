@@ -27,5 +27,9 @@ export default defineNuxtRouteMiddleware(async () => {
 
   // Mismo criterio que el menú: `esAdmin` del tenant activo. El superadmin es
   // un eje aparte, con sus propias rutas `/admin/*` y su propio guard.
-  if (!permissionsStore.esAdmin) return navigateTo('/configuracion')
+  if (!permissionsStore.esAdmin) {
+    // Mismo criterio que el middleware `permiso`: un rebote sin aviso se ve como "la pantalla se rompió".
+    useToast().add({ title: 'Esa pantalla es solo para administradores', color: 'warning' })
+    return navigateTo('/configuracion')
+  }
 })

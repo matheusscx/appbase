@@ -55,6 +55,8 @@ const { insigniaPago, textoDeuda, montoEsPositivo } = useCompras()
 
 const proveedores = ref<ProveedorPorPagar[]>([])
 const loading = ref(false)
+/** `por-pagar` no se pudo leer: la tabla lo dice en vez de "no hay deuda" (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const seleccionado = ref<ProveedorPorPagar | null>(null)
 const detalle = ref<ProveedorDetalle | null>(null)
 const cargandoDetalle = ref(false)
@@ -65,9 +67,11 @@ const pagoParaAnular = ref<PagoProveedorInfo | null>(null)
 
 async function cargar() {
   loading.value = true
+  errorCarga.value = false
   try {
     proveedores.value = await useApiFetch<ProveedorPorPagar[]>(`${apiUrl}/compras/por-pagar`)
   } catch (e: unknown) {
+    errorCarga.value = true
     toast.add({ title: apiErrorMsg(e, 'Error al cargar lo que se debe'), color: 'error' })
   } finally {
     loading.value = false
@@ -150,6 +154,9 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
           :data="proveedores"
           :columns="columnsProveedores"
           :loading="loading"
+          :error="errorCarga"
+          recurso="lo que se debe a los proveedores"
+          @reintentar="cargar"
           :ui="{ tr: 'cursor-pointer' }"
           data-qa="por-pagar-proveedores"
           @select="elegirProveedor"

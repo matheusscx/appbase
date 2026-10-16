@@ -191,7 +191,7 @@ test('con la pestaña oculta no pide nada, y al volver pide una vez', async ({ p
   expect(pedidos).toBe(1)
 })
 
-test('sin conexión avisa y conserva el último dato', async ({ page }) => {
+test('si no puede actualizar avisa y conserva el último dato', async ({ page }) => {
   await page.clock.install()
   await page.goto('/')
   const salon = tarjeta(page, '/salones', /mesas ocupadas/)
@@ -203,7 +203,7 @@ test('sin conexión avisa y conserva el último dato', async ({ page }) => {
   await page.clock.fastForward('01:00')
   await fallo
 
-  await expect(salon.getByText(/Sin conexión/)).toBeVisible()
+  await expect(salon.getByText(/No pudimos actualizar/)).toBeVisible()
   await expect(salon.getByText(dato)).toBeVisible()
 })
 
@@ -230,7 +230,7 @@ test('en un tenant sin el módulo, "Hoy" no aparece y no hay error', async ({ br
     await page.reload()
     expect((await respuesta).status()).toBe(403)
     await expect(page.getByRole('heading', { name: 'Hoy' })).toHaveCount(0)
-    await expect(page.getByText(/Sin conexión|Error/)).toHaveCount(0)
+    await expect(page.getByText(/No pudimos actualizar|Error/)).toHaveCount(0)
   }
   finally {
     await page.context().close()

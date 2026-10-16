@@ -90,7 +90,17 @@ const filtros = computed(() => ({
   hasta: hasta.value || undefined,
 }))
 
-const { items: compras, meta, page, loading } =
+const hayFiltros = computed(() => Object.values(filtros.value).some(v => v !== undefined))
+function quitarFiltros() {
+  filtroEstado.value = TODOS
+  filtroProveedor.value = TODOS
+  filtroEstadoPago.value = TODOS
+  soloFaltaCosto.value = false
+  desde.value = ''
+  hasta.value = ''
+}
+
+const { items: compras, meta, page, loading, error, sinPermiso, fetch: fetchCompras } =
   usePaginatedList<CompraListItem>({ path: '/compras', pageSize, filters: filtros })
 
 onMounted(async () => {
@@ -170,6 +180,14 @@ const columns = computed<TableColumn<CompraListItem>[]>(() => [
           :data="compras"
           :columns="columns"
           :loading="loading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          recurso="las compras"
+          vacio="No hay compras registradas."
+          filtrado-texto="Ninguna compra coincide con los filtros."
+          :filtrado="hayFiltros"
+          @reintentar="fetchCompras"
+          @quitar-filtros="quitarFiltros"
           :ui="{ tr: 'cursor-pointer' }"
           @select="abrir"
         >
@@ -221,12 +239,6 @@ const columns = computed<TableColumn<CompraListItem>[]>(() => [
               variant="subtle"
               size="sm"
             />
-          </template>
-          <template #empty>
-            <div class="py-8 text-center text-sm text-muted">
-              <UIcon name="i-lucide-truck" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-              No hay compras registradas.
-            </div>
           </template>
         </CrudTable>
 

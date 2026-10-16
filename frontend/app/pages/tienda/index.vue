@@ -13,7 +13,10 @@ const { lineas, resultado, loadingCalculo, vigente, errorCalculo, asegurarVigent
 const catalogo = useCatalogoVenta({
   tipos: ['producto'],
   filtros: { vendibleOnline: 'true' },
-  onError: e => toast.add({ title: apiErrorMsg(e, 'Error al cargar el catálogo'), color: 'error' }),
+  // El 403 y el fallo ya los dice el panel del catálogo; el toast no repite la URL ni la jerga de red.
+  onError: (e) => {
+    if (!esSinPermiso(e)) toast.add({ title: apiErrorMsg(e, 'No se pudo cargar el catálogo', { detalleLocal: false }), color: 'error' })
+  },
 })
 const items = catalogo.items
 const loadingCatalogo = catalogo.loading
@@ -84,6 +87,10 @@ async function irAPagar() {
             :total="catalogo.total.value"
             :page-size="catalogo.pageSize"
             :loading="loadingCatalogo"
+            :error="catalogo.error.value"
+            :sin-permiso="catalogo.sinPermiso.value"
+            vacio="Aún no hay ítems a la venta online. Márcalos en Configuración › Items."
+            @reintentar="catalogo.refrescar"
             @add="add"
           />
         </div>

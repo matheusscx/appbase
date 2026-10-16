@@ -1,7 +1,14 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
 
-definePageMeta({ middleware: 'auth', layout: 'dashboard' })
+// El reporte lee con `Salones:Ver todas` (`GET /salones/anulaciones`). Sin gate, quien no lo tiene
+// abría un reporte en ceros y dos toasts de 403: parecía vacío y era un acceso denegado (02.20).
+definePageMeta({
+  middleware: ['auth', 'permiso'],
+  permiso: 'Salones:Ver todas',
+  permisoLabel: 'Anulaciones',
+  layout: 'dashboard',
+})
 
 type TipoMotivoBaja = 'merma' | 'cortesia' | 'no_elaborado' | 'consumo_personal'
 type CostoEstado = 'valorizado' | 'no_aplica' | 'sin_valorizar'
@@ -114,7 +121,7 @@ const listFilters = computed(() => ({
   garzonId: filtroGarzon.value !== 'todos' ? filtroGarzon.value : undefined,
 }))
 
-const { items: anulaciones, meta, page, loading } =
+const { items: anulaciones, meta, page, loading, error, sinPermiso, fetch: fetchAnulaciones } =
   usePaginatedList<AnulacionReporteItem>({
     path: '/salones/anulaciones',
     pageSize,
@@ -123,6 +130,9 @@ const { items: anulaciones, meta, page, loading } =
 
 const resumen = ref<ResumenAnulaciones | null>(null)
 const loadingResumen = ref(false)
+/** El resumen no se pudo leer: sin esto las tarjetas quedaban en ceros, que se leen como "no hubo anulaciones". */
+const errorResumen = ref(false)
+const resumenSinPermiso = ref(false)
 
 // El resumen EXIGE desde/hasta (400 si falta uno): si el usuario borra una
 // fecha, no se pide — se muestra un estado vacío en vez de dejar que el
@@ -147,6 +157,8 @@ async function cargarResumen() {
       return
     }
     loadingResumen.value = true
+    errorResumen.value = false
+    resumenSinPermiso.value = false
     try {
       const params = new URLSearchParams()
       params.set('desde', filtroDesde.value)
@@ -160,7 +172,11 @@ async function cargarResumen() {
       )
     }
     catch (e: unknown) {
-      toast.add({ title: apiErrorMsg(e, 'Error al cargar el resumen'), color: 'error' })
+      resumen.value = null
+      errorResumen.value = true
+      resumenSinPermiso.value = esSinPermiso(e)
+      // La lista de abajo ya avisa por su cuenta si falla; el 403 lo dice la propia pantalla.
+      if (!resumenSinPermiso.value) toast.add({ title: apiErrorMsg(e, 'Error al cargar el resumen'), color: 'error' })
     }
     finally {
       loadingResumen.value = false
@@ -302,6 +318,16 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
           Selecciona desde y hasta para ver el resumen.
         </div>
 
+        <div v-else-if="errorResumen" data-qa="anulaciones-resumen-error">
+          <AppEstadoLista
+            recurso="el resumen de anulaciones"
+            vacio=""
+            error
+            :sin-permiso="resumenSinPermiso"
+            @reintentar="cargarResumen"
+          />
+        </div>
+
         <div v-else class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <div
             v-for="t in tarjetas"
@@ -329,7 +355,7 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
           </div>
         </div>
 
-        <div v-if="rangoCompleto" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div v-if="rangoCompleto && !errorResumen" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
           <UCard>
             <template #header>
               <span class="font-medium text-default">Por garzón</span>
@@ -382,6 +408,11 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
           :data="anulaciones"
           :columns="columns"
           :loading="loading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          recurso="las anulaciones"
+          vacio="No hay anulaciones en el rango filtrado."
+          @reintentar="fetchAnulaciones"
         >
           <template #creadoEl-cell="{ row }">
             <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
@@ -421,15 +452,6 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
               size="sm"
             />
             <span v-else>{{ formatCostoPorMoneda(row.original.costo) }}</span>
-          </template>
-          <template #empty>
-            <div class="py-8 text-center text-sm text-muted">
-              <UIcon
-                name="i-lucide-ban"
-                class="w-8 h-8 mx-auto mb-2 opacity-40"
-              />
-              No hay anulaciones en el rango filtrado.
-            </div>
           </template>
         </CrudTable>
 

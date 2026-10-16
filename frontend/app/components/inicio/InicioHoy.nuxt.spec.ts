@@ -108,6 +108,7 @@ mockNuxtImport('usePermissionsStore', () => {
 let llamadas: string[] = []
 let respuesta: ResumenNegocioHoy = RESUMEN_HOY
 let falla403 = false
+let falla500 = false
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
@@ -116,6 +117,7 @@ mockNuxtImport('useApiFetch', () => {
     }
     llamadas.push(url)
     if (falla403) return Promise.reject({ response: { status: 403 } })
+    if (falla500) return Promise.reject({ status: 500 })
     return Promise.resolve(respuesta)
   }
 })
@@ -146,6 +148,7 @@ beforeEach(() => {
   permisos = []
   esAdmin = false
   falla403 = false
+  falla500 = false
   respuesta = RESUMEN_HOY
   toasts = []
 })
@@ -353,6 +356,22 @@ describe('zona "Hoy" — 403', () => {
     const wrapper = await montarHoy()
 
     expect(wrapper.text().trim()).toBe('')
+    expect(toasts).toEqual([])
+
+    wrapper.unmount()
+  })
+})
+
+describe('zona "Hoy" — un fallo no se queda en "Cargando…" (lote 7, 04.7)', () => {
+  it('con un 500 dice que no pudo cargar y ofrece Reintentar, sin toast que se vaya', async () => {
+    falla500 = true
+    permisos = ['Resumen del negocio:Leer']
+    const wrapper = await mountSuspended(InicioHoy)
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(wrapper.text()).toContain('No pudimos cargar los datos. Reintenta.')
+    expect(wrapper.text()).not.toContain('Cargando…')
+    expect(wrapper.find('[data-qa="inicio-reintentar"]').exists()).toBe(true)
     expect(toasts).toEqual([])
 
     wrapper.unmount()

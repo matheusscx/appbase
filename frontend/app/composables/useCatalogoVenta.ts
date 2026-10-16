@@ -28,6 +28,14 @@ export function useCatalogoVenta(opts: {
   const page = ref(1)
   const busqueda = ref('')
   const loading = ref(false)
+  /**
+   * La última carga falló. La grilla distingue "no pudimos cargar" de "no hay ítems": un corte del
+   * servidor no puede leerse como "el local no vende nada" (auditoría UX 01.10). Lo baja la próxima
+   * carga buena; reintentar lo toca la persona.
+   */
+  const error = ref(false)
+  /** El fallo fue un 403. */
+  const sinPermiso = ref(false)
   let terminoActivo = ''
   // Descarta la respuesta que llega tarde (mismo criterio que tenía el salón con `secuenciaItems`).
   let turno = 0
@@ -54,10 +62,16 @@ export function useCatalogoVenta(opts: {
       }
       items.value = res.data
       total.value = res.meta.total
+      error.value = false
+      sinPermiso.value = false
     }
     catch (e: unknown) {
       // Lo que ya estaba en pantalla se queda: un corte de wifi no vacía la grilla a mitad de servicio.
-      if (mio === turno) opts.onError?.(e)
+      if (mio === turno) {
+        error.value = true
+        sinPermiso.value = esSinPermiso(e)
+        opts.onError?.(e)
+      }
     }
   }
 
@@ -79,5 +93,5 @@ export function useCatalogoVenta(opts: {
   watch(page, () => { void refrescar() })
   onBeforeUnmount(() => { if (espera) clearTimeout(espera) })
 
-  return { items, total, page, busqueda, loading, pageSize: PAGE_SIZE_CATALOGO, cargar, refrescar }
+  return { items, total, page, busqueda, loading, error, sinPermiso, pageSize: PAGE_SIZE_CATALOGO, cargar, refrescar }
 }

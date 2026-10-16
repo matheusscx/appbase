@@ -23,6 +23,8 @@ const apiUrl = config.public.apiUrl
 
 const razones = ref<RazonSocial[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -57,11 +59,13 @@ watch(drawerOpen, (open) => {
 })
 
 async function cargar() {
+  errorCarga.value = false
   loading.value = true
   try {
     razones.value = await useApiFetch<RazonSocial[]>(`${apiUrl}/tenants/razones-sociales`)
   }
   catch (e: unknown) {
+    errorCarga.value = true
     const msg = apiErrorMsg(e, 'Error al cargar razones sociales')
     toast.add({ title: msg, color: 'error' })
   }
@@ -238,7 +242,7 @@ const columns: TableColumn<RazonSocial>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="razones" :columns="columns" :loading="loading">
+    <CrudTable :data="razones" :columns="columns" :loading="loading" :error="errorCarga" recurso="las razones sociales" @reintentar="cargar">
         <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <p class="font-medium truncate">

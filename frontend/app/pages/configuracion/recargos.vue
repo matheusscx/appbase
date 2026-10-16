@@ -42,6 +42,8 @@ const recargos = ref<Regla[]>([])
 const tipos = ref<{ label: string; value: string; codigo: string; descripcion: string | null }[]>([])
 const metodos = ref<{ label: string; value: string }[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -228,12 +230,14 @@ async function cargar() {
   const previa = cargaEnCurso
   const actual = (async () => {
     await previa
+    errorCarga.value = false
     loading.value = true
     try {
       const query = verEliminados.value ? '?incluirEliminados=true' : ''
       recargos.value = await useApiFetch<Regla[]>(`${apiUrl}/recargos${query}`)
     }
     catch (e: unknown) {
+      errorCarga.value = true
       const msg = apiErrorMsg(e, 'Error al cargar recargos')
       toast.add({ title: msg, color: 'error' })
     }
@@ -850,7 +854,7 @@ const columns: TableColumn<Regla>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="recargos" :columns="columns" :loading="loading">
+    <CrudTable :data="recargos" :columns="columns" :loading="loading" :error="errorCarga" recurso="los recargos" @reintentar="cargar">
         <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <div class="flex items-center gap-2">

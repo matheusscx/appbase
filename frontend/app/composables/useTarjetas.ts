@@ -36,14 +36,20 @@ export function useTarjetas() {
   const apiUrl = config.public.apiUrl
 
   const tarjetas = ref<Tarjeta[]>([])
-  const oneclickDisponible = ref(false)
+  // `null` = todavía no se sabe (no cargó, o la carga falló). Solo `false` es "el tenant no tiene
+  // pasarela con tokenización": con `false` por defecto, un GET caído mostraba esa alerta (09.4).
+  const oneclickDisponible = ref<boolean | null>(null)
   const loading = ref(false)
+  const error = ref(false)
+  const sinPermiso = ref(false)
 
   async function cargar() {
     loading.value = true
     try {
       const res = await useApiFetch<ListarResponse>(`${apiUrl}/online/medios-pago`)
       oneclickDisponible.value = res.oneclickDisponible
+      error.value = false
+      sinPermiso.value = false
       tarjetas.value = res.medios.map((m) => ({
         inscripcionId: m.inscripcionId,
         marca: m.mediosPago[0]?.marca ?? null,
@@ -54,8 +60,11 @@ export function useTarjetas() {
         suscripcionesActivas: m.suscripcionesActivas ?? 0,
       }))
     } catch (e: unknown) {
-      const msg = apiErrorMsg(e, 'Error al cargar los medios de pago')
-      toast.add({ title: msg, color: 'error' })
+      error.value = true
+      sinPermiso.value = esSinPermiso(e)
+      tarjetas.value = []
+      // El 403 y el fallo los dice la propia pantalla, con su Reintentar.
+      if (!sinPermiso.value) toast.add({ title: apiErrorMsg(e, 'Error al cargar los medios de pago'), color: 'error' })
     } finally {
       loading.value = false
     }
@@ -96,5 +105,5 @@ export function useTarjetas() {
 
   onMounted(() => { void cargar() })
 
-  return { tarjetas, preferida, oneclickDisponible, loading, cargar, agregar, eliminar, marcarPreferida }
+  return { tarjetas, preferida, oneclickDisponible, loading, error, sinPermiso, cargar, agregar, eliminar, marcarPreferida }
 }

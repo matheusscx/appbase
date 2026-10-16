@@ -71,7 +71,7 @@ describe('middleware/permiso', () => {
     await new Promise(r => setTimeout(r, 10))
 
     expect(navigateTo).toHaveBeenCalledWith('/')
-    expect(avisos()).toContain('No tenés acceso al módulo Cajas')
+    expect(avisos()).toContain('No tienes acceso al módulo Cajas')
   })
 
   it('usa `permisoLabel` cuando el módulo se llama distinto en pantalla', async () => {
@@ -79,7 +79,7 @@ describe('middleware/permiso', () => {
     await correr({ permiso: 'MiCaja:Leer', permisoLabel: 'Mi caja' })
     await new Promise(r => setTimeout(r, 10))
 
-    expect(avisos()).toContain('No tenés acceso al módulo Mi caja')
+    expect(avisos()).toContain('No tienes acceso al módulo Mi caja')
   })
 
   it('el admin del tenant pasa a un módulo que su tenant contrató', async () => {
@@ -102,7 +102,7 @@ describe('middleware/permiso', () => {
     await new Promise(r => setTimeout(r, 10))
 
     expect(navigateTo).toHaveBeenCalledWith('/')
-    expect(avisos()).toContain('No tenés acceso al módulo Cajas')
+    expect(avisos()).toContain('No tienes acceso al módulo Cajas')
   })
 
   it('distingue el permiso: `Cajas:Leer` no habilita `MiCaja:Leer`', async () => {

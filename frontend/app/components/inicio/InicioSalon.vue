@@ -14,7 +14,7 @@ const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 const { formatHora } = useFormatters()
 
-const { datos, actualizadoEl, sinConexion, oculto } = useRefrescoPeriodico(
+const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
   () => useApiFetch<OcupacionSalones>(`${apiUrl}/salones/ocupacion`),
 )
 </script>
@@ -38,20 +38,18 @@ const { datos, actualizadoEl, sinConexion, oculto } = useRefrescoPeriodico(
       {{ datos.mesasOcupadas }} de {{ datos.mesasTotal }} mesas ocupadas ·
       {{ datos.cuentasAbiertas }} cuentas abiertas
     </p>
-    <p v-else class="text-sm text-muted">
-      Cargando…
-    </p>
+    <InicioSinDatos v-else :fallo="sinConexion" @reintentar="refrescar" />
 
     <UAlert
-      v-if="sinConexion"
+      v-if="sinConexion && datos"
       color="warning"
       variant="subtle"
       icon="i-lucide-wifi-off"
-      title="Sin conexión — se reintenta en el próximo ciclo"
+      title="No pudimos actualizar — se vuelve a intentar en el próximo ciclo"
       class="mt-3"
     />
 
-    <template #footer>
+    <template v-if="actualizadoEl" #footer>
       <p class="text-xs text-muted">
         Actualizado {{ formatHora(actualizadoEl) }}
       </p>

@@ -42,6 +42,9 @@ let categoriasBackend: ReturnType<typeof categoriaViva>[] = []
 let overrideConEliminados: Promise<unknown[]> | null = null
 let overrideSinEliminados: Promise<unknown[]> | null = null
 
+/** Lote 7: status con el que la lista contesta. */
+let fallaListado: number | null = null
+
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string }) => {
     if (typeof url !== 'string' || !url.includes('/categorias')) {
@@ -57,6 +60,7 @@ mockNuxtImport('useApiFetch', () => {
       }
       return Promise.resolve(undefined)
     }
+    if (fallaListado) return Promise.reject({ status: fallaListado })
     const incluirEliminados = url.includes('incluirEliminados=true')
     if (incluirEliminados && overrideConEliminados) return overrideConEliminados
     if (!incluirEliminados && overrideSinEliminados) return overrideSinEliminados
@@ -183,5 +187,42 @@ describe('configuracion/categorias — papelera: la carrera de `cargar()` bajo t
     wrapper.unmount()
     overrideConEliminados = null
     overrideSinEliminados = null
+  })
+})
+
+describe('configuracion/categorias — cargando, error y vacío son tres cosas distintas (lote 7, 07.3)', () => {
+  beforeEach(() => {
+    categoriasBackend = []
+    fallaListado = null
+  })
+
+  it('sin categorías dice "No hay categorías registradas."', async () => {
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('No hay categorías registradas.')
+    wrapper.unmount()
+  })
+
+  it('con un 500 NO dice que no hay categorías: dice que no pudo cargar y ofrece Reintentar', async () => {
+    fallaListado = 500
+    const wrapper = await montar()
+    expect(wrapper.text()).not.toContain('No hay categorías registradas.')
+    expect(wrapper.text()).toContain('No pudimos cargar las categorías')
+    expect(wrapper.find('[data-qa="estado-reintentar"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('Reintentar es manual: tras el fallo no hay un segundo pedido solo; al tocarlo, carga', async () => {
+    fallaListado = 500
+    categoriasBackend = [categoriaViva()]
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 50))
+    expect(wrapper.text()).not.toContain('Bebidas')
+
+    fallaListado = null
+    await wrapper.find('[data-qa="estado-reintentar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+    expect(wrapper.text()).toContain('Bebidas')
+    expect(wrapper.text()).not.toContain('No pudimos cargar')
+    wrapper.unmount()
   })
 })

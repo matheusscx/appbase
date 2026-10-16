@@ -13,16 +13,20 @@ const monedasStore = useMonedasStore()
 
 const monedas = ref<MonedaDisplayConfig[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const toggling = reactive(new Set<string>())
 const tasaOriginal = reactive(new Map<string, string | null>())
 
 async function cargar() {
+  errorCarga.value = false
   loading.value = true
   try {
     await monedasStore.ensureLoaded()
     monedas.value = monedasStore.monedasList.map(m => ({ ...m }))
   }
   catch (e: unknown) {
+    errorCarga.value = true
     const msg = apiErrorMsg(e, 'Error al cargar monedas')
     toast.add({ title: msg, color: 'error' })
   }
@@ -103,7 +107,7 @@ const columns: TableColumn<MonedaDisplayConfig>[] = [
       description="Habilita las monedas disponibles para tu país y define la tasa de cambio del día. La moneda oficial siempre está habilitada con tasa 1."
     />
 
-    <CrudTable :data="monedas" :columns="columns" :loading="loading">
+    <CrudTable :data="monedas" :columns="columns" :loading="loading" :error="errorCarga" recurso="las monedas" @reintentar="cargar">
         <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <p class="font-medium truncate flex items-center gap-2">

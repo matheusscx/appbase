@@ -5,7 +5,14 @@ import type { Garzon } from '~/composables/useGarzones'
 import type { Turno } from '~/composables/useTurnos'
 import { shellUi } from '~/utils/ui-shell'
 
-definePageMeta({ middleware: 'auth', layout: 'dashboard' })
+// Las lecturas de esta pantalla exigen `Salones:Leer` (`GET /sesiones-garzon`). Sin el gate, quien no
+// lo tenía veía una pantalla vacía con un toast de 403 que se iba (auditoría UX 02.20).
+definePageMeta({
+  middleware: ['auth', 'permiso'],
+  permiso: 'Salones:Leer',
+  permisoLabel: 'Sesiones de garzón',
+  layout: 'dashboard',
+})
 
 const toast = useToast()
 const { formatFecha } = useFormatters()
@@ -19,6 +26,8 @@ const { puedeActualizar: puedeForzarCierre } = usePermisosCrud('Salones')
 
 const abiertas = ref<SesionGarzon[]>([])
 const loadingAbiertas = ref(false)
+const errorAbiertas = ref(false)
+const abiertasSinPermiso = ref(false)
 
 const tab = ref('abiertas')
 const tabs = computed(() => [
@@ -35,9 +44,14 @@ async function cargarAbiertas() {
   loadingAbiertas.value = true
   try {
     abiertas.value = await sesionesApi.listarAbiertas()
+    errorAbiertas.value = false
+    abiertasSinPermiso.value = false
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar sesiones abiertas'), color: 'error' })
+    errorAbiertas.value = true
+    abiertasSinPermiso.value = esSinPermiso(e)
+    abiertas.value = []
+    if (!abiertasSinPermiso.value) toast.add({ title: apiErrorMsg(e, 'Error al cargar sesiones abiertas'), color: 'error' })
   }
   finally {
     loadingAbiertas.value = false
@@ -135,7 +149,7 @@ const listFilters = computed(() => ({
   hasta: filtroHasta.value || undefined,
 }))
 
-const { items: historial, meta, page, loading: loadingHistorial } =
+const { items: historial, meta, page, loading: loadingHistorial, error: errorHistorial, sinPermiso: historialSinPermiso, fetch: fetchHistorial } =
   usePaginatedList<SesionGarzon>({
     path: '/sesiones-garzon',
     pageSize,
@@ -225,6 +239,11 @@ onMounted(async () => {
             :data="abiertas"
             :columns="columnsAbiertas"
             :loading="loadingAbiertas"
+            :error="errorAbiertas"
+            :sin-permiso="abiertasSinPermiso"
+            recurso="las sesiones abiertas"
+            vacio="No hay sesiones abiertas."
+            @reintentar="cargarAbiertas"
           >
             <template #garzonNombre-cell="{ row }">
               <span class="font-medium text-default">{{ row.original.garzonNombre }}</span>
@@ -255,11 +274,6 @@ onMounted(async () => {
               </div>
             </template>
 
-            <template #empty>
-              <div class="py-8 text-center text-sm text-muted">
-                No hay sesiones abiertas.
-              </div>
-            </template>
           </CrudTable>
         </template>
 
@@ -307,6 +321,14 @@ onMounted(async () => {
               :data="historial"
               :columns="columnsHistorial"
               :loading="loadingHistorial"
+              :error="errorHistorial"
+              :sin-permiso="historialSinPermiso"
+              recurso="el historial de sesiones"
+              vacio="Sin sesiones registradas."
+              filtrado-texto="Ninguna sesión coincide con los filtros."
+              :filtrado="hayFiltrosActivos"
+              @reintentar="fetchHistorial"
+              @quitar-filtros="limpiarFiltros"
             >
               <template #garzonNombre-cell="{ row }">
                 <span class="font-medium text-default">{{ row.original.garzonNombre || '—' }}</span>
@@ -338,12 +360,6 @@ onMounted(async () => {
 
               <template #origenCierre-cell="{ row }">
                 <span class="text-muted">{{ origenLabel(row.original.origenCierre) }}</span>
-              </template>
-
-              <template #empty>
-                <div class="py-8 text-center text-sm text-muted">
-                  {{ hayFiltrosActivos ? 'Ninguna sesión coincide con los filtros.' : 'Sin sesiones registradas.' }}
-                </div>
               </template>
 
               <template

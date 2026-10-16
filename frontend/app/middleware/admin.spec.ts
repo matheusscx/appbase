@@ -10,6 +10,10 @@ vi.mock('#app/nuxt', () => ({
   tryUseNuxtApp: vi.fn(),
 }))
 
+// El aviso del rebote usa `useToast` (el de Nuxt UI), que necesita la app Nuxt; su comportamiento real
+// se prueba en `admin.nuxt.spec.ts`. Acá solo importa quién pasa y quién rebota.
+vi.mock('@nuxt/ui/runtime/composables/useToast.js', () => ({ useToast: () => ({ add: vi.fn() }) }))
+
 const mockNavigateTo = vi.fn()
 
 vi.mock('#app/composables/router', () => ({

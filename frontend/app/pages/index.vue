@@ -7,6 +7,16 @@ definePageMeta({
 const store = useAuthStore()
 const tenantStore = useTenantStore()
 const permissionsStore = usePermissionsStore()
+
+// Qué bloques le corresponden a este rol. Sin ninguno, la pantalla era un "Bienvenido" con el título
+// "Ahora" y nada debajo (auditoría UX 04.8): ahora dice qué hacer y esconde los títulos vacíos.
+const verAhora = computed(() =>
+  permissionsStore.can('Salones', 'Ver todas')
+  || permissionsStore.can('Cajas', 'Leer')
+  || permissionsStore.can('Inventario', 'Leer')
+  || permissionsStore.can('Pasarelas', 'Leer'),
+)
+const verHoy = computed(() => permissionsStore.can('Resumen del negocio', 'Leer'))
 </script>
 
 <template>
@@ -38,7 +48,7 @@ const permissionsStore = usePermissionsStore()
              para el admin: `mis-permisos` le trae solo los módulos que su
              tenant contrató (owner, 2026-10-15). Si igual llega un 403, el
              `useRefrescoPeriodico` del bloque lo esconde. -->
-        <section class="space-y-3">
+        <section v-if="verAhora" class="space-y-3">
           <h3 class="text-sm font-medium text-muted">
             Ahora
           </h3>
@@ -60,7 +70,15 @@ const permissionsStore = usePermissionsStore()
              sus cuatro bloques comparten UNA llamada a `/resumen-negocio/hoy`;
              `InicioHoy.vue` hace esa carga y esconde la zona entera si recibe
              un 403. -->
-        <InicioHoy v-if="permissionsStore.can('Resumen del negocio', 'Leer')" />
+        <InicioHoy v-if="verHoy" />
+
+        <p
+          v-if="!verAhora && !verHoy"
+          class="text-sm text-muted"
+          data-qa="inicio-sin-resumen"
+        >
+          Tu rol no tiene resumen del día. Elige una sección en el menú.
+        </p>
       </div>
     </template>
   </UDashboardPanel>

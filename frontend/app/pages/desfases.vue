@@ -27,15 +27,23 @@ interface AplicarResponse {
 
 const filas = ref<DesfaseItemDto[]>([])
 const loading = ref(false)
+/** `/desfases` no se pudo leer: la bandeja no puede decir "Sin costos desfasados" (04.18). */
+const error = ref(false)
+const sinPermiso = ref(false)
 const actionLoading = ref(false)
 
 async function cargar() {
   loading.value = true
   try {
     filas.value = await useApiFetch<DesfaseItemDto[]>(`${apiUrl}/desfases`)
+    error.value = false
+    sinPermiso.value = false
   }
   catch (e) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar costos desfasados'), color: 'error' })
+    error.value = true
+    sinPermiso.value = esSinPermiso(e)
+    filas.value = []
+    if (!sinPermiso.value) toast.add({ title: apiErrorMsg(e, 'Error al cargar costos desfasados'), color: 'error' })
   }
   finally {
     loading.value = false
@@ -142,6 +150,9 @@ async function onDescartar(items: DescartarDesfaseItem[]) {
         <DesfasesPanel
           :filas="filas"
           :loading="loading || actionLoading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          @reintentar="cargar"
           @aplicar="onAplicar"
           @descartar="onDescartar"
         />

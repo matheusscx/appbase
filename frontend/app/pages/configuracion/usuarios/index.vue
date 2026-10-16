@@ -36,6 +36,8 @@ const apiUrl = config.public.apiUrl
 const members = ref<Member[]>([])
 const roles = ref<Rol[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 
 const modalOpen = ref(false)
 const saving = ref(false)
@@ -57,6 +59,7 @@ const pendientes = computed(
 )
 
 async function cargar() {
+  errorCarga.value = false
   loading.value = true
   try {
     const [mem, rls] = await Promise.all([
@@ -67,6 +70,7 @@ async function cargar() {
     roles.value = rls
   }
   catch (e: unknown) {
+    errorCarga.value = true
     const msg = apiErrorMsg(e, 'Error al cargar usuarios')
     toast.add({ title: msg, color: 'error' })
   }
@@ -290,7 +294,7 @@ const columns: TableColumn<Member>[] = [
       description="El alta salió bien: ya les llegó un mail avisando que las estás sumando a esta empresa. Recién cuando aceptan pasan a ser miembros y sus roles empiezan a valer."
     />
 
-    <CrudTable :data="members" :columns="columns" :loading="loading">
+    <CrudTable :data="members" :columns="columns" :loading="loading" :error="errorCarga" recurso="los usuarios" @reintentar="cargar">
       <template #nombre-cell="{ row }">
         <div class="flex items-center gap-2">
           <CrudListItem

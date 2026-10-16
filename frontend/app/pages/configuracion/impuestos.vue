@@ -25,6 +25,8 @@ const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('impuestos
 
 const impuestos = ref<Impuesto[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -125,12 +127,14 @@ async function cargar() {
   const previa = cargaEnCurso
   const actual = (async () => {
     await previa
+    errorCarga.value = false
     loading.value = true
     try {
       const query = verEliminados.value ? '?incluirEliminados=true' : ''
       impuestos.value = await useApiFetch<Impuesto[]>(`${apiUrl}/impuestos${query}`)
     }
     catch (e: unknown) {
+      errorCarga.value = true
       const msg = apiErrorMsg(e, 'Error al cargar impuestos')
       toast.add({ title: msg, color: 'error' })
     }
@@ -359,7 +363,7 @@ const columns: TableColumn<Impuesto>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="impuestos" :columns="columns" :loading="loading">
+    <CrudTable :data="impuestos" :columns="columns" :loading="loading" :error="errorCarga" recurso="los impuestos" @reintentar="cargar">
       <template #nombre-cell="{ row }">
         <div class="space-y-1">
           <div class="flex items-center gap-2">

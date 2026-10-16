@@ -42,8 +42,10 @@ const props = withDefaults(
     vacio?: boolean
     /** El pedido falló: distinto de `vacio`, que es "no hay nada que mostrar". */
     fallo?: boolean
+    /** La tabla de al lado tampoco cargó: el fallo no puede prometer que "la tabla sigue teniendo los números". */
+    sinTabla?: boolean
   }>(),
-  { cargando: false, vacio: false, fallo: false, formatoEje: undefined },
+  { cargando: false, vacio: false, fallo: false, sinTabla: false, formatoEje: undefined },
 )
 
 interface Fila { indice: number, categoria: string, valores: string[] }
@@ -109,7 +111,7 @@ const alto = computed(() => Math.max(160, props.categorias.length * 32 + 40))
     </div>
 
     <div v-else-if="fallo" data-qa="grafica-fallo" class="py-8 text-center text-sm text-error">
-      No se pudo cargar la gráfica. La tabla de abajo sigue teniendo los números.
+      No se pudo cargar la gráfica.<template v-if="!sinTabla"> La tabla de abajo sigue teniendo los números.</template>
     </div>
 
     <div v-else-if="vacio" data-qa="grafica-vacia" class="py-8 text-center text-sm text-muted">

@@ -50,6 +50,8 @@ const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('garzones'
 
 const garzones = ref<Garzon[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 
 // Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
 // `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
@@ -63,6 +65,7 @@ async function cargar() {
   const previa = cargaEnCurso
   const actual = (async () => {
     await previa
+    errorCarga.value = false
     loading.value = true
     try {
       // `true`: esta es la única de las seis pantallas que carga el listado
@@ -71,6 +74,7 @@ async function cargar() {
       garzones.value = await garzonesApi.listar(verEliminados.value, true)
     }
     catch (e: unknown) {
+      errorCarga.value = true
       toast.add({ title: apiErrorMsg(e, 'Error al cargar garzones'), color: 'error' })
     }
     finally {
@@ -811,7 +815,7 @@ const columns: TableColumn<Garzon>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="garzones" :columns="columns" :loading="loading">
+    <CrudTable :data="garzones" :columns="columns" :loading="loading" :error="errorCarga" recurso="los garzones" @reintentar="cargar">
       <template #nombre-cell="{ row }">
         <div class="space-y-1">
           <div class="flex items-center gap-2">

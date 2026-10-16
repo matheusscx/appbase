@@ -24,6 +24,8 @@ const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('cajones')
 
 const cajones = ref<Cajon[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -84,12 +86,14 @@ async function cargar() {
   const previa = cargaEnCurso
   const actual = (async () => {
     await previa
+    errorCarga.value = false
     loading.value = true
     try {
       const query = verEliminados.value ? '?incluirEliminados=true' : ''
       cajones.value = await useApiFetch<Cajon[]>(`${apiUrl}/cajones${query}`)
     }
     catch (e: unknown) {
+      errorCarga.value = true
       toast.add({ title: apiErrorMsg(e, 'Error al cargar cajas'), color: 'error' })
     }
     finally {
@@ -374,7 +378,7 @@ const columns: TableColumn<Cajon>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="cajones" :columns="columns" :loading="loading">
+    <CrudTable :data="cajones" :columns="columns" :loading="loading" :error="errorCarga" recurso="las cajas" @reintentar="cargar">
       <template #nombre-cell="{ row }">
         <div class="min-w-0">
           <div class="flex items-center gap-2">

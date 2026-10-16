@@ -150,3 +150,15 @@ export function nombreSugeridoDe(e: unknown): string | null {
     ?.data?.nombreSugerido
   return typeof sugerido === 'string' && sugerido.length > 0 ? sugerido : null
 }
+
+/**
+ * `true` si el servidor contestó 403: la persona no tiene el permiso de esa lectura.
+ *
+ * Separa "no puedes verlo" de "se cayó" y de "no hay": las tres se veían como una lista vacía
+ * con un toast que se iba (auditoría UX 2026-10-16, lote 7). El candado sigue siendo el guard
+ * del backend (invariante 6); esto solo decide qué se le dice a la persona.
+ */
+export function esSinPermiso(e: unknown): boolean {
+  const err = e as { status?: number, response?: { status?: number } } | null | undefined
+  return (err?.status ?? err?.response?.status) === 403
+}

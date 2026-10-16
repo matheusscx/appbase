@@ -34,6 +34,8 @@ const toast = useToast()
 
 const roles = ref<Rol[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const apiUrl = config.public.apiUrl
 
 const drawerOpen = ref(false)
@@ -157,11 +159,13 @@ async function guardarPermisos(rolId: string) {
 }
 
 async function cargar() {
+  errorCarga.value = false
   loading.value = true
   try {
     roles.value = await useApiFetch<Rol[]>(`${apiUrl}/roles`)
   }
   catch (e: unknown) {
+    errorCarga.value = true
     const msg = apiErrorMsg(e, 'Error al cargar roles')
     toast.add({ title: msg, color: 'error' })
   }
@@ -269,7 +273,7 @@ const columns: TableColumn<Rol>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="roles" :columns="columns" :loading="loading">
+    <CrudTable :data="roles" :columns="columns" :loading="loading" :error="errorCarga" recurso="los roles" @reintentar="cargar">
         <template #nombre-cell="{ row }">
           <div class="flex items-center gap-2">
             <span class="font-medium">{{ row.original.nombre }}</span>

@@ -8,7 +8,7 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 
-const { suscripciones, loading, cargar, pausar, reanudar, cancelar, cambiarTarjeta, crear } =
+const { suscripciones, loading, error, sinPermiso, cargar, pausar, reanudar, cancelar, cambiarTarjeta, crear } =
   useSuscripciones()
 const {
   tarjetas,
@@ -381,7 +381,15 @@ onMounted(async () => {
           </template>
         </CrudPageHeader>
 
-        <CrudTable :data="suscripciones" :columns="columns" :loading="loading">
+        <CrudTable
+          :data="suscripciones"
+          :columns="columns"
+          :loading="loading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          recurso="tus suscripciones"
+          @reintentar="cargar"
+        >
           <template #itemNombre-cell="{ row }">
             <CrudListItem
               :title="row.original.itemNombre"
@@ -493,7 +501,7 @@ onMounted(async () => {
 
           <template #body>
             <UAlert
-              v-if="!oneclickDisponible"
+              v-if="oneclickDisponible === false"
               icon="i-lucide-triangle-alert"
               color="warning"
               variant="soft"

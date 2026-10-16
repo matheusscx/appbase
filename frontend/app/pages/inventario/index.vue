@@ -81,12 +81,21 @@ const listFilters = computed(() => ({
   ubicacionId: filtroUbicacion.value !== 'todos' ? filtroUbicacion.value : undefined,
 }))
 
-const { items: movimientos, meta, page, loading, fetch: fetchMovimientos } =
+const { items: movimientos, meta, page, loading, error, sinPermiso, fetch: fetchMovimientos } =
   usePaginatedList<Movimiento>({
     path: '/inventario/movimientos',
     pageSize,
     filters: listFilters,
   })
+
+const hayFiltros = computed(() =>
+  filtroItem.value !== null || filtroMotivo.value !== 'todos' || filtroUbicacion.value !== 'todos',
+)
+function quitarFiltros() {
+  filtroItem.value = null
+  filtroMotivo.value = 'todos'
+  filtroUbicacion.value = 'todos'
+}
 
 const ubicacionFiltroOpts = computed<Opt[]>(() => [
   { label: 'Todas las ubicaciones', value: 'todos' },
@@ -357,6 +366,14 @@ async function registrarAjusteCosto() {
           :data="movimientos"
           :columns="columns"
           :loading="loading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          recurso="los movimientos"
+          vacio="No hay movimientos registrados."
+          filtrado-texto="Ningún movimiento con esos filtros."
+          :filtrado="hayFiltros"
+          @reintentar="fetchMovimientos"
+          @quitar-filtros="quitarFiltros"
         >
           <template #creadoEl-cell="{ row }">
             <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
@@ -421,15 +438,6 @@ async function registrarAjusteCosto() {
           </template>
           <template #usuarioNombre-cell="{ row }">
             {{ row.original.usuarioNombre ?? '—' }}
-          </template>
-          <template #empty>
-            <div class="py-8 text-center text-sm text-muted">
-              <UIcon
-                name="i-lucide-inbox"
-                class="w-8 h-8 mx-auto mb-2 opacity-40"
-              />
-              No hay movimientos registrados.
-            </div>
           </template>
         </CrudTable>
 

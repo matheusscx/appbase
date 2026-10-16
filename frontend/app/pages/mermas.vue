@@ -95,7 +95,17 @@ const listFilters = computed(() => ({
   hasta: filtroHasta.value || undefined,
 }))
 
-const { items: mermas, meta, page, loading, fetch: fetchMermas } =
+const hayFiltros = computed(() =>
+  !!filtroItem.value || filtroMotivo.value !== 'todos' || !!filtroDesde.value || !!filtroHasta.value,
+)
+function quitarFiltros() {
+  filtroItem.value = null
+  filtroMotivo.value = 'todos'
+  filtroDesde.value = ''
+  filtroHasta.value = ''
+}
+
+const { items: mermas, meta, page, loading, error, sinPermiso, fetch: fetchMermas } =
   usePaginatedList<MermaListItem>({
     path: '/mermas',
     pageSize,
@@ -347,6 +357,14 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
       :data="mermas"
       :columns="columns"
       :loading="loading"
+      :error="error"
+      :sin-permiso="sinPermiso"
+      :recurso="esPersonal ? 'la comida del personal' : 'las mermas'"
+      :vacio="esPersonal ? 'No hay comida del personal registrada.' : 'No hay mermas registradas.'"
+      :filtrado-texto="esPersonal ? 'Ningún registro con esos filtros.' : 'Ninguna merma con esos filtros.'"
+      :filtrado="hayFiltros"
+      @reintentar="fetchMermas"
+      @quitar-filtros="quitarFiltros"
     >
       <template #creadoEl-cell="{ row }">
         <span class="whitespace-nowrap">{{ formatFecha(row.original.creadoEl) }}</span>
@@ -398,15 +416,6 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
       </template>
       <template #comentario-cell="{ row }">
         <span class="text-sm text-muted">{{ row.original.comentario || '—' }}</span>
-      </template>
-      <template #empty>
-        <div class="py-8 text-center text-sm text-muted">
-          <UIcon
-            name="i-lucide-trash-2"
-            class="w-8 h-8 mx-auto mb-2 opacity-40"
-          />
-          {{ esPersonal ? 'No hay comida del personal registrada.' : 'No hay mermas registradas.' }}
-        </div>
       </template>
     </CrudTable>
 

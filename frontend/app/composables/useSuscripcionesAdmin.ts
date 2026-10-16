@@ -30,14 +30,21 @@ export function useSuscripcionesAdmin() {
 
   const suscripciones = ref<SuscripcionAdmin[]>([])
   const loading = ref(false)
+  const error = ref(false)
+  const sinPermiso = ref(false)
   const mutando = reactive(new Set<string>())
 
   async function cargar() {
     loading.value = true
     try {
       suscripciones.value = await useApiFetch<SuscripcionAdmin[]>(`${apiUrl}/suscripciones/admin`)
+      error.value = false
+      sinPermiso.value = false
     } catch (e: unknown) {
-      toast.add({ title: apiErrorMsg(e, 'Error al cargar suscripciones'), color: 'error' })
+      error.value = true
+      sinPermiso.value = esSinPermiso(e)
+      suscripciones.value = []
+      if (!sinPermiso.value) toast.add({ title: apiErrorMsg(e, 'Error al cargar suscripciones'), color: 'error' })
     } finally {
       loading.value = false
     }
@@ -88,5 +95,5 @@ export function useSuscripcionesAdmin() {
 
   onMounted(cargar)
 
-  return { suscripciones, loading, cargar, pausar, reanudar, cancelar, eliminar }
+  return { suscripciones, loading, error, sinPermiso, cargar, pausar, reanudar, cancelar, eliminar }
 }

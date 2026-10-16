@@ -86,7 +86,7 @@ function limpiarFiltros() {
   busquedaAplicada.value = ''
 }
 
-const { items: paquetes, meta, page, loading, fetch: recargar } =
+const { items: paquetes, meta, page, loading, error, sinPermiso, fetch: recargar } =
   usePaginatedList<PaqueteFila>({
     path: '/paquetes',
     pageSize,
@@ -601,10 +601,16 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
             </template>
 
             <template #empty>
-              <div class="py-10 text-center text-sm text-muted">
-                <UIcon name="i-lucide-package" class="mx-auto mb-2 h-8 w-8 opacity-40" />
-                {{ hayFiltrosActivos ? 'Ningún paquete coincide con los filtros.' : 'Todavía no hay paquetes. Escanealos o creá el primero con «Nuevo paquete».' }}
-              </div>
+              <AppEstadoLista
+                recurso="los paquetes"
+                vacio="Todavía no hay paquetes. Escanealos o creá el primero con «Nuevo paquete»."
+                filtrado-texto="Ningún paquete coincide con los filtros."
+                :error="error"
+                :sin-permiso="sinPermiso"
+                :filtrado="hayFiltrosActivos"
+                @reintentar="recargar"
+                @quitar-filtros="limpiarFiltros"
+              />
             </template>
           </UTable>
 

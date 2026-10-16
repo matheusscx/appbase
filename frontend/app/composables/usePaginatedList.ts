@@ -51,6 +51,14 @@ export function usePaginatedList<T>(options: UsePaginatedListOptions) {
     totalPages: 0,
   })
   const loading = ref(false)
+  /**
+   * La última carga falló. Sin esto la tabla mostraba su "No hay …" (un 500 se leía como
+   * "no hay nada") y las filas del filtro anterior se quedaban como si fueran las del nuevo.
+   * Lo limpia la siguiente carga que sale bien; la app nunca reintenta sola, lo toca la persona.
+   */
+  const error = ref(false)
+  /** El fallo fue un 403: no es que se cayó, es que no tiene el permiso de lectura. */
+  const sinPermiso = ref(false)
 
   // Serializa invocaciones concurrentes de `fetch()`: el propio composable
   // lo dispara desde varios `watch` (filtros, pageSize, path, page) además
@@ -95,10 +103,18 @@ export function usePaginatedList<T>(options: UsePaginatedListOptions) {
         )
         items.value = res.data
         meta.value = res.meta
+        error.value = false
+        sinPermiso.value = false
       }
       catch (e: unknown) {
-        const msg = apiErrorMsg(e, 'Error al cargar datos')
-        toast.add({ title: msg, color: 'error' })
+        error.value = true
+        sinPermiso.value = esSinPermiso(e)
+        items.value = []
+        meta.value = { ...meta.value, total: 0, totalPages: 0 }
+        // El 403 lo dice la propia lista ("Sin acceso a …"): un toast más sería el mismo aviso dos veces.
+        if (!sinPermiso.value) {
+          toast.add({ title: apiErrorMsg(e, 'Error al cargar datos'), color: 'error' })
+        }
       }
       finally {
         loading.value = false
@@ -151,6 +167,8 @@ export function usePaginatedList<T>(options: UsePaginatedListOptions) {
     page,
     pageSize: resolvedPageSize,
     loading,
+    error,
+    sinPermiso,
     fetch,
   }
 }

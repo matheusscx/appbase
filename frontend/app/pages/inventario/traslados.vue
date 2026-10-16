@@ -103,7 +103,7 @@ const unidadesMedidaStore = useUnidadesMedidaStore()
 // Inventario/Crear (mismo criterio que mermas.vue).
 const { puedeCrear: puedeTrasladar } = usePermisosCrud('Inventario')
 
-const { items: traslados, meta, page, loading } =
+const { items: traslados, meta, page, loading, error, sinPermiso, fetch: fetchTraslados } =
   usePaginatedList<TrasladoListItem>({ path: '/traslados', pageSize })
 
 const origenOpts = computed<Opt[]>(() =>
@@ -515,6 +515,11 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
           :data="traslados"
           :columns="columns"
           :loading="loading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          recurso="los traslados"
+          vacio="No hay traslados registrados."
+          @reintentar="fetchTraslados"
           :ui="{ tr: 'cursor-pointer' }"
           @select="verDetalle"
         >
@@ -526,15 +531,6 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
           </template>
           <template #comentario-cell="{ row }">
             <span class="text-sm text-muted">{{ row.original.comentario || '—' }}</span>
-          </template>
-          <template #empty>
-            <div class="py-8 text-center text-sm text-muted">
-              <UIcon
-                name="i-lucide-arrow-left-right"
-                class="w-8 h-8 mx-auto mb-2 opacity-40"
-              />
-              No hay traslados registrados.
-            </div>
           </template>
         </CrudTable>
 

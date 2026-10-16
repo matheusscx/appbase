@@ -99,6 +99,9 @@ let restaurarRetenido: Promise<unknown> | null = null
 /** El body de cada crear/editar (spec compras-deuda-proveedor § 10, `plazoPagoDias`). */
 let guardados: { method: string, url: string, body?: Record<string, unknown> }[] = []
 
+/** Lote 7: el status con el que la lista contesta (403 sin permiso, 500 caída). */
+let fallaListado: number | null = null
+
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string' || !url.includes('/terceros')) {
@@ -138,6 +141,7 @@ mockNuxtImport('useApiFetch', () => {
       if (restaurarRetenido) return restaurarRetenido
       return Promise.resolve(undefined)
     }
+    if (fallaListado) return Promise.reject({ status: fallaListado })
     const incluirEliminados = url.includes('incluirEliminados=true')
     if (incluirEliminados && overrideConEliminados) return overrideConEliminados
     if (!incluirEliminados && overrideSinEliminados) return overrideSinEliminados
@@ -685,6 +689,34 @@ describe('terceros — el formulario valida al enviar', () => {
     await campo(wrapper, 'contacto@empresa.cl').setValue('ventas@sur.cl')
     await crear(wrapper)
     expect(guardados).toHaveLength(1)
+    wrapper.unmount()
+  })
+})
+
+describe('terceros — la lista que no se pudo leer no es "No hay terceros" (lote 7, 06.11)', () => {
+  beforeEach(() => {
+    tercerosBackend = [tercero()]
+    fallaListado = null
+  })
+
+  it('sin permiso (403) dice "Sin acceso", no el vacío falso', async () => {
+    fallaListado = 403
+    const wrapper = await montar()
+    expect(wrapper.text()).not.toContain('No hay terceros registrados.')
+    expect(wrapper.text()).toContain('Sin acceso a los terceros. Pídele al administrador que te lo habilite.')
+    wrapper.unmount()
+  })
+
+  it('con un 500 dice que no pudo cargar y Reintentar vuelve a pedir la lista', async () => {
+    fallaListado = 500
+    const wrapper = await montar()
+    expect(wrapper.text()).not.toContain('No hay terceros registrados.')
+    expect(wrapper.text()).toContain('No pudimos cargar los terceros')
+
+    fallaListado = null
+    await wrapper.find('[data-qa="estado-reintentar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(wrapper.text()).toContain('Distribuidora Sur')
     wrapper.unmount()
   })
 })

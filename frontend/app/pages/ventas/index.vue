@@ -60,7 +60,7 @@ const listFilters = computed(() => ({
   documento: filtroDocumento.value,
 }))
 
-const { items: ventas, meta, page, loading } =
+const { items: ventas, meta, page, loading, error, sinPermiso, fetch: fetchVentas } =
   usePaginatedList<VentaResumen>({
     path: '/ventas',
     pageSize,
@@ -309,6 +309,14 @@ const columns: TableColumn<VentaResumen>[] = [
           :data="ventas"
           :columns="columns"
           :loading="loading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          recurso="las ventas"
+          vacio="No hay ventas registradas."
+          filtrado-texto="Ninguna venta coincide con los filtros."
+          :filtrado="hayFiltrosActivos"
+          @reintentar="fetchVentas"
+          @quitar-filtros="limpiarFiltros"
           :ui="{ tr: 'cursor-pointer' }"
           @select="onSelectVenta"
         >
@@ -365,12 +373,6 @@ const columns: TableColumn<VentaResumen>[] = [
             <span class="font-mono" :class="new Decimal(row.original.saldo).gt(0) ? 'text-warning' : ''">
               {{ formatMonto(row.original.saldo) }}
             </span>
-          </template>
-          <template #empty>
-            <div class="py-10 text-center text-sm text-muted">
-              <UIcon name="i-lucide-inbox" class="mx-auto mb-2 h-8 w-8 opacity-40" />
-              {{ hayFiltrosActivos ? 'Ninguna venta coincide con los filtros.' : 'No hay ventas registradas.' }}
-            </div>
           </template>
           <template v-if="meta.total > pageSize" #footer>
             <UPagination

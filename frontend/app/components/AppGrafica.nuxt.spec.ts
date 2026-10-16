@@ -71,6 +71,15 @@ describe('AppGrafica', () => {
     expect(caida.find('[data-stub="VisXYContainer"]').exists()).toBe(false)
   })
 
+  it('la frase "la tabla sigue teniendo los números" solo sale si la tabla cargó (lote 7, 04.19)', async () => {
+    const conTabla = await montar({ fallo: true })
+    expect(conTabla.find('[data-qa="grafica-fallo"]').text()).toContain('La tabla de abajo sigue teniendo los números')
+
+    const sinTabla = await montar({ fallo: true, sinTabla: true })
+    expect(sinTabla.find('[data-qa="grafica-fallo"]').text()).toContain('No se pudo cargar la gráfica.')
+    expect(sinTabla.find('[data-qa="grafica-fallo"]').text()).not.toContain('tabla')
+  })
+
   it('una barra por categoría, en el orden de `categorias`', async () => {
     const wrapper = await montar({})
     const barras = wrapper.findComponent({ name: 'VisStackedBar' })

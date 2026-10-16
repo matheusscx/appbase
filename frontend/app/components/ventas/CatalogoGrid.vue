@@ -2,8 +2,19 @@
 import Decimal from 'decimal.js'
 import { stockPedible, type ItemCatalogo } from '~/composables/useVenta'
 
-defineProps<{ items: ItemCatalogo[]; loading?: boolean; total: number; pageSize: number }>()
-const emit = defineEmits<{ add: [item: ItemCatalogo] }>()
+defineProps<{
+  items: ItemCatalogo[]
+  loading?: boolean
+  total: number
+  pageSize: number
+  /** La carga falló: si no quedan ítems de antes, el panel dice que no pudo cargar y ofrece Reintentar. */
+  error?: boolean
+  /** El fallo fue un 403. */
+  sinPermiso?: boolean
+  /** Qué decir cuando no hay ítems y nadie buscó nada (la tienda online dice otra cosa que el POS). */
+  vacio?: string
+}>()
+const emit = defineEmits<{ add: [item: ItemCatalogo], reintentar: [] }>()
 
 const { esMonedaExtranjera, convertirAMonedaOficial, monedaOficial } = useMonedaConversion()
 const { formatStock } = useFormatters()
@@ -71,9 +82,18 @@ function onAgregar(item: ItemCatalogo) {
     <div v-if="loading" class="text-center text-muted py-10 text-sm">
       Cargando catálogo...
     </div>
-    <div v-else-if="!items.length" class="text-center text-muted py-10 text-sm">
-      No hay ítems para mostrar.
-    </div>
+    <AppEstadoLista
+      v-else-if="!items.length"
+      recurso="el catálogo"
+      :vacio="vacio ?? 'Aún no hay ítems para vender. Avisa al encargado.'"
+      :error="error"
+      :sin-permiso="sinPermiso"
+      :filtrado="!!busqueda.trim()"
+      :filtrado-texto="`No encontramos «${busqueda.trim()}». Prueba con otra palabra.`"
+      quitar-texto="Borrar búsqueda"
+      @reintentar="emit('reintentar')"
+      @quitar-filtros="busqueda = ''"
+    />
 
     <div v-else class="flex-1 min-h-0 overflow-y-auto overscroll-contain">
       <div class="grid grid-cols-2 md:grid-cols-3 gap-3 items-stretch p-1 pb-2">

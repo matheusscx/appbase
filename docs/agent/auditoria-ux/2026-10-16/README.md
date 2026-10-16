@@ -527,13 +527,13 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [01.7](01-pos-y-ventas.md) | P2 | Los botones del cobro miden menos de 44 px y cuestan con el dedo | agente |
 | ☐ | [01.8](01-pos-y-ventas.md) | P2 | Botones de solo ícono y selectores no tienen nombre para el lector de pantalla | agente |
 | ☐ | [01.9](01-pos-y-ventas.md) | P2 | Las tarjetas del catálogo no se pueden usar con teclado | agente |
-| ☐ | [01.10](01-pos-y-ventas.md) | P2 | Si el catálogo no carga, el aviso es jerga y el panel dice "no hay ítems" | agente |
-| ☐ | [01.11](01-pos-y-ventas.md) | P2 | Una búsqueda sin resultados dice lo mismo que un catálogo vacío | agente |
+| ☑ | [01.10](01-pos-y-ventas.md) | P2 | Si el catálogo no carga, el aviso es jerga y el panel dice "no hay ítems" — **hecho 2026-10-16** | agente |
+| ☑ | [01.11](01-pos-y-ventas.md) | P2 | Una búsqueda sin resultados dice lo mismo que un catálogo vacío — **hecho 2026-10-16** | agente |
 | ☐ | [01.12](01-pos-y-ventas.md) | P2 | Si el cálculo falla, el carrito deja el total viejo como si fuera bueno | agente |
 | ☐ | [01.13](01-pos-y-ventas.md) | P2 | El carrito es angosto: nombres y precios se cortan o se solapan | agente |
 | ☐ | [01.14](01-pos-y-ventas.md) | P2 | A 768 el detalle de venta corta las líneas y pega etiquetas con valores | agente |
 | ☐ | [01.15](01-pos-y-ventas.md) | P2 | Sin impresora o sin QZ la boleta no sale y casi no se avisa | agente |
-| ☐ | [01.16](01-pos-y-ventas.md) | P2 | Entrar a Órdenes sin permiso muestra una lista vacía en vez de "sin permiso" | agente |
+| ☑ | [01.16](01-pos-y-ventas.md) | P2 | Entrar a Órdenes sin permiso muestra una lista vacía en vez de "sin permiso" — **hecho 2026-10-16** | agente |
 | ☑ | [01.17](01-pos-y-ventas.md) | P2 | La insignia "Pagada" y las cifras de estado no tienen contraste suficiente — **hecho 2026-10-16** *(ver 00.8)* | agente + owner |
 | ☑ | [01.18](01-pos-y-ventas.md) | P2 | Abrir caja sin datos avisa con un toast y no marca el campo — **hecho 2026-10-16** | agente |
 | ☐ | [01.19](01-pos-y-ventas.md) | P2 | Si falla leer la propina sugerida, el cobro la deja activa con 10% | owner |
@@ -570,7 +570,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [02.17](02-salones-y-mesas.md) | P2 | Al entrar al salón sale siempre una alerta de PIN ámbar de contraste bajo *(ver 00.8)* | agente |
 | ☐ | [02.18](02-salones-y-mesas.md) | P2 | Los avisos ámbar y el "Cancelar cuenta" rojo no tienen contraste suficiente | agente |
 | ☐ | [02.19](02-salones-y-mesas.md) | P2 | En "Cancelar cuenta", los botones "Cancelar" y "Cancelar cuenta" se confunden | agente |
-| ☐ | [02.20](02-salones-y-mesas.md) | P2 | Las pantallas de gestión de salones abren sin permiso y muestran ceros y avisos | agente |
+| ☑ | [02.20](02-salones-y-mesas.md) | P2 | Las pantallas de gestión de salones abren sin permiso y muestran ceros y avisos — **hecho 2026-10-16** | agente |
 | ☐ | [02.21](02-salones-y-mesas.md) | P2 | El filtro de garzones de Anulaciones se achica al elegir uno | agente |
 | ☐ | [02.22](02-salones-y-mesas.md) | P2 | Sesiones de garzón no se actualiza y "Forzar cierre" no dice cuántas mesas hay abiertas | agente |
 | ☐ | [02.23](02-salones-y-mesas.md) | P2 | Propinas: "Ver reparto" sin fechas no hace nada y un garzón puede salir como código | agente |
@@ -616,7 +616,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [03.24](03-caja.md) | P3 | El panel de apertura de caja mide 40% y corta el campo "Comentario" | agente |
 | ☐ | [03.25](03-caja.md) | P3 | El selector Entrada/Salida no anuncia cuál está elegido | agente |
 | ☐ | [03.26](03-caja.md) | P3 | "Marcar visto" actúa al primer toque y no se puede deshacer | agente |
-| ☐ | [03.27](03-caja.md) | P3 | Entrar a "Mi caja" sin permiso lleva a Ventas con tres avisos, uno en voseo | agente |
+| ☑ | [03.27](03-caja.md) | P3 | Entrar a "Mi caja" sin permiso lleva a Ventas con tres avisos, uno en voseo — **hecho 2026-10-16** | agente |
 | ☐ | [03.28](03-caja.md) | P3 | Idea: fondo sugerido por caja y atajos para los conceptos de movimiento | owner |
 | ☐ | [03.29](03-caja.md) | P3 | La tabla de movimientos parpadea y pierde el punto de lectura al paginar | agente |
 
@@ -628,16 +628,16 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 |---|---|---|---|---|
 | ☐ | [04.5](04-inicio-y-reportes.md) | P2 | La cifra de efectivo en Inicio es verde claro, con poco contraste y otra letra *(ver 00.8)* | agente |
 | ☐ | [04.6](04-inicio-y-reportes.md) | P2 | Las alertas de Inicio (stock bajo, pagos sin venta) usan colores sin contraste suficiente *(ver 00.8)* | agente |
-| ☐ | [04.7](04-inicio-y-reportes.md) | P2 | Si Inicio falla, las tarjetas dicen "Cargando" y "Sin conexión" a la vez | agente |
-| ☐ | [04.8](04-inicio-y-reportes.md) | P2 | Un usuario sin permisos ve Inicio con "Bienvenido", "Ahora" y nada más | agente |
+| ☑ | [04.7](04-inicio-y-reportes.md) | P2 | Si Inicio falla, las tarjetas dicen "Cargando" y "Sin conexión" a la vez — **hecho 2026-10-16** | agente |
+| ☑ | [04.8](04-inicio-y-reportes.md) | P2 | Un usuario sin permisos ve Inicio con "Bienvenido", "Ahora" y nada más — **hecho 2026-10-16** | agente |
 | ☐ | [04.9](04-inicio-y-reportes.md) | P2 | Inicio muestra cantidades crudas ("2.0000") y plurales mal ("1 mermas") | agente |
 | ☐ | [04.10](04-inicio-y-reportes.md) | P2 | Las tarjetas de Inicio llevan a listas completas, no a lo que prometen | agente + owner |
 | ☐ | [04.11](04-inicio-y-reportes.md) | P2 | En Inicio todas las cifras pesan igual: Vendido y Cobrado no destacan | agente + owner |
 | ☐ | [04.12](04-inicio-y-reportes.md) | P2 | "Actualizado" repetido cinco veces empuja "Hoy" bajo el pliegue *(ver 00.1)* | agente |
 | ☐ | [04.13](04-inicio-y-reportes.md) | P2 | La tarjeta de cierres no muestra cuántos descuadres graves siguen sin revisar | agente |
 | ☐ | [04.17](04-inicio-y-reportes.md) | P2 | En /desfases el botón "Después" no hace nada | agente |
-| ☐ | [04.18](04-inicio-y-reportes.md) | P2 | Si /desfases falla, la tabla dice "Sin costos desfasados", como si todo estuviera al día | agente |
-| ☐ | [04.19](04-inicio-y-reportes.md) | P2 | Si Varianza falla salen tres avisos iguales y la tabla dice "ningún producto" | agente |
+| ☑ | [04.18](04-inicio-y-reportes.md) | P2 | Si /desfases falla, la tabla dice "Sin costos desfasados", como si todo estuviera al día — **hecho 2026-10-16** | agente |
+| ☑ | [04.19](04-inicio-y-reportes.md) | P2 | Si Varianza falla salen tres avisos iguales y la tabla dice "ningún producto" — **hecho 2026-10-16** | agente |
 | ☐ | [04.21](04-inicio-y-reportes.md) | P2 | La gráfica de Varianza distingue series solo por color y el ámbar no se lee *(ver 00.8)* | agente |
 | ☐ | [04.14](04-inicio-y-reportes.md) | P3 | La tarjeta Cajas no dice cuántas hay abiertas ni desde qué hora | agente |
 | ☐ | [04.15](04-inicio-y-reportes.md) | P3 | Ctrl/Cmd+clic en una tarjeta de Inicio no abre pestaña nueva | agente |
@@ -672,10 +672,10 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [05.17](05-inventario.md) | P2 | En el kardex y Mermas, cantidades e insignias verde, ámbar y rojo se leen mal — **hecho 2026-10-16** (colores e insignias; el placeholder no) *(ver 00.8)* | owner |
 | ☐ | [05.18](05-inventario.md) | P2 | Los botones de Inventario miden 20 a 28 px en la tablet | agente |
 | ☐ | [05.19](05-inventario.md) | P2 | Los selectores de Inventario se anuncian "Show popup" y el tacho no tiene nombre | agente |
-| ☐ | [05.20](05-inventario.md) | P2 | Si falla cargar una lista de inventario, la tabla dice "no hay nada" | agente |
+| ☑ | [05.20](05-inventario.md) | P2 | Si falla cargar una lista de inventario, la tabla dice "no hay nada" — **hecho 2026-10-16** | agente |
 | ☐ | [05.21](05-inventario.md) | P3 | Voseo en Inventario *(lote 00.3)* | agente |
 | ☐ | [05.22](05-inventario.md) | P3 | Jerga y códigos internos en pantalla: "tenant", "kardex" y el id de cada movimiento | agente |
-| ☐ | [05.23](05-inventario.md) | P3 | Un filtro sin resultados dice "No hay movimientos registrados" como si no hubiera nada | agente |
+| ☑ | [05.23](05-inventario.md) | P3 | Un filtro sin resultados dice "No hay movimientos registrados" como si no hubiera nada — **hecho 2026-10-16** | agente |
 | ☐ | [05.24](05-inventario.md) | P3 | Sin permiso o sin bodegas, el botón falta o se apaga sin explicar | agente |
 | ☐ | [05.25](05-inventario.md) | P3 | El formulario de merma tiene campos de anchos distintos y un aviso tapa el título | agente |
 
@@ -689,14 +689,14 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [06.7](06-compras-y-terceros.md) | P2 | "Pagos" de Por pagar dice "Sin pagos registrados" aunque se acabe de pagar | agente |
 | ☐ | [06.8](06-compras-y-terceros.md) | P2 | Los botones de la línea de compra no tienen nombre y quitar no se deshace | agente |
 | ☐ | [06.9](06-compras-y-terceros.md) | P2 | La fecha de una compra sale en tres formatos distintos | agente |
-| ☐ | [06.10](06-compras-y-terceros.md) | P2 | Sin permiso, Nueva compra y el detalle de compra quedan en blanco | agente |
-| ☐ | [06.11](06-compras-y-terceros.md) | P2 | Sin permiso de Terceros, la pantalla dice "No hay terceros registrados" | agente + owner |
+| ☑ | [06.10](06-compras-y-terceros.md) | P2 | Sin permiso, Nueva compra y el detalle de compra quedan en blanco — **hecho 2026-10-16** | agente |
+| ☐ | [06.11](06-compras-y-terceros.md) | P2 | Sin permiso de Terceros, la pantalla dice "No hay terceros registrados" — **parcial 2026-10-16** (hecha la mitad de pantalla: sin permiso dice "Sin acceso a los terceros", no el vacío falso; falta que quien carga compras pueda crear el proveedor, que es el frente de permisos del backend) | agente + owner |
 | ☐ | [06.12](06-compras-y-terceros.md) | P2 | Pagar en efectivo sin caja abierta falla con un aviso lejos del botón | agente |
 | ☐ | [06.13](06-compras-y-terceros.md) | P2 | "Pagar todo lo que debo" no tiene atajo y "Pagar" se apaga sin explicar | agente |
 | ☐ | [06.14](06-compras-y-terceros.md) | P2 | En la tablet, la columna "Pago" de la lista de compras queda fuera de vista | agente |
 | ☑ | [06.15](06-compras-y-terceros.md) | P2 | Un XML con RUT mal formado da un mensaje técnico y no deja elegir otro — **hecho 2026-10-16** | agente |
 | ☐ | [06.16](06-compras-y-terceros.md) | P2 | El formulario de Terceros no valida nada y los errores llegan por toast — *parcial 2026-10-16: Nombre y correo junto al campo; el formato de RUT no, porque el servidor no lo valida hoy* | agente |
-| ☐ | [06.17](06-compras-y-terceros.md) | P2 | Un filtro de compras sin resultados dice "No hay compras registradas" | agente |
+| ☑ | [06.17](06-compras-y-terceros.md) | P2 | Un filtro de compras sin resultados dice "No hay compras registradas" — **hecho 2026-10-16** | agente |
 | ☐ | [06.18](06-compras-y-terceros.md) | P2 | Tras pagar, el aviso no dice monto ni medio y "Pagar" sigue activo sin deuda | agente |
 | ☐ | [06.19](06-compras-y-terceros.md) | P2 | El documento se lee "FacturaAUDIT-001", sin espacio entre tipo y folio | agente |
 | ☐ | [06.20](06-compras-y-terceros.md) | P2 | Los botones de uso frecuente de Compras miden 16 a 32 px en la tablet | agente |
@@ -718,7 +718,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
-| ☐ | [07.3](07-configuracion.md) | P2 | Mientras carga o si falla, Configuración dice "No hay X registrados" | agente |
+| ☑ | [07.3](07-configuracion.md) | P2 | Mientras carga o si falla, Configuración dice "No hay X registrados" — **hecho 2026-10-16** | agente |
 | ☐ | [07.4](07-configuracion.md) | P2 | El menú de Configuración tiene 28 entradas y casi la mitad queda bajo el pliegue | agente |
 | ☐ | [07.5](07-configuracion.md) | P2 | La zona de trabajo es angosta y "Nuevo X" y "Ver eliminados" se parten | agente |
 | ☐ | [07.6](07-configuracion.md) | P2 | A 768 el panel lateral de Items trunca valores y parte las etiquetas | agente |
@@ -737,7 +737,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [07.19](07-configuracion.md) | P2 | El ícono "tótem" de Usuarios cambia cómo entra la persona al salón, con un toque | agente + owner |
 | ☐ | [07.20](07-configuracion.md) | P2 | Usuarios no permite quitar a alguien del local, aunque el sistema sabe hacerlo | owner |
 | ☑ | [07.21](07-configuracion.md) | P2 | "Crear" usuario queda gris sin decir qué falta y un correo malo no se marca — **hecho 2026-10-16** | agente |
-| ☐ | [07.22](07-configuracion.md) | P2 | Quien no es administrador y abre una pantalla de admin vuelve a Perfil sin aviso | agente |
+| ☐ | [07.22](07-configuracion.md) | P2 | Quien no es administrador y abre una pantalla de admin vuelve a Perfil sin aviso — **parcial 2026-10-16** (hecho el aviso del rebote: "Esa pantalla es solo para administradores"; falta dejar deshabilitados con el motivo los botones que hoy desaparecen sin permiso, que toca todas las pantallas de Configuración y sus specs) | agente |
 | ☐ | [07.23](07-configuracion.md) | P2 | En desarrollo, el menú de Configuración muestra el ícono de otra entrada | agente |
 | ☐ | [07.24](07-configuracion.md) | P3 | El panel de un rol fijo no muestra los permisos que da | agente |
 | ☐ | [07.25](07-configuracion.md) | P3 | Las insignias de Configuración miden 8 a 10 px de texto | agente |
@@ -791,8 +791,8 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
-| ☐ | [09.3](09-tienda-y-suscripciones.md) | P2 | Recargar Suscripciones manda a Inicio sin decir nada | agente |
-| ☐ | [09.4](09-tienda-y-suscripciones.md) | P2 | Si una lectura falla, la tienda muestra "no hay nada" o una alerta falsa | agente |
+| ☑ | [09.3](09-tienda-y-suscripciones.md) | P2 | Recargar Suscripciones manda a Inicio sin decir nada — **hecho 2026-10-16** | agente |
+| ☑ | [09.4](09-tienda-y-suscripciones.md) | P2 | Si una lectura falla, la tienda muestra "no hay nada" o una alerta falsa — **hecho 2026-10-16** | agente |
 | ☐ | [09.5](09-tienda-y-suscripciones.md) | P2 | La pantalla de pago aprobado no muestra monto ni número de venta | agente |
 | ☐ | [09.6](09-tienda-y-suscripciones.md) | P2 | La pantalla de resultado del pago deja callejones sin salida, sin reintento ni enlace | agente |
 | ☐ | [09.7](09-tienda-y-suscripciones.md) | P2 | Al cancelar una suscripción, dos botones dicen "Cancelar" en el mismo modal | agente |
@@ -801,7 +801,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [09.10](09-tienda-y-suscripciones.md) | P2 | Los controles del carrito online miden 24 a 28 px y quitar es inmediato | agente |
 | ☐ | [09.11](09-tienda-y-suscripciones.md) | P2 | Botones de ícono de la tienda sin nombre; la estrella solo cambia de color | agente |
 | ☐ | [09.12](09-tienda-y-suscripciones.md) | P2 | Las tarjetas del catálogo de la tienda no se pueden usar con teclado | agente |
-| ☐ | [09.13](09-tienda-y-suscripciones.md) | P2 | El catálogo de la tienda dice lo mismo vacío que sin resultados | agente |
+| ☑ | [09.13](09-tienda-y-suscripciones.md) | P2 | El catálogo de la tienda dice lo mismo vacío que sin resultados — **hecho 2026-10-16** | agente |
 | ☐ | [09.14](09-tienda-y-suscripciones.md) | P2 | Sin permiso, la tienda deja armar un carrito entero y falla recién al pagar | agente |
 | ☐ | [09.15](09-tienda-y-suscripciones.md) | P2 | Jerga en tienda y suscripciones: "tenant", "pasarela con tokenización (Oneclick)" | agente |
 | ☐ | [09.16](09-tienda-y-suscripciones.md) | P2 | A 768 el carrito de la tienda queda bajo el catálogo, lejos de "Pagar" | agente |
@@ -811,7 +811,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [09.19](09-tienda-y-suscripciones.md) | P3 | El menú de Tienda Online corta los nombres y tiene dos "Suscripciones" casi iguales | owner |
 | ☐ | [09.20](09-tienda-y-suscripciones.md) | P3 | La pasarela simulada redirige a /tienda sin decir por qué si la referencia es inválida | agente |
 | ☐ | [09.21](09-tienda-y-suscripciones.md) | P3 | Los vacíos de tarjetas y suscripciones no dicen qué hacer | agente |
-| ☐ | [09.23](09-tienda-y-suscripciones.md) | P3 | Suscripciones no busca por cliente y un filtro vacío dice "no hay suscripciones" | agente |
+| ☑ | [09.23](09-tienda-y-suscripciones.md) | P3 | Suscripciones no busca por cliente y un filtro vacío dice "no hay suscripciones" — **hecho 2026-10-16** | agente |
 | ☐ | [09.24](09-tienda-y-suscripciones.md) | P3 | La pantalla del superadmin no muestra "cargando", ni reintento, ni menú de usuario | agente |
 
 ## Lotes sugeridos

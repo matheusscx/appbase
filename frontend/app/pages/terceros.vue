@@ -37,6 +37,10 @@ const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('terceros'
 
 const terceros = ref<Tercero[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
+/** El fallo fue un 403: sin el permiso de Terceros esta lista no es "no hay terceros", es "sin acceso" (06.11). */
+const sinPermiso = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -105,14 +109,18 @@ async function cargar() {
   const previa = cargaEnCurso
   const actual = (async () => {
     await previa
+    errorCarga.value = false
+    sinPermiso.value = false
     loading.value = true
     try {
       const query = verEliminados.value ? '?incluirEliminados=true' : ''
       terceros.value = await useApiFetch<Tercero[]>(`${apiUrl}/terceros${query}`)
     }
     catch (e: unknown) {
-      const msg = apiErrorMsg(e, 'Error al cargar terceros')
-      toast.add({ title: msg, color: 'error' })
+      errorCarga.value = true
+      sinPermiso.value = esSinPermiso(e)
+      // El 403 lo dice la propia tabla; el toast que se iba solo no lo repite.
+      if (!sinPermiso.value) toast.add({ title: apiErrorMsg(e, 'Error al cargar terceros'), color: 'error' })
     }
     finally {
       loading.value = false
@@ -354,7 +362,7 @@ const columns: TableColumn<Tercero>[] = [
           </template>
         </CrudPageHeader>
 
-        <CrudTable :data="terceros" :columns="columns" :loading="loading">
+        <CrudTable :data="terceros" :columns="columns" :loading="loading" :error="errorCarga" :sin-permiso="sinPermiso" recurso="los terceros" @reintentar="cargar">
           <template #nombre-cell="{ row }">
             <div class="space-y-1">
               <div class="flex items-center gap-2">

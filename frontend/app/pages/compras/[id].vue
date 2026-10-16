@@ -65,6 +65,11 @@ const intentoCobro = useIntentoCobro()
 const esNueva = computed(() => route.params.id === 'nueva')
 const compra = ref<CompraDetalle | null>(null)
 const cargando = ref(true)
+/**
+ * Por qué no cargó la compra. Sin esto la pantalla quedaba en blanco (ni formulario ni detalle) con un
+ * toast que se iba solo (auditoría UX 06.10): `no-existe` es un 404, `sin-permiso` un 403.
+ */
+const errorCarga = ref<'no-existe' | 'sin-permiso' | 'fallo' | null>(null)
 const guardando = ref(false)
 
 /** Solo un borrador (o una compra nueva) se edita acá. */
@@ -323,7 +328,9 @@ function llenarDesde(c: CompraDetalle) {
   lineas.value = c.lineas.length ? c.lineas.map(lineaDesdeDetalle) : [nuevaLinea()]
 }
 
-onMounted(async () => {
+async function cargarPantalla() {
+  cargando.value = true
+  errorCarga.value = null
   try {
     await cargarCatalogos()
     if (!esNueva.value) {
@@ -339,11 +346,14 @@ onMounted(async () => {
       llenarDesde(c)
     }
   } catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar la compra'), color: 'error' })
+    const status = (e as { status?: number })?.status ?? (e as { response?: { status?: number } })?.response?.status
+    errorCarga.value = esSinPermiso(e) ? 'sin-permiso' : status === 404 ? 'no-existe' : 'fallo'
   } finally {
     cargando.value = false
   }
-})
+}
+
+onMounted(cargarPantalla)
 
 // ── Líneas ─────────────────────────────────────────────────────────────────
 
@@ -928,6 +938,44 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
           <UIcon name="i-lucide-loader" class="w-4 h-4 animate-spin" />
           Cargando…
         </div>
+
+        <!-- Los tres casos que antes dejaban la pantalla en blanco (auditoría UX 06.10). -->
+        <div
+          v-else-if="esNueva && !puedeCrear"
+          class="flex flex-col items-center gap-3 py-12 text-center text-sm"
+          data-qa="compra-sin-permiso"
+        >
+          <UIcon name="i-lucide-lock" class="size-6 text-muted" />
+          <p class="max-w-sm text-default">
+            No tienes permiso para registrar compras. Pídele al administrador que te lo habilite.
+          </p>
+          <UButton to="/compras" variant="outline" color="neutral" size="sm" data-qa="compra-sin-permiso-volver">
+            Volver a Compras
+          </UButton>
+        </div>
+
+        <div
+          v-else-if="errorCarga === 'no-existe'"
+          class="flex flex-col items-center gap-3 py-12 text-center text-sm"
+          data-qa="compra-no-existe"
+        >
+          <UIcon name="i-lucide-file-question" class="size-6 text-muted" />
+          <p class="max-w-sm text-default">
+            No encontramos esta compra. Puede que el enlace esté mal.
+          </p>
+          <UButton to="/compras" variant="outline" color="neutral" size="sm" data-qa="compra-no-existe-volver">
+            Volver a Compras
+          </UButton>
+        </div>
+
+        <AppEstadoLista
+          v-else-if="errorCarga"
+          recurso="esta compra"
+          vacio=""
+          error
+          :sin-permiso="errorCarga === 'sin-permiso'"
+          @reintentar="cargarPantalla"
+        />
 
         <!-- ── Carga del borrador ─────────────────────────────────────────── -->
         <UForm

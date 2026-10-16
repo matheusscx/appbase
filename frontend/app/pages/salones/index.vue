@@ -3245,6 +3245,9 @@ async function cerrarCuentaConPin(
                 :total="catalogo.total.value"
                 :page-size="catalogo.pageSize"
                 :loading="loadingCatalogo"
+                :error="catalogo.error.value"
+                :sin-permiso="catalogo.sinPermiso.value"
+                @reintentar="catalogo.refrescar"
                 @add="addProducto"
               />
             </div>

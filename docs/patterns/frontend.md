@@ -174,7 +174,7 @@ definePageMeta({ middleware: 'admin' })
 
 // La pantalla entera exige un permiso de módulo → ¿tiene este permiso?
 definePageMeta({ middleware: ['auth', 'permiso'], permiso: 'Cajas:Leer' })
-// `permisoLabel` cuando el aviso por defecto —"No tenés acceso al módulo <módulo>"—
+// `permisoLabel` cuando el aviso por defecto —"No tienes acceso al módulo <módulo>"—
 // sería confuso o directamente falso. Dos casos, los dos reales:
 //   a) el módulo se llama distinto en pantalla
 definePageMeta({
@@ -384,6 +384,27 @@ revert). Archivo CRUD clásico con toggle: `razones-sociales.vue`.
 
 Estados de carga/vacío: bloques `v-if="loading"` / `v-else-if="!items.length"` con
 texto centrado gris antes de la lista.
+
+**Una lista sin filas dice cuál de cuatro cosas pasó** (auditoría UX 2026-10-16, lote 7): cargando, falló,
+no tienes permiso, o de verdad no hay (y, aparte, "tu filtro no encontró nada"). Un 500 o un 403 que se ven
+como "No hay X" hacen creer al dueño que su catálogo se borró.
+
+- `usePaginatedList` devuelve `error` y `sinPermiso` (403, vía `esSinPermiso(e)` de `utils/api-error.ts`) y, al
+  fallar, **vacía** `items`: las filas del filtro anterior no se quedan como si fueran las del nuevo. Una carga
+  buena baja las dos banderas. El 403 no manda toast (lo dice la propia lista).
+- `CrudTable` recibe `:error`, `:sin-permiso`, `recurso="las categorías"`, `vacio="…"`, `:filtrado` y escucha
+  `@reintentar` / `@quitar-filtros`. Sin filas muestra, en este orden: error o sin permiso, "Cargando…", el filtro
+  que no encontró nada, el `#empty` de la pantalla o `vacio`. Una pantalla con carga propia (`cargar()`) lleva
+  su `const errorCarga = ref(false)`: `false` al empezar, `true` en el `catch`.
+- Fuera de `CrudTable` (un `UTable` suelto, el panel del catálogo, una gráfica) se usa `AppEstadoLista` directo,
+  con las mismas props.
+- **Reintentar lo toca la persona.** Ningún estado de error vuelve a pedir solo (regla del proyecto); en el
+  refresco periódico de Inicio, "No pudimos cargar los datos. Reintenta." con un botón por tarjeta.
+- Un valor "disponible / configurado" que se deduce de una lectura parte en `null`, no en `false`: con `false`
+  un GET caído se leía como "el tenant no tiene pasarela" (`useTarjetas.oneclickDisponible`).
+- La pantalla que lee con un permiso concreto declara el gate de página (`middleware: ['auth','permiso']` +
+  `permiso` + `permisoLabel`), no un `if` en el `setup` (corre antes de que lleguen los permisos y expulsa al
+  dueño en el F5) ni un guard en `onMounted`. Spec: `pages/gates-de-permiso.spec.ts`.
 
 **Dentro de una celda de `UTable`, un `<span>` sin clase de color se renderiza
 atenuado.** El `td` del tema trae `text-muted` y `color` es una propiedad

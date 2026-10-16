@@ -11,6 +11,8 @@ const apiUrl = useRuntimeConfig().public.apiUrl
 
 const repartidores = ref<RepartidorFila[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -43,11 +45,13 @@ watch(drawerOpen, (open) => {
 })
 
 async function cargar() {
+  errorCarga.value = false
   loading.value = true
   try {
     repartidores.value = await useApiFetch<RepartidorFila[]>(`${apiUrl}/repartidores`)
   }
   catch (e: unknown) {
+    errorCarga.value = true
     toast.add({ title: apiErrorMsg(e, 'Error al cargar repartidores'), color: 'error' })
   }
   finally {
@@ -179,7 +183,7 @@ const columns: TableColumn<RepartidorFila>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="repartidores" :columns="columns" :loading="loading">
+    <CrudTable :data="repartidores" :columns="columns" :loading="loading" :error="errorCarga" recurso="los repartidores" @reintentar="cargar">
       <template #nombre-cell="{ row }">
         <CrudListItem
           :title="row.original.nombre"

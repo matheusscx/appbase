@@ -25,6 +25,8 @@ const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('motivos-d
 
 const motivos = ref<MotivoDiferencia[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -82,12 +84,14 @@ async function cargar() {
   const previa = cargaEnCurso
   const actual = (async () => {
     await previa
+    errorCarga.value = false
     loading.value = true
     try {
       const query = verEliminados.value ? '?incluirEliminados=true' : ''
       motivos.value = await useApiFetch<MotivoDiferencia[]>(`${apiUrl}/motivos-diferencia${query}`)
     }
     catch (e: unknown) {
+      errorCarga.value = true
       toast.add({ title: apiErrorMsg(e, 'Error al cargar motivos'), color: 'error' })
     }
     finally {
@@ -324,6 +328,9 @@ const columns: TableColumn<MotivoDiferencia>[] = [
       :data="motivos"
       :columns="columns"
       :loading="loading"
+      :error="errorCarga"
+      recurso="los motivos"
+      @reintentar="cargar"
     >
       <template #nombre-cell="{ row }">
         <div class="min-w-0">

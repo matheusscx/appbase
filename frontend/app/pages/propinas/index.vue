@@ -13,7 +13,15 @@ import type { Turno } from '~/composables/useTurnos'
 import type { Garzon } from '~/composables/useGarzones'
 import { rangoMesActual } from '~/composables/usePropinaResumen'
 
-definePageMeta({ middleware: 'auth', layout: 'dashboard' })
+// `Propinas:Leer` lo pide el backend en las lecturas de la pantalla. Antes se revisaba en `onMounted` y,
+// si faltaba, devolvía a Inicio sin decir nada —con el permiso, el contenido aparecía un instante antes—;
+// el middleware decide antes de montar y avisa por qué (auditoría UX 02.20).
+definePageMeta({
+  middleware: ['auth', 'permiso'],
+  permiso: 'Propinas:Leer',
+  permisoLabel: 'Propinas',
+  layout: 'dashboard',
+})
 
 const router = useRouter()
 const toast = useToast()
@@ -220,14 +228,6 @@ async function liquidar() {
 }
 
 onMounted(async () => {
-  if (!permissions.permisos.length && !permissions.loading) {
-    await permissions.fetchPermisos()
-  }
-  if (!permissions.can('Propinas', 'Leer')) {
-    await navigateTo('/')
-    return
-  }
-
   try {
     const [turnosResp, garzonesResp, historialResp] = await Promise.all([
       turnosApi.listar(),

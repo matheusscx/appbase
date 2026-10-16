@@ -151,6 +151,13 @@ mockNuxtImport('usePermissionsStore', () => {
   })
 })
 
+/** Lote 7: con esto en true, listado y resumen contestan 500. */
+let fallaTodo = false
+let toastsPantalla: string[] = []
+mockNuxtImport('useToast', () => () => ({
+  add: (t: { title?: string }) => { toastsPantalla.push(t.title ?? '') },
+}))
+
 mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     if (typeof url !== 'string') return Promise.resolve({})
@@ -165,6 +172,7 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve(ubicacionesBackend)
     }
     // '/reportes/varianza/resumen' también matchea '/reportes/varianza': primero el resumen.
+    if (fallaTodo && url.includes('/reportes/varianza')) return Promise.reject({ status: 500 })
     if (url.includes('/reportes/varianza/resumen')) {
       return resumenDispatcher ? resumenDispatcher(url) : Promise.resolve(RESUMEN)
     }
@@ -584,6 +592,42 @@ describe('varianza — arranca en el mes del día de negocio', () => {
     // interno de `usePaginatedList` no tienen motivo para disparar de nuevo.
     expect(llamadas.length).toBe(llamadasTrasMontar)
 
+    wrapper.unmount()
+  })
+})
+
+describe('varianza — un 500 no se ve como "ningún producto con diferencia" (lote 7, 04.19)', () => {
+  beforeEach(() => { fallaTodo = true, toastsPantalla = [] })
+  afterEach(() => { fallaTodo = false })
+
+  it('la tabla dice que no pudo cargar y ofrece Reintentar, no el vacío', async () => {
+    const wrapper = await montar()
+    expect(wrapper.text()).not.toContain('Ningún producto con diferencia')
+    expect(wrapper.text()).toContain('No pudimos cargar el reporte')
+    expect(wrapper.find('[data-qa="estado-reintentar"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('la gráfica no promete la tabla cuando la tabla también falló', async () => {
+    const wrapper = await montar()
+    expect(wrapper.findComponent({ name: 'AppGrafica' }).props('sinTabla')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('el aviso es uno solo, no uno por cada pedido', async () => {
+    const wrapper = await montar()
+    expect(toastsPantalla.length).toBeLessThanOrEqual(1)
+    wrapper.unmount()
+  })
+
+  it('Reintentar vuelve a pedir listado y resumen', async () => {
+    const wrapper = await montar()
+    const antes = llamadas.length
+    fallaTodo = false
+    await wrapper.find('[data-qa="estado-reintentar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+    expect(llamadas.length).toBeGreaterThanOrEqual(antes + 2)
+    expect(wrapper.text()).not.toContain('No pudimos cargar el reporte')
     wrapper.unmount()
   })
 })

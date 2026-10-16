@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { apiErrorMsg, apiFieldErrors, nombreSugeridoDe } from './api-error'
+import { apiErrorMsg, apiFieldErrors, nombreSugeridoDe, esSinPermiso } from './api-error'
 
 describe('apiErrorMsg', () => {
   it('prioriza el mensaje HTTP del backend', () => {
@@ -152,5 +152,18 @@ describe('apiFieldErrors', () => {
   it('ignora los mensajes que no son de un campo', () => {
     expect(apiFieldErrors({ data: { message: 'Stock insuficiente' } })).toEqual({})
     expect(apiFieldErrors({})).toEqual({})
+  })
+})
+
+describe('esSinPermiso', () => {
+  it('es true con un 403, venga como status o como response.status', () => {
+    expect(esSinPermiso({ status: 403 })).toBe(true)
+    expect(esSinPermiso({ response: { status: 403 } })).toBe(true)
+  })
+
+  it('es false con cualquier otro fallo', () => {
+    expect(esSinPermiso({ status: 500 })).toBe(false)
+    expect(esSinPermiso(new Error('Failed to fetch'))).toBe(false)
+    expect(esSinPermiso(undefined)).toBe(false)
   })
 })

@@ -413,3 +413,26 @@ describe('DesfasesPanel — la sugerencia se aplica en la escala de la moneda', 
     wrapper.unmount()
   })
 })
+
+describe('DesfasesPanel — una lectura fallida no es "Sin costos desfasados" (lote 7, 04.18)', () => {
+  it('con error dice que no pudo cargar y ofrece Reintentar; no dice que todo está al día', async () => {
+    esAdmin = false
+    permisos = ['Items:Leer']
+    const wrapper = await mountSuspended(DesfasesPanel, {
+      props: { filas: [], error: true },
+    })
+
+    expect(wrapper.text()).not.toContain('Sin costos desfasados.')
+    expect(wrapper.text()).toContain('No pudimos cargar los costos desfasados')
+
+    await wrapper.find('[data-qa="estado-reintentar"]').trigger('click')
+    expect(wrapper.emitted('reintentar')).toHaveLength(1)
+  })
+
+  it('sin error y sin filas, sí dice "Sin costos desfasados."', async () => {
+    esAdmin = false
+    permisos = ['Items:Leer']
+    const wrapper = await mountSuspended(DesfasesPanel, { props: { filas: [] } })
+    expect(wrapper.text()).toContain('Sin costos desfasados.')
+  })
+})

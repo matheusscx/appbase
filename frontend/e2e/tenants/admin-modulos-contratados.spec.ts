@@ -60,8 +60,8 @@ test('una pantalla de un módulo no contratado rebota a Inicio con el aviso', as
   await entrarComo(page, ADMIN)
 
   for (const { url, aviso } of [
-    { url: '/cajas', aviso: 'No tenés acceso al módulo Cajas' },
-    { url: '/compras/por-pagar', aviso: 'No tenés acceso al módulo Compras (pagar)' },
+    { url: '/cajas', aviso: 'No tienes acceso al módulo Cajas' },
+    { url: '/compras/por-pagar', aviso: 'No tienes acceso al módulo Compras (pagar)' },
   ]) {
     const rechazos = await rechazosDurante(page, async () => {
       await page.goto(url, { waitUntil: 'networkidle' })

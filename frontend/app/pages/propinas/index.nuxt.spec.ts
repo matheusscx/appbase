@@ -156,15 +156,6 @@ describe('propinas — el admin del tenant entra solo si su tenant contrató Pro
     expect(llamadas.some(u => u.includes('/propinas/liquidaciones'))).toBe(true)
     wrapper.unmount()
   })
-
-  it('en un tenant que no contrató Propinas, rebota a Inicio sin pedir nada de propinas', async () => {
-    permisos = ['Paquetería:Leer']
-    const wrapper = await montar()
-
-    expect(navigateTo).toHaveBeenCalledWith('/')
-    expect(llamadas.some(u => u.includes('/propinas'))).toBe(false)
-    wrapper.unmount()
-  })
 })
 
 describe('propinas — se liquida el reparto que se vio (auditoría UX 02.1)', () => {

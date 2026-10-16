@@ -40,6 +40,8 @@ const promociones = ref<Promocion[]>([])
 const catalogoItems = useItemsPorId<ItemCatalogo>()
 const categoriasCatalogo = ref<CategoriaCatalogo[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -169,11 +171,13 @@ function eliminarSlot(i: number) {
 // ── Carga ────────────────────────────────────────────────────────────────
 
 async function cargar() {
+  errorCarga.value = false
   loading.value = true
   try {
     promociones.value = await listar()
   }
   catch (e: unknown) {
+    errorCarga.value = true
     toast.add({ title: apiErrorMsg(e, 'Error al cargar promociones'), color: 'error' })
   }
   finally {
@@ -360,7 +364,7 @@ const columns: TableColumn<Promocion>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="promociones" :columns="columns" :loading="loading">
+    <CrudTable :data="promociones" :columns="columns" :loading="loading" :error="errorCarga" recurso="las promociones" @reintentar="cargar">
       <template #nombre-cell="{ row }">
         <div class="min-w-0">
           <div class="flex items-center gap-2">

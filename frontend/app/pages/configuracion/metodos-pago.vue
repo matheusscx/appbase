@@ -36,6 +36,7 @@ const apiUrl = config.public.apiUrl
 
 const metodos = ref<MetodoPago[]>([])
 const loading = ref(false)
+const errorCarga = ref(false)
 const toggling = reactive(new Set<string>())
 // `null` hasta que carga `GET /tenants/me`: el selector va deshabilitado.
 const facturador = ref<Facturador | null>(null)
@@ -43,6 +44,7 @@ const guardandoFacturador = ref(false)
 
 async function cargar() {
   loading.value = true
+  errorCarga.value = false
   // Dos lecturas independientes: que falle `/tenants/me` no esconde la tabla.
   const [lista, tenant] = await Promise.allSettled([
     useApiFetch<MetodoPago[]>(`${apiUrl}/metodos-pago`),
@@ -52,6 +54,7 @@ async function cargar() {
     metodos.value = lista.value
   }
   else {
+    errorCarga.value = true
     const msg = apiErrorMsg(lista.reason, 'Error al cargar métodos de pago')
     toast.add({ title: msg, color: 'error' })
   }
@@ -187,7 +190,14 @@ const columns: TableColumn<MetodoPago>[] = [
       </template>
     </UFormField>
 
-    <CrudTable :data="metodos" :columns="columns" :loading="loading">
+    <CrudTable
+      :data="metodos"
+      :columns="columns"
+      :loading="loading"
+      :error="errorCarga"
+      recurso="los métodos de pago"
+      @reintentar="cargar"
+    >
       <template #nombre-cell="{ row }">
         <CrudListItem
           :title="row.original.nombre"

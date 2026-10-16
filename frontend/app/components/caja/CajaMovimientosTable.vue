@@ -14,7 +14,7 @@ const filtroTipo = ref<string | undefined>()
 const listPath = computed(() => `/caja/${props.cajaId}/movimientos`)
 const listFilters = computed(() => ({ tipo: filtroTipo.value }))
 
-const { items: movimientos, meta, page, loading, fetch: recargarMovimientos } =
+const { items: movimientos, meta, page, loading, error, sinPermiso, fetch: recargarMovimientos } =
   usePaginatedList<{
     id: string
     tipo: string
@@ -173,12 +173,16 @@ const columns: TableColumn<typeof movimientos.value[number]>[] = [
             </span>
           </template>
           <template #empty>
-            <div class="py-10 text-center text-sm text-muted">
-              <UIcon name="i-lucide-inbox" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-              {{ hayFiltrosActivos
-                ? 'Ningún movimiento coincide con los filtros.'
-                : 'Sin movimientos registrados en este turno.' }}
-            </div>
+            <AppEstadoLista
+              recurso="los movimientos de la caja"
+              vacio="Sin movimientos registrados en este turno."
+              filtrado-texto="Ningún movimiento coincide con los filtros."
+              :error="error"
+              :sin-permiso="sinPermiso"
+              :filtrado="hayFiltrosActivos"
+              @reintentar="recargarMovimientos"
+              @quitar-filtros="limpiarFiltros"
+            />
           </template>
         </UTable>
 

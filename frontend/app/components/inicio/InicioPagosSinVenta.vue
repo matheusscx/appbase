@@ -19,7 +19,7 @@ const { formatHora } = useFormatters()
 
 const DESTINO = '/ordenes?sinVenta=true'
 
-const { datos, actualizadoEl, sinConexion, oculto } = useRefrescoPeriodico(
+const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeriodico(
   () => useApiFetch<ListadoOrdenes>(`${apiUrl}/pasarela/admin/ordenes?sinVenta=true&pageSize=1`),
 )
 </script>
@@ -53,20 +53,18 @@ const { datos, actualizadoEl, sinConexion, oculto } = useRefrescoPeriodico(
         </p>
       </template>
     </div>
-    <p v-else class="text-sm text-muted">
-      Cargando…
-    </p>
+    <InicioSinDatos v-else :fallo="sinConexion" @reintentar="refrescar" />
 
     <UAlert
-      v-if="sinConexion"
+      v-if="sinConexion && datos"
       color="warning"
       variant="subtle"
       icon="i-lucide-wifi-off"
-      title="Sin conexión — se reintenta en el próximo ciclo"
+      title="No pudimos actualizar — se vuelve a intentar en el próximo ciclo"
       class="mt-3"
     />
 
-    <template #footer>
+    <template v-if="actualizadoEl" #footer>
       <p class="text-xs text-muted">
         Actualizado {{ formatHora(actualizadoEl) }}
       </p>

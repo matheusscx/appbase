@@ -38,7 +38,7 @@ const listFilters = computed(() => ({
   estado: filtroEstado.value !== 'todos' ? filtroEstado.value : undefined,
 }))
 
-const { items: recuentos, meta, page, loading } =
+const { items: recuentos, meta, page, loading, error, sinPermiso, fetch: fetchRecuentos } =
   usePaginatedList<RecuentoListItem>({
     path: '/recuentos',
     pageSize,
@@ -166,6 +166,13 @@ const columns: TableColumn<RecuentoListItem>[] = [
           :data="recuentos"
           :columns="columns"
           :loading="loading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          recurso="los recuentos"
+          vacio="No hay recuentos de inventario."
+          :filtrado="filtroEstado !== 'todos'"
+          @reintentar="fetchRecuentos"
+          @quitar-filtros="() => { filtroEstado = 'todos' }"
           :ui="{ tr: 'cursor-pointer' }"
           @select="onSelectRecuento"
         >
@@ -193,15 +200,6 @@ const columns: TableColumn<RecuentoListItem>[] = [
           </template>
           <template #comentario-cell="{ row }">
             <span class="text-sm text-muted">{{ row.original.comentario || '—' }}</span>
-          </template>
-          <template #empty>
-            <div class="py-8 text-center text-sm text-muted">
-              <UIcon
-                name="i-lucide-clipboard-list"
-                class="w-8 h-8 mx-auto mb-2 opacity-40"
-              />
-              No hay recuentos de inventario.
-            </div>
           </template>
         </CrudTable>
 

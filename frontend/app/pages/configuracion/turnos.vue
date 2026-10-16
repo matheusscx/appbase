@@ -14,6 +14,8 @@ const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('turnos')
 
 const turnos = ref<Turno[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 
 // Cola serial, mismo patrón que `configuracion/descuentos.vue` → `cargar()`:
 // `watch(verEliminados, cargar)` dispara una llamada por toggle del switch, y
@@ -25,11 +27,13 @@ async function cargar() {
   const previa = cargaEnCurso
   const actual = (async () => {
     await previa
+    errorCarga.value = false
     loading.value = true
     try {
       turnos.value = await turnosApi.listar(verEliminados.value)
     }
     catch (e: unknown) {
+      errorCarga.value = true
       toast.add({ title: apiErrorMsg(e, 'Error al cargar turnos'), color: 'error' })
     }
     finally {
@@ -283,7 +287,7 @@ const columns: TableColumn<Turno>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="turnos" :columns="columns" :loading="loading">
+    <CrudTable :data="turnos" :columns="columns" :loading="loading" :error="errorCarga" recurso="los turnos" @reintentar="cargar">
       <template #nombre-cell="{ row }">
         <div class="space-y-1">
           <div class="flex items-center gap-2">

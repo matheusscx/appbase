@@ -17,11 +17,14 @@ const toast = useToast()
 const datos = ref<ResumenNegocioHoy | null>(null)
 const cargando = ref(false)
 const oculto = ref(false)
+/** La carga falló: sin datos no se queda en "Cargando…", ofrece reintentar (04.7). */
+const fallo = ref(false)
 
 async function cargar(): Promise<void> {
   cargando.value = true
   try {
     datos.value = await useApiFetch<ResumenNegocioHoy>(`${apiUrl}/resumen-negocio/hoy`)
+    fallo.value = false
   }
   catch (e: unknown) {
     const status = (e as { status?: number })?.status
@@ -30,7 +33,9 @@ async function cargar(): Promise<void> {
       oculto.value = true
       return
     }
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar el resumen de hoy'), color: 'error' })
+    fallo.value = true
+    // Sin datos, el aviso es el propio bloque ("No pudimos cargar…" + Reintentar); un toast que se va solo sumaba ruido.
+    if (datos.value) toast.add({ title: apiErrorMsg(e, 'Error al actualizar el resumen de hoy'), color: 'error' })
   }
   finally {
     cargando.value = false
@@ -66,8 +71,6 @@ void cargar()
       <InicioPerdidas :perdidas="datos.perdidas" />
       <InicioMasVendidos class="lg:col-span-4" :mas-vendidos="datos.masVendidos" />
     </div>
-    <p v-else class="text-sm text-muted">
-      Cargando…
-    </p>
+    <InicioSinDatos v-else :fallo="fallo" @reintentar="cargar" />
   </section>
 </template>

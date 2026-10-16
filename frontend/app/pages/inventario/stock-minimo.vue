@@ -39,7 +39,14 @@ const listFilters = computed(() => ({
   search: busqueda.value.trim() || undefined,
 }))
 
-const { items: filas, meta, page, loading } = usePaginatedList<StockMinimoFila>({
+// Filtro o búsqueda que el usuario puso. "Solo bajo el mínimo" no cuenta: sin filas es buena noticia.
+const hayFiltros = computed(() => !!filtroUbicacion.value || !!busqueda.value.trim())
+function quitarFiltros() {
+  filtroUbicacion.value = undefined
+  busqueda.value = ''
+}
+
+const { items: filas, meta, page, loading, error, sinPermiso, fetch: fetchFilas } = usePaginatedList<StockMinimoFila>({
   path: '/inventario/stock-minimo',
   pageSize,
   filters: listFilters,
@@ -165,6 +172,14 @@ const columns = computed<TableColumn<StockMinimoFila>[]>(() => [
           :data="filas"
           :columns="columns"
           :loading="loading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          recurso="el stock mínimo"
+          :vacio="soloBajoMinimo ? 'Nada bajo el mínimo.' : 'No hay productos con stock.'"
+          filtrado-texto="Ningún producto con esos filtros."
+          :filtrado="hayFiltros"
+          @reintentar="fetchFilas"
+          @quitar-filtros="quitarFiltros"
         >
           <template #stock-cell="{ row }">
             <span class="whitespace-nowrap">{{ formatStock(row.original.stock, row.original.unidadMedida) }}</span>
@@ -237,15 +252,6 @@ const columns = computed<TableColumn<StockMinimoFila>[]>(() => [
             </template>
           </template>
 
-          <template #empty>
-            <div class="py-8 text-center text-sm text-muted">
-              <UIcon
-                name="i-lucide-package-check"
-                class="w-8 h-8 mx-auto mb-2 opacity-40"
-              />
-              {{ soloBajoMinimo ? 'Nada bajo el mínimo.' : 'No hay productos con stock.' }}
-            </div>
-          </template>
         </CrudTable>
 
         <div

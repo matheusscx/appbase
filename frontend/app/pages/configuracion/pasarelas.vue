@@ -49,6 +49,7 @@ const tabs = [
 const configs = ref<TenantPasarelaRow[]>([])
 const globales = ref<PasarelaGlobal[]>([])
 const loadingConfig = ref(false)
+const errorConfig = ref(false)
 const savingConfig = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -87,6 +88,7 @@ const drawerTitle = computed(() => (editingId.value ? 'Editar pasarela' : 'Agreg
 
 async function cargarConfig() {
   loadingConfig.value = true
+  errorConfig.value = false
   try {
     const [cfg, glob] = await Promise.all([
       useApiFetch<TenantPasarelaRow[]>(`${apiUrl}/pasarela/admin/config`),
@@ -96,6 +98,7 @@ async function cargarConfig() {
     globales.value = glob
   }
   catch (e: unknown) {
+    errorConfig.value = true
     toast.add({ title: apiErrorMsg(e, 'Error al cargar pasarelas'), color: 'error' })
   }
   finally {
@@ -210,6 +213,7 @@ async function confirmarEliminarConfig() {
 // ---------- Tab 2: API Keys ----------
 const keys = ref<ApiKeyRow[]>([])
 const loadingKeys = ref(false)
+const errorKeys = ref(false)
 const creandoKey = ref(false)
 const nuevaKeyNombre = ref('')
 const keyCreadaModal = ref(false)
@@ -218,10 +222,12 @@ const crearKeyOpen = ref(false)
 
 async function cargarKeys() {
   loadingKeys.value = true
+  errorKeys.value = false
   try {
     keys.value = await useApiFetch<ApiKeyRow[]>(`${apiUrl}/pasarela/admin/api-keys`)
   }
   catch (e: unknown) {
+    errorKeys.value = true
     toast.add({ title: apiErrorMsg(e, 'Error al cargar API keys'), color: 'error' })
   }
   finally {
@@ -327,7 +333,14 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
         />
       </div>
 
-      <CrudTable :data="configs" :columns="configColumns" :loading="loadingConfig">
+      <CrudTable
+        :data="configs"
+        :columns="configColumns"
+        :loading="loadingConfig"
+        :error="errorConfig"
+        recurso="las pasarelas"
+        @reintentar="cargarConfig"
+      >
         <template #nombre-cell="{ row }">
           <CrudListItem
             :title="row.original.nombre"
@@ -391,7 +404,14 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
         />
       </div>
 
-      <CrudTable :data="keys" :columns="keyColumns" :loading="loadingKeys">
+      <CrudTable
+        :data="keys"
+        :columns="keyColumns"
+        :loading="loadingKeys"
+        :error="errorKeys"
+        recurso="las API keys"
+        @reintentar="cargarKeys"
+      >
         <template #nombre-cell="{ row }">
           <div class="min-w-0">
             <p class="font-medium truncate">

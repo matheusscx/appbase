@@ -61,11 +61,16 @@ const RESUMEN_DESCUADRES = {
 let llamadas: string[] = []
 /** Fragmentos de URL que en este test deben responder 403 en vez de 200. */
 let falla403: string[] = []
+/** Fragmentos de URL que responden 500 (se cayó el servidor). */
+let falla500: string[] = []
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     if (typeof url !== 'string') return Promise.resolve(null)
     llamadas.push(url)
+    if (falla500.some(f => url.includes(f))) {
+      return Promise.reject({ status: 500 })
+    }
     if (falla403.some(f => url.includes(f))) {
       return Promise.reject({ response: { status: 403 } })
     }
@@ -87,6 +92,7 @@ beforeEach(() => {
   permisos = []
   esAdmin = false
   falla403 = []
+  falla500 = []
 })
 
 describe('zona "Ahora" — un bloque sin permiso no hace su llamada', () => {
@@ -187,6 +193,71 @@ describe('zona "Ahora" — con permiso, pide y muestra', () => {
     expect(llamadas.some(u => u.includes('/salones/ocupacion'))).toBe(true)
     expect(wrapper.text()).not.toContain('mesas ocupadas')
     expect(wrapper.text()).not.toContain('Sin conexión')
+
+    wrapper.unmount()
+  })
+})
+
+describe('zona "Ahora" — un fallo no se queda en "Cargando…" (lote 7, 04.7)', () => {
+  it('con un 500 y sin datos, dice que no pudo cargar y ofrece Reintentar; no "Cargando…" ni "Sin conexión"', async () => {
+    permisos = ['Salones:Ver todas']
+    falla500 = ['/salones/ocupacion']
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('No pudimos cargar los datos. Reintenta.')
+    expect(wrapper.text()).not.toContain('Cargando…')
+    expect(wrapper.text()).not.toContain('Sin conexión')
+    expect(wrapper.text()).not.toContain('No pudimos actualizar')
+    expect(wrapper.text()).not.toContain('Actualizado')
+    expect(wrapper.find('[data-qa="inicio-reintentar"]').exists()).toBe(true)
+
+    wrapper.unmount()
+  })
+
+  it('Reintentar vuelve a pedir lo que falló, y solo cuando la persona lo toca', async () => {
+    permisos = ['Salones:Ver todas']
+    falla500 = ['/salones/ocupacion']
+    const wrapper = await montar()
+    const pedidos = () => llamadas.filter(u => u.includes('/salones/ocupacion')).length
+    expect(pedidos()).toBe(1)
+
+    falla500 = []
+    await wrapper.find('[data-qa="inicio-reintentar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+
+    expect(pedidos()).toBe(2)
+    expect(wrapper.text()).toContain('14 de 20 mesas ocupadas')
+
+    wrapper.unmount()
+  })
+
+  it('mientras la primera carga está en vuelo sigue diciendo "Cargando…"', async () => {
+    permisos = ['Salones:Ver todas']
+    const wrapper = await mountSuspended(Index)
+    // Sin esperar: la respuesta del mock todavía no se procesó.
+    expect(wrapper.text()).not.toContain('No pudimos cargar')
+    wrapper.unmount()
+  })
+})
+
+describe('inicio — sin ninguna tarjeta que mostrar (lote 7, 04.8)', () => {
+  it('un rol sin permisos de resumen ve un mensaje, no títulos vacíos', async () => {
+    permisos = ['Paquetería:Leer']
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('Tu rol no tiene resumen del día. Elige una sección en el menú.')
+    expect(wrapper.text()).not.toContain('Ahora')
+    expect(wrapper.text()).not.toContain('Hoy')
+
+    wrapper.unmount()
+  })
+
+  it('con al menos un bloque, el mensaje no aparece', async () => {
+    permisos = ['Salones:Ver todas']
+    const wrapper = await montar()
+
+    expect(wrapper.text()).not.toContain('Tu rol no tiene resumen del día')
+    expect(wrapper.text()).toContain('Ahora')
 
     wrapper.unmount()
   })

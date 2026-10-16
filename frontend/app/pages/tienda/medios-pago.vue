@@ -10,7 +10,7 @@ const toast = useToast()
 const { formatFecha } = useFormatters()
 
 const {
-  tarjetas, oneclickDisponible, loading,
+  tarjetas, oneclickDisponible, loading, error, sinPermiso, cargar,
   agregar, eliminar, marcarPreferida,
 } = useTarjetas()
 
@@ -111,7 +111,7 @@ const columns: TableColumn<Tarjeta>[] = [
           <template #actions>
             <UButton
               icon="i-lucide-plus"
-              :disabled="!oneclickDisponible"
+              :disabled="oneclickDisponible !== true"
               :loading="agregando"
               @click="abrirInscripcion"
             >
@@ -121,7 +121,7 @@ const columns: TableColumn<Tarjeta>[] = [
         </CrudPageHeader>
 
         <UAlert
-          v-if="!loading && !oneclickDisponible"
+          v-if="!loading && oneclickDisponible === false"
           icon="i-lucide-triangle-alert"
           color="warning"
           variant="soft"
@@ -132,6 +132,15 @@ const columns: TableColumn<Tarjeta>[] = [
         <div v-if="loading" class="py-8 text-center text-sm text-muted">
           Cargando…
         </div>
+
+        <AppEstadoLista
+          v-else-if="error"
+          recurso="tus tarjetas"
+          vacio=""
+          error
+          :sin-permiso="sinPermiso"
+          @reintentar="cargar"
+        />
 
         <CrudTable v-else :data="tarjetas" :columns="columns">
           <template #marca-cell="{ row }">

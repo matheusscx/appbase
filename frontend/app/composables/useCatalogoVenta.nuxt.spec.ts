@@ -159,6 +159,27 @@ describe('useCatalogoVenta', () => {
     expect(onError).toHaveBeenCalledWith(falla)
   })
 
+  it('un fallo levanta `error` (y `sinPermiso` si fue 403); una carga buena lo baja', async () => {
+    responder = () => Promise.resolve(pagina([item('A')], 1))
+    const c = await montar({ tipos: TIPOS })
+    await c.cargar()
+    expect(c.error.value).toBe(false)
+
+    responder = () => Promise.reject({ status: 500 })
+    await c.refrescar()
+    expect(c.error.value).toBe(true)
+    expect(c.sinPermiso.value).toBe(false)
+
+    responder = () => Promise.reject({ status: 403 })
+    await c.refrescar()
+    expect(c.sinPermiso.value).toBe(true)
+
+    responder = () => Promise.resolve(pagina([item('A')], 1))
+    await c.refrescar()
+    expect(c.error.value).toBe(false)
+    expect(c.sinPermiso.value).toBe(false)
+  })
+
   it('página fuera de rango: va a la última y vuelve a pedir', async () => {
     responder = () => Promise.resolve(pagina([], 500))
     const c = await montar({ tipos: TIPOS })

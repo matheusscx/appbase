@@ -67,7 +67,10 @@ watch(
 
 const catalogo = useCatalogoVenta({
   tipos: ['producto', 'receta', 'combo'],
-  onError: e => toast.add({ title: apiErrorMsg(e, 'Error al cargar el catálogo'), color: 'error' }),
+  // El 403 y el fallo ya los dice el panel del catálogo; el toast no repite la URL ni la jerga de red.
+  onError: (e) => {
+    if (!esSinPermiso(e)) toast.add({ title: apiErrorMsg(e, 'No se pudo cargar el catálogo', { detalleLocal: false }), color: 'error' })
+  },
 })
 const items = catalogo.items
 const metodos = ref<MetodoPago[]>([])
@@ -438,6 +441,9 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
             :total="catalogo.total.value"
             :page-size="catalogo.pageSize"
             :loading="loadingCatalogo"
+            :error="catalogo.error.value"
+            :sin-permiso="catalogo.sinPermiso.value"
+            @reintentar="catalogo.refrescar"
             @add="onCatalogoAdd"
           />
         </div>

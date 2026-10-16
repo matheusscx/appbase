@@ -9,7 +9,7 @@ const { pageSize } = useUserPreferences()
 
 const listFilters = computed(() => ({ cajaId: props.cajaId }))
 
-const { items: intentos, meta, page, loading } = usePaginatedList<IntentoRechazado>({
+const { items: intentos, meta, page, loading, error, sinPermiso, fetch: fetchIntentos } = usePaginatedList<IntentoRechazado>({
   path: '/caja/intentos-rechazados',
   pageSize,
   filters: listFilters,
@@ -110,10 +110,13 @@ const columns: TableColumn<IntentoRechazado>[] = [
         </span>
       </template>
       <template #empty>
-        <div class="py-10 text-center text-sm text-muted">
-          <UIcon name="i-lucide-shield-check" class="w-8 h-8 mx-auto mb-2 opacity-40" />
-          Ningún intento rechazado en esta caja.
-        </div>
+        <AppEstadoLista
+          recurso="los intentos rechazados"
+          vacio="Ningún intento rechazado en esta caja."
+          :error="error"
+          :sin-permiso="sinPermiso"
+          @reintentar="fetchIntentos"
+        />
       </template>
     </UTable>
 

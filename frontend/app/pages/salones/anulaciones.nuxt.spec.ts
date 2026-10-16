@@ -138,6 +138,9 @@ let resumenDispatcher: ((url: string) => Promise<unknown>) | null = null
  *  no ve la asignación que hace el callback del `Promise` — y la llamada no
  *  tipa. Leída desde otra función (el `it`), usa el tipo declarado. */
 let resolverOptimista: ((v: typeof RESUMEN) => void) | null = null
+/** Lote 7: con un status puesto, esa ruta contesta con ese error (500 = se cayó, 403 = sin permiso). */
+let falloResumen: number | null = null
+let falloListado: number | null = null
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -159,9 +162,11 @@ mockNuxtImport('useApiFetch', () => {
     // Ojo con el orden: '/salones/anulaciones/resumen' también matchea
     // '/salones/anulaciones', así que el resumen se chequea primero.
     if (url.includes('/salones/anulaciones/resumen')) {
+      if (falloResumen) return Promise.reject({ status: falloResumen })
       return resumenDispatcher ? resumenDispatcher(url) : Promise.resolve(RESUMEN)
     }
     if (url.includes('/salones/anulaciones')) {
+      if (falloListado) return Promise.reject({ status: falloListado })
       return Promise.resolve({
         data: LISTADO,
         meta: { page: 1, pageSize: 15, total: LISTADO.length, totalPages: 1 },
@@ -219,6 +224,8 @@ beforeEach(() => {
   tenantMeResolver = null
   resumenDispatcher = null
   resolverOptimista = null
+  falloResumen = null
+  falloListado = null
 })
 
 describe('anulaciones — resumen', () => {
@@ -544,6 +551,52 @@ describe('anulaciones — carrera del resumen', () => {
     const vm = wrapper.vm as unknown as { resumen: typeof RESUMEN | null }
     expect(vm.resumen?.porAutorizo[0]?.usuarioNombre).toBe('Corregido')
 
+    wrapper.unmount()
+  })
+})
+
+describe('anulaciones — un fallo no se ve como un reporte en ceros (lote 7, 02.20)', () => {
+  it('si el resumen falla, no hay tarjetas en cero: hay un error con Reintentar', async () => {
+    falloResumen = 500
+    const wrapper = await montar()
+
+    expect(wrapper.text()).not.toContain('Precio de carta:')
+    // Las tablas "Por garzón" / "Por quién autorizó" salen del mismo resumen: tampoco se dibujan vacías.
+    expect(wrapper.text()).not.toContain('Por garzón')
+    expect(wrapper.text()).toContain('No pudimos cargar el resumen')
+    expect(wrapper.find('[data-qa="anulaciones-resumen-error"] [data-qa="estado-reintentar"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('Reintentar vuelve a pedir el resumen solo cuando la persona lo toca', async () => {
+    falloResumen = 500
+    const wrapper = await montar()
+    const pedidos = () => llamadas.filter(u => u.includes('/salones/anulaciones/resumen')).length
+    const antes = pedidos()
+    await new Promise(r => setTimeout(r, 50))
+    expect(pedidos()).toBe(antes)
+
+    falloResumen = null
+    await wrapper.find('[data-qa="anulaciones-resumen-error"] [data-qa="estado-reintentar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(pedidos()).toBe(antes + 1)
+    expect(wrapper.text()).toContain('Precio de carta:')
+    wrapper.unmount()
+  })
+
+  it('si el resumen da 403 dice "Sin acceso", no "No pudimos cargar"', async () => {
+    falloResumen = 403
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Sin acceso al resumen de anulaciones. Pídele al administrador que te lo habilite.')
+    expect(wrapper.text()).not.toContain('No pudimos cargar el resumen')
+    wrapper.unmount()
+  })
+
+  it('si el listado falla, la tabla no dice "No hay anulaciones"', async () => {
+    falloListado = 500
+    const wrapper = await montar()
+    expect(wrapper.text()).not.toContain('No hay anulaciones')
+    expect(wrapper.text()).toContain('No pudimos cargar las anulaciones')
     wrapper.unmount()
   })
 })

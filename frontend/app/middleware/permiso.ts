@@ -44,7 +44,7 @@ export default defineNuxtRouteMiddleware(async (to) => {
   // pero su `inject` interno loguea un warning de Vue en dev. Es el precio de
   // no perder el aviso que la pantalla daba antes de rebotar.
   useToast().add({
-    title: `No tenés acceso al módulo ${to.meta.permisoLabel ?? modulo}`,
+    title: `No tienes acceso al módulo ${to.meta.permisoLabel ?? modulo}`,
     color: 'warning',
   })
   // A Inicio y no a Ventas: Inicio existe para todos, y Ventas puede ser justo un módulo

@@ -34,6 +34,8 @@ const impresoraOptions = computed(() => [
   ...impresorasComanda.value.map(i => ({ label: i.nombre, value: i.id as string | null })),
 ])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -97,12 +99,14 @@ async function cargar() {
   const previa = cargaEnCurso
   const actual = (async () => {
     await previa
+    errorCarga.value = false
     loading.value = true
     try {
       const query = verEliminados.value ? '?incluirEliminados=true' : ''
       categorias.value = await useApiFetch<Categoria[]>(`${apiUrl}/categorias${query}`)
     }
     catch (e: unknown) {
+      errorCarga.value = true
       const msg = apiErrorMsg(e, 'Error al cargar categorías')
       toast.add({ title: msg, color: 'error' })
     }
@@ -294,7 +298,7 @@ const columns: TableColumn<Categoria>[] = [
       </template>
     </CrudPageHeader>
 
-    <CrudTable :data="categorias" :columns="columns" :loading="loading">
+    <CrudTable :data="categorias" :columns="columns" :loading="loading" :error="errorCarga" recurso="las categorías" @reintentar="cargar">
       <template #nombre-cell="{ row }">
         <div class="space-y-1">
           <div class="flex items-center gap-2">

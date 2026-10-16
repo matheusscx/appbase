@@ -46,6 +46,9 @@ const props = withDefaults(
     filas: DesfaseItemDto[]
     highlightIngredienteId?: string | null
     loading?: boolean
+    /** La lectura de `/desfases` falló: no es lo mismo que "no hay costos desfasados" (auditoría UX 04.18). */
+    error?: boolean
+    sinPermiso?: boolean
   }>(),
   {
     highlightIngredienteId: null,
@@ -57,6 +60,7 @@ const emit = defineEmits<{
   aplicar: [items: AplicarDesfaseItem[]]
   descartar: [items: DescartarDesfaseItem[]]
   cerrar: []
+  reintentar: []
 }>()
 
 // Aplicar y descartar pegan a `POST /desfases/*`, que exige
@@ -276,6 +280,17 @@ function onDescartar() {
         <tbody class="divide-y divide-default">
           <tr v-if="loading">
             <td colspan="6" class="px-3 py-8 text-center text-muted">Cargando…</td>
+          </tr>
+          <tr v-else-if="error">
+            <td colspan="6">
+              <AppEstadoLista
+                recurso="los costos desfasados"
+                vacio=""
+                error
+                :sin-permiso="sinPermiso"
+                @reintentar="emit('reintentar')"
+              />
+            </td>
           </tr>
           <tr v-else-if="!filas.length">
             <td colspan="6" class="px-3 py-8 text-center text-muted">Sin costos desfasados.</td>

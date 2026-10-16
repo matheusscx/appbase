@@ -24,6 +24,8 @@ const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('ubicacion
 
 const ubicaciones = ref<Ubicacion[]>([])
 const loading = ref(false)
+/** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
+const errorCarga = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
 const editingId = ref<string | null>(null)
@@ -82,12 +84,14 @@ async function cargar() {
   const previa = cargaEnCurso
   const actual = (async () => {
     await previa
+    errorCarga.value = false
     loading.value = true
     try {
       const query = verEliminados.value ? '?incluirEliminados=true' : ''
       ubicaciones.value = await useApiFetch<Ubicacion[]>(`${apiUrl}/ubicaciones${query}`)
     }
     catch (e: unknown) {
+      errorCarga.value = true
       toast.add({ title: apiErrorMsg(e, 'Error al cargar ubicaciones'), color: 'error' })
     }
     finally {
@@ -345,6 +349,9 @@ const columns: TableColumn<Ubicacion>[] = [
       :data="bodegas"
       :columns="columns"
       :loading="loading"
+      :error="errorCarga"
+      recurso="las ubicaciones"
+      @reintentar="cargar"
     >
       <template #nombre-cell="{ row }">
         <div class="min-w-0">

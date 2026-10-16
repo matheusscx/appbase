@@ -210,3 +210,60 @@ describe('CatalogoGrid — búsqueda, orden y paginación vienen de afuera', () 
     expect(wrapper.findComponent({ name: 'UPagination' }).exists()).toBe(false)
   })
 })
+
+describe('CatalogoGrid — sin ítems: no es lo mismo no tener, no encontrar y no poder cargar (lote 7)', () => {
+  async function montarVacio(props: Record<string, unknown>) {
+    return mountSuspended(CatalogoGrid, {
+      props: { items: [], total: 0, pageSize: 48, ...props },
+      global: { stubs },
+    })
+  }
+
+  it('sin búsqueda y sin ítems dice qué hacer, no "No hay ítems para mostrar"', async () => {
+    const wrapper = await montarVacio({})
+    expect(wrapper.text()).not.toContain('No hay ítems para mostrar')
+    expect(wrapper.text()).toContain('Aún no hay ítems para vender. Avisa al encargado.')
+  })
+
+  it('el texto del vacío lo puede poner la pantalla (la tienda online)', async () => {
+    const wrapper = await montarVacio({ vacio: 'Aún no hay ítems a la venta online.' })
+    expect(wrapper.text()).toContain('Aún no hay ítems a la venta online.')
+  })
+
+  it('con búsqueda sin resultado nombra lo buscado y ofrece borrarla', async () => {
+    const wrapper = await montarVacio({ busqueda: 'zzzz' })
+    expect(wrapper.text()).toContain('No encontramos «zzzz». Prueba con otra palabra.')
+    expect(wrapper.text()).not.toContain('Avisa al encargado')
+
+    expect(wrapper.find('[data-qa="estado-quitar-filtros"]').text()).toBe('Borrar búsqueda')
+    await wrapper.find('[data-qa="estado-quitar-filtros"]').trigger('click')
+    expect(wrapper.emitted('update:busqueda')?.at(-1)).toEqual([''])
+  })
+
+  it('si el catálogo no cargó, dice que falló y ofrece Reintentar (no "no hay ítems")', async () => {
+    const wrapper = await montarVacio({ error: true })
+    expect(wrapper.text()).not.toContain('Aún no hay ítems')
+    expect(wrapper.text()).toContain('No pudimos cargar el catálogo')
+
+    await wrapper.find('[data-qa="estado-reintentar"]').trigger('click')
+    expect(wrapper.emitted('reintentar')).toHaveLength(1)
+  })
+
+  it('un 403 dice "Sin acceso al catálogo"', async () => {
+    const wrapper = await montarVacio({ error: true, sinPermiso: true })
+    expect(wrapper.text()).toContain('Sin acceso al catálogo.')
+  })
+
+  it('si falló pero quedan ítems de antes, la grilla se queda (un corte no la vacía a mitad de servicio)', async () => {
+    const wrapper = await mountSuspended(CatalogoGrid, {
+      props: { items: [producto()], total: 1, pageSize: 48, error: true },
+      global: { stubs },
+    })
+    expect(wrapper.find('[data-qa="item-catalogo-item-1"]').exists()).toBe(true)
+  })
+
+  it('el buscador sigue disponible en cualquiera de los estados', async () => {
+    const wrapper = await montarVacio({ error: true })
+    expect(wrapper.find('input').exists()).toBe(true)
+  })
+})

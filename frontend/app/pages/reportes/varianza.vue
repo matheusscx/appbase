@@ -140,7 +140,7 @@ const listFilters = computed(() => ({
   soloSinCosto: soloSinCosto.value && rangoCompleto.value ? 'true' : undefined,
 }))
 
-const { items: filas, meta, page, loading } = usePaginatedList<VarianzaFila>({
+const { items: filas, meta, page, loading, error, sinPermiso, fetch: fetchFilas } = usePaginatedList<VarianzaFila>({
   path: '/reportes/varianza',
   pageSize,
   filters: listFilters,
@@ -182,9 +182,10 @@ async function cargarResumen() {
         `${apiUrl}/reportes/varianza/resumen?${params.toString()}`,
       )
     }
-    catch (e: unknown) {
+    catch {
+      // Sin toast: la gráfica y la tabla dicen el fallo en su lugar y traen su Reintentar; con el listado
+      // caído se acumulaban tres avisos iguales (auditoría UX 04.19).
       resumenFallo.value = true
-      toast.add({ title: apiErrorMsg(e, 'Error al cargar el resumen'), color: 'error' })
     }
     finally {
       loadingResumen.value = false
@@ -195,6 +196,12 @@ async function cargarResumen() {
 }
 
 watch(filtrosComunes, cargarResumen, { deep: true })
+
+/** Reintentar a mano: el listado y el resumen caen juntos, así que se piden los dos. */
+function reintentar() {
+  void fetchFilas()
+  void cargarResumen()
+}
 
 async function prepararUbicaciones() {
   try {
@@ -406,6 +413,7 @@ const columns: TableColumn<VarianzaFila>[] = [
               :formato-eje="formatoEjeGrafica"
               :cargando="loadingResumen || monedasCargando"
               :fallo="resumenFallo || !!monedasStore.error"
+              :sin-tabla="error"
               :vacio="topGraficado.length === 0"
             />
             <p
@@ -496,6 +504,15 @@ const columns: TableColumn<VarianzaFila>[] = [
           :data="filas"
           :columns="columns"
           :loading="loading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          recurso="el reporte"
+          :vacio="listFilters.soloSinCosto
+            ? 'Ningún producto sin costo con faltante en el rango filtrado.'
+            : soloConVarianza
+              ? 'Ningún producto con diferencia en el rango filtrado.'
+              : 'Ningún producto con recuentos en el rango filtrado.'"
+          @reintentar="reintentar"
         >
           <template #ventana-cell="{ row }">
             <span class="whitespace-nowrap">
@@ -551,19 +568,6 @@ const columns: TableColumn<VarianzaFila>[] = [
             </span>
           </template>
 
-          <template #empty>
-            <div class="py-8 text-center text-sm text-muted">
-              <UIcon
-                name="i-lucide-scale"
-                class="w-8 h-8 mx-auto mb-2 opacity-40"
-              />
-              {{ listFilters.soloSinCosto
-                ? 'Ningún producto sin costo con faltante en el rango filtrado.'
-                : soloConVarianza
-                  ? 'Ningún producto con diferencia en el rango filtrado.'
-                  : 'Ningún producto con recuentos en el rango filtrado.' }}
-            </div>
-          </template>
         </CrudTable>
 
         <div

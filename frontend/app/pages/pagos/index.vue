@@ -59,7 +59,7 @@ const listFilters = computed(() => ({
   ventaId: filtroVentaId.value,
 }))
 
-const { items: pagos, meta, page, loading } =
+const { items: pagos, meta, page, loading, error, sinPermiso, fetch: fetchPagos } =
   usePaginatedList<PagoLedger>({
     path: '/pagos',
     pageSize,
@@ -256,6 +256,14 @@ onMounted(cargar)
           :data="pagos"
           :columns="columns"
           :loading="loading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          recurso="los pagos"
+          vacio="Sin pagos registrados."
+          filtrado-texto="Ningún pago coincide con los filtros."
+          :filtrado="hayFiltrosActivos"
+          @reintentar="fetchPagos"
+          @quitar-filtros="limpiarFiltros"
           :ui="{ tr: 'cursor-pointer' }"
           @select="onSelectPago"
         >
@@ -280,12 +288,6 @@ onMounted(cargar)
               variant="subtle"
               size="sm"
             />
-          </template>
-          <template #empty>
-            <div class="py-10 text-center text-sm text-muted">
-              <UIcon name="i-lucide-inbox" class="mx-auto mb-2 h-8 w-8 opacity-40" />
-              {{ hayFiltrosActivos ? 'Ningún pago coincide con los filtros.' : 'Sin pagos registrados.' }}
-            </div>
           </template>
           <template v-if="meta.total > pageSize" #footer>
             <UPagination

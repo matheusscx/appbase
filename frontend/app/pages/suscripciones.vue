@@ -2,19 +2,21 @@
 import type { TableColumn } from '@nuxt/ui'
 import type { SuscripcionAdmin } from '~/composables/useSuscripcionesAdmin'
 
-definePageMeta({ middleware: 'auth', layout: 'dashboard' })
+// El gate de página espera los permisos antes de decidir. El `if` que había en el `setup` corría antes de que
+// llegaran, así que el F5 de un dueño con permiso lo mandaba a Inicio sin decir nada (auditoría UX 09.3).
+definePageMeta({
+  middleware: ['auth', 'permiso'],
+  permiso: 'Suscripciones:Leer',
+  permisoLabel: 'Suscripciones',
+  layout: 'dashboard',
+})
 
 const {
-  puedeLeer: puedeVer,
   puedeActualizar,
   puedeEliminar,
 } = usePermisosCrud('Suscripciones')
 
-if (import.meta.client && !puedeVer.value) {
-  await navigateTo('/')
-}
-
-const { suscripciones, loading, pausar, reanudar, cancelar, eliminar } = useSuscripcionesAdmin()
+const { suscripciones, loading, error, sinPermiso, cargar, pausar, reanudar, cancelar, eliminar } = useSuscripcionesAdmin()
 const { formatMonto, formatFecha } = useFormatters()
 
 const filtroEstado = ref<'todas' | SuscripcionAdmin['estado']>('todas')
@@ -25,11 +27,31 @@ const filtroOpts = [
   { label: 'Canceladas', value: 'cancelada' },
 ]
 
-const filtradas = computed(() =>
-  filtroEstado.value === 'todas'
-    ? suscripciones.value
-    : suscripciones.value.filter((s) => s.estado === filtroEstado.value),
-)
+const busqueda = ref('')
+const terminoBusqueda = computed(() => busqueda.value.trim())
+
+const filtradas = computed(() => {
+  const q = terminoBusqueda.value.toLowerCase()
+  return suscripciones.value.filter(s =>
+    (filtroEstado.value === 'todas' || s.estado === filtroEstado.value)
+    && (!q || s.usuarioNombre.toLowerCase().includes(q) || s.usuarioEmail.toLowerCase().includes(q)),
+  )
+})
+
+const hayFiltros = computed(() => filtroEstado.value !== 'todas' || !!terminoBusqueda.value)
+function quitarFiltros() {
+  filtroEstado.value = 'todas'
+  busqueda.value = ''
+}
+
+const ESTADO_PLURAL = { activa: 'activas', pausada: 'pausadas', cancelada: 'canceladas' } as const
+/** El vacío nombra el filtro: "No hay suscripciones canceladas", no el "no hay ninguna" de siempre (09.23). */
+const textoFiltrado = computed(() => {
+  const estado = filtroEstado.value === 'todas' ? '' : ` ${ESTADO_PLURAL[filtroEstado.value]}`
+  return terminoBusqueda.value
+    ? `No encontramos «${terminoBusqueda.value}»${estado ? ` entre las suscripciones${estado}` : ''}.`
+    : `No hay suscripciones${estado}.`
+})
 
 function subtituloPlan(s: SuscripcionAdmin): string {
   const dia = detalleDia(s)
@@ -116,6 +138,13 @@ function confirmarEliminar() {
           description="Administración de las suscripciones de los clientes del tenant."
         >
           <template #actions>
+            <UInput
+              v-model="busqueda"
+              icon="i-lucide-search"
+              placeholder="Buscar por cliente o correo"
+              class="w-64"
+              data-qa="suscripciones-busqueda"
+            />
             <USelectMenu
               v-model="filtroEstado"
               :items="filtroOpts"
@@ -125,7 +154,19 @@ function confirmarEliminar() {
           </template>
         </CrudPageHeader>
 
-        <CrudTable :data="filtradas" :columns="columns" :loading="loading">
+        <CrudTable
+          :data="filtradas"
+          :columns="columns"
+          :loading="loading"
+          :error="error"
+          :sin-permiso="sinPermiso"
+          recurso="las suscripciones"
+          vacio="No hay suscripciones para mostrar."
+          :filtrado="hayFiltros"
+          :filtrado-texto="textoFiltrado"
+          @reintentar="cargar"
+          @quitar-filtros="quitarFiltros"
+        >
           <template #usuarioNombre-cell="{ row }">
             <CrudListItem
               :title="row.original.usuarioNombre"
@@ -194,11 +235,6 @@ function confirmarEliminar() {
             </div>
           </template>
 
-          <template #empty>
-            <div class="py-8 text-center text-sm text-muted">
-              No hay suscripciones para mostrar.
-            </div>
-          </template>
         </CrudTable>
 
         <CrudModal
