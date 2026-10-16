@@ -2386,7 +2386,7 @@ describe('ComprasService (pagar, spec compras-deuda-proveedor § 5 y § 11)', ()
           USUARIO,
           dtoPago() as never,
         ),
-      ).rejects.toThrow('necesitás tu caja abierta');
+      ).rejects.toThrow('necesitas tu caja abierta');
     });
 
     it('efectivo sin plata suficiente: IntentoRechazadoError con tipo pago_proveedor', async () => {

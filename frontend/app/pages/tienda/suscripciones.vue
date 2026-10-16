@@ -56,7 +56,7 @@ const cancelModalOpen = ref(false)
 const cancelMensaje = computed(() => {
   const s = cancelando.value
   if (!s) return ''
-  return `Tu suscripción seguirá activa hasta el ${formatFecha(diaAnterior(s.proximoCobro))} y se cancelará el ${formatFecha(s.proximoCobro)} a primera hora. ¿Confirmás la cancelación?`
+  return `Tu suscripción seguirá activa hasta el ${formatFecha(diaAnterior(s.proximoCobro))} y se cancelará el ${formatFecha(s.proximoCobro)} a primera hora. ¿Confirmas la cancelación?`
 })
 
 function abrirCancelar(s: Suscripcion) {
@@ -356,7 +356,7 @@ onMounted(async () => {
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="Mis suscripciones">
+      <AppNavbar title="Mis planes">
         <template #right>
           <UserMenu />
         </template>
@@ -366,8 +366,8 @@ onMounted(async () => {
     <template #body>
       <div class="w-full space-y-6">
         <CrudPageHeader
-          title="Mis suscripciones"
-          description="Compras recurrentes de items del catálogo — pausá, reanudá o cancelá cuando quieras."
+          title="Mis planes"
+          description="Compras recurrentes de items del catálogo — pausa, reanuda o cancela cuando quieras."
         >
           <template #actions>
             <UButton
@@ -446,7 +446,7 @@ onMounted(async () => {
 
           <template #empty>
             <div class="py-8 text-center text-sm text-muted">
-              No tenés suscripciones activas.
+              No tienes suscripciones activas.
             </div>
           </template>
         </CrudTable>
@@ -455,7 +455,8 @@ onMounted(async () => {
           v-model:open="cancelModalOpen"
           title="Cancelar suscripción"
           :message="cancelMensaje"
-          confirm-label="Cancelar suscripción"
+          confirm-label="Sí, cancelar suscripción"
+          cancel-label="Volver"
           @cancel="cancelando = null"
           @confirm="confirmarCancelar"
         />
@@ -464,13 +465,13 @@ onMounted(async () => {
           <template #body>
             <div class="space-y-3">
               <p class="text-sm text-muted">
-                Elegí con qué tarjeta se cobrará esta suscripción a partir del próximo período.
+                Elige con qué tarjeta se cobrará esta suscripción a partir del próximo período.
               </p>
               <USelectMenu
                 v-model="nuevaInscripcionId"
                 :items="tarjetaOpts"
                 value-key="value"
-                placeholder="Elegí una tarjeta"
+                placeholder="Elige una tarjeta"
                 class="w-full"
               />
             </div>
@@ -506,7 +507,7 @@ onMounted(async () => {
               color="warning"
               variant="soft"
               title="Suscripciones no disponibles"
-              description="El tenant no tiene una pasarela con tokenización (Oneclick) activa, necesaria para cobrar las suscripciones."
+              description="Tu local aún no tiene activo el cobro con tarjeta inscrita, necesario para cobrar las suscripciones. Actívalo en Configuración › Pasarelas, o pídelo a quien administra el local."
               class="mb-4"
             />
 
@@ -518,7 +519,7 @@ onMounted(async () => {
                   :filtros="FILTROS_SUSCRIBIBLE"
                   :etiqueta="etiquetaSuscribible"
                   :disabled="!oneclickDisponible || confirmando"
-                  placeholder="Elegí una suscripción del catálogo"
+                  placeholder="Elige una suscripción del catálogo"
                   class="w-full"
                 />
               </UFormField>
@@ -557,7 +558,7 @@ onMounted(async () => {
                       v-model="selectedInscripcionId"
                       :items="tarjetaOpts"
                       value-key="value"
-                      placeholder="Elegí una tarjeta"
+                      placeholder="Elige una tarjeta"
                       class="w-full"
                     />
                     <UButton
@@ -571,7 +572,7 @@ onMounted(async () => {
                   </template>
 
                   <div v-else class="flex items-center justify-between gap-2">
-                    <span class="text-sm text-muted">No tenés tarjetas registradas.</span>
+                    <span class="text-sm text-muted">No tienes tarjetas registradas.</span>
                     <UButton
                       icon="i-lucide-plus"
                       label="Agregar tarjeta"

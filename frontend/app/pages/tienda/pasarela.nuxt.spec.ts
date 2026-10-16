@@ -47,7 +47,7 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve({ id: 'venta-1', estado: 'pagada', ...respuesta })
     }
     // El comprador SÍ tiene una tarjeta preferida, y eso no es relleno: con la
-    // lista vacía, la pantalla vieja renderizaba "No tenés tarjetas
+    // lista vacía, la pantalla vieja renderizaba "No tienes tarjetas
     // registradas" y la aserción sobre los `••••` no discriminaba nada. Es el
     // caso que la entrada de backlog denunciaba.
     if (url.includes('/online/medios-pago')) {

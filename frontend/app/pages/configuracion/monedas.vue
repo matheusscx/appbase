@@ -155,7 +155,7 @@ const columns: TableColumn<MonedaDisplayConfig>[] = [
 
       <template #empty>
         <div class="py-8 text-center text-sm text-muted">
-          No hay monedas disponibles para el país del tenant.
+          No hay monedas disponibles para el país de tu local.
         </div>
       </template>
     </CrudTable>

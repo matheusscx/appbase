@@ -480,7 +480,7 @@ const keyColumns: TableColumn<ApiKeyRow>[] = [
             v-if="esDemo"
             color="warning" variant="subtle" icon="i-lucide-triangle-alert"
             title="Aprueba todo sin cobrar"
-            description="No pide credenciales y no cobra: la venta queda registrada como pagada sin que entre dinero. Usala solo para probar la tienda."
+            description="No pide credenciales y no cobra: la venta queda registrada como pagada sin que entre dinero. Úsala solo para probar la tienda."
           />
           <UFormField v-if="!esDemo" label="Modo de integración">
             <USelect

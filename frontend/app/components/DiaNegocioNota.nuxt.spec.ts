@@ -86,7 +86,7 @@ describe('DiaNegocioNota', () => {
 
   // Ítem 4 de `2026-09-19-residuos-hora-de-corte/brief.md`: el caso que
   // distingue el diseño y que faltaba cubrir. `undefined` (prop no pasado) es
-  // "sin controlar, pedí lo tuyo"; `null` es "el dueño del dato TODAVÍA no
+  // "sin controlar, pide lo tuyo"; `null` es "el dueño del dato TODAVÍA no
   // resolvió su fetch" — a propósito no dibuja nada y tampoco dispara el
   // fetch propio, porque ese `null` es transitorio: en cuanto el dueño
   // resuelva, va a mandar un número real.

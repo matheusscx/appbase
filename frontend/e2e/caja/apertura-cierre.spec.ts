@@ -60,7 +60,7 @@ test.beforeEach(async ({ request }) => {
     { token },
   )
   // Falla acá y no diez líneas después: sin cajón libre la pantalla muestra el
-  // aviso de "pedile al administrador" y el test moriría buscando un formulario
+  // aviso de "pídele al administrador" y el test moriría buscando un formulario
   // que no existe.
   if (!disponibles[0]) {
     throw new Error(
@@ -162,7 +162,7 @@ test('abre la caja, la cierra con un faltante, y la diferencia la pone el sistem
   await cierre.getByRole('button', { name: 'Enviar conteo' }).click()
   await expect(
     conciliacion.getByText(
-      'El conteo no cuadró. Justificá cada diferencia para confirmar el cierre.',
+      'El conteo no cuadró. Justifica cada diferencia para confirmar el cierre.',
     ),
   ).toBeVisible()
 

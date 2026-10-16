@@ -247,7 +247,7 @@ const columns: TableColumn<MetodoPago>[] = [
 
       <template #empty>
         <div class="py-8 text-center text-sm text-muted">
-          No hay métodos de pago disponibles para el país del tenant.
+          No hay métodos de pago disponibles para el país de tu local.
         </div>
       </template>
     </CrudTable>

@@ -46,7 +46,7 @@ export function useMenuLateral() {
       type: 'trigger',
       to: primera.to,
       // Marcado si la pantalla actual es una de sus hijas o un detalle suyo
-      // (`/compras/123` es de Recepciones).
+      // (`/compras/123` es de Compras).
       active: visibles.some(hija => route.path === hija.to || route.path.startsWith(`${hija.to}/`)),
       // Con el grupo desplegado se resalta solo la hija activa: el padre lleva la marca menta
       // pero no el fondo (auditoría UX 00.5). Colapsado, el padre es lo único que se ve y
@@ -88,19 +88,19 @@ export function useMenuLateral() {
     ]))
     menu.push(...grupo('tienda', 'Tienda Online', 'i-lucide-store', [
       puede('Tienda Online', 'Leer') && { label: 'Catálogo', icon: 'i-lucide-layout-grid', to: '/tienda' },
-      puede('Tienda Online', 'Leer') && { label: 'Mis suscripciones', icon: 'i-lucide-repeat', to: '/tienda/suscripciones' },
-      puede('Tienda Online', 'Leer') && { label: 'Medios de pago', icon: 'i-lucide-wallet', to: '/tienda/medios-pago' },
+      puede('Tienda Online', 'Leer') && { label: 'Mis planes', icon: 'i-lucide-repeat', to: '/tienda/suscripciones' },
+      puede('Tienda Online', 'Leer') && { label: 'Tarjetas', icon: 'i-lucide-wallet', to: '/tienda/medios-pago' },
     ]))
     if (puede('Suscripciones', 'Leer')) {
-      menu.push({ label: 'Suscripciones', icon: 'i-lucide-repeat-2', to: '/suscripciones' })
+      menu.push({ label: 'Suscripciones de clientes', icon: 'i-lucide-repeat-2', to: '/suscripciones' })
     }
     if (puede('Terceros', 'Leer')) {
-      menu.push({ label: 'Terceros', icon: 'i-lucide-contact', to: '/terceros' })
+      menu.push({ label: 'Proveedores', icon: 'i-lucide-contact', to: '/terceros' })
     }
     // Costos desfasados es del módulo Items, pero el aviso nace donde cambia el
     // costo (owner, 2026-10-02).
     menu.push(...grupo('inventario', 'Inventario', 'i-lucide-clipboard-list', [
-      puede('Inventario', 'Leer') && { label: 'Stock', icon: 'i-lucide-boxes', to: '/inventario' },
+      puede('Inventario', 'Leer') && { label: 'Movimientos', icon: 'i-lucide-boxes', to: '/inventario' },
       puede('Inventario', 'Leer') && { label: 'Recuentos', icon: 'i-lucide-clipboard-check', to: '/inventario/recuentos' },
       puede('Inventario', 'Leer') && { label: 'Traslados', icon: 'i-lucide-arrow-left-right', to: '/inventario/traslados' },
       puede('Inventario', 'Leer') && { label: 'Mermas', icon: 'i-lucide-trash-2', to: '/mermas' },
@@ -108,7 +108,7 @@ export function useMenuLateral() {
       puede('Items', 'Leer') && { label: 'Costos desfasados', icon: 'i-lucide-scale', to: '/desfases' },
     ]))
     menu.push(...grupo('compras', 'Compras', 'i-lucide-truck', [
-      puede('Compras', 'Leer') && { label: 'Recepciones', icon: 'i-lucide-package-check', to: '/compras' },
+      puede('Compras', 'Leer') && { label: 'Compras', icon: 'i-lucide-package-check', to: '/compras' },
       // "Por pagar" (spec compras-deuda-proveedor § 8 y § 10, decisión 12): "el
       // bodeguero recibe y el dueño paga" — la entrada es de `Pagar`, no de
       // `Leer` como el resto del módulo (§ 1 del pattern frontend: acá el link

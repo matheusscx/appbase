@@ -50,7 +50,7 @@ test('@smoke el navegador solo habla con el origen del frontend', async ({ page,
   await page.waitForURL('**/select-tenant')
   await page.getByRole('button', { name: 'Demo Restaurante' }).click()
   await page.waitForURL((url) => url.pathname === '/')
-  await expect(page.getByText('Bienvenido')).toBeVisible()
+  await expect(page.getByText('Hola,')).toBeVisible()
 
   expect(ajenas, 'llamadas a la API fuera del origen del frontend').toEqual([])
   // Y que efectivamente hubo llamadas que mirar: si `/api` dejara de usarse el

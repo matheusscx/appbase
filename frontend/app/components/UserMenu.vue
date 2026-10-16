@@ -10,7 +10,7 @@ const fullName = computed(() =>
 )
 
 const rolLabel = computed(() => {
-  if (authStore.isSuperadmin) return 'Super Administrador'
+  if (authStore.isSuperadmin) return 'Superadministrador'
   if (permissionsStore.esAdmin) return 'Administrador'
   return null
 })
@@ -18,7 +18,7 @@ const rolLabel = computed(() => {
 const items = computed<DropdownMenuItem[][]>(() => {
   const main: DropdownMenuItem[] = [
     {
-      label: 'Mi Cuenta',
+      label: 'Mi cuenta',
       icon: 'i-lucide-circle-user',
       onSelect: () => navigateTo('/configuracion/perfil'),
     },
@@ -26,7 +26,7 @@ const items = computed<DropdownMenuItem[][]>(() => {
 
   if (tenantStore.tenants.length > 1) {
     main.push({
-      label: 'Cambiar Institución',
+      label: 'Cambiar de empresa',
       icon: 'i-lucide-building-2',
       onSelect: () => navigateTo('/select-tenant'),
     })
@@ -35,7 +35,7 @@ const items = computed<DropdownMenuItem[][]>(() => {
   return [
     main,
     [{
-      label: 'Cerrar Sesión',
+      label: 'Cerrar sesión',
       icon: 'i-lucide-log-out',
       color: 'error',
       onSelect: () => authStore.logout(),

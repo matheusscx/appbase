@@ -756,13 +756,13 @@ async function restaurarMesaSeleccionada(id: string) {
     <CrudModal
       v-model:open="deleteSalonOpen"
       title="Eliminar salón"
-      message="Se eliminará el salón junto con sus mesas activas. Podés recuperarlo desde «Ver eliminados» (las mesas que se lleve este borrado vuelven con él)."
+      message="Se eliminará el salón junto con sus mesas activas. Puedes recuperarlo desde «Ver eliminados» (las mesas que se lleve este borrado vuelven con él)."
       @confirm="eliminarSalon"
     />
     <CrudModal
       v-model:open="deleteMesaOpen"
       title="Eliminar mesa"
-      message="¿Eliminar esta mesa? Podés recuperarla desde «Ver eliminados»."
+      message="¿Eliminar esta mesa? Puedes recuperarla desde «Ver eliminados»."
       @cancel="mesaToDelete = null"
       @confirm="eliminarMesa"
     />

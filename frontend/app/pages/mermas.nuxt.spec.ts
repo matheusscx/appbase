@@ -270,7 +270,7 @@ describe('mermas — producto con número de serie', () => {
   const botonRegistrar = (w: Wrapper) => w.findAllComponents({ name: 'UButton' })
     .find(b => b.text().trim() === 'Registrar' && b.props('type') === 'submit')!
 
-  const AVISO = 'tiene número de serie: dalo de baja desde Ajuste de stock, eligiendo la unidad'
+  const AVISO = 'tiene número de serie: da de baja el producto desde Ajuste de stock, eligiendo la unidad'
 
   it('al elegirlo, avisa nombrándolo y deshabilita Registrar', async () => {
     ubicacionesBackend = [LOCAL]

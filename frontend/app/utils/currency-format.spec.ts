@@ -207,7 +207,7 @@ describe('parseMontoPegado', () => {
   describe('el borde: lo que decide es el VALOR, no el largo de la cola', () => {
     it('"1.500,00" en pesos son mil quinientos y SÍ caben', () => {
       // Es como cualquier planilla escribe un entero, y es el caso que un
-      // "rechazá si la cola mide más que la escala" descartaba de más. Se
+      // "rechaza si la cola mide más que la escala" descartaba de más. Se
       // reescribe igual, porque con `fraction: 0` la máscara leería `150000`.
       expect(parseMontoPegado('1.500,00', clp)).toEqual({
         tipo: 'corregido',

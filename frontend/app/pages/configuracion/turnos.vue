@@ -198,7 +198,7 @@ function cerrarRestaurar() {
  * desde el modal de colisión.
  *
  * El catch NO cierra todo y tira un toast rojo: un 400 de colisión no es un
- * error terminal sino una pregunta —qué nombre querés usar—, así que abre el
+ * error terminal sino una pregunta —qué nombre quieres usar—, así que abre el
  * segundo modal con la sugerencia del backend. Molde:
  * `configuracion/descuentos.vue`.
  */
@@ -395,7 +395,7 @@ const columns: TableColumn<Turno>[] = [
     <CrudModal
       v-model:open="deleteOpen"
       title="Eliminar turno"
-      message="Se eliminará el turno. Las sesiones ya registradas conservan su trazabilidad, y podés recuperarlo desde «Ver eliminados»."
+      message="Se eliminará el turno. Las sesiones ya registradas conservan su trazabilidad, y puedes recuperarlo desde «Ver eliminados»."
       @cancel="toDelete = null"
       @confirm="eliminar"
     />

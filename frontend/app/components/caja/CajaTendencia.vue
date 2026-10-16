@@ -155,7 +155,7 @@ function onSelectFila(_e: Event, row: Row<TendenciaDescuadres>) {
       </template>
       <template #empty>
         <div v-if="fallo" class="py-10 text-center text-sm text-error">
-          No se pudo cargar la tendencia. Volvé a intentar — esto no significa que
+          No se pudo cargar la tendencia. Vuelve a intentar — esto no significa que
           no haya descuadres.
         </div>
         <div v-else-if="loading" class="py-10 text-center text-sm text-muted">

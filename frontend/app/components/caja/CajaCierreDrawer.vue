@@ -278,7 +278,7 @@ async function confirmarCierre() {
   if (!conciliacionCompleta.value) {
     toast.add({
       title: requiereComentarioSinTestigo.value && !comentario.value.trim()
-        ? 'Nadie firmó como testigo: explicá qué pasó para poder cerrar'
+        ? 'Nadie firmó como testigo: explica qué pasó para poder cerrar'
         : 'Completa el motivo (o comentario) de cada diferencia',
       color: 'warning',
     })
@@ -400,10 +400,10 @@ async function confirmarCierre() {
         @submit="confirmarCierre"
       >
         <p v-if="descuadres.length > 0" class="text-sm text-muted">
-          El conteo no cuadró. Justificá cada diferencia para confirmar el cierre.
+          El conteo no cuadró. Justifica cada diferencia para confirmar el cierre.
         </p>
         <p v-else-if="props.forzado" class="text-sm text-muted">
-          El conteo cuadró. Es un cierre forzado: pedile firma a un garzón en turno o explicá qué pasó.
+          El conteo cuadró. Es un cierre forzado: pídele firma a un garzón en turno o explica qué pasó.
         </p>
 
         <!-- Aviso del umbral. No hay botón que frene: el cajero confirma y
@@ -418,8 +418,8 @@ async function confirmarCierre() {
               ? 'La diferencia superó el límite del local'
               : 'La diferencia es más grande de lo habitual'"
             :description="nivelDescuadre === 'alto'
-              ? 'Podés cerrar igual. Tu cierre le va a quedar al encargado para revisar; contá acá qué pasó y lo revisa con tu explicación al lado.'
-              : 'Podés cerrar igual. Si querés, dejá una nota de qué pasó.'"
+              ? 'Puedes cerrar igual. Tu cierre le va a quedar al encargado para revisar; cuenta acá qué pasó y lo revisa con tu explicación al lado.'
+              : 'Puedes cerrar igual. Si quieres, deja una nota de qué pasó.'"
             :data-qa="`cierre-umbral-${nivelDescuadre}`"
           />
           <UFormField label="¿Qué pasó?" data-qa="cierre-explicacion-descuadre">
@@ -481,7 +481,7 @@ async function confirmarCierre() {
                 class="w-full"
               />
               <p v-else class="text-xs text-warning">
-                No hay motivos activos configurados: describí la diferencia en el comentario.
+                No hay motivos activos configurados: describe la diferencia en el comentario.
               </p>
               <UInput
                 v-model="comentarioJustificacionPorClave[claveDe(l)]"

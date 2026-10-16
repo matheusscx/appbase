@@ -1112,8 +1112,8 @@ describe('configuracion/descuentos — badge de vigencia', () => {
  * prende **`abrirEditar`**.
  *
  * ⚠️ **Esta tabla ya estuvo mal dos veces, siempre por lo mismo:** se escribió con
- * un conteo de tests y después se agregaron tests sin volver a medirla. Si sumás
- * un caso a este bloque, **volvé a correr los mutantes** — no alcanza con agregar
+ * un conteo de tests y después se agregaron tests sin volver a medirla. Si sumas
+ * un caso a este bloque, **vuelve a correr los mutantes** — no alcanza con agregar
  * una fila.
  *
  * 📌 **El tipo se elige emitiendo `update:modelValue` en el `USelectMenu`, no

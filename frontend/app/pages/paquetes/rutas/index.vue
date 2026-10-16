@@ -97,7 +97,7 @@ const columns: TableColumn<HojaRutaFila>[] = [
       <div class="w-full space-y-6" data-qa="rutas-pantalla">
         <CrudPageHeader
           title="Rutas"
-          description="Las hojas de ruta de cada repartidor. Entrá a una para marcar lo que entregó y rendirla."
+          description="Las hojas de ruta de cada repartidor. Entra a una para marcar lo que entregó y rendirla."
         />
 
         <AppRangoFechas v-model:desde="desde" v-model:hasta="hasta" qa="rutas-rango" />
@@ -207,7 +207,7 @@ const columns: TableColumn<HojaRutaFila>[] = [
             <template #empty>
               <div class="py-10 text-center text-sm text-muted" data-qa="rutas-vacio">
                 <UIcon name="i-lucide-route" class="mx-auto mb-2 h-8 w-8 opacity-40" />
-                {{ desde && hasta ? 'No hay hojas de ruta en estas fechas.' : 'Elegí el rango de fechas para ver las hojas de ruta.' }}
+                {{ desde && hasta ? 'No hay hojas de ruta en estas fechas.' : 'Elige el rango de fechas para ver las hojas de ruta.' }}
               </div>
             </template>
           </UTable>

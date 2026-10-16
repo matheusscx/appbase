@@ -14,6 +14,7 @@
 // también trae su propio `sinValorizar` (`anulaciones-reporte.service.ts`) — no solo
 // `ResumenMermas`. Mismo aviso, mismo token, uno por tipo de anulación.
 import type { PerdidasHoy } from '~/types/resumen-negocio'
+import { formatStockCantidad } from '~/utils/stock-format'
 
 defineProps<{ perdidas: PerdidasHoy }>()
 
@@ -38,7 +39,7 @@ const { formatMonto, formatCostoPorMoneda } = useFormatters()
           <li v-for="grupo in perdidas.anulaciones" :key="grupo.tipo" class="text-sm">
             <div class="flex items-center justify-between gap-2">
               <span class="text-default font-medium">{{ tipoMotivoBajaLabel(grupo.tipo) }}</span>
-              <span class="text-muted">{{ grupo.platos }} platos</span>
+              <span class="text-muted">{{ formatStockCantidad(grupo.platos, true) }} {{ Number(grupo.platos) === 1 ? 'plato' : 'platos' }}</span>
             </div>
             <div class="flex items-center justify-between gap-2 text-xs text-muted">
               <span>Precio de carta: {{ formatMonto(grupo.precioCarta) }}</span>
@@ -62,7 +63,7 @@ const { formatMonto, formatCostoPorMoneda } = useFormatters()
           Mermas
         </p>
         <p class="text-sm text-default">
-          {{ perdidas.mermas.cantidad }} mermas · {{ formatCostoPorMoneda(perdidas.mermas.costo) }}
+          {{ perdidas.mermas.cantidad }} {{ perdidas.mermas.cantidad === 1 ? 'merma' : 'mermas' }} · {{ formatCostoPorMoneda(perdidas.mermas.costo) }}
         </p>
         <p v-if="perdidas.mermas.sinValorizar > 0" class="text-xs text-warning">
           {{ perdidas.mermas.sinValorizar }} sin costo cargado

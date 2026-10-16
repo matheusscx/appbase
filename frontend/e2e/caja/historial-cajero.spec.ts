@@ -177,7 +177,7 @@ test('logout con la tarjeta en pantalla: el que entra después en ese navegador 
   // navegación de la SPA, así que lo único que puede vaciarlo es el logout.
   const yo = await api<{ nombre: string }>(page.request, 'get', '/auth/me', { token: escenario.tokenCajero })
   await page.getByRole('button').filter({ hasText: yo.nombre }).first().click()
-  await page.getByRole('menuitem', { name: 'Cerrar Sesión' }).click()
+  await page.getByRole('menuitem', { name: 'Cerrar sesión' }).click()
   await page.waitForURL(url => url.pathname === '/login')
   await page.getByPlaceholder('tu@email.com').fill(ADMIN_PARIS.email)
   await page.locator('input[type="password"]').first().fill(ADMIN_PARIS.password)

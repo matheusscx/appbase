@@ -544,7 +544,7 @@ describe('precargaDescuento', () => {
     const bruto = documentoOk(leerDte(leerFixture('precios-brutos.xml')))
     expect(precargaDescuento(bruto, 0, false, formatMontoStub)).toEqual({
       monto: null,
-      avisos: ['Esta factura trae los precios con IVA incluido: tipeá el neto'],
+      avisos: ['Esta factura trae los precios con IVA incluido: tipea el neto'],
       fueraDeLaBase: [],
     })
   })

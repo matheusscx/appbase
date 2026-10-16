@@ -56,7 +56,7 @@ describe('RolPermisosPorModulo', () => {
       global: { stubs },
     })
 
-    expect(wrapper.text()).toContain('El tenant no tiene módulos contratados.')
+    expect(wrapper.text()).toContain('Tu local no tiene módulos contratados.')
   })
 
   it('deshabilitado muestra su mensaje y no ofrece el buscador', () => {

@@ -32,7 +32,7 @@ interface CategoriaCatalogo { id: string, nombre: string }
 const runtimeConfig = useRuntimeConfig()
 const toast = useToast()
 const apiUrl = runtimeConfig.public.apiUrl
-const { formatFecha, formatMonto } = useFormatters()
+const { formatFecha, formatMonto, formatPorcentajeCorto } = useFormatters()
 const { listar, crear, actualizar, eliminar } = usePromociones()
 
 const promociones = ref<Promocion[]>([])
@@ -333,7 +333,7 @@ function labelTipo(tipo: TipoPromocion): string {
 
 function resumenValor(p: Promocion): string {
   if (p.tipo === 'porcentaje') {
-    return p.valorPorcentaje ? `${(Number(p.valorPorcentaje) * 100).toFixed(0)}% de descuento` : '—'
+    return p.valorPorcentaje ? `${formatPorcentajeCorto(p.valorPorcentaje)} de descuento` : '—'
   }
   if (p.tipo === 'nxm') return resumenNxm(p)
   return p.valorMonto ? formatMonto(p.valorMonto) : '—'

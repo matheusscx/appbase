@@ -440,7 +440,7 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
       <div class="w-full space-y-6">
         <CrudPageHeader
           title="Paquetes"
-          description="Los paquetes que llegan al local. Elegí los disponibles y asignalos a un repartidor para armar su hoja de ruta."
+          description="Los paquetes que llegan al local. Elige los disponibles y asígnalos a un repartidor para armar su hoja de ruta."
         >
           <template #actions>
             <UButton
@@ -603,7 +603,7 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
             <template #empty>
               <AppEstadoLista
                 recurso="los paquetes"
-                vacio="Todavía no hay paquetes. Escanealos o creá el primero con «Nuevo paquete»."
+                vacio="Todavía no hay paquetes. Escanéalos o crea el primero con «Nuevo paquete»."
                 filtrado-texto="Ningún paquete coincide con los filtros."
                 :error="error"
                 :sin-permiso="sinPermiso"
@@ -643,7 +643,7 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
           color="info"
           variant="subtle"
           icon="i-lucide-info"
-          title="Todavía no hay valores por defecto: escribí el precio de envío y el pago al repartidor de este paquete."
+          title="Todavía no hay valores por defecto: escribe el precio de envío y el pago al repartidor de este paquete."
           data-qa="paquete-sin-configurar"
         />
 
@@ -679,7 +679,7 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
         <UFormField label="Nota">
           <UTextarea v-model="form.nota" :rows="2" placeholder="Dejar con el conserje" class="w-full" />
         </UFormField>
-        <UFormField v-if="puedeVerTerceros" label="Remitente" description="Quién manda el paquete, si está registrado en Terceros.">
+        <UFormField v-if="puedeVerTerceros" label="Remitente" description="Quién manda el paquete, si está registrado en Proveedores.">
           <USelectMenu
             v-model="form.remitenteTerceroId"
             :items="remitenteOptions"
@@ -746,7 +746,7 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
           color="warning"
           variant="subtle"
           icon="i-lucide-user-x"
-          title="No hay repartidores activos. Activá o creá uno en Configuración > Repartidores."
+          title="No hay repartidores activos. Activa o crea uno en Configuración > Repartidores."
         />
         <UFormField label="Repartidor" required>
           <USelectMenu
@@ -754,7 +754,7 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
             :items="repartidorOptions"
             value-key="value"
             :search-input="false"
-            placeholder="Elegí un repartidor"
+            placeholder="Elige un repartidor"
             class="w-full"
             aria-label="Repartidor"
           />

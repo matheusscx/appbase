@@ -377,8 +377,9 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         vuelto: venta.boleta.vuelto ?? undefined,
         formatMonto: (v: string) => formatMonto(v),
       })
-    } catch (e: unknown) {
-      toast.add({ title: apiErrorMsg(e, 'Venta registrada, pero no se pudo imprimir la boleta — reimprimila desde la venta'), color: 'warning' })
+    } catch {
+      // Sin cierre automático: es lo único que la cajera tiene que hacer.
+      toast.add({ title: 'La venta quedó registrada, pero la boleta no salió', description: 'Revisa la impresora y reimprime desde Ventas.', color: 'warning', duration: 0 })
     }
 
     // Persiste la venta en el catálogo base; el carrito se limpia después.

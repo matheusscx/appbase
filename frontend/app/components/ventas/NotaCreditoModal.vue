@@ -126,7 +126,7 @@ const itemsOpciones = computed(() =>
   props.opciones.map((o) => {
     const sinCaja = o.mueveCaja && !tieneCaja.value
     const caja = sinCaja
-      ? 'Necesitás una caja física abierta para devolver efectivo.'
+      ? 'Necesitas una caja física abierta para devolver efectivo.'
       : o.mueveCaja
         ? 'La plata sale de tu caja física abierta.'
         : null

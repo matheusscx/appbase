@@ -31,7 +31,7 @@ setup('autenticar y elegir tenant', async ({ page }) => {
   await page.getByRole('button', { name: TENANT }).click()
 
   await page.waitForURL((url) => url.pathname === '/')
-  await expect(page.getByText('Bienvenido')).toBeVisible()
+  await expect(page.getByText('Hola,')).toBeVisible()
 
   await page.context().storageState({ path: authFile })
 })

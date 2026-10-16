@@ -74,7 +74,7 @@ watch(() => props.modulos, () => {
     v-else-if="!modulos.length"
     class="py-2 text-sm text-muted"
   >
-    {{ emptyMessage ?? 'El tenant no tiene módulos contratados.' }}
+    {{ emptyMessage ?? 'Tu local no tiene módulos contratados.' }}
   </div>
 
   <div

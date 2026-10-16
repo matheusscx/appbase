@@ -34,9 +34,9 @@ const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeri
       </div>
     </template>
 
-    <p v-if="datos" class="text-lg font-medium text-highlighted">
-      {{ datos.mesasOcupadas }} de {{ datos.mesasTotal }} mesas ocupadas ·
-      {{ datos.cuentasAbiertas }} cuentas abiertas
+    <p v-if="datos" class="flex flex-wrap gap-x-3 text-lg font-medium text-highlighted">
+      <span class="whitespace-nowrap">{{ datos.mesasOcupadas }} de {{ datos.mesasTotal }} {{ datos.mesasTotal === 1 ? 'mesa ocupada' : 'mesas ocupadas' }}</span>
+      <span class="whitespace-nowrap">{{ datos.cuentasAbiertas }} {{ datos.cuentasAbiertas === 1 ? 'cuenta abierta' : 'cuentas abiertas' }}</span>
     </p>
     <InicioSinDatos v-else :fallo="sinConexion" @reintentar="refrescar" />
 

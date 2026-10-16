@@ -265,7 +265,7 @@ test('cargar con una línea sin precio y confirmar: entran las dos y el costo pr
   // `estado = 'confirmada'` en el filtro del listado). Un borrador sin precio no
   // le debe nada a nadie: no movió stock ni costo. Esta negativa no es vacua: la
   // sostiene la positiva sobre el MISMO locator y el mismo texto, después de
-  // confirmar (buscá `Falta costo` más abajo en este test) — que es donde la
+  // confirmar (busca `Falta costo` más abajo en este test) — que es donde la
   // insignia significa algo. Si alguien la renombra, esa positiva cae.
   await expect(fila.getByText('Falta costo')).toHaveCount(0)
 

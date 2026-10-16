@@ -183,7 +183,7 @@ async function rendir() {
           </div>
 
           <p v-if="!rendida && hoja.enRuta > 0" class="text-sm text-muted" data-qa="hoja-rendir-bloqueo">
-            Quedan {{ hoja.enRuta }} en ruta: marcalos como entregados o no entregados para poder rendir.
+            Quedan {{ hoja.enRuta }} en ruta: márcalos como entregados o no entregados para poder rendir.
           </p>
 
           <section class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]" aria-label="Totales de la hoja">

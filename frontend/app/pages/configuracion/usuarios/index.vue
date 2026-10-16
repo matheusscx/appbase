@@ -204,7 +204,7 @@ async function crearUsuario() {
         ? `Invitación enviada a ${res.correo}`
         : res.pendienteConfirmacion
           ? `Falta que ${res.correo} acepte`
-          : 'Usuario agregado al tenant',
+          : 'Usuario agregado a tu local',
       description: res.invitado
         ? 'Le llega un link para elegir su contraseña. Vence en 7 días.'
         : res.pendienteConfirmacion
@@ -270,7 +270,7 @@ const columns: TableColumn<Member>[] = [
   <div class="space-y-6">
     <CrudPageHeader
       title="Usuarios"
-      description="Da de alta usuarios del tenant y asigna sus roles."
+      description="Da de alta a las personas de tu local y asígnales sus roles."
     >
       <template #actions>
         <UButton icon="i-lucide-plus" @click="abrirAlta">
@@ -383,7 +383,7 @@ const columns: TableColumn<Member>[] = [
 
       <template #empty>
         <div class="py-8 text-center text-sm text-muted">
-          No hay usuarios en este tenant.
+          Aún no hay usuarios en tu local.
         </div>
       </template>
     </CrudTable>
@@ -416,7 +416,7 @@ const columns: TableColumn<Member>[] = [
             avisándole que la estás sumando: se suma
             <strong>recién cuando acepta</strong>, con los roles que elijas acá.
             Si <strong>no tiene cuenta</strong>, le llega un
-            <strong>link por mail</strong> para que elija su contraseña. Vos no
+            <strong>link por mail</strong> para que elija su contraseña. Tú no
             la ves nunca.
           </p>
         </UForm>

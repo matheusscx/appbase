@@ -522,12 +522,12 @@ modal de borrado avise el N.
 
 Páginas de nivel superior (patrón `ventas/*.vue`: cada una con su propio
 `definePageMeta` y `UDashboardPanel` + `AppNavbar`, sin layout padre
-intermedio). Catálogo, Mis suscripciones y Medios de pago son las pantallas del
+intermedio). Catálogo, Mis planes y Tarjetas son las pantallas del
 grupo **Tienda Online** del menú lateral (`composables/useMenuLateral.ts`), detrás
 del mismo permiso `Tienda Online:Leer`; las otras dos dicen abajo cómo se llega:
 
 - `pages/tienda/index.vue` — catálogo + carrito (`/tienda`).
-- `pages/tienda/suscripciones.vue` — **"Mis suscripciones"**: lista de
+- `pages/tienda/suscripciones.vue` — **"Mis planes"**: lista de
   suscripciones del usuario (API-backed), drawer "Nueva suscripción" para
   elegir item suscribible, día de cobro y tarjeta preferida, y acciones
   pausar/reanudar/cancelar. Cancelar abre un **modal informativo** con la

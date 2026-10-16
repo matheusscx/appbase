@@ -21,7 +21,7 @@ const error = ref('')
 const subtitulo = computed(() =>
   enviado.value
     ? 'Si ese correo tiene una cuenta, te llega un link para elegir una contraseña nueva. Vence en una hora.'
-    : 'Ponés tu correo y te mandamos un link para elegir una contraseña nueva.',
+    : 'Pones tu correo y te mandamos un link para elegir una contraseña nueva.',
 )
 
 async function pedir() {
@@ -70,7 +70,7 @@ async function pedir() {
         {{ error }}
       </p>
       <UButton type="submit" block :loading="enviando" :disabled="!correo">
-        Mandame el link
+        Mándame el link
       </UButton>
       <UButton to="/login" block variant="ghost">
         Volver

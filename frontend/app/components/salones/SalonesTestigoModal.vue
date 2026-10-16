@@ -40,7 +40,7 @@ const rechazando = reactive(new Set<string>())
 const resolviendo = reactive(new Set<string>())
 /**
  * El 403 "está vinculado a una cuenta" (`CajaTestigoService.resolver`) NO es un
- * error genérico: es información para el garzón ("firmá desde tu cuenta, no
+ * error genérico: es información para el garzón ("firma desde tu cuenta, no
  * desde el tótem"). Se guarda por solicitud para mostrarse inline, nunca como
  * toast rojo indistinguible de un PIN incorrecto o un fallo de red.
  */
@@ -133,12 +133,12 @@ async function resolver(solicitud: SolicitudTestigo, firma: boolean) {
   <UModal
     v-model:open="open"
     title="Te pidieron dar fe de un cierre"
-    description="Es lo contado en el conteo. Si algo no coincide, rechazá con un comentario."
+    description="Es lo contado en el conteo. Si algo no coincide, rechaza con un comentario."
     :ui="shellUi.modal"
   >
     <template #body>
       <div v-if="props.solicitudes.length === 0" class="py-6 text-center text-sm text-muted">
-        No tenés ninguna firma pendiente.
+        No tienes ninguna firma pendiente.
       </div>
 
       <div v-else class="space-y-6">
@@ -180,7 +180,7 @@ async function resolver(solicitud: SolicitudTestigo, firma: boolean) {
             color="warning"
             variant="subtle"
             icon="i-lucide-info"
-            title="Tenés que firmar desde tu cuenta"
+            title="Tienes que firmar desde tu cuenta"
             description="Este garzón está vinculado a una cuenta: la firma vale desde ahí, no desde un dispositivo compartido."
           />
           <UAlert
@@ -195,7 +195,7 @@ async function resolver(solicitud: SolicitudTestigo, firma: boolean) {
             <UTextarea
               :model-value="comentario(solicitud.id)"
               aria-label="Comentario del rechazo"
-              placeholder="¿Por qué rechazás?"
+              placeholder="¿Por qué rechazas?"
               @update:model-value="(v: string | number) => comentarios.set(solicitud.id, String(v))"
             />
           </UFormField>

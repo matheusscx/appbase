@@ -12,18 +12,18 @@ describe('apiErrorMsg', () => {
   })
 
   it('para Error local usa el message si el fallback es el genérico', () => {
-    expect(apiErrorMsg(new Error('La impresora no respondió (timeout 5 s)')))
-      .toBe('La impresora no respondió (timeout 5 s)')
+    expect(apiErrorMsg(new Error('La impresora no respondió')))
+      .toBe('La impresora no respondió')
   })
 
   it('para Error local antepone el fallback de contexto', () => {
     expect(
       apiErrorMsg(
-        new Error('La impresora no respondió (timeout 5 s)'),
+        new Error('La impresora no respondió'),
         'Venta registrada, pero falló la impresión de la boleta',
       ),
     ).toBe(
-      'Venta registrada, pero falló la impresión de la boleta: La impresora no respondió (timeout 5 s)',
+      'Venta registrada, pero falló la impresión de la boleta: La impresora no respondió',
     )
   })
 
@@ -51,7 +51,7 @@ describe('apiErrorMsg', () => {
   })
 })
 
-// Lo que separa "no se pudo, avisale" de "no se pudo TODAVÍA, ofrecele un
+// Lo que separa "no se pudo, avísale" de "no se pudo TODAVÍA, ofrécele un
 // nombre libre" al restaurar de la papelera. Devolver algo distinto de `null`
 // para un error común haría que la pantalla abriera el modal de colisión con
 // el campo vacío ante cualquier 404 o caída de red.

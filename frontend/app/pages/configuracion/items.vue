@@ -18,7 +18,7 @@ const { puedeCrear, puedeActualizar, puedeEliminar } = usePermisosCrud('Items')
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
-const { formatFecha, formatMonto, formatStock, esAjusteDeValor } = useFormatters()
+const { formatFecha, formatMonto, formatStock, formatCantidadConUnidad, esAjusteDeValor } = useFormatters()
 const { pageSize } = useUserPreferences()
 const { ubicaciones, local, hayBodegas, cargar: cargarUbicaciones } = useUbicaciones()
 
@@ -233,9 +233,9 @@ const eliminarMensaje = computed(() => {
   if (eliminarBloqueado.value) return `El item ${item} está en uso y no se puede eliminar:`
   const extras = usoItem.value?.advertencias ?? []
   if (extras.length) {
-    return `${nombre ? `El item ${item}` : 'Este item'} se ofrece como extra en ${extras.map((a) => a.nombre).join(', ')}. Si lo eliminás dejará de estar disponible en esas recetas.`
+    return `${nombre ? `El item ${item}` : 'Este item'} se ofrece como extra en ${extras.map((a) => a.nombre).join(', ')}. Si lo eliminas dejará de estar disponible en esas recetas.`
   }
-  return `¿Eliminar ${item}? Podés recuperarlo desde «Ver eliminados».`
+  return `¿Eliminar ${item}? Puedes recuperarlo desde «Ver eliminados».`
 })
 
 // Simulador de impacto de costos en recetas y combos: se dispara tras una compra
@@ -737,7 +737,7 @@ const confirmarCambioMonedaLabel = computed(() =>
 
 function elegirMoneda(monedaId: string) {
   // **Cualquier** elección resuelve el aviso anterior, incluso volver a elegir la que ya
-  // está puesta (el gesto de "dejala como está") o una que se aplique de una. Un aviso que
+  // está puesta (el gesto de "déjala como está") o una que se aplique de una. Un aviso que
   // sobrevive a un gesto nuevo sobre el mismo selector queda huérfano: promete un cambio
   // que ya ocurrió, y el click posterior vacía plata sin cambiar ninguna moneda.
   monedaPendiente.value = null
@@ -1844,7 +1844,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
     <!-- Cabecera -->
     <CrudPageHeader
       large
-      title="Items"
+      title="Productos"
       description="Productos, ingredientes, servicios y suscripciones del catálogo"
     >
       <template #actions>
@@ -1935,10 +1935,10 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                      20 kg en bodega y 10 en el local, acá dice 30 y el POS
                      puede decir que no hay: los dos números tienen razón, y
                      llamarlos distinto es lo que evita que se lea como un bug. -->
-                · Stock total: {{ row.original.stock }}
-                <span v-if="row.original.tipo === 'producto' && row.original.modoInventario === 'serie'">(unidades)</span>
-                <span v-else-if="row.original.tipo === 'producto' && row.original.modoInventario === 'lote'">(lotes)</span>
-                <span v-else>{{ row.original.unidadMedida }}</span>
+                · Stock total:
+                <template v-if="row.original.tipo === 'producto' && row.original.modoInventario === 'serie'">{{ formatStock(row.original.stock, null) }} (unidades)</template>
+                <template v-else-if="row.original.tipo === 'producto' && row.original.modoInventario === 'lote'">{{ formatStock(row.original.stock, null) }} (lotes)</template>
+                <template v-else>{{ formatCantidadConUnidad(row.original.stock, row.original.unidadMedida) }}</template>
               </span>
               <span v-if="row.original.tipo === 'producto' || row.original.tipo === 'ingrediente'">
                 · Costo: {{ row.original.costoActual ? formatMonto(row.original.costoActual, row.original.monedaId) : '—' }}
@@ -2480,7 +2480,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 Costo actual: {{ formatMonto(costoRecetaCalculado, form.monedaId) }}
               </p>
               <p v-else class="text-xs text-muted">
-                Completá ingredientes (insumo, cantidad y unidad) para calcular el costo.
+                Completa ingredientes (insumo, cantidad y unidad) para calcular el costo.
               </p>
 
               <div class="flex items-center justify-between pt-2">
@@ -2590,7 +2590,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                 Costo actual: {{ formatMonto(costoComboPreview, form.monedaId) }}
               </p>
               <p v-else class="text-xs text-muted">
-                Agregá componentes (item y cantidad) para calcular el costo.
+                Agrega componentes (item y cantidad) para calcular el costo.
               </p>
             </div>
           </template>
@@ -2751,8 +2751,8 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
                         <span class="font-medium text-default">Afecto</span>: el sistema
                         aplica solo el IVA del país<template v-if="ivaLabel">
                           ({{ ivaLabel }})</template>. No hay que agregarlo como
-                        impuesto: si creás uno llamado «IVA» en Configuración →
-                        Impuestos, se suma al automático y cobrás de más.
+                        impuesto: si creas uno llamado «IVA» en Configuración →
+                        Impuestos, se suma al automático y cobras de más.
                       </p>
                       <p>
                         <span class="font-medium text-default">Exento</span>: no se
@@ -2929,7 +2929,7 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
             variant="subtle"
             icon="i-lucide-circle-alert"
             title="Este ítem todavía no tiene costo"
-            description="La compra se va a registrar igual. Pero mientras el ítem no tenga costo, sus mermas no van a quedar valorizadas — y esas no se corrigen después. Podés cargarle el costo cuando quieras, no hace falta ahora."
+            description="La compra se va a registrar igual. Pero mientras el ítem no tenga costo, sus mermas no van a quedar valorizadas — y esas no se corrigen después. Puedes cargarle el costo cuando quieras, no hace falta ahora."
           />
 
           <!-- Modo cantidad: cantidad + unidad opcional -->

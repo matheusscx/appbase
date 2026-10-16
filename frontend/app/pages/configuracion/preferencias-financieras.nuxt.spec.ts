@@ -218,7 +218,7 @@ describe('preferencias financieras — el candado del país', () => {
     // Gemelo del de arriba, con el estado REAL de un tenant legado: nació con
     // el default viejo, escala 6 y nivel 'linea'. Pisarle solo el nivel lo deja
     // sin salida — 'documento' con escala 6 es un 400 del backend, y la salida
-    // que sugiere ese error («usá linea») es el radio que acabamos de
+    // que sugiere ese error («usa linea») es el radio que acabamos de
     // deshabilitar. Por eso la escala baja acá también.
     prefsBackend = sinLey({
       escalaCalculo: 6,

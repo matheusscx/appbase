@@ -60,7 +60,7 @@ function presentacionLinea(linea: CarritoLinea): string {
 
     <div class="flex-1 min-h-0 overflow-y-auto px-4 sm:px-6">
       <div v-if="!lineas.length" class="text-center text-muted py-10 text-sm">
-        Agregá ítems desde el catálogo.
+        Agrega ítems desde el catálogo.
       </div>
       <ul v-else class="divide-y divide-default">
         <li v-for="(linea, index) in lineas" :key="`${linea.item.id}-${index}`" class="py-2 flex items-center gap-2">

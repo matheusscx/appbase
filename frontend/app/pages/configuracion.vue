@@ -4,6 +4,7 @@ import type { NavigationMenuItem } from '@nuxt/ui'
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 const permissionsStore = usePermissionsStore()
+const route = useRoute()
 
 onMounted(() => {
   if (!permissionsStore.permisos.length && !permissionsStore.loading)
@@ -45,7 +46,7 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
     {
       label: 'Catálogo',
       items: [
-        lee('Items') && { label: 'Items', icon: 'i-lucide-archive', to: '/configuracion/items' },
+        lee('Items') && { label: 'Productos', icon: 'i-lucide-archive', to: '/configuracion/items' },
         admin && { label: 'Categorías', icon: 'i-lucide-tag', to: '/configuracion/categorias' },
         admin && { label: 'Grupos de modificadores', icon: 'i-lucide-list-plus', to: '/configuracion/grupos-modificadores' },
       ],
@@ -53,7 +54,7 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
     {
       label: 'Precios',
       items: [
-        admin && { label: 'Preferencias', icon: 'i-lucide-sliders-horizontal', to: '/configuracion/preferencias-financieras' },
+        admin && { label: 'Preferencias financieras', icon: 'i-lucide-sliders-horizontal', to: '/configuracion/preferencias-financieras' },
         admin && { label: 'Impuestos', icon: 'i-lucide-badge-percent', to: '/configuracion/impuestos' },
         admin && { label: 'Descuentos', icon: 'i-lucide-trending-down', to: '/configuracion/descuentos' },
         admin && { label: 'Recargos', icon: 'i-lucide-trending-up', to: '/configuracion/recargos' },
@@ -65,7 +66,7 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
       label: 'Cobros',
       items: [
         admin && { label: 'Métodos de pago', icon: 'i-lucide-credit-card', to: '/configuracion/metodos-pago' },
-        lee('Pasarelas') && { label: 'Pasarelas', icon: 'i-lucide-plug-zap', to: '/configuracion/pasarelas' },
+        lee('Pasarelas') && { label: 'Pasarelas de pago', icon: 'i-lucide-plug-zap', to: '/configuracion/pasarelas' },
       ],
     },
     {
@@ -80,18 +81,18 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
       items: [
         admin && { label: 'Ubicaciones', icon: 'i-lucide-warehouse', to: '/configuracion/ubicaciones' },
         admin && { label: 'Motivos de baja', icon: 'i-lucide-tags', to: '/configuracion/motivos-baja' },
-        admin && { label: 'Motivos de diferencia', icon: 'i-lucide-clipboard-check', to: '/configuracion/motivos-diferencia-inventario' },
+        admin && { label: 'Motivos de diferencia (inventario)', icon: 'i-lucide-clipboard-check', to: '/configuracion/motivos-diferencia-inventario' },
         admin && { label: 'Motivos de traslado', icon: 'i-lucide-truck', to: '/configuracion/motivos-traslado' },
       ],
     },
     {
       label: 'Restaurante',
       items: [
-        lee('Salones') && { label: 'Salones', icon: 'i-lucide-utensils', to: '/configuracion/salones' },
+        lee('Salones') && { label: 'Salones y mesas', icon: 'i-lucide-utensils', to: '/configuracion/salones' },
         lee('Salones') && { label: 'Garzones', icon: 'i-lucide-users', to: '/configuracion/garzones' },
         lee('Salones') && { label: 'Turnos', icon: 'i-lucide-clock-3', to: '/configuracion/turnos' },
         (lee('Propinas') || permissionsStore.can('Propinas', 'Configurar'))
-        && { label: 'Propinas', icon: 'i-lucide-hand-coins', to: '/configuracion/propinas-distribucion' },
+        && { label: 'Distribución de propinas', icon: 'i-lucide-hand-coins', to: '/configuracion/propinas-distribucion' },
         lee('Impresoras') && { label: 'Impresoras', icon: 'i-lucide-printer', to: '/configuracion/impresoras' },
       ],
     },
@@ -119,7 +120,7 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="Configuración" />
+      <AppNavbar :title="route.path === '/configuracion/perfil' ? 'Mi cuenta' : 'Configuración'" />
     </template>
 
     <template #body>
@@ -128,6 +129,7 @@ const navItems = computed<NavigationMenuItem[][]>(() => {
           <UNavigationMenu
             :items="navItems"
             orientation="vertical"
+            :ui="{ linkLabel: 'whitespace-normal text-clip' }"
           />
         </div>
         <div class="flex-1 overflow-y-auto p-6">

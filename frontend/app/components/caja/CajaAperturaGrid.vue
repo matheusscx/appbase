@@ -25,7 +25,7 @@ onMounted(async () => {
     await cajaStore.cargarCajonesDisponibles()
   }
   catch {
-    toast.add({ title: 'Error al cargar los cajones disponibles', color: 'error' })
+    toast.add({ title: 'Error al cargar las cajas disponibles', color: 'error' })
   }
   finally {
     loadingCajones.value = false
@@ -74,11 +74,11 @@ async function abrir() {
   <div class="w-full">
     <div v-if="loadingCajones" class="py-12 text-center text-sm text-muted">
       <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
-      Cargando cajones…
+      Cargando cajas…
     </div>
 
     <p v-else-if="sinCajones" class="text-sm text-warning">
-      No hay cajas disponibles para abrir. Pedí al administrador que te habilite una.
+      No hay cajas disponibles para abrir. Pide al administrador que te habilite una.
     </p>
 
     <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -95,7 +95,7 @@ async function abrir() {
           </div>
         </template>
         <p class="text-sm text-muted">
-          Disponible. Hacé click para abrir tu caja.
+          Disponible. Toca para abrir tu caja.
         </p>
       </UCard>
     </div>

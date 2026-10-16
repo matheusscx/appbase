@@ -54,13 +54,13 @@ const puedeGuardar = computed(
 const titulo = computed(() => {
   if (cargando.value) return undefined
   if (linkInvalido.value) return 'Este link ya no sirve'
-  return esInvitacion ? 'Elegí tu contraseña' : 'Elegí una contraseña nueva'
+  return esInvitacion ? 'Elige tu contraseña' : 'Elige una contraseña nueva'
 })
 const subtitulo = computed(() => {
   if (cargando.value) return 'Verificando el link…'
   if (linkInvalido.value) return linkInvalido.value
   return esInvitacion
-    ? `Te sumaron a un equipo con ${correo.value}. Elegí una contraseña para entrar.`
+    ? `Te sumaron a un equipo con ${correo.value}. Elige una contraseña para entrar.`
     : `Vas a cambiar la contraseña de ${correo.value}.`
 })
 
@@ -93,7 +93,7 @@ async function guardar() {
       method: 'POST',
       body: { contrasena: form.value.contrasena },
     })
-    toast.add({ title: 'Listo, ya podés entrar', color: 'success' })
+    toast.add({ title: 'Listo, ya puedes entrar', color: 'success' })
     await navigateTo('/login')
   }
   catch (e: unknown) {
@@ -129,7 +129,7 @@ async function guardar() {
           class="w-full"
         />
       </UFormField>
-      <UFormField label="Repetila" required>
+      <UFormField label="Repítela" required>
         <UInput v-model="form.confirmar" type="password" class="w-full" @blur="confirmarTocado = true" />
       </UFormField>
 

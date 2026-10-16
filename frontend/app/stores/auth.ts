@@ -147,7 +147,7 @@ export const useAuthStore = defineStore('auth', () => {
   //
   // Si `my-tenants` o el switch fallan, deja el aviso en `error` —el que lee el
   // login, adonde vuelven las tres pantallas que llegan acá— y devuelve `false`
-  // sin navegar: una lista vacía por error no es "no pertenecés a ninguna
+  // sin navegar: una lista vacía por error no es "no perteneces a ninguna
   // empresa". El texto es propio y no el del servidor (owner, 2026-09-27).
   async function handlePostLogin(): Promise<boolean> {
     error.value = null

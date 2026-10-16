@@ -270,7 +270,7 @@ describe('terceros — cada control con el permiso de SU endpoint', () => {
 
     const wrapper = await montar()
 
-    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(false)
+    expect(tieneBoton(wrapper, 'Nuevo proveedor')).toBe(false)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
     // La tabla sigue cargando: el gate es de escritura, no de lectura.
@@ -283,7 +283,7 @@ describe('terceros — cada control con el permiso de SU endpoint', () => {
 
     const wrapper = await montar()
 
-    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(true)
+    expect(tieneBoton(wrapper, 'Nuevo proveedor')).toBe(true)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
   })
@@ -296,7 +296,7 @@ describe('terceros — cada control con el permiso de SU endpoint', () => {
 
     const wrapper = await montar()
 
-    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(false)
+    expect(tieneBoton(wrapper, 'Nuevo proveedor')).toBe(false)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBeGreaterThan(0)
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
   })
@@ -307,7 +307,7 @@ describe('terceros — cada control con el permiso de SU endpoint', () => {
 
     const wrapper = await montar()
 
-    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(false)
+    expect(tieneBoton(wrapper, 'Nuevo proveedor')).toBe(false)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBeGreaterThan(0)
   })
@@ -318,7 +318,7 @@ describe('terceros — cada control con el permiso de SU endpoint', () => {
 
     const wrapper = await montar()
 
-    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(true)
+    expect(tieneBoton(wrapper, 'Nuevo proveedor')).toBe(true)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBeGreaterThan(0)
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBeGreaterThan(0)
   })
@@ -329,7 +329,7 @@ describe('terceros — cada control con el permiso de SU endpoint', () => {
 
     const wrapper = await montar()
 
-    expect(tieneBoton(wrapper, 'Nuevo tercero')).toBe(false)
+    expect(tieneBoton(wrapper, 'Nuevo proveedor')).toBe(false)
     expect(cuentaPorTitulo(wrapper, 'Editar')).toBe(0)
     expect(cuentaPorTitulo(wrapper, 'Eliminar')).toBe(0)
   })
@@ -393,8 +393,8 @@ describe('terceros — papelera: gateada por `Terceros:Eliminar`', () => {
 
     // Ancla positiva: la pantalla SÍ cargó y muestra sus otros controles, así
     // que la ausencia del toggle es un gate y no una pantalla vacía.
-    expect(wrapper.text()).toContain('Terceros')
-    expect(wrapper.findAll('button').some(b => b.text().includes('Nuevo tercero'))).toBe(true)
+    expect(wrapper.text()).toContain('Proveedores')
+    expect(wrapper.findAll('button').some(b => b.text().includes('Nuevo proveedor'))).toBe(true)
     expect(wrapper.find('[aria-label="Ver eliminados"]').exists()).toBe(false)
 
     wrapper.unmount()
@@ -565,8 +565,8 @@ describe('terceros — "Plazo de pago (días)" (spec compras-deuda-proveedor § 
   it('al crear, un plazo tipeado viaja como número', async () => {
     tercerosBackend = [tercero()]
     const wrapper = await montar()
-    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nuevo tercero'))
-    expect(nuevo, 'botón "Nuevo tercero"').toBeTruthy()
+    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nuevo proveedor'))
+    expect(nuevo, 'botón "Nuevo proveedor"').toBeTruthy()
     await nuevo!.trigger('click')
     await new Promise(r => setTimeout(r, 0))
 
@@ -590,7 +590,7 @@ describe('terceros — "Plazo de pago (días)" (spec compras-deuda-proveedor § 
   it('al crear sin tipear el plazo, manda null (el backend lo trata como default de 30 días)', async () => {
     tercerosBackend = [tercero()]
     const wrapper = await montar()
-    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nuevo tercero'))
+    const nuevo = wrapper.findAll('button').find(b => b.text().includes('Nuevo proveedor'))
     await nuevo!.trigger('click')
     await new Promise(r => setTimeout(r, 0))
 
@@ -651,7 +651,7 @@ describe('terceros — el formulario valida al enviar', () => {
     return c!.find('input')
   }
   async function abrirNuevo(wrapper: Awaited<ReturnType<typeof montar>>) {
-    await wrapper.findAll('button').find(b => b.text().includes('Nuevo tercero'))!.trigger('click')
+    await wrapper.findAll('button').find(b => b.text().includes('Nuevo proveedor'))!.trigger('click')
     await new Promise(r => setTimeout(r, 20))
   }
   async function crear(wrapper: Awaited<ReturnType<typeof montar>>) {
@@ -702,16 +702,16 @@ describe('terceros — la lista que no se pudo leer no es "No hay terceros" (lot
   it('sin permiso (403) dice "Sin acceso", no el vacío falso', async () => {
     fallaListado = 403
     const wrapper = await montar()
-    expect(wrapper.text()).not.toContain('No hay terceros registrados.')
-    expect(wrapper.text()).toContain('Sin acceso a los terceros. Pídele al administrador que te lo habilite.')
+    expect(wrapper.text()).not.toContain('No hay proveedores registrados.')
+    expect(wrapper.text()).toContain('Sin acceso a los proveedores. Pídele al administrador que te lo habilite.')
     wrapper.unmount()
   })
 
   it('con un 500 dice que no pudo cargar y Reintentar vuelve a pedir la lista', async () => {
     fallaListado = 500
     const wrapper = await montar()
-    expect(wrapper.text()).not.toContain('No hay terceros registrados.')
-    expect(wrapper.text()).toContain('No pudimos cargar los terceros')
+    expect(wrapper.text()).not.toContain('No hay proveedores registrados.')
+    expect(wrapper.text()).toContain('No pudimos cargar los proveedores')
 
     fallaListado = null
     await wrapper.find('[data-qa="estado-reintentar"]').trigger('click')

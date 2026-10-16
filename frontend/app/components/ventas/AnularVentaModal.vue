@@ -70,8 +70,8 @@ const puedeConfirmar = computed(() =>
 
 const ayudaReposicion = computed(() =>
   props.tieneLineasDespachadas
-    ? 'Hay platos ya enviados a cocina: eso no vuelve al inventario. Tildalo solo si la mercadería sigue vendible.'
-    : 'Desmarcalo solo si la mercadería ya no está vendible: el descuento queda como pérdida.',
+    ? 'Hay platos ya enviados a cocina: eso no vuelve al inventario. Tíldalo solo si la mercadería sigue vendible.'
+    : 'Desmárcalo solo si la mercadería ya no está vendible: el descuento queda como pérdida.',
 )
 
 async function confirmar() {
@@ -158,7 +158,7 @@ async function confirmar() {
             placeholder="Por qué se anula esta venta"
           />
           <p v-if="motivo && !motivoValido" class="text-xs text-error">
-            Contá el motivo con al menos {{ MOTIVO_MIN }} caracteres: queda como
+            Cuenta el motivo con al menos {{ MOTIVO_MIN }} caracteres: queda como
             registro de auditoría.
           </p>
         </div>

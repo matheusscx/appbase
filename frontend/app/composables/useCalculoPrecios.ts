@@ -153,8 +153,8 @@ export function useCalculoPrecios() {
  * Un 4xx es el motor diciendo que el carrito no se puede calcular —el tope de
  * unidades, un monto que no cabe, una regla que no existe—: reintentar da lo
  * mismo, así que el aviso lleva el motivo que mandó el servidor. Un error de red
- * o un 5xx sí puede salir distinto la próxima vez, y ahí el "intentá de nuevo" es
- * verdad. Hasta el 2026-10-08 los dos decían "Intentá de nuevo": quien cobraba
+ * o un 5xx sí puede salir distinto la próxima vez, y ahí el "intenta de nuevo" es
+ * verdad. Hasta el 2026-10-08 los dos decían "Intenta de nuevo": quien cobraba
  * reintentaba sin saber qué revisar.
  *
  * **El 401 es la excepción**: `useApiFetch` ya intentó el refresh, y si falló
@@ -176,7 +176,7 @@ export function avisoCalculoFallido(
     const motivo = apiErrorMsg(e, '', { detalleLocal: false })
     if (motivo) return { title: titulo, description: motivo }
   }
-  return { title: `${titulo}. Intentá de nuevo.` }
+  return { title: `${titulo}. Intenta de nuevo.` }
 }
 
 /**
@@ -184,7 +184,7 @@ export function avisoCalculoFallido(
  * (arriba de las líneas de la cuenta del salón) en vez de un toast que se va.
  *
  * Suma `reintentable`, que decide si el aviso ofrece volver a calcular. Es
- * `true` exactamente cuando el título dice "Intentá de nuevo": con el motivo
+ * `true` exactamente cuando el título dice "Intenta de nuevo": con el motivo
  * del motor, reintentar da lo mismo, y un botón que no cambia nada miente.
  *
  * `null` con el 401: la sesión se cayó y `useApiFetch` ya manda a `/login`. Un
@@ -234,7 +234,7 @@ function statusDelError(e: unknown): number | undefined {
  * **`error` es el motivo del último cálculo fallido de ESTE carrito**, atado a su
  * clave igual que el resultado: un fallo de otro carrito no lo explica. Cuando
  * `asegurarVigente()` devuelve `null`, la pantalla lo pasa a
- * `avisoCalculoFallido` para decir por qué, en vez de un "intentá de nuevo" que
+ * `avisoCalculoFallido` para decir por qué, en vez de un "intenta de nuevo" que
  * con un 400 del motor miente.
  *
  * @param input     Getter del input de cálculo. `null` o sin líneas = carrito vacío.

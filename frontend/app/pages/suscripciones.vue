@@ -95,7 +95,7 @@ const eliminarModalOpen = ref(false)
 const cancelMensaje = computed(() => {
   const s = cancelando.value
   if (!s) return ''
-  return `La suscripción de ${s.usuarioNombre} seguirá activa hasta el ${formatFecha(diaAnterior(s.proximoCobro))} y se cancelará el ${formatFecha(s.proximoCobro)} a primera hora. ¿Confirmás la cancelación?`
+  return `La suscripción de ${s.usuarioNombre} seguirá activa hasta el ${formatFecha(diaAnterior(s.proximoCobro))} y se cancelará el ${formatFecha(s.proximoCobro)} a primera hora. ¿Confirmas la cancelación?`
 })
 
 function abrirCancelar(s: SuscripcionAdmin) {
@@ -124,7 +124,7 @@ function confirmarEliminar() {
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="Suscripciones">
+      <AppNavbar title="Suscripciones de clientes">
         <template #right>
           <UserMenu />
         </template>
@@ -134,8 +134,8 @@ function confirmarEliminar() {
     <template #body>
       <div class="w-full space-y-6">
         <CrudPageHeader
-          title="Suscripciones"
-          description="Administración de las suscripciones de los clientes del tenant."
+          title="Suscripciones de clientes"
+          description="Administración de las suscripciones de los clientes de tu local."
         >
           <template #actions>
             <UInput
@@ -241,7 +241,8 @@ function confirmarEliminar() {
           v-model:open="cancelModalOpen"
           title="Cancelar suscripción"
           :message="cancelMensaje"
-          confirm-label="Cancelar suscripción"
+          confirm-label="Sí, cancelar suscripción"
+          cancel-label="Volver"
           @cancel="cancelando = null"
           @confirm="confirmarCancelar"
         />

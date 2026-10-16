@@ -39,7 +39,7 @@ function errorOtrosDatos(ventaId: string | null = 'venta-1') {
     status: 422,
     data: {
       statusCode: 422,
-      message: 'Este cobro ya se había registrado con otros datos. Revisá la venta antes de cobrar de nuevo.',
+      message: 'Este cobro ya se había registrado con otros datos. Revisa la venta antes de cobrar de nuevo.',
       ventaId,
     },
   }

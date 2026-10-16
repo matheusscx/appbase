@@ -93,7 +93,7 @@ async function paginaSinScrollHorizontal(page: Page): Promise<boolean> {
 const RUTAS: Array<{ ruta: string; titulo: string }> = [
   { ruta: '/', titulo: 'Inicio' },
   { ruta: '/tienda', titulo: 'Tienda Online' },
-  { ruta: '/inventario', titulo: 'Inventario' },
+  { ruta: '/inventario', titulo: 'Movimientos' },
   { ruta: '/salones', titulo: 'Salones' },
 ]
 

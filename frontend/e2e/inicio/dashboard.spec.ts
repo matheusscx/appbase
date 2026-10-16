@@ -68,7 +68,7 @@ async function entrarComo(
     await page.getByRole('button', { name: tenant ?? 'Demo Restaurante' }).click()
   }
   await page.waitForURL(url => url.pathname === '/')
-  await expect(page.getByText('Bienvenido')).toBeVisible()
+  await expect(page.getByText('Hola,')).toBeVisible()
   return page
 }
 

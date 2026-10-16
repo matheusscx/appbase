@@ -55,7 +55,7 @@ export const PROMOCION_CONFIG: Record<TipoPromocion, PromocionTipoConfig> = {
   porcentaje: {
     campoPorcentaje: true,
     labelPorcentaje: 'Porcentaje de descuento',
-    ayudaPorcentaje: 'Expresar en decimal y menor a 1.00: 0.10 = 10%. Para regalar un producto, usá la cortesía.',
+    ayudaPorcentaje: 'Expresar en decimal y menor a 1.00: 0.10 = 10%. Para regalar un producto, usa la cortesía.',
     placeholderPorcentaje: '0.10 (= 10%)',
     campoCadaN: false,
     campoMonto: false,

@@ -350,7 +350,7 @@ describe('el menú de configuración no puede pedir más que la pantalla', () =>
       .map(a => a.textContent?.trim())
 
     expect(links).toEqual(expect.arrayContaining([
-      'Salones', 'Garzones', 'Turnos', 'Impresoras',
+      'Salones y mesas', 'Garzones', 'Turnos', 'Impresoras',
     ]))
     wrapper.unmount()
   })
@@ -367,7 +367,7 @@ describe('el menú de configuración no puede pedir más que la pantalla', () =>
       .map(a => a.textContent?.trim())
 
     expect(links).toEqual(expect.arrayContaining([
-      'Salones', 'Garzones', 'Turnos', 'Impresoras',
+      'Salones y mesas', 'Garzones', 'Turnos', 'Impresoras',
     ]))
     wrapper.unmount()
   })
@@ -383,7 +383,7 @@ describe('el menú de configuración no puede pedir más que la pantalla', () =>
     const links = [...wrapper.element.querySelectorAll('a')]
       .map(a => a.textContent?.trim())
 
-    expect(links).not.toContain('Salones')
+    expect(links).not.toContain('Salones y mesas')
     expect(links).not.toContain('Impresoras')
     wrapper.unmount()
   })

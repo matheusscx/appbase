@@ -424,7 +424,7 @@ export function lineaFormDesdeDte(
 
 /**
  * El descuento a precargar (§ 3.3): con precios brutos no hay nada que
- * cuantizar (aviso propio, "tipeá el neto"); con alguna línea sin precio la
+ * cuantizar (aviso propio, "tipea el neto"); con alguna línea sin precio la
  * pieza 1 ya exige todas con precio para cargar un descuento, así que se
  * avisa **solo si la factura de verdad trae uno** — si no trae, no hay nada
  * que "no se cargó". Sin ninguno de los dos problemas, delega en
@@ -437,11 +437,11 @@ export function precargaDescuento(
   formatMonto: (v: string) => string,
 ): DescuentoDeFacturaDte {
   if (doc.preciosConIva) {
-    return { monto: null, avisos: ['Esta factura trae los precios con IVA incluido: tipeá el neto'], fueraDeLaBase: [] }
+    return { monto: null, avisos: ['Esta factura trae los precios con IVA incluido: tipea el neto'], fueraDeLaBase: [] }
   }
   if (faltaAlgunPrecio) {
     return doc.descuentosGlobales.length
-      ? { monto: null, avisos: ['La factura trae un descuento, pero hay líneas sin precio: revisalas para que se cargue'], fueraDeLaBase: [] }
+      ? { monto: null, avisos: ['La factura trae un descuento, pero hay líneas sin precio: revísalas para que se cargue'], fueraDeLaBase: [] }
       : { monto: null, avisos: [], fueraDeLaBase: [] }
   }
   return descuentoDeFactura(doc, decimalesMoneda, formatMonto)

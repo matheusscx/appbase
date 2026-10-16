@@ -67,7 +67,7 @@ const mensajePermisosBloqueados = computed(() =>
   esSistema.value
     ? 'Este rol lo define la aplicación: alguien que no es administrador puede '
       + 'concedérselo a una cuenta, así que su lista de permisos no se edita. '
-      + 'Si necesitás otra combinación, creá un rol propio.'
+      + 'Si necesitas otra combinación, crea un rol propio.'
     : 'El rol Administrador tiene acceso completo a todos los módulos contratados; sus permisos no se editan.',
 )
 

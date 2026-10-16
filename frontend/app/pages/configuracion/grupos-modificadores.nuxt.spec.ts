@@ -796,7 +796,7 @@ describe('configuracion/grupos-modificadores — `ids=` que falla', () => {
     await new Promise(r => setTimeout(r, 30))
 
     expect(toasts.map(t => t.title)).toContain(
-      'No se pudo cargar un ítem de las opciones: cerrá y volvé a abrir el grupo',
+      'No se pudo cargar un ítem de las opciones: cierra y vuelve a abrir el grupo',
     )
     expect(escrituras).toEqual([])
 

@@ -53,7 +53,7 @@ async function onGoogle() {
           {{ enviado }}
         </p>
         <p class="text-xs text-muted">
-          Abrí el link para verificar tu correo. Sin ese paso la cuenta todavía no se puede usar.
+          Abre el link para verificar tu correo. Sin ese paso la cuenta todavía no se puede usar.
         </p>
         <UButton to="/login" block variant="outline" color="neutral">
           Ir a iniciar sesión

@@ -124,10 +124,10 @@ const hojaRendida = computed(() => hoja.value?.estado === 'rendida')
 const puedeEscanear = computed(() => !!repartidorId.value && !!fecha.value && !hojaRendida.value)
 
 const placeholderCampo = computed(() => {
-  if (!repartidorId.value) return 'Elegí un repartidor'
-  if (!fecha.value) return 'Elegí la fecha'
+  if (!repartidorId.value) return 'Elige un repartidor'
+  if (!fecha.value) return 'Elige la fecha'
   if (hojaRendida.value) return 'La hoja ya está rendida'
-  return 'Escaneá o tipeá el código'
+  return 'Escanea o tipea el código'
 })
 
 async function cargarHoja() {
@@ -440,7 +440,7 @@ const iconoResultado = {
               :items="repartidorOptions"
               value-key="value"
               :search-input="false"
-              placeholder="Elegí un repartidor"
+              placeholder="Elige un repartidor"
               class="w-full"
               aria-label="Repartidor"
               data-qa="escanear-repartidor"
@@ -469,7 +469,7 @@ const iconoResultado = {
           color="warning"
           variant="subtle"
           icon="i-lucide-user-x"
-          title="No hay repartidores activos. Activá o creá uno en Configuración > Repartidores."
+          title="No hay repartidores activos. Activa o crea uno en Configuración > Repartidores."
         />
 
         <UInput
@@ -577,7 +577,7 @@ const iconoResultado = {
             v-if="!repartidorId"
             class="rounded-lg border border-dashed border-default p-8 text-center text-sm text-muted"
           >
-            Elegí un repartidor para ver y armar su hoja de ruta.
+            Elige un repartidor para ver y armar su hoja de ruta.
           </div>
 
           <template v-else>
@@ -701,7 +701,7 @@ const iconoResultado = {
               class="rounded-lg border border-dashed border-default p-8 text-center text-sm text-muted"
               data-qa="escanear-hoja-vacia"
             >
-              Esta hoja todavía no tiene paquetes. Escaneá el primero.
+              Esta hoja todavía no tiene paquetes. Escanea el primero.
             </p>
           </template>
         </section>

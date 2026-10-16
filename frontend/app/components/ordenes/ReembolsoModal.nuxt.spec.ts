@@ -182,7 +182,7 @@ describe('ReembolsoModal — un reembolso por intento', () => {
       ordenId: 'orden-1',
       estado: 'conciliada',
       reembolsoAprobado: false,
-      motivo: 'el saldo de la tarjeta no cambió. Podés reembolsar de nuevo.',
+      motivo: 'el saldo de la tarjeta no cambió. Puedes reembolsar de nuevo.',
     })
     const wrapper = await abrir('venta-1', 'orden-no-salio')
     await confirmarYEsperar()
@@ -192,7 +192,7 @@ describe('ReembolsoModal — un reembolso por intento', () => {
     const aviso = toastAdd.mock.calls[0]![0] as { title: string, description: string, color: string }
     expect(aviso).toMatchObject({
       title: 'Transbank no hizo el reembolso',
-      description: expect.stringContaining('Podés reembolsar de nuevo'),
+      description: expect.stringContaining('Puedes reembolsar de nuevo'),
       color: 'error',
     })
     expect(clave(1)).not.toBe(clave(0))

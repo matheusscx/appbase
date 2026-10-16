@@ -132,7 +132,7 @@ function confirmar() {
     <template #body>
       <div class="flex flex-col gap-3">
         <p v-if="fijas?.length" class="text-xs text-muted" data-qa="unidades-fijas-aviso">
-          Ya se despachó: las unidades que tiene la línea no se sacan por acá. Para sacar o cambiar una, anulala.
+          Ya se despachó: las unidades que tiene la línea no se sacan por acá. Para sacar o cambiar una, anúlala.
         </p>
         <UInput
           v-model="busqueda"

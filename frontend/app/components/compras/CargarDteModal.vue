@@ -183,7 +183,7 @@ function abrirCompraExistente() {
           <UFormField label="Archivo XML de la factura" :error="errorArchivo ?? undefined">
             <UFileUpload
               accept=".xml,text/xml,application/xml"
-              label="Arrastrá o elegí el XML"
+              label="Arrastra o elige el XML"
               description="Hasta 2 MB"
               data-qa="cargar-dte-archivo"
               @update:model-value="onArchivo"
@@ -196,7 +196,7 @@ function abrirCompraExistente() {
 
         <template v-else-if="paso === 'documentos'">
           <p class="text-sm text-default">
-            El archivo trae varios documentos: elegí cuál cargar.
+            El archivo trae varios documentos: elige cuál cargar.
           </p>
           <ul class="divide-y divide-default">
             <li v-for="(doc, i) in documentos" :key="i">
@@ -215,14 +215,14 @@ function abrirCompraExistente() {
         <template v-else-if="paso === 'proveedor'">
           <p v-if="sinCoincidenciaRut" class="text-sm text-muted" data-qa="cargar-dte-sin-rut">
             No encontramos el RUT {{ documentoElegido?.emisorRut }}. Si el proveedor no existe,
-            pedile a quien tenga el módulo Terceros que lo cree
+            pídele a quien administra los proveedores que lo cree
           </p>
           <UFormField label="¿Qué proveedor es?">
             <USelectMenu
               :items="opcionesProveedor"
               value-key="value"
               searchable
-              placeholder="Elegí el proveedor"
+              placeholder="Elige el proveedor"
               class="w-full"
               data-qa="cargar-dte-proveedor"
               @update:model-value="onElegirProveedor"

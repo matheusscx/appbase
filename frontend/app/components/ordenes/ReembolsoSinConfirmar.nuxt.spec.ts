@@ -19,7 +19,7 @@ const montar = () =>
   })
 const boton = (texto: string) =>
   [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === texto)
-const conflicto = () => Object.assign(new Error('x'), { status: 409, data: { message: 'revisalo en el portal' } })
+const conflicto = () => Object.assign(new Error('x'), { status: 409, data: { message: 'revísalo en el portal' } })
 
 describe('ReembolsoSinConfirmar', () => {
   beforeEach(() => {

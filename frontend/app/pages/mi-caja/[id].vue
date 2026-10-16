@@ -40,7 +40,7 @@ onMounted(async () => {
   catch (e: unknown) {
     // Con el mensaje del backend: a un cajero que recarga su caja recién
     // cerrada le dice que el historial es de supervisión, no que no existe.
-    toast.add({ title: apiErrorMsg(e, 'No tenés acceso a esta caja o no existe', { detalleLocal: false }), color: 'warning' })
+    toast.add({ title: apiErrorMsg(e, 'No tienes acceso a esta caja o no existe', { detalleLocal: false }), color: 'warning' })
     await navigateTo('/mi-caja')
   }
   finally {
@@ -61,7 +61,7 @@ watch(() => cajaStore.activa, (newActiva, oldActiva) => {
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="Detalle de caja" />
+      <AppNavbar title="Mi caja" />
     </template>
 
     <template #body>

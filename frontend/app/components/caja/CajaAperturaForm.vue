@@ -23,7 +23,7 @@ onMounted(async () => {
     await cajaStore.cargarCajonesDisponibles()
   }
   catch {
-    toast.add({ title: 'Error al cargar los cajones disponibles', color: 'error' })
+    toast.add({ title: 'Error al cargar las cajas disponibles', color: 'error' })
   }
   finally {
     loadingCajones.value = false
@@ -84,7 +84,7 @@ async function abrir() {
           class="w-full"
         />
         <p v-if="sinCajones" class="text-sm text-warning mt-1">
-          No hay cajas disponibles para abrir. Pedí al administrador que te habilite una.
+          No hay cajas disponibles para abrir. Pide al administrador que te habilite una.
         </p>
       </UFormField>
 

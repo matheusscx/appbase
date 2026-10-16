@@ -122,7 +122,7 @@ async function cargarMiembros() {
   }
   catch (e: unknown) {
     toast.add({
-      title: apiErrorMsg(e, 'No se pudieron cargar las cuentas del tenant'),
+      title: apiErrorMsg(e, 'No se pudieron cargar las cuentas de tu local'),
       color: 'error',
     })
   }
@@ -156,7 +156,7 @@ const miembros = ref<{ usuarioId: string, nombre: string, apellido: string, esTo
  * backend necesita para **desvincular**.
  *
  * No son sinónimos en el DTO: ausente significa "no toques el vínculo" y `null`
- * es "sacalo". Sin esta traducción, vaciar el selector no desvincularía nada.
+ * es "sácalo". Sin esta traducción, vaciar el selector no desvincularía nada.
  *
  * Dos tipos y no uno: el selector entrega `undefined` cuando nunca se eligió
  * nada y `null` cuando se aprieta la ✕ (`resetModelValueOnClear`), y los dos
@@ -213,7 +213,7 @@ const drawerTitle = computed(() =>
 const textoPinAlta = computed(() =>
   form.value.usuarioId
     ? 'No se generará ningún PIN: al tener cuenta vinculada, lo fija esa persona '
-      + 'desde su perfil y vos nunca lo ves.'
+      + 'desde su perfil y tú nunca lo ves.'
     : 'Al crear el garzón se generará automáticamente un PIN de 6 dígitos y se '
       + 'mostrará una sola vez para que se lo entregues.',
 )
@@ -384,7 +384,7 @@ function avisar(
   if (puedeOperarSalon === false) {
     toast.add({
       title: `${nombre} todavía no puede entrar en modo personal`,
-      description: 'Le falta el permiso para operar el salón. Se lo podés dar desde acá.',
+      description: 'Le falta el permiso para operar el salón. Se lo puedes dar desde acá.',
       color: 'warning',
       actions: [{
         label: 'Dárselo ahora',
@@ -463,7 +463,7 @@ async function guardar() {
         activo: form.value.activo,
         tipo: form.value.tipo,
         // Se manda siempre, incluido `null`: en el DTO, ausente significa "no
-        // toques el vínculo" y `null` es "desvinculá". Omitirlo cuando el
+        // toques el vínculo" y `null` es "desvincula". Omitirlo cuando el
         // selector se vacía dejaría el vínculo vivo.
         usuarioId: form.value.usuarioId,
       })
@@ -493,7 +493,7 @@ async function guardar() {
       // `puedeOperarSalon` se saca del spread porque el de la mutación
       // significa otra cosa que el del listado (ver `useGarzones`), pero desde
       // el 2026-08-16 **sí** se guarda: el listado ya trae el campo, y dejar la
-      // fila recién creada sin él haría que la ficha del garzón que acabás de
+      // fila recién creada sin él haría que la ficha del garzón que acabas de
       // dar de alta sea la única que no sabe si le falta el permiso. La
       // conversión de un significado al otro la hace `factsTrasMutacion`.
       const { pin, advertencias, puedeOperarSalon, ...garzon } = creado
@@ -993,7 +993,7 @@ const columns: TableColumn<Garzon>[] = [
                  Hasta el 2026-08-16 el único lugar donde se podía dar era un
                  toast que se auto-cierra: quien no llegaba a apretarlo volvía
                  al mismo problema. El toast sigue existiendo (es la respuesta
-                 a lo que acabás de guardar), pero ya no es el único.
+                 a lo que acabas de guardar), pero ya no es el único.
                  `v-if="permisoOperar !== null"`: sin cuenta no hay permiso
                  que dar — `otorgarPermisoOperar` responde 400 a eso. -->
             <div v-if="permisoOperar !== null" class="flex flex-wrap items-center gap-2">

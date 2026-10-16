@@ -6,6 +6,8 @@ withDefaults(
     title: string
     message: string
     confirmLabel?: string
+    /** Para un modal que destruye: el que sale dice "Volver" y no repite la palabra del que confirma. */
+    cancelLabel?: string
     confirmColor?: 'error' | 'primary' | 'neutral'
     loading?: boolean
     soloCerrar?: boolean
@@ -15,6 +17,7 @@ withDefaults(
   }>(),
   {
     confirmLabel: 'Eliminar',
+    cancelLabel: 'Cancelar',
     confirmColor: 'error',
     loading: false,
     soloCerrar: false,
@@ -52,7 +55,7 @@ function cancelar() {
         </UButton>
         <template v-else>
           <UButton color="neutral" variant="ghost" @click="cancelar">
-            Cancelar
+            {{ cancelLabel }}
           </UButton>
           <UButton
             :color="confirmColor"

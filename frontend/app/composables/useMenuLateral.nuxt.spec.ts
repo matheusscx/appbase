@@ -93,13 +93,13 @@ const ARBOL_DEL_ADMIN = [
   ]],
   ['Tienda Online', [
     ['Catálogo', '/tienda'],
-    ['Mis suscripciones', '/tienda/suscripciones'],
-    ['Medios de pago', '/tienda/medios-pago'],
+    ['Mis planes', '/tienda/suscripciones'],
+    ['Tarjetas', '/tienda/medios-pago'],
   ]],
-  ['Suscripciones', '/suscripciones'],
-  ['Terceros', '/terceros'],
+  ['Suscripciones de clientes', '/suscripciones'],
+  ['Proveedores', '/terceros'],
   ['Inventario', [
-    ['Stock', '/inventario'],
+    ['Movimientos', '/inventario'],
     ['Recuentos', '/inventario/recuentos'],
     ['Traslados', '/inventario/traslados'],
     ['Mermas', '/mermas'],
@@ -107,7 +107,7 @@ const ARBOL_DEL_ADMIN = [
     ['Costos desfasados', '/desfases'],
   ]],
   ['Compras', [
-    ['Recepciones', '/compras'],
+    ['Compras', '/compras'],
     ['Por pagar', '/compras/por-pagar'],
   ]],
   ['Paquetería', [
@@ -263,13 +263,13 @@ describe('useMenuLateral', () => {
 
     it('un módulo de varias pantallas sigue siendo grupo aunque el rol vea una sola', () => {
       // El bodeguero recibe y no paga (decisión del owner, 2026-10-02): ve el
-      // grupo Compras con "Recepciones" adentro, no un link suelto.
+      // grupo Compras con "Compras" adentro, no un link suelto.
       permisos.value = ['Compras:Leer', 'Compras:Crear', 'Compras:Actualizar', 'Compras:Anular']
       const { items } = montarMenu()
 
       expect(forma(items.value)).toEqual([
         ['Inicio', '/'],
-        ['Compras', [['Recepciones', '/compras']]],
+        ['Compras', [['Compras', '/compras']]],
       ])
     })
   })
@@ -277,7 +277,7 @@ describe('useMenuLateral', () => {
   describe('con el lateral colapsado', () => {
     it('el ícono del grupo lleva a la primera pantalla que el usuario ve', () => {
       // Colapsado no hay acordeón: el clic en el ícono navega. Con solo `Pagar`,
-      // la primera visible es "Por pagar", no "Recepciones".
+      // la primera visible es "Por pagar", no "Compras".
       permisos.value = ['Compras:Pagar']
       const soloPaga = montarMenu()
       expect(soloPaga.items.value.find(i => i.label === 'Compras')?.to).toBe('/compras/por-pagar')

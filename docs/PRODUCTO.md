@@ -1351,7 +1351,7 @@ muestra un **modal informativo** con ambas fechas.
 - Acciones del admin sobre cualquier suscripción: pausar, reanudar, cancelar
   (mismo modal de vigencia) y **eliminar** (soft delete, **solo canceladas** —
   evita borrar contratos vigentes por accidente).
-- La vista del customer pasa a llamarse **"Mis suscripciones"** y solo opera
+- La vista del customer pasa a llamarse **"Mis planes"** (antes "Mis suscripciones") y solo opera
   sobre las suscripciones propias.
 
 **Fuera de alcance (fase futura):** cobro automático de los períodos siguientes al primero — hoy se persiste `proximo_cobro` pero no existe un job/cron que lo ejecute (la cancelación efectiva en `activa_hasta` también es informativa).

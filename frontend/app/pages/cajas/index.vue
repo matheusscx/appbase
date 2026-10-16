@@ -16,7 +16,7 @@ definePageMeta({
       <div class="w-full space-y-6">
         <div class="flex items-center justify-between gap-2">
           <p class="text-sm text-muted">
-            Cajones del tenant y su estado. La apertura de caja se hace en Mi caja.
+            Cajas del local y su estado. La apertura de caja se hace en Mi caja.
           </p>
           <div class="flex items-center gap-2">
             <UButton

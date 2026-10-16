@@ -68,17 +68,17 @@ un grupo, si le queda al menos una pantalla visible (en orden de aparición):
 | Salones | Sesiones | `/sesiones-garzon` | Salones · Leer |
 | Salones | Anulaciones | `/salones/anulaciones` | Salones · Ver todas |
 | Tienda Online | Catálogo | `/tienda` | Tienda Online · Leer |
-| Tienda Online | Mis suscripciones | `/tienda/suscripciones` | Tienda Online · Leer |
-| Tienda Online | Medios de pago | `/tienda/medios-pago` | Tienda Online · Leer |
-| — | Suscripciones | `/suscripciones` | Suscripciones · Leer |
-| — | Terceros | `/terceros` | Terceros · Leer |
-| Inventario | Stock | `/inventario` | Inventario · Leer |
+| Tienda Online | Mis planes | `/tienda/suscripciones` | Tienda Online · Leer |
+| Tienda Online | Tarjetas | `/tienda/medios-pago` | Tienda Online · Leer |
+| — | Suscripciones de clientes | `/suscripciones` | Suscripciones · Leer |
+| — | Proveedores | `/terceros` | Terceros · Leer |
+| Inventario | Movimientos | `/inventario` | Inventario · Leer |
 | Inventario | Recuentos | `/inventario/recuentos` | Inventario · Leer |
 | Inventario | Traslados | `/inventario/traslados` | Inventario · Leer |
 | Inventario | Mermas | `/mermas` | Inventario · Leer |
 | Inventario | Stock mínimo | `/inventario/stock-minimo` | Inventario · Leer |
 | Inventario | Costos desfasados | `/desfases` | Items · Leer |
-| Compras | Recepciones | `/compras` | Compras · Leer |
+| Compras | Compras | `/compras` | Compras · Leer |
 | Compras | Por pagar | `/compras/por-pagar` | Compras · Pagar |
 | Paquetería | Escanear | `/paquetes/escanear` | Paquetería · Leer |
 | Paquetería | Paquetes | `/paquetes` | Paquetería · Leer |
@@ -101,7 +101,7 @@ Pagos y Órdenes viven en Ventas y Costos desfasados en Inventario aunque su per
 otro módulo: son decisiones del owner (el porqué, en
 [patterns/frontend](../patterns/frontend.md) § 1).
 
-*Items*, *Pasarelas* e *Impresoras* no tienen entrada propia en el menú lateral: sus pantallas
+*Productos* (módulo `Items`), *Pasarelas* e *Impresoras* no tienen entrada propia en el menú lateral: sus pantallas
 principales viven dentro de Configuración (§3).
 
 ---
@@ -142,8 +142,12 @@ owner eligió cada una en el selector, y la razón es la de la opción elegida:
   reparto de propinas es entre garzones y cocina, y la impresora principal es la de comanda.
 - **Pasarelas va con Métodos de pago en Cobros**, no en Precios: Precios es cuánto vale lo
   vendido; Cobros, cómo se paga.
-- **Las dos "Motivos de diferencia"** se distinguen por el grupo (Caja / Inventario); el
-  título de la pantalla de inventario sigue diciendo "(inventario)".
+- **Las dos "Motivos de diferencia"** se distinguen por el grupo (Caja / Inventario) y la de
+  inventario lleva "(inventario)" tanto en el menú como en el título.
+- **El menú dice lo mismo que el título de la pantalla** (auditoría UX 07.30, 2026-10-16):
+  Productos (el catálogo, aunque incluya servicios y suscripciones), Preferencias financieras,
+  Pasarelas de pago, Salones y mesas, Distribución de propinas. La ruta y el módulo de permisos
+  siguen siendo `items`, `Items`, etc.: solo cambia lo que se lee.
 
 Suma: Mi cuenta 1 + Organización 4 + Catálogo 3 + Precios 6 + Cobros 2 + Caja 2 + Inventario 4
 + Restaurante 5 = las 27 entradas del menú plano anterior, cada una una vez; más Paquetería 2.
@@ -167,7 +171,7 @@ Suma: Mi cuenta 1 + Organización 4 + Catálogo 3 + Precios 6 + Cobros 2 + Caja 
 
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
-| **Items** | `Items:Leer` | Catálogo completo (tipo, precio, moneda, categoría, impuestos, modo de inventario cantidad/serie/lote, recetas, combos, modificadores, frecuencia de suscripción) |
+| **Productos** | `Items:Leer` | Catálogo completo (tipo, precio, moneda, categoría, impuestos, modo de inventario cantidad/serie/lote, recetas, combos, modificadores, frecuencia de suscripción) |
 | **Categorías** | Admin | Nombre, aplica a productos/servicios/ambos, impresora de comanda, activa |
 | **Grupos de modificadores** | Admin | Grupos reutilizables de opciones (ítem, cantidad, unidad, precio extra) y overrides por receta |
 
@@ -175,7 +179,7 @@ Suma: Mi cuenta 1 + Organización 4 + Catálogo 3 + Precios 6 + Cobros 2 + Caja 
 
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
-| **Preferencias** | Admin | Ver §2: cálculo de descuentos/recargos, fórmula, escala, redondeo, tolerancia, acumulación de promos, umbrales de descuadre |
+| **Preferencias financieras** | Admin | Ver §2: cálculo de descuentos/recargos, fórmula, escala, redondeo, tolerancia, acumulación de promos, umbrales de descuadre |
 | **Impuestos** | Admin | Impuestos personalizados: nombre, porcentaje (decimal), activo. Los de sistema (IVA) no se crean acá |
 | **Descuentos** | Admin | Reglas: tipo (`directo`, `metodo_pago`, `pronto_pago`, `por_mayor`, `por_monto_venta`), nivel línea/venta, porcentaje o monto fijo, valor único o por tramos, métodos de pago, vigencia |
 | **Recargos** | Admin | Reglas: tipo (`general`, `mora`, `recargo_metodo_pago`, `interes_simple`, `interes_compuesto`, `recargo_por_monto_venta`), mismo esquema que descuentos |
@@ -187,7 +191,7 @@ Suma: Mi cuenta 1 + Organización 4 + Catálogo 3 + Precios 6 + Cobros 2 + Caja 
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
 | **Métodos de pago** | Admin | Por método: habilitado, permite vuelto, quién emite el documento (`sistema`/`maquina`/`nadie`). Por tenant: `facturador` |
-| **Pasarelas** | `Pasarelas:Leer` | Pasarela, ambiente (pruebas/producción), modo (mall/individual), códigos de comercio, prioridad, activo; API keys |
+| **Pasarelas de pago** | `Pasarelas:Leer` | Pasarela, ambiente (pruebas/producción), modo (mall/individual), códigos de comercio, prioridad, activo; API keys |
 
 ### Caja
 
@@ -202,7 +206,7 @@ Suma: Mi cuenta 1 + Organización 4 + Catálogo 3 + Precios 6 + Cobros 2 + Caja 
 |---|---|---|
 | **Ubicaciones** | Admin | El local (único, predefinido) y las bodegas |
 | **Motivos de baja** | Admin | Nombre, tipo (`merma`/`cortesia`/`no_elaborado`/`consumo_personal`), activo; los fijos no se editan |
-| **Motivos de diferencia** | Admin | Motivos de descuadre de recuento |
+| **Motivos de diferencia (inventario)** | Admin | Motivos de descuadre de recuento |
 | **Motivos de traslado** | Admin | Motivos de traslado entre ubicaciones |
 
 **Stock mínimo** (mínimo por ítem y ubicación, para el aviso de stock bajo) no está en este
@@ -212,10 +216,10 @@ menú: vive en `/inventario/stock-minimo`, en el grupo Inventario del menú late
 
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
-| **Salones** | `Salones:Leer` | Salones y mesas: forma, tamaño, posición en el plano |
+| **Salones y mesas** | `Salones:Leer` | Salones y mesas: forma, tamaño, posición en el plano |
 | **Garzones** | `Salones:Leer` | Nombre, tipo (garzón/cocina/barra), activo, usuario vinculado, PIN de 6 dígitos, permiso de operar |
 | **Turnos** | `Salones:Leer` | Nombre, hora de inicio y fin, activo |
-| **Propinas** | `Propinas:Leer` o `Propinas:Configurar` | % sugerido, habilitada en POS y en salones; grupos de reparto (tipo, %, criterio, base de ventas, miembros y pesos) |
+| **Distribución de propinas** | `Propinas:Leer` o `Propinas:Configurar` | % sugerido, habilitada en POS y en salones; grupos de reparto (tipo, %, criterio, base de ventas, miembros y pesos) |
 | **Impresoras** | `Impresoras:Leer` | Rol (comanda/boleta), conexión red (host, puerto) o sistema (cola), activo |
 
 El listado de garzones (`GET /garzones`) también lo lee quien tiene `Propinas:Leer` —el

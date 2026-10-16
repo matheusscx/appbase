@@ -25,7 +25,7 @@ const { formatMonto } = useFormatters()
     </template>
 
     <p class="text-lg font-medium text-highlighted">
-      {{ porCobrar.cantidad }} ventas · {{ formatMonto(porCobrar.saldo) }} por cobrar
+      {{ porCobrar.cantidad }} {{ porCobrar.cantidad === 1 ? 'venta' : 'ventas' }} · {{ formatMonto(porCobrar.saldo) }} por cobrar
     </p>
   </UCard>
 </template>

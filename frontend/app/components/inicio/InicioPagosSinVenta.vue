@@ -49,7 +49,7 @@ const { datos, actualizadoEl, sinConexion, oculto, refrescar } = useRefrescoPeri
           <span class="text-sm font-normal text-muted">cobrados sin registrar</span>
         </p>
         <p class="mt-2 text-sm text-muted">
-          Devolvé el cargo o registrá la venta a mano.
+          Devuelve el cargo o registra la venta a mano.
         </p>
       </template>
     </div>

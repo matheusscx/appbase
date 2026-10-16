@@ -242,7 +242,7 @@ function onReembolsoSuccess(payload: {
           variant="subtle"
           icon="i-lucide-triangle-alert"
           title="El comprador pagó y la venta no se registró"
-          :description="`Motivo: ${orden.motivoSinVenta}. Devolvé el cargo con Reembolsar, o registrá la venta a mano y comunicate con el comprador.`"
+          :description="`Motivo: ${orden.motivoSinVenta}. Devuelve el cargo con Reembolsar, o registra la venta a mano y comunicate con el comprador.`"
           data-qa="orden-sin-venta-motivo"
         />
         <UCard>

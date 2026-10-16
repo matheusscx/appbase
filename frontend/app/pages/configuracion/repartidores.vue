@@ -224,7 +224,7 @@ const columns: TableColumn<RepartidorFila>[] = [
 
       <template #empty>
         <div class="py-8 text-center text-sm text-muted">
-          Todavía no hay repartidores. Creá el primero para poder armar hojas de ruta.
+          Todavía no hay repartidores. Crea el primero para poder armar hojas de ruta.
         </div>
       </template>
     </CrudTable>
@@ -279,7 +279,7 @@ const columns: TableColumn<RepartidorFila>[] = [
     <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar repartidor"
-      :message="`¿Eliminar a ${repartidorAEliminar?.nombre ?? 'este repartidor'}? Si ya tiene hojas de ruta no se puede eliminar: desactivalo.`"
+      :message="`¿Eliminar a ${repartidorAEliminar?.nombre ?? 'este repartidor'}? Si ya tiene hojas de ruta no se puede eliminar: desactívalo.`"
       :loading="eliminando"
       @cancel="cancelarEliminar"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"

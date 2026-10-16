@@ -219,7 +219,7 @@ async function enviar() {
             />
           </UFormField>
           <p v-if="medioEsEfectivo" class="text-xs text-muted" data-qa="pagar-aviso-efectivo">
-            Sale de tu caja física abierta: si no tenés una, abrila antes de pagar.
+            Sale de tu caja física abierta: si no tienes una, ábrela antes de pagar.
           </p>
           <UFormField label="Referencia (opcional)">
             <UInput v-model="referencia" class="w-full" data-qa="pagar-referencia" />

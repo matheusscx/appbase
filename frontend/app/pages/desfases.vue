@@ -73,13 +73,13 @@ async function onAplicar(items: AplicarDesfaseItem[]) {
     ]
     if (res.omitidos.length) {
       toast.add({
-        title: `${res.omitidos.length} combo(s) se recalcularon y vuelven a proponerse`,
+        title: `${res.omitidos.length === 1 ? '1 combo se recalculó y vuelve' : `${res.omitidos.length} combos se recalcularon y vuelven`} a proponerse`,
         color: 'warning',
       })
     }
     if (res.afectados.length) {
       toast.add({
-        title: `${res.afectados.length} combo(s) quedaron desfasados por este cambio`,
+        title: `${res.afectados.length === 1 ? '1 combo quedó desfasado' : `${res.afectados.length} combos quedaron desfasados`} por este cambio`,
         color: 'info',
       })
     }
@@ -111,7 +111,7 @@ async function onDescartar(items: DescartarDesfaseItem[]) {
       // ⚠️ El aviso lo arma `avisosDeDesfasesCambiados`, compartido con el
       // drawer, y no un texto propio: acá se mandaba uno solo sobre TODO
       // `cambiados`, así que una fila que volvió `null` —ya no está desfasada—
-      // recibía "mirá el número nuevo y decidí otra vez" justo cuando el
+      // recibía "mira el número nuevo y decide otra vez" justo cuando el
       // `cargar()` de arriba la sacaba de la lista.
       for (const aviso of avisosDeDesfasesCambiados(res.cambiados)) {
         toast.add(aviso)

@@ -73,7 +73,7 @@ export interface GarzonConAdvertencias extends Garzon {
    *
    * Desde el 2026-08-16 el listado también lo trae, pero **solo si se lo
    * pide** (`listar(_, true)`). Este campo sigue existiendo aparte porque
-   * significa otra cosa: acá es *"cómo quedó después de lo que acabás de
+   * significa otra cosa: acá es *"cómo quedó después de lo que acabas de
    * guardar"*, y por eso es `null` cuando la mutación no tocó el vínculo.
    */
   puedeOperarSalon: boolean | null
@@ -177,7 +177,7 @@ export function useGarzones() {
   const actualizar = (
     id: string,
     // `usuarioId` acepta `null` explícito: en el DTO, ausente es "no toques el
-    // vínculo" y `null` es "desvinculá".
+    // vínculo" y `null` es "desvincula".
     body: { nombre?: string, activo?: boolean, tipo?: TipoGarzon, usuarioId?: string | null },
   ) =>
     useApiFetch<GarzonConAdvertencias>(`${apiUrl}/garzones/${id}`, { method: 'PATCH', body })

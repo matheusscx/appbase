@@ -60,15 +60,15 @@ interactivo; las siete preguntas salieron en la opción recomendada):
 
 - **Va al grupo del módulo cuyo permiso la muestra.** Un módulo con varias pantallas es un
   grupo —Ventas, Salones, Tienda Online, Inventario, Compras— y lo sigue siendo aunque el rol
-  vea una sola (el bodeguero ve Compras ▸ Recepciones). Uno de una sola pantalla va suelto
-  (Mi caja, Cajas, Propinas, Suscripciones, Terceros); si una pantalla nueva le da la segunda,
+  vea una sola (el bodeguero ve Compras ▸ Compras). Uno de una sola pantalla va suelto
+  (Mi caja, Cajas, Propinas, Suscripciones de clientes, Proveedores); si una pantalla nueva le da la segunda,
   pasa a ser grupo.
 - **Las pantallas de otro módulo que viven en un grupo son decisiones, no descuidos**: Pagos y
   Órdenes en Ventas (son los cobros de lo vendido) y Costos desfasados (`Items`) en Inventario
-  (el aviso nace donde cambia el costo). "Mis suscripciones" y "Medios de pago" son del que
-  compra y quedan en Tienda Online, separadas de "Suscripciones", que es la del local.
+  (el aviso nace donde cambia el costo). "Mis planes" y "Tarjetas" son del que
+  compra y quedan en Tienda Online, separadas de "Suscripciones de clientes", que es la del local.
 - **La pantalla principal de un grupo se nombra por lo que muestra**, no repite al grupo:
-  Stock, Historial, Mesas, Catálogo, Recepciones.
+  Movimientos, Historial, Mesas, Catálogo, Compras.
 - **El gate es el de la ruta, exacto** (`puede('Compras', 'Pagar') && { … }`). Casi todas piden
   `Leer`; las que no, a propósito: Punto de venta (`Ventas:Crear`), Mesas (`Salones:Operar`),
   Anulaciones (`Salones:Ver todas`) y Por pagar (`Compras:Pagar`). Un grupo aparece solo si le

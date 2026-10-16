@@ -164,7 +164,7 @@ describe('useImpresoras — impresoras operativas (imprimir sin Impresoras:Leer)
     ]
     vi.useFakeTimers()
     const promesa = useImpresoras().imprimirPrecuenta(precuentaMinima())
-    const assertion = expect(promesa).rejects.toThrow('No se pudo conectar con QZ Tray (timeout 5 s)')
+    const assertion = expect(promesa).rejects.toThrow('No se pudo conectar con el servicio de impresión')
     await vi.advanceTimersByTimeAsync(5_000)
     await assertion
     vi.useRealTimers()
@@ -183,7 +183,7 @@ describe('useImpresoras — impresoras operativas (imprimir sin Impresoras:Leer)
     expect(qzMock.websocket.disconnect).toHaveBeenCalledTimes(1)
 
     const segundo = useImpresoras().imprimirPrecuenta(precuentaMinima())
-    const assertion = expect(segundo).rejects.toThrow('No se pudo conectar con QZ Tray (timeout 5 s)')
+    const assertion = expect(segundo).rejects.toThrow('No se pudo conectar con el servicio de impresión')
     await vi.advanceTimersByTimeAsync(5_000)
     await assertion
     expect(qzMock.websocket.connect).toHaveBeenCalledTimes(2)
@@ -230,7 +230,7 @@ describe('useImpresoras — impresoras operativas (imprimir sin Impresoras:Leer)
     // no hace falta avanzar el reloj, y si hubiera un reintento automático
     // `connect` se habría llamado una tercera vez.
     await expect(useImpresoras().imprimirPrecuenta(precuentaMinima()))
-      .rejects.toThrow('QZ Tray está esperando que autorices la conexión en su ventana')
+      .rejects.toThrow('El servicio de impresión espera que autorices la conexión en su ventana')
     expect(qzMock.websocket.connect).toHaveBeenCalledTimes(2)
 
     vi.useRealTimers()
@@ -244,7 +244,7 @@ describe('useImpresoras — impresoras operativas (imprimir sin Impresoras:Leer)
       Promise.reject(new Error('Unable to establish connection with QZ')))
 
     await expect(useImpresoras().imprimirPrecuenta(precuentaMinima()))
-      .rejects.toThrow('No se pudo imprimir. Revisá la impresora o QZ Tray.')
+      .rejects.toThrow('No se pudo imprimir. Revisa la impresora.')
     expect(qzMock.websocket.connect).toHaveBeenCalledTimes(1)
     expect(qzMock.websocket.disconnect).not.toHaveBeenCalled()
   })

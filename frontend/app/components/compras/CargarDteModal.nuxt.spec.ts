@@ -259,7 +259,7 @@ describe('CargarDteModal — proveedor ambiguo o ausente', () => {
     expect(enviados).toHaveLength(1) // el primer intento, sin proveedorId
     expect(enviados[0]!.body).not.toHaveProperty('proveedorId')
     expect(bodyFind('[data-qa="cargar-dte-sin-rut"]')!.textContent)
-      .toContain('No encontramos el RUT 11.111.111-1. Si el proveedor no existe, pedile a quien tenga el módulo Terceros que lo cree')
+      .toContain('No encontramos el RUT 11.111.111-1. Si el proveedor no existe, pídele a quien administra los proveedores que lo cree')
 
     // Segunda vuelta: ya con proveedor resuelto y sin ambigüedad.
     respuestaLectura = { ...respuestaLectura as LecturaDteRespuesta, proveedor: { id: 'prov-2', nombre: 'Otro Proveedor' } }

@@ -11,8 +11,8 @@ describe('conTimeout', () => {
     const lenta = new Promise<string>((resolve) => {
       setTimeout(() => resolve('tarde'), 10_000)
     })
-    const pending = conTimeout(lenta, 5_000, 'La impresora no respondió (timeout 5 s)')
-    const assertion = expect(pending).rejects.toThrow('La impresora no respondió (timeout 5 s)')
+    const pending = conTimeout(lenta, 5_000, 'La impresora no respondió')
+    const assertion = expect(pending).rejects.toThrow('La impresora no respondió')
     await vi.advanceTimersByTimeAsync(5_000)
     await assertion
     vi.useRealTimers()

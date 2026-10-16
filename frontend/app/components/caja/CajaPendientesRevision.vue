@@ -113,11 +113,11 @@ function claseMonto(val: string | null): string {
           <p class="text-lg font-semibold text-default">{{ resumen.conDescuadre }}</p>
         </div>
         <div>
-          <p class="text-xs text-muted">Nivel aviso</p>
+          <p class="text-xs text-muted">Diferencia grande</p>
           <p class="text-lg font-semibold text-warning">{{ resumen.nivelAviso }}</p>
         </div>
         <div>
-          <p class="text-xs text-muted">Nivel alto</p>
+          <p class="text-xs text-muted">Diferencia muy grande</p>
           <p class="text-lg font-semibold text-error">{{ resumen.nivelAlto }}</p>
         </div>
         <div>
@@ -218,7 +218,7 @@ function claseMonto(val: string | null): string {
 
         <template #empty>
           <div v-if="fallo" class="py-10 text-center text-sm text-error">
-            No se pudo cargar la bandeja. Volvé a intentar — esto no significa que
+            No se pudo cargar la bandeja. Vuelve a intentar — esto no significa que
             no haya cierres pendientes.
           </div>
           <div v-else-if="loading" class="py-10 text-center text-sm text-muted">

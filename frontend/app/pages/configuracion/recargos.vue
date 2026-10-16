@@ -32,6 +32,7 @@ interface Regla {
 
 const runtimeConfig = useRuntimeConfig()
 const toast = useToast()
+const { formatMonto, formatPorcentajeCorto } = useFormatters()
 const apiUrl = runtimeConfig.public.apiUrl
 
 const { verEliminados, restaurar, formatearBorradoPor } = usePapelera('recargos')
@@ -535,7 +536,7 @@ const avisoPerdida = computed(() => {
   if (escalonesAPerder.value && mostrarTramos.value) {
     return {
       titulo: 'El importe quedó sin cargar',
-      mensaje: `«${form.value.nombre}» tiene ${perdida}, y el formulario quedó sin ninguno. Cargalos de nuevo: al guardar así, el servidor lo rechaza.`,
+      mensaje: `«${form.value.nombre}» tiene ${perdida}, y el formulario quedó sin ninguno. Cárgalos de nuevo: al guardar así, el servidor lo rechaza.`,
       confirmLabel: 'Guardar igual',
     }
   }
@@ -545,7 +546,7 @@ const avisoPerdida = computed(() => {
   if (valorSinCargar.value) {
     return {
       titulo: 'El importe quedó sin cargar',
-      mensaje: `«${form.value.nombre}» tiene ${perdida}, y el formulario quedó vacío. Cargalo de nuevo: al guardar así, el servidor lo rechaza.`,
+      mensaje: `«${form.value.nombre}» tiene ${perdida}, y el formulario quedó vacío. Cárgalo de nuevo: al guardar así, el servidor lo rechaza.`,
       confirmLabel: 'Guardar igual',
     }
   }
@@ -749,7 +750,7 @@ function cerrarRestaurar() {
  * desde el modal de colisión.
  *
  * El catch NO cierra todo y tira un toast rojo: un 400 de colisión no es un
- * error terminal sino una pregunta —qué nombre querés usar—, así que abre el
+ * error terminal sino una pregunta —qué nombre quieres usar—, así que abre el
  * segundo modal con la sugerencia del backend. Solo los errores de verdad
  * (404 "no está en la papelera", red) terminan en toast.
  * Molde: `configuracion/descuentos.vue`.
@@ -887,11 +888,11 @@ const columns: TableColumn<Regla>[] = [
                 {{ row.original.tramos.length }} tramo{{ row.original.tramos.length !== 1 ? 's' : '' }}
               </template>
               <template v-else-if="row.original.valorPorcentaje || row.original.valorMonto">
-                {{ row.original.valorPorcentaje ? `${(Number(row.original.valorPorcentaje) * 100).toFixed(0)}%` : row.original.valorMonto }}
+                {{ row.original.valorPorcentaje ? formatPorcentajeCorto(row.original.valorPorcentaje) : formatMonto(row.original.valorMonto) }}
                 ({{ row.original.valorPorcentaje ? 'porcentaje' : 'monto fijo' }})
               </template>
               <template v-else>
-                {{ row.original.metodoPagoIds?.length ? `${row.original.metodoPagoIds.length} método(s) de pago` : '—' }}
+                {{ row.original.metodoPagoIds?.length ? `${row.original.metodoPagoIds.length} ${row.original.metodoPagoIds.length === 1 ? 'método' : 'métodos'} de pago` : '—' }}
               </template>
             </p>
             <p class="text-xs text-muted">
@@ -1203,7 +1204,7 @@ const columns: TableColumn<Regla>[] = [
     <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar recargo"
-      message="¿Eliminar este recargo? Podés recuperarlo desde «Ver eliminados»."
+      message="¿Eliminar este recargo? Puedes recuperarlo desde «Ver eliminados»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
     />

@@ -89,12 +89,12 @@ test.afterEach(async ({ request }) => {
 
 /**
  * El botón "Compras" para volver, dentro del encabezado de la página. En la
- * barra lateral "Compras" es el grupo —un botón, no un link— y su pantalla se
- * llama "Recepciones", así que el link con ese nombre exacto es solo este. Si
+ * barra lateral "Compras" es el grupo (un botón) y su pantalla también se llama
+ * "Compras" (un link): este se distingue por no colgar del menú lateral. Si
  * el lateral volviera a tener uno, el modo estricto de Playwright lo avisa.
  */
 function botonVolverACompras(page: Page): Locator {
-  return page.getByRole('link', { name: 'Compras', exact: true })
+  return page.locator('xpath=//a[normalize-space(.)="Compras" and not(ancestor::*[@data-qa="menu-lateral"])]')
 }
 
 /**

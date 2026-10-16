@@ -79,7 +79,7 @@ test.describe('entrar directo (F5) con un rol del tenant', () => {
   test.use({ storageState: { cookies: [], origins: [] } })
 
   for (const caso of [
-    { correo: 'aprobador@paris.cl', ruta: '/inventario/recuentos', grupo: 'Inventario', pantalla: 'Recuentos', hermana: 'Stock' },
+    { correo: 'aprobador@paris.cl', ruta: '/inventario/recuentos', grupo: 'Inventario', pantalla: 'Recuentos', hermana: 'Movimientos' },
     { correo: 'vendedor@paris.cl', ruta: '/ventas/pos', grupo: 'Ventas', pantalla: 'Punto de venta', hermana: 'Historial' },
   ]) {
     test(`${caso.ruta} abre ${caso.grupo} y marca solo ${caso.pantalla}`, async ({ page }) => {
@@ -104,7 +104,7 @@ test('navegar a otro grupo no cierra el que estaba abierto', async ({ page }) =>
   const menu = menuLateral(page)
 
   await menu.getByRole('button', { name: 'Compras', exact: true }).click()
-  await menu.getByRole('link', { name: 'Recepciones', exact: true }).click()
+  await menu.getByRole('link', { name: 'Compras', exact: true }).click()
   await page.waitForURL(url => url.pathname === '/compras')
 
   await expect(menu.getByRole('button', { name: 'Inventario', exact: true }))

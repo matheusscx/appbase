@@ -158,7 +158,7 @@ test('el cajero elige la unidad usada: queda en el carrito y la venta sale con e
   // 7. Plazo propio: entre el aviso y el carrito vacío se intenta imprimir la
   //    boleta, y esa espera sola agota los 5 s por defecto.
   await expect(page.getByText('Venta pagada').first()).toBeVisible({ timeout: 15_000 })
-  await expect(page.getByText('Agregá ítems desde el catálogo.')).toBeVisible({
+  await expect(page.getByText('Agrega ítems desde el catálogo.')).toBeVisible({
     timeout: 15_000,
   })
 

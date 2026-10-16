@@ -41,7 +41,7 @@ import { shellUi } from '~/utils/ui-shell'
 // Esconder no es seguridad (invariante 6): el candado real sigue siendo el
 // `@RequiresPermiso` del backend.
 //
-// El `permisoLabel` NO es cosmético: el aviso del middleware es *"No tenés
+// El `permisoLabel` NO es cosmético: el aviso del middleware es *"No tienes
 // acceso al módulo ${label}"*, y con el default diría "…al módulo Salones",
 // que para este usuario es falso —tiene el módulo, administra salones—. El
 // label es lo único que ese mensaje deja ajustar (no puede nombrar la acción).
@@ -528,7 +528,7 @@ const TEXTO_INVALIDACION: Record<
  * JWT, ver más abajo), así que este aviso no describe un bloqueo, solo el
  * límite del tótem. Los dos textos lo dicen explícito.
  *
- * ⚠️ Prometer "desde este dispositivo trabajás normal" es seguro ACÁ y no en
+ * ⚠️ Prometer "desde este dispositivo trabajas normal" es seguro ACÁ y no en
  * `MiPinForm.vue` (revisión final, 2026-08-15). Este bloque solo se muestra
  * con `garzonPersonal`, que sale de `GET /garzones/mi-vinculo` —ruta con
  * `@RequiresPermiso('Salones', 'Operar')`—: quien lee esto ya probó que
@@ -554,8 +554,8 @@ const avisoPin = computed(() => {
     (e): e is EventoPin & { tipo: 'invalidado_por_encargado' | 'invalidado_por_vinculo' } =>
       e.tipo === 'invalidado_por_encargado' || e.tipo === 'invalidado_por_vinculo',
   )
-  const sufijo = 'Desde este dispositivo trabajás normal; para el tótem compartido, hace falta ponerlo desde tu perfil.'
-  if (!ultima) return `Todavía no tenés PIN. ${sufijo}`
+  const sufijo = 'Desde este dispositivo trabajas normal; para el tótem compartido, hace falta ponerlo desde tu perfil.'
+  if (!ultima) return `Todavía no tienes PIN. ${sufijo}`
   // `null` = la cuenta que hizo el cambio ya se dio de baja: mismo fallback
   // que usa `PinEventosLista.vue` para el mismo dato, no un rol inventado
   // ("el encargado") que ya no está respaldado.
@@ -793,7 +793,7 @@ async function cargarPendientesTestigo(
       testigoModalOpen.value = true
     }
     else if (!opciones?.silencioso) {
-      toast.add({ title: 'No tenés ninguna firma pendiente', color: 'neutral' })
+      toast.add({ title: 'No tienes ninguna firma pendiente', color: 'neutral' })
     }
   }
   catch (e: unknown) {
@@ -929,33 +929,33 @@ async function abrirCobro() {
       if (!(e instanceof Error) || e.message !== MENSAJE_LIMITE_ABRIR_COBRO) throw e
       if (cobroPedidoId.value === cuenta.id && activeCuenta.value?.id === cuenta.id) {
         // El aviso nombra lo que quedó colgado (owner, 2026-09-13), para que el garzón no repita lo
-        // que ya viaja: un "revisá la cuenta" genérico lo mandaba a buscar el producto, no verlo y
+        // que ya viaja: un "revisa la cuenta" genérico lo mandaba a buscar el producto, no verlo y
         // agregarlo otra vez. Uno por caso, porque un quitado no "aparece": desaparece. Si el request
         // termina fallando, sale el error de siempre y ahí sí sabe que tiene que repetirlo.
         const cambios = new Set(lineasEnVuelo.get(cuenta.id)?.values() ?? [])
-        let aviso = { title: 'No se pudo calcular el total', description: 'Revisá la conexión y tocá Cobrar de nuevo.' }
+        let aviso = { title: 'No se pudo calcular el total', description: 'Revisa la conexión y toca Cobrar de nuevo.' }
         if (cambios.size > 1) {
           aviso = {
             title: 'Todavía se están guardando cambios en la cuenta',
-            description: 'Esperá a que terminen y después tocá Cobrar de nuevo.',
+            description: 'Espera a que terminen y después toca Cobrar de nuevo.',
           }
         }
         else if (cambios.has('agregar')) {
           aviso = {
             title: 'Todavía se está guardando lo último que agregaste',
-            description: 'No lo vuelvas a agregar: va a aparecer en la cuenta cuando termine. Después tocá Cobrar de nuevo.',
+            description: 'No lo vuelvas a agregar: va a aparecer en la cuenta cuando termine. Después toca Cobrar de nuevo.',
           }
         }
         else if (cambios.has('quitar')) {
           aviso = {
             title: 'Todavía se está quitando lo último que sacaste',
-            description: 'No lo vuelvas a quitar: va a desaparecer de la cuenta cuando termine. Después tocá Cobrar de nuevo.',
+            description: 'No lo vuelvas a quitar: va a desaparecer de la cuenta cuando termine. Después toca Cobrar de nuevo.',
           }
         }
         else if (cambios.has('cambiar')) {
           aviso = {
             title: 'Todavía se están guardando las unidades que elegiste',
-            description: 'No las vuelvas a elegir: van a aparecer en la línea cuando termine. Después tocá Cobrar de nuevo.',
+            description: 'No las vuelvas a elegir: van a aparecer en la línea cuando termine. Después toca Cobrar de nuevo.',
           }
         }
         toast.add({ ...aviso, color: 'warning' })
@@ -1458,8 +1458,8 @@ async function fusionarSeleccionadas() {
       // no llegó a abrir nada.
       toast.add({
         title: estabaAbierto
-          ? 'El cobro se cerró: esa cuenta entró en la fusión. Volvé a cargarlo en la fusionada.'
-          : 'La cuenta que ibas a cobrar entró en la fusión. Cobrala desde la fusionada.',
+          ? 'El cobro se cerró: esa cuenta entró en la fusión. Vuelve a cargarlo en la fusionada.'
+          : 'La cuenta que ibas a cobrar entró en la fusión. Cóbrala desde la fusionada.',
         color: 'warning',
       })
     }
@@ -1500,8 +1500,8 @@ async function fusionarSeleccionadas() {
     //
     // ⚠️ **No es el gemelo exacto del `volverACuentas()` de `confirmarCancelar`**,
     // aunque lo parezca y así estuvo escrito acá un rato: aquél pregunta *"¿sigo
-    // en la cuenta que murió? entonces sacame"*, y éste *"¿estoy en el listado o
-    // en una que murió? entonces llevame"*. La pregunta por las muertas es la
+    // en la cuenta que murió? entonces sácame"*, y éste *"¿estoy en el listado o
+    // en una que murió? entonces llévame"*. La pregunta por las muertas es la
     // misma; el destino, no.
     if (!activeCuenta.value || fusedIds.has(activeCuenta.value.id)) {
       activeCuenta.value = cuenta
@@ -2517,7 +2517,7 @@ async function enviarComanda() {
     })
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al enviar la comanda (¿QZ Tray está abierto?)'), color: 'error' })
+    toast.add({ title: apiErrorMsg(e, 'No se pudo enviar la comanda. Revisa la impresora'), color: 'error' })
   }
   finally {
     enviandoComanda.value = false
@@ -2647,7 +2647,7 @@ async function imprimirPrecuenta() {
     })
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al imprimir la precuenta (¿QZ Tray está abierto?)'), color: 'error' })
+    toast.add({ title: apiErrorMsg(e, 'No se pudo imprimir la precuenta. Revisa la impresora'), color: 'error' })
   }
   finally {
     imprimiendoPrecuenta.value = false
@@ -2908,7 +2908,7 @@ async function cerrarCuentaConPin(
     // los junte.
     if (cobroEnVueloId.value !== cuentaCerrada.id) {
       toast.add({
-        title: 'El cobro no salió: esa cuenta entró en la fusión. Cobrala de nuevo desde la fusionada.',
+        title: 'El cobro no salió: esa cuenta entró en la fusión. Cóbrala de nuevo desde la fusionada.',
         color: 'warning',
       })
       return
@@ -2977,8 +2977,9 @@ async function cerrarCuentaConPin(
         formatMonto: (v: string) => formatMonto(v),
       })
     }
-    catch (e: unknown) {
-      toast.add({ title: apiErrorMsg(e, 'Cuenta cerrada, pero no se pudo imprimir la boleta — reimprimila desde la venta'), color: 'warning' })
+    catch {
+      // Sin cierre automático: es lo único que la persona tiene que hacer.
+      toast.add({ title: 'La cuenta quedó cerrada, pero la boleta no salió', description: 'Revisa la impresora y reimprime desde Ventas.', color: 'warning', duration: 0 })
     }
 
     // El filtro va sin condicionar: si el garzón se cambió de mesa, `cuentas`
@@ -3218,7 +3219,7 @@ async function cerrarCuentaConPin(
                     <div>
                       <p class="font-semibold text-default">Cuenta {{ cuenta.numero }}</p>
                       <p class="text-sm text-muted">
-                        {{ cuenta.lineas.length }} producto(s)
+                        {{ cuenta.lineas.length }} {{ cuenta.lineas.length === 1 ? 'producto' : 'productos' }}
                       </p>
                       <p
                         v-if="cuenta.garzonResponsableNombre"
@@ -3325,7 +3326,7 @@ async function cerrarCuentaConPin(
                         />
                       </div>
                       <p v-if="linea.itemEliminado" class="text-xs text-error">
-                        Quitá esta línea para poder cobrar la cuenta.
+                        Quita esta línea para poder cobrar la cuenta.
                       </p>
                       <div v-if="linea.unidades?.length" class="flex flex-wrap gap-1 pt-1" data-qa="series-linea">
                         <UBadge
@@ -3382,7 +3383,7 @@ async function cerrarCuentaConPin(
                       size="xs"
                       :disabled="yaEnviadaACocina(linea) || cuentaActivaEnCobro"
                       :title="yaEnviadaACocina(linea)
-                        ? 'Ya se despachó a cocina: registralo como merma o cortesía para que quede el rastro'
+                        ? 'Ya se despachó a cocina: regístralo como merma o cortesía para que quede el rastro'
                         : 'Quitar'"
                       @click="quitarLinea(linea)"
                     />
@@ -3509,7 +3510,8 @@ async function cerrarCuentaConPin(
         v-model:open="cancelOpen"
         title="Cancelar cuenta"
         message="Se anulará la cuenta sin generar venta. Esta acción no se puede deshacer."
-        confirm-label="Cancelar cuenta"
+        confirm-label="Sí, cancelar la cuenta"
+        cancel-label="Volver"
         :loading="cancelando"
         @confirm="confirmarCancelar"
       />
@@ -3522,7 +3524,7 @@ async function cerrarCuentaConPin(
         v-else
         v-model:open="cancelOpen"
         title="Cancelar cuenta con platos despachados"
-        description="Hay platos ya despachados a cocina. Elegí el motivo: se van a anular y la cuenta se cancela sin generar venta."
+        description="Hay platos ya despachados a cocina. Elige el motivo: se van a anular y la cuenta se cancela sin generar venta."
         :ui="shellUi.modal"
       >
         <template #body>
@@ -3541,7 +3543,7 @@ async function cerrarCuentaConPin(
         <template #footer>
           <AppModalFooter>
             <UButton color="neutral" variant="ghost" :disabled="cancelando" @click="() => { cancelOpen = false }">
-              Cancelar
+              Volver
             </UButton>
             <UButton
               color="error"
@@ -3549,7 +3551,7 @@ async function cerrarCuentaConPin(
               :loading="cancelando"
               @click="confirmarCancelar"
             >
-              Cancelar cuenta
+              Sí, cancelar la cuenta
             </UButton>
           </AppModalFooter>
         </template>

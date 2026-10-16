@@ -62,13 +62,13 @@ describe('useApiFetch ante un 401', () => {
     expect(navigateTo).toHaveBeenCalledWith('/login')
   })
 
-  // ADR-032: un 429 es "esperá", no "tu sesión no vale". Cerrarla sacaría al
+  // ADR-032: un 429 es "espera", no "tu sesión no vale". Cerrarla sacaría al
   // cajero a mitad de una venta por un límite que se vacía solo en un minuto.
   it('si el refresh choca el límite, NO cierra la sesión: llega el aviso del 429', async () => {
-    responder(errorHttp(401), errorHttp(429, 'Demasiadas solicitudes seguidas. Esperá 30 segundos y volvé a intentar.'))
+    responder(errorHttp(401), errorHttp(429, 'Demasiadas solicitudes seguidas. Espera 30 segundos y vuelve a intentar.'))
     await expect(useApiFetch('/api/x')).rejects.toMatchObject({
       status: 429,
-      data: { message: 'Demasiadas solicitudes seguidas. Esperá 30 segundos y volvé a intentar.' },
+      data: { message: 'Demasiadas solicitudes seguidas. Espera 30 segundos y vuelve a intentar.' },
     })
     expect(store.clearAuth).not.toHaveBeenCalled()
     expect(navigateTo).not.toHaveBeenCalled()

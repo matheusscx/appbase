@@ -35,7 +35,7 @@ const mensaje = ref('')
 const titulo = computed(() => {
   if (linkInvalido.value) return 'Este link ya no sirve'
   if (mensaje.value) return 'Correo verificado'
-  return 'Confirmá que este correo es tuyo'
+  return 'Confirma que este correo es tuyo'
 })
 const subtitulo = computed(() => {
   if (linkInvalido.value) return linkInvalido.value

@@ -1102,7 +1102,7 @@ function dialogos(): HTMLElement[] {
  */
 function esModalPin(d: HTMLElement): boolean {
   const texto = d.textContent ?? ''
-  return texto.includes('Ingresa tu PIN') || texto.includes('Elegí quién sos')
+  return texto.includes('Ingresa tu PIN') || texto.includes('Elige quién eres')
 }
 
 function tecladoPin(): HTMLElement | undefined {
@@ -1872,7 +1872,7 @@ describe('salones — aviso de PIN invalidado (modo personal)', () => {
     // No bloquea: el bypass de modo personal sigue funcionando en ESTE
     // dispositivo, y el aviso no puede leerse como una alarma de que no se
     // puede trabajar.
-    expect(texto).toContain('Desde este dispositivo trabajás normal; para el tótem compartido, hace falta ponerlo desde tu perfil.')
+    expect(texto).toContain('Desde este dispositivo trabajas normal; para el tótem compartido, hace falta ponerlo desde tu perfil.')
     // Guarda contra la puntuación doble: `formatFecha` termina en "a. m." /
     // "p. m." (con punto), así que pegarle un "." directo sin envolver la
     // fecha entre paréntesis deja "a. m..".
@@ -1919,14 +1919,14 @@ describe('salones — aviso de PIN invalidado (modo personal)', () => {
     expect(wrapper.text()).not.toContain('El encargado invalidó')
   })
 
-  it('sin ningún evento de invalidación (recién dado de alta), avisa el genérico "todavía no tenés PIN" y que no bloquea', async () => {
+  it('sin ningún evento de invalidación (recién dado de alta), avisa el genérico "todavía no tienes PIN" y que no bloquea', async () => {
     vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
     miPinMock = { fijado: false, eventos: [] }
 
     const wrapper = await montar()
 
     expect(wrapper.text()).toContain(
-      'Todavía no tenés PIN. Desde este dispositivo trabajás normal; para el tótem compartido, hace falta ponerlo desde tu perfil.',
+      'Todavía no tienes PIN. Desde este dispositivo trabajas normal; para el tótem compartido, hace falta ponerlo desde tu perfil.',
     )
   })
 
@@ -1940,7 +1940,7 @@ describe('salones — aviso de PIN invalidado (modo personal)', () => {
     const wrapper = await montar()
 
     expect(wrapper.text()).toContain('No hay salones configurados')
-    expect(wrapper.text()).toContain('Todavía no tenés PIN')
+    expect(wrapper.text()).toContain('Todavía no tienes PIN')
   })
 
   // Contraejemplo del mutante "el aviso también con fijado: true": con el PIN
@@ -1959,7 +1959,7 @@ describe('salones — aviso de PIN invalidado (modo personal)', () => {
     const wrapper = await montar()
 
     expect(wrapper.text()).not.toContain('invalidó tu PIN')
-    expect(wrapper.text()).not.toContain('Todavía no tenés PIN')
+    expect(wrapper.text()).not.toContain('Todavía no tienes PIN')
     expect(botonPerfilEnAviso(wrapper)).toBeUndefined()
   })
 
@@ -1972,7 +1972,7 @@ describe('salones — aviso de PIN invalidado (modo personal)', () => {
 
     const wrapper = await montar()
 
-    expect(wrapper.text()).not.toContain('Todavía no tenés PIN')
+    expect(wrapper.text()).not.toContain('Todavía no tienes PIN')
     expect(botonPerfilEnAviso(wrapper)).toBeUndefined()
   })
 
@@ -2957,7 +2957,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
     await esperar(20)
     const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
-    botonEn(modal, 'Cancelar cuenta')!.click()
+    botonEn(modal, 'Sí, cancelar la cuenta')!.click()
     await esperar(50)
     expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
 
@@ -3391,7 +3391,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     }
     await esperar(20)
 
-    // El aviso nombra lo que pasa de verdad: lo agregado sigue viajando y va a aparecer. Un "revisá la
+    // El aviso nombra lo que pasa de verdad: lo agregado sigue viajando y va a aparecer. Un "revisa la
     // cuenta" genérico mandaba al garzón a buscarlo, no verlo, y agregarlo otra vez.
     const aviso = toasts.find(t => t.title === 'Todavía se está guardando lo último que agregaste')
     expect(aviso, 'avisa que sigue guardándose').toBeTruthy()
@@ -3812,7 +3812,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     // El de confirmar vive en el modal, que es OTRO diálogo: el del drawer ya
     // se usó arriba y buscarlo de nuevo devolvería el mismo botón.
     const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
-    botonEn(modal, 'Cancelar cuenta')!.click()
+    botonEn(modal, 'Sí, cancelar la cuenta')!.click()
     await esperar(400)
 
     expect(patchesDeCantidad).toEqual([{ lineaId: 'linea-1', cantidad: '3.0000' }])
@@ -3864,7 +3864,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
     await esperar(20)
     const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
-    botonEn(modal, 'Cancelar cuenta')!.click()
+    botonEn(modal, 'Sí, cancelar la cuenta')!.click()
     await esperar(50)
 
     // El garzón vuelve al listado mientras el flush viaja: `activeCuenta` a null.
@@ -3928,7 +3928,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
     await esperar(20)
     const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
-    botonEn(modal, 'Cancelar cuenta')!.click()
+    botonEn(modal, 'Sí, cancelar la cuenta')!.click()
     await esperar(50)
 
     // El garzón se va a la OTRA cuenta y edita ahí.
@@ -4383,7 +4383,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     botonEn(drawerMesa(), 'Cancelar cuenta')!.click()
     await esperar(20)
     const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
-    botonEn(modal, 'Cancelar cuenta')!.click()
+    botonEn(modal, 'Sí, cancelar la cuenta')!.click()
     await esperar(500)
 
     expect(toasts.some(t => /no está abierta/.test(t.title ?? ''))).toBe(true)
@@ -4732,7 +4732,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
      * Durante esa espera el botón *Cuentas* sigue vivo (`:loading` va solo al de
      * comanda) y pone `activeCuenta` en `null`. Lo medido con la lectura sin
      * congelar: `TypeError` adentro del `try`, que el `catch` muestra como
-     * *"Error al enviar la comanda (¿QZ Tray está abierto?)"* — **le echa la
+     * *"No se pudo enviar la comanda. Revisa la impresora"* — **le echa la
      * culpa a la impresora y la comanda nunca llega a cocina**. Es el peor de
      * los cuatro: el garzón se va tranquilo creyendo que es un problema de QZ.
      */
@@ -5717,7 +5717,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(drawerMesa()?.textContent).toContain('— Cuenta 1')
     expect(cobroModal.props('open'), 'el cobro se cerró solo').toBe(false)
     expect(toasts.map(t => t.title)).toContain(
-      'El cobro se cerró: esa cuenta entró en la fusión. Volvé a cargarlo en la fusionada.',
+      'El cobro se cerró: esa cuenta entró en la fusión. Vuelve a cargarlo en la fusionada.',
     )
   })
 
@@ -5897,7 +5897,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(drawerMesa()?.textContent).toContain('— Cuenta 1')
     expect(cobroModal.props('open')).toBe(false)
     expect(toasts.map(t => t.title)).toContain(
-      'La cuenta que ibas a cobrar entró en la fusión. Cobrala desde la fusionada.',
+      'La cuenta que ibas a cobrar entró en la fusión. Cóbrala desde la fusionada.',
     )
   })
 
@@ -5966,7 +5966,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     expect(cobroModal.props('open'), 'no abre con el total de antes de la fusión').toBe(false)
     expect(toasts.map(t => t.title)).toContain(
-      'La cuenta que ibas a cobrar entró en la fusión. Cobrala desde la fusionada.',
+      'La cuenta que ibas a cobrar entró en la fusión. Cóbrala desde la fusionada.',
     )
   })
 
@@ -6037,7 +6037,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     expect(cierresDeCuenta, 'no se cobra una cuenta que la fusión anuló').toEqual([])
     expect(toasts.map(t => t.title)).toContain(
-      'El cobro no salió: esa cuenta entró en la fusión. Cobrala de nuevo desde la fusionada.',
+      'El cobro no salió: esa cuenta entró en la fusión. Cóbrala de nuevo desde la fusionada.',
     )
     // Y el drawer no queda trabado en `submitting` con el cobro abortado.
     expect(botonEn(drawerMesa(), 'Cerrar y cobrar')?.disabled, 'el drawer sigue usable').toBe(false)
@@ -6106,7 +6106,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     expect(cierresDeCuenta, 'no se cobra el total de antes de la fusión').toEqual([])
     expect(toasts.map(t => t.title)).toContain(
-      'El cobro no salió: esa cuenta entró en la fusión. Cobrala de nuevo desde la fusionada.',
+      'El cobro no salió: esa cuenta entró en la fusión. Cóbrala de nuevo desde la fusionada.',
     )
   })
 
@@ -6309,7 +6309,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     expect(cierresDeCuenta, 'el cobro de la 11 sí sale').toEqual(['cuenta-11'])
     expect(toasts.map(t => t.title)).not.toContain(
-      'El cobro no salió: esa cuenta entró en la fusión. Cobrala de nuevo desde la fusionada.',
+      'El cobro no salió: esa cuenta entró en la fusión. Cóbrala de nuevo desde la fusionada.',
     )
   })
 
@@ -6467,7 +6467,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
      * La otra mitad, y la que el garzón se comía más seguido: al volver al listado
      * `limpiarResultado()` deja el resultado en `null` con las dos claves en
      * `null` —o sea **vigente**—, así que `asegurarVigente()` devuelve `null` y
-     * salía *"No se pudo calcular el total de la cuenta. Intentá de nuevo."*. El
+     * salía *"No se pudo calcular el total de la cuenta. Intenta de nuevo."*. El
      * cálculo no falló: el garzón se fue.
      */
     catalogoItemsMock = [producto('20.0000', '10.0000')]
@@ -6902,8 +6902,8 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
   it('abrir una cuenta nueva mientras estás dentro de otra no te saca de donde estás', async () => {
     /**
      * El guard de `abrirCuentaConPin` era **por mesa**, y eso dejaba abierta la
-     * puerta de quedarse en la misma mesa: tocás *Nueva cuenta*, tecleás el PIN,
-     * y mientras el `POST` viaja te metés en una cuenta que ya estaba. Al
+     * puerta de quedarse en la misma mesa: tocas *Nueva cuenta*, tecleas el PIN,
+     * y mientras el `POST` viaja te metes en una cuenta que ya estaba. Al
      * aterrizar, `abrirCuenta()` te cambiaba `activeCuenta` por abajo.
      *
      * Y no es solo "me movió la pantalla": lo midió la revisión con un modal
@@ -6989,7 +6989,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
   it('una fusión que aterriza con el modal abierto no le cambia el destinatario', async () => {
     /**
      * **El camino que refutó mi segunda explicación.** Cerrada la puerta de
-     * `abrirCuentaConPin`, escribí que ya nada podía cambiar `activeCuenta` con un
+     * `abrirCuentaConPin`, escribe que ya nada podía cambiar `activeCuenta` con un
      * modal abierto — y la revisión midió que `fusionarSeleccionadas` sí: cuando
      * el garzón quedó parado en una de las cuentas fusionadas, su continuación
      * hace `activeCuenta.value = cuenta` con **otro id**, y el overlay no frena la
@@ -7087,7 +7087,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
       err.status = 422
       err.data = {
         statusCode: 422,
-        message: 'Este cobro ya se había registrado con otros datos. Revisá la venta antes de cobrar de nuevo.',
+        message: 'Este cobro ya se había registrado con otros datos. Revisa la venta antes de cobrar de nuevo.',
         ventaId: 'venta-1',
       }
       return err
@@ -7168,7 +7168,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
   })
 
   describe('un cálculo que falla dice por qué', () => {
-    // Hasta el 2026-10-08 el cobro y la precuenta decían "Intentá de nuevo" ante
+    // Hasta el 2026-10-08 el cobro y la precuenta decían "Intenta de nuevo" ante
     // cualquier fallo de `/calcular`: con un 400 del motor, reintentar da lo mismo.
     const error400 = Object.assign(new Error('400'), {
       status: 400,
@@ -7214,7 +7214,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
       botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
       await esperar(50)
 
-      expect(toasts).toEqual([{ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.', color: 'error' }])
+      expect(toasts).toEqual([{ title: 'No se pudo calcular el total de la cuenta. Intenta de nuevo.', color: 'error' }])
     })
 
     /** El aviso de arriba de las líneas. */
@@ -7275,7 +7275,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
       await cuentaConCalculoQueFalla(errorDeRed)
 
       const aviso = avisoDeLaCuenta()
-      expect(aviso?.textContent).toContain('No se pudo calcular la cuenta. Intentá de nuevo.')
+      expect(aviso?.textContent).toContain('No se pudo calcular la cuenta. Intenta de nuevo.')
       expect(valorDelTotal()).toBe('—')
 
       // La red volvió: el garzón reintenta y la cuenta se calcula.
@@ -7883,7 +7883,7 @@ describe('salones — cancelar una cuenta con algo despachado', () => {
 
     expect(modalConMotivo(), 'no hay motivo que pedir').toBeFalsy()
     const modal = dialogos().find(d => d !== drawerMesa() && !esModalPin(d))
-    botonEn(modal, 'Cancelar cuenta')!.click()
+    botonEn(modal, 'Sí, cancelar la cuenta')!.click()
     await esperar(20)
 
     expect(cancelacionesConMotivoPedidas, 'no pasó por la ruta con motivo').toEqual([])
@@ -7926,7 +7926,7 @@ describe('salones — cancelar una cuenta con algo despachado', () => {
     await esperar(20) // carga de `GET /motivos-baja`
 
     // El botón de confirmar arranca deshabilitado: falta el motivo.
-    expect(botonEn(modal, 'Cancelar cuenta')?.disabled, 'sin motivo todavía').toBe(true)
+    expect(botonEn(modal, 'Sí, cancelar la cuenta')?.disabled, 'sin motivo todavía').toBe(true)
 
     // Por elemento contenido en el modal, no el primero de la página: puede
     // convivir con otros `USelectMenu` montados en el resto de la pantalla.
@@ -7936,7 +7936,7 @@ describe('salones — cancelar una cuenta con algo despachado', () => {
     motivoSelect!.vm.$emit('update:modelValue', 'motivo-cortesia')
     await esperar(10)
 
-    botonEn(modal, 'Cancelar cuenta')!.click()
+    botonEn(modal, 'Sí, cancelar la cuenta')!.click()
     await esperar(20)
 
     expect(cancelacionesConMotivoPedidas).toHaveLength(1)
@@ -8314,7 +8314,7 @@ describe('salones — la pantalla declara el permiso que su listado exige', () =
 
     expect(meta).toContain("middleware: ['auth', 'permiso']")
     expect(meta).toContain("permiso: 'Salones:Operar'")
-    // El label, porque el aviso por defecto —"no tenés acceso al módulo
+    // El label, porque el aviso por defecto —"no tienes acceso al módulo
     // Salones"— es FALSO para quien tiene el módulo y no la acción.
     expect(meta).toContain("permisoLabel: 'Salones (operación)'")
   })

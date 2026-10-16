@@ -42,7 +42,7 @@ const { visibles } = useReportes()
         </div>
 
         <div v-else class="rounded-lg bg-muted p-4 text-sm text-muted">
-          No tenés acceso a ningún reporte.
+          No tienes acceso a ningún reporte.
         </div>
       </div>
     </template>

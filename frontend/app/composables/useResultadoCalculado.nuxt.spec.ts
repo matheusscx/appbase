@@ -344,7 +344,7 @@ const errorDeRed = () => new Error('[POST] "http://api:3000/api/calculo-precios/
 
 describe('useResultadoCalculado — el motivo del fallo', () => {
   // Hasta el 2026-10-08 el `catch` estaba vacío: un 400 del motor llegaba a la
-  // pantalla como un `null` sin motivo y las tres decían "Intentá de nuevo".
+  // pantalla como un `null` sin motivo y las tres decían "Intenta de nuevo".
   it('guarda el error del cálculo que falló para el carrito actual', async () => {
     const carrito = ref(input(['A']))
     const e = errorHttp(400, 'La cantidad supera el máximo permitido')
@@ -408,7 +408,7 @@ describe('useResultadoCalculado — el motivo del fallo', () => {
 })
 
 describe('avisoCalculoFallido', () => {
-  it('un 400 del motor lleva el motivo del servidor, sin "intentá de nuevo"', () => {
+  it('un 400 del motor lleva el motivo del servidor, sin "intenta de nuevo"', () => {
     expect(avisoCalculoFallido(errorHttp(400, 'La cantidad supera el máximo permitido'))).toEqual({
       title: 'No se pudo calcular el total',
       description: 'La cantidad supera el máximo permitido',
@@ -422,12 +422,12 @@ describe('avisoCalculoFallido', () => {
 
   it('un error de red pide reintentar y no muestra la URL del backend', () => {
     const aviso = avisoCalculoFallido(errorDeRed())
-    expect(aviso).toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })
+    expect(aviso).toEqual({ title: 'No se pudo calcular el total. Intenta de nuevo.' })
   })
 
   it('un 401 (sesión caída, el redirect a login ya va en camino) no muestra "Unauthorized" ni el mensaje del servidor', () => {
     const aviso = avisoCalculoFallido(errorHttp(401, 'Unauthorized'))
-    expect(aviso).toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })
+    expect(aviso).toEqual({ title: 'No se pudo calcular el total. Intenta de nuevo.' })
     expect(JSON.stringify(aviso)).not.toContain('Unauthorized')
     expect(avisoCalculoFallido(errorHttp(401, 'Token vencido por el servidor')).description).toBeUndefined()
   })
@@ -439,21 +439,21 @@ describe('avisoCalculoFallido', () => {
 
   it('un 5xx pide reintentar aunque traiga mensaje', () => {
     expect(avisoCalculoFallido(errorHttp(500, 'Internal server error')))
-      .toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })
+      .toEqual({ title: 'No se pudo calcular el total. Intenta de nuevo.' })
   })
 
   it('sin error (el carrito quedó vacío) pide reintentar, como antes', () => {
-    expect(avisoCalculoFallido(null)).toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })
+    expect(avisoCalculoFallido(null)).toEqual({ title: 'No se pudo calcular el total. Intenta de nuevo.' })
   })
 
   it('un 4xx sin mensaje no inventa uno: pide reintentar', () => {
     const e = Object.assign(new Error('[POST] url: 400'), { status: 400, data: {} })
-    expect(avisoCalculoFallido(e)).toEqual({ title: 'No se pudo calcular el total. Intentá de nuevo.' })
+    expect(avisoCalculoFallido(e)).toEqual({ title: 'No se pudo calcular el total. Intenta de nuevo.' })
   })
 
   it('respeta el título de la pantalla', () => {
     expect(avisoCalculoFallido(errorDeRed(), 'No se pudo calcular el total de la cuenta'))
-      .toEqual({ title: 'No se pudo calcular el total de la cuenta. Intentá de nuevo.' })
+      .toEqual({ title: 'No se pudo calcular el total de la cuenta. Intenta de nuevo.' })
     expect(avisoCalculoFallido(errorHttp(400, 'Motivo'), 'No se pudo calcular el total de la cuenta'))
       .toEqual({ title: 'No se pudo calcular el total de la cuenta', description: 'Motivo' })
   })
@@ -469,12 +469,12 @@ describe('avisoCalculoEnPantalla', () => {
 
   it('un corte de red y un 5xx sí lo ofrecen, igual que su título', () => {
     expect(avisoCalculoEnPantalla(errorDeRed(), T))
-      .toEqual({ title: `${T}. Intentá de nuevo.`, reintentable: true })
+      .toEqual({ title: `${T}. Intenta de nuevo.`, reintentable: true })
     expect(avisoCalculoEnPantalla(errorHttp(500, 'Internal server error'), T))
-      .toEqual({ title: `${T}. Intentá de nuevo.`, reintentable: true })
+      .toEqual({ title: `${T}. Intenta de nuevo.`, reintentable: true })
   })
 
-  it('un 4xx sin mensaje dice "Intentá de nuevo", así que también lo ofrece', () => {
+  it('un 4xx sin mensaje dice "Intenta de nuevo", así que también lo ofrece', () => {
     const e = Object.assign(new Error('[POST] url: 400'), { status: 400, data: {} })
     expect(avisoCalculoEnPantalla(e, T)?.reintentable).toBe(true)
   })

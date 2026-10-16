@@ -1314,7 +1314,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
                   <UInput v-model="pagoReferencia" class="w-full" data-qa="compra-pago-referencia" />
                 </UFormField>
                 <p v-if="medioEsEfectivo" class="text-xs text-muted" data-qa="compra-pago-aviso-efectivo">
-                  Sale de tu caja física abierta: si no tenés una, abrila antes de confirmar.
+                  Sale de tu caja física abierta: si no tienes una, ábrela antes de confirmar.
                 </p>
               </div>
             </div>

@@ -35,7 +35,7 @@ const { formatFecha } = useFormatters()
  * como precedente de redacción.) La lista es un **registro**, no un
  * mensaje: dice quién hizo qué y cuándo, y por eso las seis líneas tienen
  * la misma forma. Los avisos SÍ tutean (`avisoPin` en el salón, "Todavía no
- * tenés PIN" en el perfil) porque son otra cosa: le hablan al lector.
+ * tienes PIN" en el perfil) porque son otra cosa: le hablan al lector.
  *
  * `fijado_por_garzon` era la única en tercera persona SIN actor ("Puso su
  * PIN"): rompía la forma y además escondía el dato —en la ficha, el

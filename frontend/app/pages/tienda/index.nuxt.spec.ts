@@ -106,7 +106,7 @@ describe('tienda/index — el catálogo pide solo ítems vendibles', () => {
 })
 
 describe('tienda/index — Pagar con un cálculo que falla dice por qué', () => {
-  // Hasta el 2026-10-08 cualquier fallo de `/calcular` decía "Intentá de nuevo":
+  // Hasta el 2026-10-08 cualquier fallo de `/calcular` decía "Intenta de nuevo":
   // con un 400 del motor, reintentar da lo mismo.
   const cafe = {
     id: 'item-cafe',
@@ -148,7 +148,7 @@ describe('tienda/index — Pagar con un cálculo que falla dice por qué', () =>
   it('un corte de red pide reintentar', async () => {
     await pagarConCalculoQueFalla(new Error('[POST] "http://api/calcular": <no response> fetch failed'))
 
-    expect(toasts).toEqual([{ title: 'No se pudo calcular el total. Intentá de nuevo.', color: 'error' }])
+    expect(toasts).toEqual([{ title: 'No se pudo calcular el total. Intenta de nuevo.', color: 'error' }])
     expect(pagosIniciados).toBe(0)
   })
 })

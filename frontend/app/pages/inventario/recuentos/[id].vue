@@ -117,7 +117,7 @@ let comentarioOriginal = ''
 function lineaAFila(l: RecuentoLineaApi): LineaRow {
   return {
     ...l,
-    cantidadInput: l.cantidadContada ?? '',
+    cantidadInput: cantidadParaCampo(l.cantidadContada),
     motivoInput: l.motivoDiferenciaId ?? SIN_CAUSA,
     guardando: false,
   }
@@ -170,7 +170,7 @@ function diferenciaLinea(row: LineaRow): string | null {
 async function guardarCantidad(row: LineaRow) {
   if (readOnly.value) return
   const nuevo = row.cantidadInput.trim()
-  const actual = row.cantidadContada ?? ''
+  const actual = cantidadParaCampo(row.cantidadContada)
   if (nuevo === actual) return
   row.guardando = true
   try {
@@ -180,10 +180,10 @@ async function guardarCantidad(row: LineaRow) {
     )
     row.cantidadContada = res.cantidadContada
     row.diferencia = res.diferencia
-    row.cantidadInput = res.cantidadContada ?? ''
+    row.cantidadInput = cantidadParaCampo(res.cantidadContada)
   }
   catch (e: unknown) {
-    row.cantidadInput = row.cantidadContada ?? ''
+    row.cantidadInput = cantidadParaCampo(row.cantidadContada)
     toast.add({ title: apiErrorMsg(e, 'Error al guardar el conteo'), color: 'error' })
   }
   finally {
@@ -279,13 +279,13 @@ async function aplicar() {
     aplicarModalOpen.value = false
     toast.add({
       title: res.lineasAplicadas > 0
-        ? `Recuento aplicado — ${res.lineasAplicadas} línea(s) movida(s)`
+        ? `Recuento aplicado — ${res.lineasAplicadas} ${res.lineasAplicadas === 1 ? 'línea movida' : 'líneas movidas'}`
         : 'Recuento aplicado — ninguna línea tenía diferencia',
       color: 'success',
     })
     if (res.lineasDescartadas.length) {
       toast.add({
-        title: `${res.lineasDescartadas.length} producto(s) descartado(s) del recuento`,
+        title: `${res.lineasDescartadas.length === 1 ? '1 producto descartado' : `${res.lineasDescartadas.length} productos descartados`} del recuento`,
         description: res.lineasDescartadas
           .map(d => `${d.itemNombre}: ${d.razon}`)
           .join(' · '),
@@ -467,14 +467,17 @@ const columns: TableColumn<LineaRow>[] = [
             </template>
 
             <template #cantidadContada-cell="{ row }">
-              <UInput
-                v-model="row.original.cantidadInput"
-                inputmode="decimal"
-                placeholder="Sin contar"
-                :disabled="readOnly || row.original.guardando"
-                class="w-32"
-                @blur="guardarCantidad(row.original)"
-              />
+              <div class="flex items-center gap-2">
+                <UInput
+                  v-model="row.original.cantidadInput"
+                  inputmode="decimal"
+                  placeholder="Sin contar"
+                  :disabled="readOnly || row.original.guardando"
+                  class="w-32"
+                  @blur="guardarCantidad(row.original)"
+                />
+                <span v-if="row.original.unidadMedida" class="text-xs text-muted">{{ row.original.unidadMedida }}</span>
+              </div>
             </template>
 
             <template #diferencia-cell="{ row }">
@@ -482,7 +485,7 @@ const columns: TableColumn<LineaRow>[] = [
                 class="font-medium"
                 :class="claseDiferenciaRecuento(diferenciaLinea(row.original))"
               >
-                {{ diferenciaLinea(row.original) ?? '—' }}
+                {{ formatStock(diferenciaLinea(row.original), row.original.unidadMedida) }}
               </span>
             </template>
 
@@ -512,11 +515,11 @@ const columns: TableColumn<LineaRow>[] = [
           <template #body>
             <div class="space-y-2 text-sm text-default">
               <p>
-                Se van a mover <strong>{{ lineasAMoverCount }}</strong> línea(s) al kardex.
+                Se van a mover <strong>{{ lineasAMoverCount }}</strong> {{ lineasAMoverCount === 1 ? 'línea' : 'líneas' }} al historial de movimientos.
                 Las líneas sin contar o con diferencia cero no generan movimiento.
               </p>
               <p v-if="lineasSinCausaCount > 0" class="text-warning">
-                {{ lineasSinCausaCount }} línea(s) con diferencia no tienen causa asignada
+                {{ lineasSinCausaCount }} {{ lineasSinCausaCount === 1 ? 'línea con diferencia no tiene' : 'líneas con diferencia no tienen' }} causa asignada
                 ni causa por defecto — la aplicación se rechazará hasta indicarla.
               </p>
             </div>
@@ -544,7 +547,8 @@ const columns: TableColumn<LineaRow>[] = [
           v-model:open="cancelarModalOpen"
           title="Cancelar recuento"
           message="¿Cancelar esta sesión de recuento? No se moverá stock y quedará como solo lectura."
-          confirm-label="Cancelar recuento"
+          confirm-label="Sí, cancelar el recuento"
+          cancel-label="Volver"
           confirm-color="error"
           :loading="cancelando"
           @confirm="cancelar"

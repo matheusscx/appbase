@@ -31,12 +31,12 @@ test('la navegación no ofrece "Por pagar"', async ({ page }) => {
   // `toHaveCount(0)` de abajo pasaría aunque el rol pudiera pagar.
   await expect(menu.getByRole('button', { name: 'Compras', exact: true }))
     .toHaveAttribute('aria-expanded', 'true')
-  // "Recepciones" sí, porque tiene `Leer`.
-  await expect(menu.getByRole('link', { name: 'Recepciones', exact: true })).toBeVisible()
+  // "Compras" sí, porque tiene `Leer`.
+  await expect(menu.getByRole('link', { name: 'Compras', exact: true })).toBeVisible()
   await expect(page.getByRole('link', { name: 'Por pagar' })).toHaveCount(0)
   // Y ningún grupo sin pantallas: de todo el menú, el bodeguero ve Inicio y Compras.
   await expect(menu.getByRole('button')).toHaveText(['Compras'])
-  await expect(menu.getByRole('link')).toHaveText(['Inicio', 'Recepciones'])
+  await expect(menu.getByRole('link')).toHaveText(['Inicio', 'Compras'])
 })
 
 test('entrar por URL a /compras/por-pagar lo frena el middleware de ruta', async ({ page }) => {

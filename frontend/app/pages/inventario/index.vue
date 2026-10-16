@@ -146,7 +146,11 @@ function motivoLabel(mov: Movimiento): string {
   const base = motivoOpts.find(o => o.value === mov.motivo)?.label ?? mov.motivo
   if (mov.motivo === 'merma' && mov.motivoBajaNombre) {
     const tipo = mov.motivoBajaTipo ? tipoMotivoBajaLabel(mov.motivoBajaTipo) : 'Merma'
-    return `${tipo} · ${mov.motivoBajaNombre}`
+    // El nombre del motivo a veces ya empieza por el tipo ("Comida del personal (dentro del local)"):
+    // repetirlo dejaba "Comida del personal · Comida del personal (dentro del local)".
+    return mov.motivoBajaNombre.toLowerCase().startsWith(tipo.toLowerCase())
+      ? mov.motivoBajaNombre
+      : `${tipo} · ${mov.motivoBajaNombre}`
   }
   return base
 }
@@ -319,15 +323,15 @@ async function registrarAjusteCosto() {
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="Inventario" />
+      <AppNavbar title="Movimientos" />
     </template>
 
     <template #body>
       <div class="w-full space-y-6">
         <CrudPageHeader
           large
-          title="Inventario"
-          description="Kardex de movimientos de stock"
+          title="Movimientos"
+          description="Entradas y salidas de stock, en orden"
         >
           <template #actions>
             <UButton
@@ -433,7 +437,7 @@ async function registrarAjusteCosto() {
               v-else-if="row.original.costoBaja != null"
               title="Costo de la baja"
             >
-              <span class="text-muted">Baja</span>
+              <span class="mr-1 text-muted">Baja</span>
               <span
                 class="font-medium"
                 :class="{ 'text-error': tipoMotivoBajaEsPerdida(row.original.motivoBajaTipo) }"

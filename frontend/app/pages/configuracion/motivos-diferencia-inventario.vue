@@ -232,7 +232,7 @@ function cerrarRestaurar() {
  *
  * A diferencia de un catch genérico, NO cierra todo y tira un toast rojo: un
  * 400 de colisión no es un error terminal sino una pregunta —qué nombre
- * querés usar—, así que abre el segundo modal con la sugerencia del backend.
+ * quieres usar—, así que abre el segundo modal con la sugerencia del backend.
  * Solo los errores de verdad (404 "no está en la papelera", red) terminan en
  * toast.
  */
@@ -466,7 +466,7 @@ const columns: TableColumn<MotivoDiferenciaInventario>[] = [
     <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar motivo"
-      message="¿Eliminar este motivo de diferencia? Podés recuperarlo desde «Ver eliminados»."
+      message="¿Eliminar este motivo de diferencia? Puedes recuperarlo desde «Ver eliminados»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
     />

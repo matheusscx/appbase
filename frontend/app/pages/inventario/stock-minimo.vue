@@ -71,7 +71,7 @@ const guardando = reactive(new Set<string>())
 const clave = (f: StockMinimoFila) => `${f.itemId}:${f.ubicacionId}`
 
 function valorMinimo(f: StockMinimoFila): string {
-  return borradores.get(clave(f)) ?? f.minimo ?? ''
+  return borradores.get(clave(f)) ?? cantidadParaCampo(f.minimo)
 }
 
 /** Filas cuyo mínimo tipeado no es un número: el error va junto al campo. */

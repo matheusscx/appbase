@@ -28,7 +28,7 @@ export const useTenantStore = defineStore('tenant', () => {
       )
     }
     catch (e: unknown) {
-      error.value = apiErrorMsg(e, 'Error al cargar tenants')
+      error.value = apiErrorMsg(e, 'No se pudieron cargar tus empresas')
     }
     finally {
       loading.value = false
@@ -55,7 +55,7 @@ export const useTenantStore = defineStore('tenant', () => {
       await navigateTo('/')
     }
     catch (e: unknown) {
-      error.value = apiErrorMsg(e, 'Error al cambiar de tenant')
+      error.value = apiErrorMsg(e, 'No se pudo cambiar de empresa')
     }
     finally {
       loading.value = false

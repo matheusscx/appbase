@@ -1312,7 +1312,7 @@ export class TenantsService {
     );
     if (!fila || !fila.datos) {
       throw new BadRequestException(
-        'Ese link ya no sirve: puede estar vencido o ya usado. Pedí uno nuevo.',
+        'Ese link ya no sirve: puede estar vencido o ya usado. Pide uno nuevo.',
       );
     }
     return { fila, datos: fila.datos };

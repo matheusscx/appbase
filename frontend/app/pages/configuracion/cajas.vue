@@ -212,7 +212,7 @@ function cerrarRestaurar() {
  * desde el modal de colisión.
  *
  * El catch NO cierra todo y tira un toast rojo: un 400 de colisión no es un
- * error terminal sino una pregunta —qué nombre querés usar—, así que abre el
+ * error terminal sino una pregunta —qué nombre quieres usar—, así que abre el
  * segundo modal con la sugerencia del backend. Molde: `configuracion/descuentos.vue`.
  */
 async function restaurarCajon(id: string, nombreNuevo?: string) {
@@ -360,7 +360,7 @@ const columns: TableColumn<Cajon>[] = [
   <div class="space-y-6">
     <CrudPageHeader
       title="Cajas"
-      description="Cajones físicos del local (Mostrador, Delivery, Barra…)."
+      description="Cajas físicas del local (Mostrador, Delivery, Barra…)."
     >
       <template #actions>
         <div class="flex items-center gap-4">
@@ -464,7 +464,7 @@ const columns: TableColumn<Cajon>[] = [
             Arqueo ciego
           </p>
           <p class="text-sm text-muted">
-            El cajero cuenta el cajón sin ver el monto esperado; el sistema revela la diferencia al cerrar.
+            El cajero cuenta la caja sin ver el monto esperado; el sistema revela la diferencia al cerrar.
           </p>
         </div>
         <USwitch
@@ -513,10 +513,10 @@ const columns: TableColumn<Cajon>[] = [
         </div>
         <div v-else class="space-y-4">
           <p class="text-sm text-muted">
-            Marcá quién puede abrir esta caja. Si no seleccionás a nadie, cualquiera con permiso de caja puede abrirla.
+            Marca quién puede abrir esta caja. Si no seleccionas a nadie, cualquiera con permiso de caja puede abrirla.
           </p>
           <div v-if="miembros.length === 0" class="text-sm text-muted">
-            No hay usuarios en el tenant.
+            No hay usuarios en tu local.
           </div>
           <div v-else class="space-y-2">
             <UCheckbox
@@ -543,7 +543,7 @@ const columns: TableColumn<Cajon>[] = [
     <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar caja"
-      message="¿Eliminar esta caja? Podés recuperarla desde «Ver eliminados»."
+      message="¿Eliminar esta caja? Puedes recuperarla desde «Ver eliminados»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
     />

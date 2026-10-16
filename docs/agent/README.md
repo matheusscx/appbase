@@ -126,6 +126,10 @@ primero, por definición, nunca mira lo que ya está.
   - [x] `@ValidateNested` sin su `@IsObject` del mismo `each` (un `[]` como elemento, o un array
     donde va un objeto, pasa el pipe) → test
     `src/common/invariants/validate-nested-objeto.invariant.spec.ts`.
+  - [x] Voseo en la pantalla (el tono de la marca es tuteo chileno) → test
+    `frontend/app/invariants/voseo.invariant.spec.ts`. Lee el código sin comentarios y cae por
+    una lista de verbos o por toda palabra en `á`/`í` que no esté permitida; un verbo nuevo se
+    suma a la lista del test, no se silencia.
   - [x] Tailwind hardcoded fuera de Caja → `frontend/scripts/check-design-tokens.mjs`
     (`npm run design:check` en el gate + `--staged` en el pre-commit).
   - [x] Tabla GFM rota por un párrafo pegado → `scripts/check-md-tables.mjs`

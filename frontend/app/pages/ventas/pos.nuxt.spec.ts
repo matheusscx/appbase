@@ -733,7 +733,7 @@ describe('ventas/pos — un cobro que se repite no se registra dos veces', () =>
     status: 422,
     data: {
       statusCode: 422,
-      message: 'Este cobro ya se había registrado con otros datos. Revisá la venta antes de cobrar de nuevo.',
+      message: 'Este cobro ya se había registrado con otros datos. Revisa la venta antes de cobrar de nuevo.',
       ventaId: 'venta-1',
     },
   }
@@ -1023,7 +1023,7 @@ describe('ventas/pos — boleta sobre el umbral de la Res. Ex. SII 44/2025', () 
 })
 
 describe('ventas/pos — Cobrar con un cálculo que falla dice por qué', () => {
-  // Hasta el 2026-10-08 cualquier fallo de `/calcular` decía "Intentá de nuevo":
+  // Hasta el 2026-10-08 cualquier fallo de `/calcular` decía "Intenta de nuevo":
   // con un 400 del motor, reintentar da lo mismo y el cajero no sabía qué revisar.
   const cafe = {
     id: 'item-cafe',
@@ -1070,7 +1070,7 @@ describe('ventas/pos — Cobrar con un cálculo que falla dice por qué', () => 
     const wrapper = await cobrarConCalculoQueFalla(new Error('[POST] "http://api/calcular": <no response> fetch failed'))
 
     expect(toasts.filter(t => t.color === 'error')).toEqual([
-      { title: 'No se pudo calcular el total. Intentá de nuevo.', color: 'error' },
+      { title: 'No se pudo calcular el total. Intenta de nuevo.', color: 'error' },
     ])
     expect(wrapper.findComponent({ name: 'VentasCobroModal' }).props('open')).toBe(false)
   })

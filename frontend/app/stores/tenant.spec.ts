@@ -210,7 +210,7 @@ describe('useTenantStore — fetchMyTenants', () => {
 
     // `apiErrorMsg` conserva el motivo real del error local detrás del fallback de
     // contexto, en vez de tragárselo. Antes acá se veía solo el genérico.
-    expect(store.error).toBe('Error al cargar tenants: Network error')
+    expect(store.error).toBe('No se pudieron cargar tus empresas: Network error')
     expect(store.loading).toBe(false)
   })
 
@@ -330,7 +330,7 @@ describe('useTenantStore — switchTenant', () => {
     expect(store.error).toBeNull()
     await store.switchTenant('tenant-bbb')
 
-    expect(store.error).toBe('Error al cambiar de tenant: Unknown')
+    expect(store.error).toBe('No se pudo cambiar de empresa: Unknown')
   })
 
   it('loading es true durante la llamada y false al terminar', async () => {

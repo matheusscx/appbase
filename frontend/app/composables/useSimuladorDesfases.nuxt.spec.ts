@@ -4,7 +4,7 @@
 // solo se veía corriendo la app: al descartar, la lista se recargaba con
 // `GET /items/:insumoId/afectados`, que filtra por componente DIRECTO, mientras
 // el drawer puede contener combos que `onAplicarDesfases` le agregó y que un
-// ingrediente nunca alcanza. El toast decía "el costo de «C» cambió, decidí otra
+// ingrediente nunca alcanza. El toast decía "el costo de «C» cambió, decide otra
 // vez" sobre una fila que la propia recarga sacaba de pantalla.
 //
 // Los dos primeros tests recorren el camino compuesto completo (abrir por un
@@ -135,7 +135,7 @@ describe('useSimuladorDesfases — descartar no recarga con un alcance más ango
     ])
 
     expect(sim.desfasesFilas.value).toEqual([])
-    // Y NO se le avisa "mirá el número nuevo y decidí otra vez": no hay nada que
+    // Y NO se le avisa "mira el número nuevo y decide otra vez": no hay nada que
     // decidir, y decirlo sobre una fila que la propia respuesta sacó de pantalla
     // es el mismo bug que este frente cierra, movido al texto.
     expect(toasts.map(t => t.title)).toEqual(['«COMBO-1» ya no está desfasado'])
@@ -164,7 +164,7 @@ describe('useSimuladorDesfases — descartar no recarga con un alcance más ango
     ])
 
     expect(sim.desfasesFilas.value).toEqual([nueva])
-    // El aviso de "decidí otra vez" cuenta 1, no 2: el otro no está desfasado.
+    // El aviso de "decide otra vez" cuenta 1, no 2: el otro no está desfasado.
     expect(toasts[0]!.title).toBe('El costo de «COMBO-1» cambió mientras mirabas')
     expect(toasts[1]!.title).toBe('«COMBO-2» ya no está desfasado')
     // Y el drawer sigue abierto, porque quedó una fila que decidir.
@@ -200,7 +200,7 @@ describe('useSimuladorDesfases — descartar no recarga con un alcance más ango
 // La partición vive en una función pura porque las DOS pantallas que descartan
 // tienen que decir lo mismo: la bandeja `/desfases` mandaba un único aviso sobre
 // todo `cambiados`, así que una fila `null` —que su propio `cargar()` sacaba de
-// la lista— recibía igual el "decidí otra vez".
+// la lista— recibía igual el "decide otra vez".
 describe('avisosDeDesfasesCambiados', () => {
   const cambiado = (id: string, conFila: boolean) => ({
     itemId: id,
@@ -220,7 +220,7 @@ describe('avisosDeDesfasesCambiados', () => {
     const avisos = avisosDeDesfasesCambiados([cambiado('a', false)])
     expect(avisos).toHaveLength(1)
     expect(avisos[0]!.title).toBe('«A» ya no está desfasado')
-    expect(avisos[0]!.description).not.toContain('decidí otra vez')
+    expect(avisos[0]!.description).not.toContain('decide otra vez')
   })
 
   it('las dos clases juntas: un aviso por grupo, cada uno con SU cuenta', () => {

@@ -2871,7 +2871,7 @@ export class ComprasService {
         const caja = await this.cajaService.findActiva(tenantId, usuarioId);
         if (!caja) {
           throw new BadRequestException(
-            'Para pagar en efectivo necesitás tu caja abierta',
+            'Para pagar en efectivo necesitas tu caja abierta',
           );
         }
         await this.cajaService.bloquearCajaAbierta(manager, caja.id, tenantId);

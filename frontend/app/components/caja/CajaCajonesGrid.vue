@@ -11,7 +11,7 @@ onMounted(async () => {
     await cajaStore.cargarCajonesEstado()
   }
   catch {
-    toast.add({ title: 'Error al cargar los cajones', color: 'error' })
+    toast.add({ title: 'Error al cargar las cajas', color: 'error' })
   }
   finally {
     loading.value = false
@@ -35,11 +35,11 @@ const cajonesOrdenados = computed(() =>
   <div class="w-full">
     <div v-if="loading" class="py-12 text-center text-sm text-muted">
       <UIcon name="i-lucide-loader" class="w-6 h-6 animate-spin mx-auto mb-2" />
-      Cargando cajones…
+      Cargando cajas…
     </div>
 
     <div v-else-if="cajonesOrdenados.length === 0" class="py-12 text-center text-sm text-muted">
-      No hay cajones activos definidos.
+      No hay cajas activas definidas.
     </div>
 
     <div v-else class="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

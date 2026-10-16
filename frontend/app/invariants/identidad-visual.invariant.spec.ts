@@ -43,7 +43,7 @@ const MONO_PERMITIDO: Record<string, { usos: number, motivo: string }> = {
   'components/salones/AnularLineaModal.vue': { usos: 1, motivo: 'número de serie' },
   'pages/salones/index.vue': { usos: 1, motivo: 'número de serie' },
   'pages/configuracion/items.vue': { usos: 3, motivo: 'número de serie (2) y UUID del movimiento' },
-  'pages/inventario/traslados.vue': { usos: 3, motivo: 'número de serie y UUID de los movimientos' },
+  'pages/inventario/traslados.vue': { usos: 1, motivo: 'número de serie' },
   'pages/propinas/liquidaciones/[id]/imprimir.vue': { usos: 3, motivo: 'folio técnico del comprobante' },
   'pages/configuracion/pasarelas.vue': { usos: 1, motivo: 'prefijo técnico de la pasarela' },
   'pages/paquetes/index.vue': { usos: 2, motivo: 'código de bulto y lo que lee la pistola' },

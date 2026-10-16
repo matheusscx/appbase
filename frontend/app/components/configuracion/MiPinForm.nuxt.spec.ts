@@ -101,17 +101,17 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
     const wrapper = await montar()
 
     expect(wrapper.text()).toContain('Mi PIN')
-    expect(wrapper.text()).toContain('Todavía no tenés PIN')
+    expect(wrapper.text()).toContain('Todavía no tienes PIN')
     // ⚠️ El cuerpo del aviso no tenía NINGUNA aserción hasta el 2026-08-15,
-    // así que la redacción que prometía "Desde el tuyo trabajás normal"
+    // así que la redacción que prometía "Desde el tuyo trabajas normal"
     // podía volver a entrar sin poner nada en rojo. Y es la peor pantalla
     // donde puede pasar: es la que SÍ alcanza el garzón sin
     // `Salones:Operar` —el perfil no tiene gate de permiso y
     // `GET /garzones/mi-pin` tampoco—, o sea justo a quien esa promesa le
     // mentiría. El permiso no viaja en `MiPinEstado` (`{ fijado, eventos }`),
     // así que el texto no puede condicionarse: solo puede no prometer.
-    expect(wrapper.text()).toContain('Sin PIN no podés operar desde un dispositivo compartido')
-    expect(wrapper.text()).not.toMatch(/trabajás normal|Desde el tuyo/)
+    expect(wrapper.text()).toContain('Sin PIN no puedes operar desde un dispositivo compartido')
+    expect(wrapper.text()).not.toMatch(/trabajas normal|Desde el tuyo/)
   })
 
   it('no avisa cuando ya está fijado', async () => {
@@ -120,7 +120,7 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
     const wrapper = await montar()
 
     expect(wrapper.text()).toContain('Mi PIN')
-    expect(wrapper.text()).not.toContain('Todavía no tenés PIN')
+    expect(wrapper.text()).not.toContain('Todavía no tienes PIN')
   })
 
   it('muestra el historial de eventos que trae el backend', async () => {
@@ -136,7 +136,7 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
 
     // El historial es un REGISTRO y no tutea, aunque acá lo lea el propio
     // garzón: el mismo componente lo lee el encargado en la ficha. Lo que
-    // tutea es el aviso de arriba ("Todavía no tenés PIN").
+    // tutea es el aviso de arriba ("Todavía no tienes PIN").
     expect(wrapper.text()).toContain('ana.torres puso su propio PIN')
   })
 
@@ -157,7 +157,7 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
     await inputs[1]!.setValue('135790')
 
     // Tras guardar, el mock pasa a reportar el PIN fijado — así la aserción
-    // de recarga es observable (el aviso de "todavía no tenés PIN" desaparece).
+    // de recarga es observable (el aviso de "todavía no tienes PIN" desaparece).
     miPinRespuesta = { fijado: true, eventos: [], total: 0 }
 
     await wrapper.find('form').trigger('submit')
@@ -165,12 +165,12 @@ describe('MiPinForm — el bloque "Mi PIN" del perfil', () => {
 
     expect(fijarMiPinBody).toEqual({ pin: '135790', confirmarPin: '135790' })
     expect(toasts).toEqual([{ title: 'PIN actualizado', color: 'success' }])
-    expect(wrapper.text()).not.toContain('Todavía no tenés PIN')
+    expect(wrapper.text()).not.toContain('Todavía no tienes PIN')
   })
 
   it('un error al guardar (ej: PIN obvio) se muestra con el mensaje que vuelve del backend', async () => {
     miPinRespuesta = { fijado: false, eventos: [], total: 0 }
-    fijarMiPinError = 'Ese PIN es demasiado previsible. Elegí uno que no sea todo el mismo dígito ni una secuencia.'
+    fijarMiPinError = 'Ese PIN es demasiado previsible. Elige uno que no sea todo el mismo dígito ni una secuencia.'
 
     const wrapper = await montar()
     const inputs = wrapper.findAll('input[type="password"]')

@@ -225,7 +225,7 @@ describe('stock mínimo — con Inventario:Actualizar', () => {
     await new Promise(r => setTimeout(r, 20))
 
     expect(llamadas.filter(l => l.method === 'PUT')).toHaveLength(1)
-    expect((input.element as HTMLInputElement).value).toBe('6.0000')
+    expect((input.element as HTMLInputElement).value).toBe('6')
 
     wrapper.unmount()
   })

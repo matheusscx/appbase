@@ -69,7 +69,7 @@ test('la merma se pinta como pérdida y la comida del personal no, cada una con 
   await expect(filaMerma.getByText('$400', { exact: true })).toHaveClass(/text-error/)
 
   const filaPersonal = page.getByRole('row', { name: new RegExp(PRODUCTO) })
-    .filter({ hasText: `Comida del personal · ${MOTIVO_PERSONAL}` })
+    .filter({ hasText: MOTIVO_PERSONAL })
   await expect(filaPersonal).toBeVisible()
   await expect(filaPersonal.getByText('$800', { exact: true })).not.toHaveClass(/text-error/)
 })
@@ -79,7 +79,7 @@ test('el filtro de motivo separa la merma de la comida del personal, y "Bajas (t
 
   const filasDelProducto = page.getByRole('row', { name: new RegExp(PRODUCTO) })
   const merma = filasDelProducto.filter({ hasText: 'Merma · Vencimiento' })
-  const personal = filasDelProducto.filter({ hasText: `Comida del personal · ${MOTIVO_PERSONAL}` })
+  const personal = filasDelProducto.filter({ hasText: MOTIVO_PERSONAL })
   // El trigger del USelectMenu es un botón que muestra la opción elegida: se lo encuentra por la
   // vigente en cada paso, con el texto entero (el molde de `reportes/varianza.spec.ts`, pero sin
   // armar un RegExp: los paréntesis de "Bajas (todas)" serían un grupo y no matchearían).

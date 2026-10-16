@@ -39,6 +39,7 @@ const { etiquetaCondicion, colorCondicion } = useUnidadesSerie()
 
 const motivos = ref<MotivoBajaOpt[]>([])
 const cargandoMotivos = ref(false)
+const { formatCantidadConUnidad } = useFormatters()
 const cantidad = ref<number | undefined>(undefined)
 const motivoBajaId = ref<string | undefined>(undefined)
 /** Solo en una línea con serie: los ids de las unidades que se anulan. */
@@ -209,7 +210,7 @@ function confirmar() {
           v-else
           label="Cantidad a anular"
           required
-          :description="`Máximo ${maximoPresentacion} ${unidadPresentacion} (lo despachado)`"
+          :description="`Máximo ${formatCantidadConUnidad(maximoPresentacion, unidadPresentacion)} (lo despachado)`"
         >
           <UInputNumber
             v-model="cantidad"

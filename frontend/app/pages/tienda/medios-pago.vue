@@ -95,7 +95,7 @@ const columns: TableColumn<Tarjeta>[] = [
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="Medios de pago">
+      <AppNavbar title="Tarjetas">
         <template #right>
           <UserMenu />
         </template>
@@ -105,8 +105,8 @@ const columns: TableColumn<Tarjeta>[] = [
     <template #body>
       <div class="w-full space-y-6">
         <CrudPageHeader
-          title="Medios de pago"
-          description="Tarjetas inscritas en Webpay Oneclick para tus suscripciones. Nunca guardamos el número: solo la marca y los últimos 4 dígitos."
+          title="Tarjetas"
+          description="Tarjetas inscritas para tus suscripciones. Nunca guardamos el número: solo la marca y los últimos 4 dígitos."
         >
           <template #actions>
             <UButton
@@ -126,7 +126,7 @@ const columns: TableColumn<Tarjeta>[] = [
           color="warning"
           variant="soft"
           title="Inscripción no disponible"
-          description="El tenant no tiene una pasarela con tokenización (Oneclick) configurada y activa."
+          description="Tu local aún no tiene activo el cobro con tarjeta inscrita. Actívalo en Configuración › Pasarelas, o pídelo a quien administra el local."
         />
 
         <div v-if="loading" class="py-8 text-center text-sm text-muted">
@@ -177,7 +177,7 @@ const columns: TableColumn<Tarjeta>[] = [
 
           <template #empty>
             <div class="py-8 text-center text-sm text-muted">
-              No tenés tarjetas inscritas.
+              No tienes tarjetas inscritas.
             </div>
           </template>
         </CrudTable>

@@ -143,7 +143,7 @@ describe('AbonoModal — un abono que se repite no se registra dos veces', () =>
   it('el 422 de otros datos: "Ver venta" en vez del error genérico', async () => {
     const err = new Error('x') as Error & { status?: number, data?: unknown }
     err.status = 422
-    err.data = { statusCode: 422, message: 'Este cobro ya se había registrado con otros datos. Revisá la venta antes de cobrar de nuevo.', ventaId: 'venta-1' }
+    err.data = { statusCode: 422, message: 'Este cobro ya se había registrado con otros datos. Revisa la venta antes de cobrar de nuevo.', ventaId: 'venta-1' }
     respuestas = [err]
     await montar()
     await confirmar()

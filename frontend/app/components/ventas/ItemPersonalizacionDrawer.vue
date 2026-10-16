@@ -27,7 +27,7 @@ const open = defineModel<boolean>('open', { required: true })
 
 const config = useRuntimeConfig()
 const toast = useToast()
-const { formatMonto } = useFormatters()
+const { formatMonto, formatCantidadConUnidad } = useFormatters()
 const apiUrl = config.public.apiUrl
 
 /** Ítem personalizable (receta o combo) — la misma API/drawer sirve para ambos. */
@@ -376,8 +376,8 @@ function agregar() {
               <div class="min-w-0 flex-1 space-y-1">
                 <p class="text-sm font-medium text-default">{{ ing.ingredienteNombre }}</p>
                 <p class="text-xs text-muted">
-                  {{ ing.cantidad }} {{ ing.unidadCodigo }}
-                  <span v-if="ing.bloqueante"> · Bloqueante</span>
+                  {{ formatCantidadConUnidad(ing.cantidad, ing.unidadCodigo) }}
+                  <span v-if="ing.bloqueante"> · siempre va</span>
                 </p>
                 <p
                   v-if="sinStock(ing) && incluidos[ing.ingredienteItemId]"

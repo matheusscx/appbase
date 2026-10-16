@@ -1,7 +1,7 @@
 // @vitest-environment nuxt
 //
 // Lote 7 (09.4): si `GET /online/medios-pago` falla, la pantalla no puede decir "Inscripción no disponible:
-// el tenant no tiene una pasarela…" (falso) ni "No tenés tarjetas inscritas".
+// el tenant no tiene una pasarela…" (falso) ni "No tienes tarjetas inscritas".
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import MediosPago from './medios-pago.vue'
@@ -27,7 +27,7 @@ beforeEach(() => {
 })
 
 describe('tienda/medios-pago — una lectura fallida no es "no hay pasarela"', () => {
-  it('con un 500 no muestra la alerta de pasarela ni "No tenés tarjetas": dice que no pudo cargar', async () => {
+  it('con un 500 no muestra la alerta de pasarela ni "No tienes tarjetas": dice que no pudo cargar', async () => {
     respuesta = () => Promise.reject({ status: 500 })
     const w = await montar()
 

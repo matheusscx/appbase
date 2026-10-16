@@ -40,7 +40,7 @@ test('el admin ve los nueve grupos en orden y ninguna etiqueta se corta', async 
   )
   expect(cortadas).toEqual([])
 
-  await menu.getByRole('link', { name: 'Items', exact: true }).click()
+  await menu.getByRole('link', { name: 'Productos', exact: true }).click()
   await page.waitForURL('**/configuracion/items')
 })
 
@@ -55,7 +55,7 @@ test.describe('rol del tenant con permisos parciales', () => {
     const menu = menuConfiguracion(page)
 
     await expect(menu.locator('[data-slot="label"]')).toHaveText(['Mi cuenta', 'Catálogo', 'Restaurante'])
-    await expect(menu.getByRole('link')).toHaveText(['Perfil', 'Items', 'Salones', 'Garzones', 'Turnos'])
+    await expect(menu.getByRole('link')).toHaveText(['Perfil', 'Productos', 'Salones y mesas', 'Garzones', 'Turnos'])
     await expect(menu.locator('[data-slot="separator"]')).toHaveCount(2)
   })
 })

@@ -18,15 +18,15 @@ import { conTimeout } from '~/utils/con-timeout'
 
 /** Techo de espera de QZ Tray al imprimir (impresora apagada / host inalcanzable). */
 const PRINT_TIMEOUT_MS = 5_000
-const PRINT_TIMEOUT_MSG = 'La impresora no respondió (timeout 5 s)'
+const PRINT_TIMEOUT_MSG = 'La impresora no respondió'
 /** Mismo techo para `qz.websocket.connect()` — docs/agent/pendientes.md § 3,
  * "Conectar con QZ Tray tiene el mismo techo que imprimir" (owner, 2026-09-29). */
-const CONNECT_TIMEOUT_MSG = 'No se pudo conectar con QZ Tray (timeout 5 s)'
+const CONNECT_TIMEOUT_MSG = 'No se pudo conectar con el servicio de impresión'
 /** Mensaje propio para cualquier rechazo de QZ Tray que no sea uno de los dos
  * timeouts de arriba (p. ej. certificado inválido, versión incompatible): esos
  * vienen en inglés desde `qz-tray` y no deben llegarle así a la persona
  * (`apiErrorMsg` concatena el `message` del `Error` tal cual, ver `api-error.ts`). */
-const PRINT_ERROR_MSG = 'No se pudo imprimir. Revisá la impresora o QZ Tray.'
+const PRINT_ERROR_MSG = 'No se pudo imprimir. Revisa la impresora.'
 /** Cadenas exactas que `qz.websocket.connect()` rechaza (`node_modules/qz-tray/qz-tray.js`)
  * cuando la conexión anterior todavía no terminó — CONNECTING, si ni llegamos a
  * disparar `disconnect()`, o CLOSING, si ya lo disparamos y sigue sin cerrar (el
@@ -37,7 +37,7 @@ const QZ_CONEXION_PENDIENTE_MSGS = [
   'The current connection attempt has not returned yet',
   'Waiting for previous disconnect request to complete',
 ]
-const ESPERANDO_AUTORIZACION_MSG = 'QZ Tray está esperando que autorices la conexión en su ventana'
+const ESPERANDO_AUTORIZACION_MSG = 'El servicio de impresión espera que autorices la conexión en su ventana'
 const ESC_POS_CP850 = '\x1B\x74\x02'
 const ESC_POS_CORTE = '\x1B\x64\x04\x1D\x56\x00'
 

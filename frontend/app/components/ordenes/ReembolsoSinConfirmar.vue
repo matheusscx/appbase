@@ -36,7 +36,7 @@ async function volverAConsultar() {
     if (res.aclarado === 'salio')
       toast.add({ title: `El reembolso de ${montoTexto.value} salió: quedó registrado`, description: res.warning, color: 'success' })
     else if (res.aclarado === 'no_salio')
-      toast.add({ title: `El reembolso de ${montoTexto.value} no salió: podés reembolsar de nuevo`, color: 'warning' })
+      toast.add({ title: `El reembolso de ${montoTexto.value} no salió: puedes reembolsar de nuevo`, color: 'warning' })
     emit('resuelto')
   }
   catch (e: unknown) {
@@ -98,7 +98,7 @@ async function marcar(salio: boolean) {
         </div>
         <div v-if="aMano" class="flex flex-col gap-2">
           <p class="text-sm text-default">
-            Revisalo en el portal de Transbank y marcá lo que dice.
+            Revísalo en el portal de Transbank y marca lo que dice.
           </p>
           <div class="flex flex-wrap items-center gap-2">
             <UInput

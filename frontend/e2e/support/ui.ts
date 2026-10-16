@@ -117,7 +117,7 @@ export async function elegirPorPlaceholder(
 }
 
 /**
- * Una ronda completa de identificación de garzón: elegir quién sos y teclear
+ * Una ronda completa de identificación de garzón: elegir quién eres y teclear
  * los 6 dígitos del PIN. El modal tiene DOS pasos y el segundo no existe hasta
  * que el primero elige un garzón.
  *

@@ -252,7 +252,7 @@ test('pide, manda a cocina, anula como cortesía y el aviso aparece con el total
   //     cuenta abierta el toaster queda `aria-hidden` y `getByRole` contaría
   //     cero desde el principio. Los 10 s son la vida del toast (5 s, el
   //     default de Nuxt UI) más el margen, no un click más paciente.
-  await expect(page.getByText('Error al enviar la comanda').first()).toBeVisible()
+  await expect(page.getByText('No se pudo enviar la comanda').first()).toBeVisible()
   await expect(page.locator('ol[data-slot="viewport"] li')).toHaveCount(0, { timeout: 10_000 })
 
   // 6. Anular 1 de las 2 unidades despachadas, como cortesía.

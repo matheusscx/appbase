@@ -159,7 +159,7 @@ const problemaPagador = computed(() =>
 )
 const errorRutPagador = computed(() =>
   props.rutChileno && pagador.value.rut.trim() && !rutValido(pagador.value.rut)
-    ? 'RUT inválido: revisá el dígito verificador'
+    ? 'RUT inválido: revisa el dígito verificador'
     : undefined,
 )
 

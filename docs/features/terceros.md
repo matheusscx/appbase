@@ -8,6 +8,9 @@
 
 ## Overview
 
+> En pantalla se llama **Proveedores** (menú y títulos; auditoría UX 06.25 y 06.29, 2026-10-16).
+> En el código, la API, la base y los permisos sigue siendo `tercero` / `Terceros`.
+
 ### What is it?
 
 Un directorio de entidades externas del tenant: proveedores, empresas compradoras y

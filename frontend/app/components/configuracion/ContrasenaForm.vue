@@ -34,7 +34,7 @@ async function guardar() {
     // el access token, hasta 15 minutos después y en cualquier pantalla.
     toast.add({
       title: 'Contraseña actualizada',
-      description: 'Se cerraron todas las sesiones. Entrá de nuevo con tu contraseña nueva.',
+      description: 'Se cerraron todas las sesiones. Entra de nuevo con tu contraseña nueva.',
       color: 'success',
     })
     await authStore.logout()
@@ -67,7 +67,7 @@ async function guardar() {
       </UFormField>
 
       <UFormField label="Confirmar nueva contraseña" required :error="errores.confirmarContrasena">
-        <UInput v-model="form.confirmarContrasena" type="password" placeholder="Repetí la nueva contraseña" @update:model-value="limpiar('confirmarContrasena')" />
+        <UInput v-model="form.confirmarContrasena" type="password" placeholder="Repite la nueva contraseña" @update:model-value="limpiar('confirmarContrasena')" />
       </UFormField>
 
       <UButton type="submit" :loading="loading">

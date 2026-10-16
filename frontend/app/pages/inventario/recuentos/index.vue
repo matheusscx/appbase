@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
-
+import { formatStockCantidad } from '~/utils/stock-format'
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 interface RecuentoListItem {
@@ -139,7 +139,7 @@ const columns: TableColumn<RecuentoListItem>[] = [
         <CrudPageHeader
           large
           title="Recuentos de inventario"
-          description="Sesiones de conteo físico: contá contra el stock del sistema y aplicá la diferencia al kardex."
+          description="Sesiones de conteo físico: cuenta contra el stock del sistema y aplica la diferencia al historial de movimientos."
         >
           <template #actions>
             <UButton
@@ -192,7 +192,7 @@ const columns: TableColumn<RecuentoListItem>[] = [
               class="font-medium"
               :class="claseDiferenciaRecuento(row.original.diferenciaNeta)"
             >
-              {{ row.original.diferenciaNeta }}
+              {{ formatStockCantidad(row.original.diferenciaNeta, true) }}
             </span>
           </template>
           <template #usuarioCreadorNombre-cell="{ row }">

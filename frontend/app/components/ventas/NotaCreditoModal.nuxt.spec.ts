@@ -489,7 +489,7 @@ describe('NotaCreditoModal — una nota por intento de emisión (ADR-026)', () =
     await esperar()
 
     expect(wrapper.emitted('success')).toHaveLength(1)
-    expect(titulos().some(t => t.includes('ya estaba emitida') && t.includes('entregale los billetes'))).toBe(true)
+    expect(titulos().some(t => t.includes('ya estaba emitida') && t.includes('entrégale los billetes'))).toBe(true)
     // No se suma localmente: el resumen se pide al servidor.
     expect(caja.resumenTurno?.totalSalidas).toBe('3000.0000')
     expect(apiFetch.mock.calls.some(([url]) => String(url).endsWith('/caja/caja-1/movimientos/resumen'))).toBe(true)
@@ -523,7 +523,7 @@ describe('NotaCreditoModal — una nota por intento de emisión (ADR-026)', () =
       status: 422,
       data: {
         statusCode: 422,
-        message: 'Esta nota de crédito ya se había emitido con otros datos. Revisá la venta antes de emitir otra.',
+        message: 'Esta nota de crédito ya se había emitido con otros datos. Revisa la venta antes de emitir otra.',
         ventaId: 'nc-1',
       },
     })

@@ -184,7 +184,7 @@ const ESTADO_LABEL: Record<string, string> = {
           abierta desde {{ formatFecha(caja.fechaApertura) }}.
         </p>
         <p class="text-sm text-muted">
-          Si el cajero ya no está, podés cerrarla vos con el conteo a ciegas. Si nadie firma como
+          Si el cajero ya no está, puedes cerrarla tú con el conteo a ciegas. Si nadie firma como
           testigo, vas a tener que explicar qué pasó.
         </p>
         <UButton

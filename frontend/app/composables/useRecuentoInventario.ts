@@ -46,6 +46,21 @@ export function calcularDiferenciaRecuento(
   }
 }
 
+/**
+ * El conteo tal como se muestra en el campo: sin los ceros de cola con que el
+ * servidor lo guarda ("49.0000" → "49"). Sigue siendo un `Decimal` válido en
+ * notación normal, así que lo que la persona ve es lo que se vuelve a leer.
+ */
+export function cantidadParaCampo(cantidad: string | null | undefined): string {
+  if (cantidad === null || cantidad === undefined || cantidad.trim() === '') return ''
+  try {
+    return new Decimal(cantidad).toFixed()
+  }
+  catch {
+    return cantidad
+  }
+}
+
 /** Clase de color semántico de la diferencia: faltante, sobrante o neutro. */
 export function claseDiferenciaRecuento(diferencia: string | null | undefined): string {
   if (diferencia === null || diferencia === undefined) return 'text-muted'

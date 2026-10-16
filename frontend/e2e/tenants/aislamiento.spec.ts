@@ -89,7 +89,7 @@ async function irAlCatalogoPorElMenu(
   page: import('@playwright/test').Page,
 ): Promise<void> {
   await page.getByRole('link', { name: 'Configuración' }).click()
-  await page.getByRole('link', { name: 'Items', exact: true }).click()
+  await page.getByRole('link', { name: 'Productos', exact: true }).click()
   await page.waitForURL('**/configuracion/items')
 }
 
@@ -115,7 +115,7 @@ test('cambiar de institución no arrastra el catálogo de la anterior', async ({
 
   // Cambio de institución por donde lo hace un usuario: el menú de la cuenta.
   await page.getByRole('button', { name: /Admin Sistema/ }).click()
-  await page.getByRole('menuitem', { name: 'Cambiar Institución' }).click()
+  await page.getByRole('menuitem', { name: 'Cambiar de empresa' }).click()
   await page.waitForURL('**/select-tenant')
   await page.getByRole('button', { name: 'Demo Bodega' }).click()
   await page.waitForURL((url) => url.pathname === '/')

@@ -66,6 +66,24 @@ export function useFormatters() {
     )
   }
 
+  /**
+   * Cantidad con su unidad SIEMPRE a la vista: "1 unidad", "3 unidades",
+   * "20 g". `formatStock` omite la unidad de conteo ("98"), lo que sirve en una
+   * tabla con la unidad en el encabezado pero no en una frase suelta
+   * ("Máximo 1 unidad"). Presentación pura: no toca el valor.
+   */
+  function formatCantidadConUnidad(
+    value: string | Decimal | null | undefined,
+    unidadMedida?: string | null,
+  ): string {
+    const texto = formatStock(value, unidadMedida)
+    if (texto === '—' || !unidadMedida) return texto
+    const unidadesStore = useUnidadesMedidaStore()
+    if (unidadesStore.esFraccionaria(unidadMedida)) return texto
+    if (unidadMedida === 'unidad') return `${texto} ${texto === '1' ? 'unidad' : 'unidades'}`
+    return `${texto} ${unidadMedida}`
+  }
+
   // Traduce el payment_type_code de Transbank (Webpay) a una etiqueta legible.
   function formatTipoPago(code: string | null | undefined): string | null {
     if (!code) return null
@@ -110,11 +128,26 @@ export function useFormatters() {
     }
   }
 
+  /**
+   * Porcentaje para una lista: hasta 2 decimales y sin ceros de cola
+   * ("0.025" → "2,5%", "0.1" → "10%"). Con `toFixed(0)` un 2,5 % se leía "3 %":
+   * la persona veía una regla distinta de la guardada.
+   */
+  function formatPorcentajeCorto(value: string | Decimal | null | undefined): string {
+    if (value === null || value === undefined || value === '') return '—'
+    try {
+      const pct = new Decimal(value).mul(100).toDecimalPlaces(2, Decimal.ROUND_HALF_UP)
+      return `${pct.toFixed().replace('.', ',')}%`
+    } catch {
+      return '—'
+    }
+  }
+
   // `formatCosto` se reexpone tal cual: un costo es una tasa y su formato tiene
   // su propia regla (los decimales de la moneda son el piso, ver `useCurrency`).
   // Va por acá y no importando `useCurrency` en la página porque las pantallas
   // formatean por `useFormatters` — una sola puerta, no dos.
-  return { formatMonto, formatCosto, formatFecha, formatHora, formatDiaSemana, formatStock, formatTipoPago, formatPorcentaje, formatCostoPorMoneda, esAjusteDeValor }
+  return { formatMonto, formatCosto, formatFecha, formatHora, formatDiaSemana, formatStock, formatCantidadConUnidad, formatTipoPago, formatPorcentaje, formatPorcentajeCorto, formatCostoPorMoneda, esAjusteDeValor }
 }
 
 /**

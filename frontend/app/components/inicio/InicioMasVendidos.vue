@@ -7,6 +7,8 @@ import type { MasVendidoItem } from '~/types/resumen-negocio'
 
 defineProps<{ masVendidos: MasVendidoItem[] }>()
 
+import { formatStockCantidad } from '~/utils/stock-format'
+
 const { formatMonto } = useFormatters()
 </script>
 
@@ -26,7 +28,7 @@ const { formatMonto } = useFormatters()
         class="flex items-center justify-between gap-2 text-sm"
       >
         <span class="text-default truncate">{{ i + 1 }}. {{ item.itemNombre }}</span>
-        <span class="text-muted shrink-0">{{ item.cantidad }} · {{ formatMonto(item.monto) }}</span>
+        <span class="text-muted shrink-0">{{ formatStockCantidad(item.cantidad, true) }} · {{ formatMonto(item.monto) }}</span>
       </li>
     </ol>
     <p v-else class="text-sm text-muted">

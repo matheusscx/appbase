@@ -322,12 +322,12 @@ describe('avisoNotaRepetida — la nota ya había entrado: qué falta hacer (own
     const aviso = avisoNotaRepetida(opcion({}), '$3.000')
     expect(aviso).toContain('no se emitió dos veces')
     expect(aviso).toContain('La salida de $3.000 ya está registrada')
-    expect(aviso).toContain('entregale los billetes')
+    expect(aviso).toContain('entrégale los billetes')
   })
 
   it('por otro pago: la devolución en ese medio, una sola vez', () => {
     const aviso = avisoNotaRepetida(opcion({ metodo: 'Tarjeta de débito', mueveCaja: false }), '$3.000')
-    expect(aviso).toContain('por Tarjeta de débito, hacelo una sola vez')
+    expect(aviso).toContain('por Tarjeta de débito, hazlo una sola vez')
     expect(aviso).not.toContain('billetes')
   })
 

@@ -172,7 +172,7 @@ test('cobra un afecto y un exento: el IVA sale solo del afecto, y así queda en 
   await expect(page.getByText('Venta pagada').first()).toBeVisible({
     timeout: 15_000,
   })
-  await expect(page.getByText('Agregá ítems desde el catálogo.')).toBeVisible({
+  await expect(page.getByText('Agrega ítems desde el catálogo.')).toBeVisible({
     timeout: 15_000,
   })
 
@@ -496,14 +496,14 @@ test('Cobrar con un carrito que el motor rechaza dice por qué, y no abre el cob
   await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
   await rechazo
 
-  // Hasta el 2026-10-08 decía "No se pudo calcular el total. Intentá de nuevo.",
+  // Hasta el 2026-10-08 decía "No se pudo calcular el total. Intenta de nuevo.",
   // que con un 400 miente: reintentar da lo mismo.
   await expect(page.getByText('No se pudo calcular el total', { exact: true }).first()).toBeVisible()
   await expect(
     page.getByText(
-      `«${nombre}» da $146.913.578.024.690, y el sistema no puede guardar montos de $100.000.000.000.000 o más: revisá el precio y la cantidad`,
+      `«${nombre}» da $146.913.578.024.690, y el sistema no puede guardar montos de $100.000.000.000.000 o más: revisá el precio y la cantidad` // el mensaje sale del motor de precios (backend), todavía en voseo,
     ).first(),
   ).toBeVisible()
-  await expect(page.getByText('Intentá de nuevo')).toHaveCount(0)
+  await expect(page.getByText('Intenta de nuevo')).toHaveCount(0)
   await expect(page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })).toHaveCount(0)
 })

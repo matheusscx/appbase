@@ -135,8 +135,8 @@ function traducirMensaje(m: string): { texto: string, corto: string, campo: stri
  * El `nombreSugerido` que viaja en el 400 de colisión al restaurar de la
  * papelera, o `null` si el error es cualquier otra cosa.
  *
- * Es lo que separa "no se pudo, avisale al usuario" de "no se pudo TODAVÍA,
- * ofrecele un nombre libre": sin este dato la pantalla solo puede tirar un
+ * Es lo que separa "no se pudo, avísale al usuario" de "no se pudo TODAVÍA,
+ * ofrécele un nombre libre": sin este dato la pantalla solo puede tirar un
  * toast rojo, y el usuario queda sin salida más que renombrar a mano la fila
  * viva que le está ocupando el nombre.
  *

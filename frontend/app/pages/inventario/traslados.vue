@@ -516,7 +516,7 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
         <CrudPageHeader
           large
           title="Traslados"
-          description="Mueve mercadería entre el local y las bodegas del tenant, en un solo acto."
+          description="Mueve mercadería entre el local y sus bodegas, en un solo acto."
         >
           <template #actions>
             <UButton
@@ -644,7 +644,7 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                 </div>
 
                 <p v-if="!form.origenId" class="text-sm text-muted">
-                  Elegí el origen para poder agregar líneas.
+                  Elige el origen para poder agregar líneas.
                 </p>
 
                 <div
@@ -804,16 +804,10 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                   {{ formatStock(row.original.cantidad, row.original.unidadMedida) }}
                 </template>
                 <template #stockOrigenResultante-cell="{ row }">
-                  <div>
-                    {{ formatStock(row.original.stockOrigenResultante, row.original.unidadMedida) }}
-                    <p class="text-xs text-muted font-mono">{{ row.original.movimientoSalidaId }}</p>
-                  </div>
+                  {{ formatStock(row.original.stockOrigenResultante, row.original.unidadMedida) }}
                 </template>
                 <template #stockDestinoResultante-cell="{ row }">
-                  <div>
-                    {{ formatStock(row.original.stockDestinoResultante, row.original.unidadMedida) }}
-                    <p class="text-xs text-muted font-mono">{{ row.original.movimientoEntradaId }}</p>
-                  </div>
+                  {{ formatStock(row.original.stockDestinoResultante, row.original.unidadMedida) }}
                 </template>
               </UTable>
             </div>

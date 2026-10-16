@@ -8,7 +8,7 @@ const store = useAuthStore()
 const tenantStore = useTenantStore()
 const permissionsStore = usePermissionsStore()
 
-// Qué bloques le corresponden a este rol. Sin ninguno, la pantalla era un "Bienvenido" con el título
+// Qué bloques le corresponden a este rol. Sin ninguno, la pantalla era un saludo con el título
 // "Ahora" y nada debajo (auditoría UX 04.8): ahora dice qué hacer y esconde los títulos vacíos.
 const verAhora = computed(() =>
   permissionsStore.can('Salones', 'Ver todas')
@@ -28,12 +28,9 @@ const verHoy = computed(() => permissionsStore.can('Resumen del negocio', 'Leer'
     <template #body>
       <div class="w-full space-y-8">
         <div class="flex items-center gap-4">
-          <div class="w-10 h-10 rounded-xl bg-primary-50 dark:bg-primary-950 flex items-center justify-center shrink-0">
-            <UIcon name="i-lucide-circle-check" class="w-5 h-5 text-highlighted" />
-          </div>
           <div>
             <h2 class="text-lg font-semibold text-default">
-              Bienvenido, {{ store.user?.nombre }}
+              Hola, {{ store.user?.nombre }}
             </h2>
             <ClientOnly>
               <p class="text-muted text-xs">

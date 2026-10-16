@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Repartidores from './repartidores.vue'
 
-const MENSAJE_HOJAS = 'El repartidor tiene hojas de ruta: desactivalo en vez de eliminarlo.'
+const MENSAJE_HOJAS = 'El repartidor tiene hojas de ruta: desactívalo en vez de eliminarlo.'
 
 let repartidoresBackend: { id: string, nombre: string, telefono: string | null, activo: boolean }[] = []
 let fallaPatch = false

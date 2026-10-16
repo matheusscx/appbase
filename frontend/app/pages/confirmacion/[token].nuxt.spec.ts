@@ -62,7 +62,7 @@ beforeEach(() => {
         ? Promise.resolve(datosToken)
         : Promise.reject({ data: { message: 'El link venció' } })
     }
-    return Promise.resolve({ message: 'Listo, ya sos parte de Bar Central' })
+    return Promise.resolve({ message: 'Listo, ya eres parte de Bar Central' })
   })
 })
 
@@ -93,7 +93,7 @@ describe('confirmacion/[token] — el link del mail', () => {
     expect(llamadas[0]![1]).toBe('GET')
   })
 
-  it('dice "te están sumando a X", no "confirmá tu correo"', async () => {
+  it('dice "te están sumando a X", no "confirma tu correo"', async () => {
     const wrapper = await montar()
     const texto = wrapper.text()
 
@@ -101,7 +101,7 @@ describe('confirmacion/[token] — el link del mail', () => {
     // y su correo no está en duda. Lo que se le pregunta es si se suma a ésta.
     expect(texto).toContain('Te están sumando a Bar Central')
     expect(texto).toContain('beto@example.com')
-    expect(texto).not.toMatch(/confirmá tu correo/i)
+    expect(texto).not.toMatch(/confirma tu correo/i)
     // No se elige contraseña: la persona ya tiene cuenta.
     expect(wrapper.findAll('input[type="password"]')).toHaveLength(0)
   })
@@ -147,7 +147,7 @@ describe('confirmacion/[token] — el link del mail', () => {
     vi.stubGlobal('$fetch', (url: string, opts?: { method?: string }) => {
       llamadas.push([url, opts?.method ?? 'GET'])
       if (!opts?.method) return Promise.resolve(datosToken)
-      return Promise.reject({ data: { message: 'Ya sos parte de esta empresa' } })
+      return Promise.reject({ data: { message: 'Ya eres parte de esta empresa' } })
     })
 
     const wrapper = await montar()
@@ -155,7 +155,7 @@ describe('confirmacion/[token] — el link del mail', () => {
     await new Promise(r => setTimeout(r, 0))
     await wrapper.vm.$nextTick()
 
-    expect(wrapper.text()).toContain('Ya sos parte de esta empresa')
+    expect(wrapper.text()).toContain('Ya eres parte de esta empresa')
     expect(navegado).toHaveLength(0)
   })
 })

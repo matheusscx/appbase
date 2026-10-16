@@ -533,7 +533,7 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
             color="warning"
             variant="subtle"
             icon="i-lucide-circle-alert"
-            :title="`«${productoConSerie.nombre}» tiene número de serie: dalo de baja desde Ajuste de stock, eligiendo la unidad`"
+            :title="`«${productoConSerie.nombre}» tiene número de serie: da de baja el producto desde Ajuste de stock, eligiendo la unidad`"
           />
 
           <UAlert

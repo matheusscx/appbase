@@ -727,8 +727,8 @@ seguridad.
 3. **Bloqueos**, con el mensaje exacto: el RUT receptor no es una razón social del tenant; el tipo
    es nota de crédito/débito (56/61 — fiscal y deuda, van aparte) o no tiene fila; la factura ya
    está cargada (con un botón **Abrir**, que navega a ella); el RUT del emisor no calza con ningún
-   proveedor — ahí el encargado elige uno (`proveedorId`), y "no encontramos el RUT…, pedile a
-   quien tenga el módulo Terceros que lo cree" si no hay candidatos.
+   proveedor — ahí el encargado elige uno (`proveedorId`), y "no encontramos el RUT…, pídele a
+   quien administra los proveedores que lo cree" si no hay candidatos.
 4. Sin bloqueo, el formulario de siempre se pre-llena: proveedor, tipo de documento, folio, fecha
    del documento. **La ubicación ("Entra a") nunca se pre-llena** — ni con el XML ni con la carga
    manual: a qué local o bodega entra la mercadería lo decide el encargado, la factura no lo dice.

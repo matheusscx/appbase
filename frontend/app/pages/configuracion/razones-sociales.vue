@@ -230,7 +230,7 @@ const columns: TableColumn<RazonSocial>[] = [
   <div class="space-y-6">
     <CrudPageHeader
       title="Razones sociales"
-      description="Datos legales para facturación del tenant."
+      description="Datos legales para la facturación de tu local."
     >
       <template #actions>
         <UButton

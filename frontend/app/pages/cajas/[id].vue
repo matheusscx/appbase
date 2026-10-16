@@ -33,7 +33,7 @@ onMounted(async () => {
     }
   }
   catch {
-    toast.add({ title: 'No tenés acceso a esta caja o no existe', color: 'warning' })
+    toast.add({ title: 'No tienes acceso a esta caja o no existe', color: 'warning' })
     await navigateTo('/cajas')
   }
   finally {

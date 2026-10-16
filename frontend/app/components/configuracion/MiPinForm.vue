@@ -71,7 +71,7 @@ onMounted(async () => {
       </div>
     </template>
 
-    <!-- ⚠️ Este aviso NO promete "desde el tuyo trabajás normal" (revisión
+    <!-- ⚠️ Este aviso NO promete "desde el tuyo trabajas normal" (revisión
          final, 2026-08-15). Es la pantalla que SÍ alcanza el garzón sin
          `Salones:Operar`: `perfil.vue` no declara `definePageMeta` propio y
          hereda el de la ruta padre `pages/configuracion.vue`
@@ -89,8 +89,8 @@ onMounted(async () => {
       color="warning"
       variant="subtle"
       icon="i-lucide-info"
-      title="Todavía no tenés PIN"
-      description="Sin PIN no podés operar desde un dispositivo compartido, como el tótem del local. Poné uno acá abajo."
+      title="Todavía no tienes PIN"
+      description="Sin PIN no puedes operar desde un dispositivo compartido, como el tótem del local. Pon uno acá abajo."
       class="mb-4"
     />
 
@@ -100,7 +100,7 @@ onMounted(async () => {
       </UFormField>
 
       <UFormField label="Repetir PIN" required>
-        <UInput v-model="form.confirmarPin" type="password" inputmode="numeric" maxlength="6" placeholder="Repetilo" />
+        <UInput v-model="form.confirmarPin" type="password" inputmode="numeric" maxlength="6" placeholder="Repítelo" />
       </UFormField>
 
       <UButton type="submit" :loading="guardando">

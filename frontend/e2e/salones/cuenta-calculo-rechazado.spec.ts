@@ -160,7 +160,7 @@ test('la cuenta que el servidor no puede calcular dice por qué arriba de las l�
   await expect(aviso).toBeVisible()
   await expect(aviso).toContainText('No se pudo calcular la cuenta')
   await expect(aviso).toContainText(
-    `«${escenario.productoNombre}» da $146.913.578.024.690, y el sistema no puede guardar montos de $100.000.000.000.000 o más: revisá el precio y la cantidad`,
+    `«${escenario.productoNombre}» da $146.913.578.024.690, y el sistema no puede guardar montos de $100.000.000.000.000 o más: revisá el precio y la cantidad` // el mensaje sale del motor de precios (backend), todavía en voseo,
   )
   await expect(valorDelTotal(page)).toHaveText('—')
 

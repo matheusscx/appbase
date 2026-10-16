@@ -41,7 +41,7 @@ const cuadro = computed(() => diferenciaTotal.value.isZero())
       </span>
     </div>
     <span v-if="caja.cajonNombre" class="text-sm text-muted">
-      Cajón {{ caja.cajonNombre }}
+      Caja {{ caja.cajonNombre }}
     </span>
     <span v-if="caja.fechaCierre" class="text-sm text-muted">
       Cerrada {{ formatFecha(caja.fechaCierre) }}

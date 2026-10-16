@@ -275,8 +275,8 @@ export function avisoNotaRepetida(o: OpcionDevolucion | null, montoFormateado: s
   const base = 'Esta nota de crédito ya estaba emitida, no se emitió dos veces.'
   if (!o || o.sinPlata) return base
   if (o.mueveCaja)
-    return `${base} La salida de ${montoFormateado} ya está registrada en tu caja: entregale los billetes al cliente si todavía no lo hiciste.`
-  return `${base} Si todavía no devolviste ${montoFormateado} por ${o.metodo ?? 'ese pago'}, hacelo una sola vez.`
+    return `${base} La salida de ${montoFormateado} ya está registrada en tu caja: entrégale los billetes al cliente si todavía no lo hiciste.`
+  return `${base} Si todavía no devolviste ${montoFormateado} por ${o.metodo ?? 'ese pago'}, hazlo una sola vez.`
 }
 
 /**

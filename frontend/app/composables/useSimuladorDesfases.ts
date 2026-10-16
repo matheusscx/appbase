@@ -22,7 +22,7 @@ export interface DesfaseCambiado {
  *
  * ⚠️ Vive acá y no en cada pantalla porque las dos que descartan —el drawer y la
  * bandeja `/desfases`— tienen que decir lo mismo, y la bandeja decía otra cosa:
- * mandaba *"mirá el número nuevo y decidí otra vez"* sobre TODO `cambiados`,
+ * mandaba *"mira el número nuevo y decide otra vez"* sobre TODO `cambiados`,
  * incluidas las filas `null`, que su propia recarga acababa de sacar de la
  * lista. Es el mismo bug que este frente cerró en el drawer, y una fila que dejó
  * de estar desfasada no tiene nada que decidir.
@@ -36,7 +36,7 @@ export function avisosDeDesfasesCambiados(cambiados: DesfaseCambiado[]) {
       title: paraDecidir.length === 1
         ? `El costo de «${paraDecidir[0]!.nombre}» cambió mientras mirabas`
         : `${paraDecidir.length} costos cambiaron mientras mirabas`,
-      description: 'Esos avisos no se descartaron. Mirá el número nuevo y decidí otra vez.',
+      description: 'Esos avisos no se descartaron. Mira el número nuevo y decide otra vez.',
       color: 'warning',
     })
   }
@@ -143,13 +143,13 @@ export function useSimuladorDesfases() {
       ]
       if (res.omitidos.length) {
         toast.add({
-          title: `${res.omitidos.length} combo(s) se recalcularon y vuelven a proponerse`,
+          title: `${res.omitidos.length === 1 ? '1 combo se recalculó y vuelve' : `${res.omitidos.length} combos se recalcularon y vuelven`} a proponerse`,
           color: 'warning',
         })
       }
       if (res.afectados.length) {
         toast.add({
-          title: `${res.afectados.length} combo(s) quedaron desfasados por este cambio`,
+          title: `${res.afectados.length === 1 ? '1 combo quedó desfasado' : `${res.afectados.length} combos quedaron desfasados`} por este cambio`,
           color: 'info',
         })
       } else {

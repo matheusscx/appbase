@@ -370,7 +370,7 @@ describe('configuracion/recargos — badge de nivel', () => {
  * ⚠️ **La tabla test↔mutante de `descuentos.nuxt.spec.ts` NO se aplica tal cual
  * acá**, y por eso no se remite a ella sin más: su última fila dice que quitar el
  * empujón entero mata DOS tests, y eso depende de qué tests tenga cada archivo.
- * Si tocás este bloque, medí los mutantes **sobre `recargos.vue`**. El porqué de
+ * Si tocas este bloque, mide los mutantes **sobre `recargos.vue`**. El porqué de
  * la decisión sí es común y vive allá.
  */
 describe('configuracion/recargos — el tipo empuja el nivel, sin bloquearlo', () => {

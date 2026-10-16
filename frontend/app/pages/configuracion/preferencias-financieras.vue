@@ -65,7 +65,7 @@ const pasoLabels: Record<string, string> = {
 
 const nivelRedondeoOptions = [
   { value: 'linea', label: 'Por línea', description: 'Cada línea de la venta se redondea por separado y el total es la suma de esos redondeos. Es lo habitual: cada línea del comprobante muestra un monto que la moneda puede representar, y suman exacto.' },
-  { value: 'documento', label: 'Por documento', description: 'Las líneas se calculan con toda su precisión y solo el total final se redondea a la moneda. Elegilo si tu normativa exige que el redondeo ocurra en el total y no en cada línea (es la regla mexicana); a cambio, las líneas del comprobante pueden mostrar decimales que la moneda no tiene.' },
+  { value: 'documento', label: 'Por documento', description: 'Las líneas se calculan con toda su precisión y solo el total final se redondea a la moneda. Elígelo si tu normativa exige que el redondeo ocurra en el total y no en cada línea (es la regla mexicana); a cambio, las líneas del comprobante pueden mostrar decimales que la moneda no tiene.' },
 ]
 
 async function cargar() {
@@ -119,7 +119,7 @@ async function cargar() {
     // 'documento' no admite una escala mayor que 4 y el backend lo rechaza con
     // 400. Un tenant legado nació con escala 6 y nivel 'linea': si le pisamos
     // solo el nivel, el guardado que la norma le OBLIGA a hacer es imposible —
-    // y la salida que sugiere el mensaje del backend, «usá linea», es justo el
+    // y la salida que sugiere el mensaje del backend, «usa linea», es justo el
     // radio que acabamos de deshabilitar. Es la misma regla que aplica
     // `TenantsService.create` al nacer el tenant, acá para el que nació antes.
     //
@@ -389,7 +389,7 @@ function moverAbajo(index: number) {
 
             <UFormField
               label="Nivel de redondeo"
-              hint="Cuándo se ajustan los centavos: en cada línea de la venta, o solo una vez al final del documento. Si no te lo exige una normativa, dejá «Por línea»."
+              hint="Cuándo se ajustan los centavos: en cada línea de la venta, o solo una vez al final del documento. Si no te lo exige una normativa, deja «Por línea»."
               :description="nivelRedondeoBloqueado ? motivoDelCandado(nivelRedondeoNorma, nivelRedondeoDesalineado, escalaBajadaPorElNivel) : undefined"
             >
               <URadioGroup
@@ -435,8 +435,8 @@ function moverAbajo(index: number) {
                 sobrante de tarjeta no pasa desapercibido.
               </p>
               <p class="text-sm text-muted">
-                Dejá un umbral en <strong>0</strong> para apagarlo. Para elegir los
-                números, mirá primero la
+                Deja un umbral en <strong>0</strong> para apagarlo. Para elegir los
+                números, mira primero la
                 <ULink to="/cajas/tendencia" class="text-primary">
                   tendencia de descuadres
                 </ULink>: sirve saber cuánto descuadra tu local de verdad.

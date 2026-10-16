@@ -213,7 +213,7 @@ describe('UnidadesSerieModal', () => {
     expect(marcadas()).toEqual(['350000000000001', '350000000000002'])
     const fija = filas().find(f => f.getAttribute('data-serie') === '350000000000001')!
     expect(fija.querySelector('[role="checkbox"]')!.hasAttribute('disabled')).toBe(true)
-    expect(dialogo().querySelector('[data-qa="unidades-fijas-aviso"]')?.textContent).toMatch(/anul/i)
+    expect(dialogo().querySelector('[data-qa="unidades-fijas-aviso"]')?.textContent).toMatch(/anúl/i)
 
     await tildar('351111111111111')
     botonConfirmar().click()

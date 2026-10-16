@@ -198,10 +198,10 @@ function conCompuerta(codigo: string) {
 }
 
 describe('escanear: antes de elegir repartidor', () => {
-  it('el campo está deshabilitado y dice "Elegí un repartidor"; solo se listan los activos', async () => {
+  it('el campo está deshabilitado y dice "Elige un repartidor"; solo se listan los activos', async () => {
     const w = await montar()
     expect(campo().disabled).toBe(true)
-    expect(campo().placeholder).toBe('Elegí un repartidor')
+    expect(campo().placeholder).toBe('Elige un repartidor')
     const items = selectDeRepartidor(w).props('items') as { label: string }[]
     expect(items.map(i => i.label)).toEqual(['Juan Pérez', 'Beto Rojas'])
   })
@@ -210,7 +210,7 @@ describe('escanear: antes de elegir repartidor', () => {
     const w = await montar()
     await elegirRepartidor(w, 'r-1')
     expect(campo().disabled).toBe(false)
-    expect(campo().placeholder).toBe('Escaneá o tipeá el código')
+    expect(campo().placeholder).toBe('Escanea o tipea el código')
     expect(document.activeElement).toBe(campo())
     const get = llamadas.find(l => /\/hojas-ruta\?/.test(l.url))!
     const q = new URL(get.url, 'http://x').searchParams

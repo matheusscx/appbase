@@ -74,7 +74,7 @@ const emptyForm = () => ({
 const form = ref(emptyForm())
 
 const drawerTitle = computed(() =>
-  editingId.value ? 'Editar tercero' : 'Nuevo tercero',
+  editingId.value ? 'Editar proveedor' : 'Nuevo proveedor',
 )
 
 const submitLabel = computed(() =>
@@ -120,7 +120,7 @@ async function cargar() {
       errorCarga.value = true
       sinPermiso.value = esSinPermiso(e)
       // El 403 lo dice la propia tabla; el toast que se iba solo no lo repite.
-      if (!sinPermiso.value) toast.add({ title: apiErrorMsg(e, 'Error al cargar terceros'), color: 'error' })
+      if (!sinPermiso.value) toast.add({ title: apiErrorMsg(e, 'Error al cargar proveedores'), color: 'error' })
     }
     finally {
       loading.value = false
@@ -200,7 +200,7 @@ async function guardar() {
       comuna: form.value.comuna || undefined,
       activo: form.value.activo,
       // Distinto del resto de los campos de este body (`|| undefined`, "no
-      // se toca"): `plazoPagoDias` vacío significa "volvé a 30 días" (spec
+      // se toca"): `plazoPagoDias` vacío significa "vuelve a 30 días" (spec
       // § 2, decisión 4), así que viaja en `null` — nunca ausente, que en un
       // PATCH el backend lee como "no cambies nada" y deja el plazo viejo
       // con un 200 que parece haber funcionado. Los dos DTOs (crear y
@@ -216,7 +216,7 @@ async function guardar() {
           body,
         })
     upsertLocal(saved)
-    toast.add({ title: isNew ? 'Tercero creado' : 'Tercero actualizado', color: 'success' })
+    toast.add({ title: isNew ? 'Proveedor creado' : 'Proveedor actualizado', color: 'success' })
     drawerOpen.value = false
   }
   catch (e: unknown) {
@@ -239,7 +239,7 @@ async function toggleActivo(tercero: Tercero) {
       method: 'PATCH',
       body: { activo: tercero.activo },
     })
-    toast.add({ title: tercero.activo ? 'Tercero activado' : 'Tercero desactivado', color: 'success' })
+    toast.add({ title: tercero.activo ? 'Proveedor activado' : 'Proveedor desactivado', color: 'success' })
   }
   catch (e: unknown) {
     tercero.activo = prev
@@ -272,7 +272,7 @@ async function eliminar(id: string) {
     else {
       removeLocal(id)
     }
-    toast.add({ title: 'Tercero eliminado', color: 'success' })
+    toast.add({ title: 'Proveedor eliminado', color: 'success' })
   }
   catch (e: unknown) {
     const msg = apiErrorMsg(e, 'Error al eliminar')
@@ -308,7 +308,7 @@ async function restaurarTercero(id: string) {
       t.eliminadoEl = null
       t.eliminadoPorNombre = null
     }
-    toast.add({ title: 'Tercero restaurado', color: 'success' })
+    toast.add({ title: 'Proveedor restaurado', color: 'success' })
     cerrarRestaurar()
   }
   catch (e: unknown) {
@@ -333,13 +333,13 @@ const columns: TableColumn<Tercero>[] = [
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="Terceros" />
+      <AppNavbar title="Proveedores" />
     </template>
 
     <template #body>
       <div class="w-full space-y-6">
         <CrudPageHeader
-          title="Terceros"
+          title="Proveedores"
           description="Directorio de proveedores, empresas y personas naturales recurrentes."
         >
           <template #actions>
@@ -356,13 +356,13 @@ const columns: TableColumn<Tercero>[] = [
                 icon="i-lucide-plus"
                 @click="abrirCrear"
               >
-                Nuevo tercero
+                Nuevo proveedor
               </UButton>
             </div>
           </template>
         </CrudPageHeader>
 
-        <CrudTable :data="terceros" :columns="columns" :loading="loading" :error="errorCarga" :sin-permiso="sinPermiso" recurso="los terceros" @reintentar="cargar">
+        <CrudTable :data="terceros" :columns="columns" :loading="loading" :error="errorCarga" :sin-permiso="sinPermiso" recurso="los proveedores" @reintentar="cargar">
           <template #nombre-cell="{ row }">
             <div class="space-y-1">
               <div class="flex items-center gap-2">
@@ -432,7 +432,7 @@ const columns: TableColumn<Tercero>[] = [
 
           <template #empty>
             <div class="py-8 text-center text-sm text-muted">
-              No hay terceros registrados.
+              No hay proveedores registrados.
             </div>
           </template>
         </CrudTable>
@@ -497,7 +497,7 @@ const columns: TableColumn<Tercero>[] = [
               <UFormField label="Comuna" :hint="`${form.comuna.length}/${LARGO_RECEPTOR.comuna}`">
                 <UInput v-model="form.comuna" :maxlength="LARGO_RECEPTOR.comuna" placeholder="Santiago" />
               </UFormField>
-              <UFormField label="Plazo de pago (días)" help="Vacío = 30 días (spec compras-deuda-proveedor § 2)">
+              <UFormField label="Plazo de pago (días)" help="Vacío = 30 días">
                 <UInput
                   v-model="form.plazoPagoDias"
                   type="number"
@@ -533,16 +533,16 @@ const columns: TableColumn<Tercero>[] = [
 
         <CrudModal
           v-model:open="confirmModalOpen"
-          title="Eliminar tercero"
-          message="¿Eliminar este tercero? Podés recuperarlo desde «Ver eliminados»."
+          title="Eliminar proveedor"
+          message="¿Eliminar este proveedor? Puedes recuperarlo desde «Ver eliminados»."
           @cancel="confirmDeleteId = null"
           @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
         />
 
         <CrudModal
           v-model:open="confirmRestaurarModalOpen"
-          title="Restaurar tercero"
-          message="¿Restaurar este tercero? Volverá a aparecer en el listado y podrá usarse de nuevo."
+          title="Restaurar proveedor"
+          message="¿Restaurar este proveedor? Volverá a aparecer en el listado y podrá usarse de nuevo."
           confirm-label="Restaurar"
           confirm-color="neutral"
           :loading="restaurando"

@@ -219,7 +219,7 @@ export class AuthService {
     );
     if (!fila) {
       throw new BadRequestException(
-        'Ese link ya no sirve: puede estar vencido o ya usado. Volvé a registrarte y te mandamos uno nuevo.',
+        'Ese link ya no sirve: puede estar vencido o ya usado. Vuelve a registrarte y te mandamos uno nuevo.',
       );
     }
     await this.db.transaccion(async (manager) => {
@@ -233,7 +233,7 @@ export class AuthService {
         throw new BadRequestException('Ese link ya no sirve');
       }
     });
-    return { message: 'Listo, tu correo quedó verificado. Ya podés entrar.' };
+    return { message: 'Listo, tu correo quedó verificado. Ya puedes entrar.' };
   }
 
   /**
@@ -251,7 +251,7 @@ export class AuthService {
     const fila = await this.tokens.buscarVigente(token, tipo);
     if (!fila) {
       throw new BadRequestException(
-        'Ese link ya no sirve: puede estar vencido o ya usado. Pedí uno nuevo.',
+        'Ese link ya no sirve: puede estar vencido o ya usado. Pide uno nuevo.',
       );
     }
     const user = await this.usersService.findById(fila.usuarioId);
@@ -276,7 +276,7 @@ export class AuthService {
     const fila = await this.tokens.buscarVigente(token, tipo);
     if (!fila) {
       throw new BadRequestException(
-        'Ese link ya no sirve: puede estar vencido o ya usado. Pedí uno nuevo.',
+        'Ese link ya no sirve: puede estar vencido o ya usado. Pide uno nuevo.',
       );
     }
     const hashed = await bcrypt.hash(contrasena, 10);

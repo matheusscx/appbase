@@ -203,7 +203,7 @@ test('en una línea despachada el celular que está en la mesa no se desmarca, y
   await page.getByRole('button', { name: 'Cambiar unidades' }).click()
   const selector = page.getByRole('dialog').filter({ hasText: 'Elegir unidades' })
   await expect(selector).toBeVisible()
-  await expect(selector.locator('[data-qa="unidades-fijas-aviso"]')).toContainText('anulala')
+  await expect(selector.locator('[data-qa="unidades-fijas-aviso"]')).toContainText('anúlala')
 
   // El usado está en la mesa: marcado y sin poder desmarcarse.
   const checkUsado = selector.locator(`[data-qa="unidad-fila"][data-serie="${usado.serie}"]`).getByRole('checkbox')

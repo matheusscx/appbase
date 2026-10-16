@@ -403,9 +403,9 @@ async function abrirEditar(grupo: Grupo) {
 
 function validarForm(): string | null {
   if (!form.value.nombre.trim()) return 'El nombre es obligatorio'
-  if (!form.value.opciones.length) return 'Agregá al menos una opción'
+  if (!form.value.opciones.length) return 'Agrega al menos una opción'
   for (const o of form.value.opciones) {
-    if (!o.itemId) return 'Seleccioná un item para cada opción'
+    if (!o.itemId) return 'Selecciona un item para cada opción'
     if (o.cantidad) {
       let cantidad: Decimal
       try {
@@ -416,10 +416,10 @@ function validarForm(): string | null {
       }
       if (cantidad.isNaN() || cantidad.lessThanOrEqualTo(0)) return 'La cantidad debe ser mayor a 0'
     }
-    if (!o.precioExtra) return 'Completá el precio extra de cada opción (puede ser 0)'
+    if (!o.precioExtra) return 'Completa el precio extra de cada opción (puede ser 0)'
     const familia = familiaDeItem(o.itemId)
     // Ítem sin resolver (falló el pedido por id): no se valida a ciegas ni se saltea en silencio.
-    if (!familia) return 'No se pudo cargar un ítem de las opciones: cerrá y volvé a abrir el grupo'
+    if (!familia) return 'No se pudo cargar un ítem de las opciones: cierra y vuelve a abrir el grupo'
     if (familia === 'ingrediente' && !o.unidadCodigo) {
       return 'Las opciones ingrediente requieren unidad de medida'
     }
@@ -507,7 +507,7 @@ function cerrarRestaurar() {
  * desde el modal de colisión. Molde: `descuentos.vue` → `restaurarDescuento()`.
  *
  * El catch NO cierra todo y tira un toast rojo: un 400 de colisión no es un
- * error terminal sino una pregunta —qué nombre querés usar—, así que abre el
+ * error terminal sino una pregunta —qué nombre quieres usar—, así que abre el
  * segundo modal con la sugerencia del backend. Solo los errores de verdad
  * (404 "no está en la papelera", red) terminan en toast.
  */
@@ -780,7 +780,7 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
             </div>
 
             <p v-if="!form.opciones.length" class="text-sm text-muted">
-              Agregá al menos una opción. Todas deben ser de la misma familia (ingrediente o vendible).
+              Agrega al menos una opción. Todas deben ser de la misma familia (ingrediente o vendible).
             </p>
           </div>
         </UForm>
@@ -819,7 +819,7 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
                 v-model="loteOpcionId"
                 :items="loteOpcionesItems"
                 value-key="value"
-                placeholder="Elegí una opción"
+                placeholder="Elige una opción"
                 class="w-full"
               />
             </UFormField>
@@ -890,7 +890,7 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
             </template>
 
             <template #efectivo-cell="{ row }">
-              <span v-if="!loteOpcionId" class="text-sm text-muted">Elegí una opción arriba</span>
+              <span v-if="!loteOpcionId" class="text-sm text-muted">Elige una opción arriba</span>
               <template v-else-if="opcionDeFila(row.original)">
                 <div class="flex items-center gap-2">
                   <UBadge
@@ -932,7 +932,7 @@ const recetasColumns: TableColumn<RecetaUsando>[] = [
     <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar grupo de modificadores"
-      message="¿Eliminar este grupo? Podés recuperarlo desde «Ver eliminados»."
+      message="¿Eliminar este grupo? Puedes recuperarlo desde «Ver eliminados»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
     />

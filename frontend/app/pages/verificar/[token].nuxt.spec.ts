@@ -68,7 +68,7 @@ describe('verificar/[token]', () => {
     montado = wrapper
 
     expect(alBackend()).toEqual([])
-    expect(wrapper.text()).toContain('Confirmá que este correo es tuyo')
+    expect(wrapper.text()).toContain('Confirma que este correo es tuyo')
   })
 
   it('el clic manda el POST al token de la URL', async () => {

@@ -345,7 +345,7 @@ const columns: TableColumn<Impuesto>[] = [
   <div class="space-y-6">
     <CrudPageHeader
       title="Impuestos"
-      description="Impuestos oficiales del país (Sistema) e impuestos propios del tenant (en decimal: 0.19 = 19%)."
+      description="Impuestos oficiales del país (Sistema) e impuestos propios de tu local (en decimal: 0.19 = 19%)."
     >
       <template #actions>
         <div class="flex items-center gap-4">
@@ -471,7 +471,7 @@ const columns: TableColumn<Impuesto>[] = [
                       (Afecto / Exento) y el sistema lo aplica solo.
                     </p>
                     <p>
-                      Si creás acá un impuesto llamado «IVA», se va a
+                      Si creas acá un impuesto llamado «IVA», se va a
                       <span class="font-medium text-default">sumar</span> al
                       automático y vas a cobrar de más.
                     </p>
@@ -533,7 +533,7 @@ const columns: TableColumn<Impuesto>[] = [
     <CrudModal
       v-model:open="confirmModalOpen"
       title="Eliminar impuesto"
-      message="¿Eliminar este impuesto? Podés recuperarlo desde «Ver eliminados»."
+      message="¿Eliminar este impuesto? Puedes recuperarlo desde «Ver eliminados»."
       @cancel="confirmDeleteId = null"
       @confirm="confirmDeleteId && eliminar(confirmDeleteId)"
     />

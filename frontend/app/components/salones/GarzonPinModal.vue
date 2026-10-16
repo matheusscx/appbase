@@ -115,7 +115,7 @@ async function verificar() {
       <!-- Paso 1: elegir garzón -->
       <div v-if="!elegido" class="flex flex-col gap-4 py-2">
         <p class="text-center text-sm text-muted">
-          Elegí quién sos para continuar.
+          Elige quién eres para continuar.
         </p>
 
         <div v-if="cargando" class="flex justify-center py-6 text-muted">

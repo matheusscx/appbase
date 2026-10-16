@@ -241,7 +241,7 @@ describe('rutas: cambiar el rango', () => {
     await esperar(40)
 
     expect(llamadas).toEqual([])
-    expect(texto('rutas-vacio')).toContain('Elegí el rango de fechas')
+    expect(texto('rutas-vacio')).toContain('Elige el rango de fechas')
     expect(texto('rutas-kpi-entregados')).toBe('—')
   })
 

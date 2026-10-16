@@ -38,7 +38,7 @@ const props = withDefaults(defineProps<{ regla?: ReglaReceptor }>(), {
 
 const errorRut = computed(() =>
   props.regla.rutChileno && model.value.rut.trim() && !rutValido(model.value.rut)
-    ? 'RUT inválido: revisá el dígito verificador'
+    ? 'RUT inválido: revisa el dígito verificador'
     : undefined,
 )
 function contador(campo: keyof typeof LARGO_RECEPTOR) {
@@ -46,7 +46,7 @@ function contador(campo: keyof typeof LARGO_RECEPTOR) {
 }
 function errorLargo(campo: keyof typeof LARGO_RECEPTOR) {
   return model.value[campo].length > LARGO_RECEPTOR[campo]
-    ? `Abreviá: el SII acepta hasta ${LARGO_RECEPTOR[campo]} caracteres`
+    ? `Abrevia: el SII acepta hasta ${LARGO_RECEPTOR[campo]} caracteres`
     : undefined
 }
 
@@ -99,13 +99,12 @@ function ponerReadonly(e: Event) {
 
 <template>
   <div class="flex flex-col gap-4">
-    <p class="text-sm font-medium text-default">Datos del cliente</p>
-    <UFormField label="Tercero registrado">
+    <UFormField label="Cliente guardado">
       <USelectMenu
         v-model="terceroSeleccionado"
         :items="terceroOptions"
         value-key="value"
-        placeholder="Buscar proveedor, empresa o persona..."
+        placeholder="Buscar cliente por nombre…"
         class="w-full"
       />
     </UFormField>

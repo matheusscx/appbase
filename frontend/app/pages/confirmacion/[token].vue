@@ -65,9 +65,9 @@ const subtitulo = computed(() => {
   if (cargando.value) return 'Verificando el link…'
   if (linkInvalido.value) return linkInvalido.value
   if (declinado.value) {
-    return `No te sumamos a ${tenant.value} y tu cuenta quedó igual que antes. Si cambiás de idea, volvé a abrir el link del mail antes de que venza.`
+    return `No te sumamos a ${tenant.value} y tu cuenta quedó igual que antes. Si cambias de idea, vuelve a abrir el link del mail antes de que venza.`
   }
-  return `Con tu cuenta ${correo.value}. Si aceptás, vas a poder entrar a ${tenant.value} con la contraseña que ya usás — no tenés que crear nada nuevo.`
+  return `Con tu cuenta ${correo.value}. Si aceptas, vas a poder entrar a ${tenant.value} con la contraseña que ya usas — no tienes que crear nada nuevo.`
 })
 
 async function confirmar() {
@@ -80,7 +80,7 @@ async function confirmar() {
       { method: 'POST' },
     )
     toast.add({
-      title: res?.message || `Listo, ya sos parte de ${tenant.value}`,
+      title: res?.message || `Listo, ya eres parte de ${tenant.value}`,
       color: 'success',
     })
     await navigateTo('/login')
@@ -125,7 +125,7 @@ async function confirmar() {
       </p>
 
       <p class="text-center text-xs text-muted mt-6">
-        Si no esperabas esto, no aceptes: sin tu confirmación no quedás
+        Si no esperabas esto, no aceptes: sin tu confirmación no quedas
         asociado a ninguna empresa.
       </p>
     </template>

@@ -34,7 +34,7 @@ async function entrarComo(browser: Browser, email: string): Promise<Page> {
     await page.getByRole('button', { name: 'Demo Restaurante' }).click()
   }
   await page.waitForURL(url => url.pathname === '/')
-  await expect(page.getByText('Bienvenido')).toBeVisible()
+  await expect(page.getByText('Hola,')).toBeVisible()
   return page
 }
 

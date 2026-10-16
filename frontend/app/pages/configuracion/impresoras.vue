@@ -434,7 +434,7 @@ const columns: TableColumn<Impresora>[] = [
     <CrudModal
       v-model:open="deleteOpen"
       title="Eliminar impresora"
-      message="¿Estás seguro de que quieres eliminar esta impresora? Las categorías que la usan quedarán sin ruta de comanda. Podés recuperarla desde «Ver eliminados»."
+      message="¿Estás seguro de que quieres eliminar esta impresora? Las categorías que la usan quedarán sin ruta de comanda. Puedes recuperarla desde «Ver eliminados»."
       @cancel="toDelete = null"
       @confirm="eliminar"
     />
