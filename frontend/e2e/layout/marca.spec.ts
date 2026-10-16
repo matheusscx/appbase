@@ -37,6 +37,43 @@ test.describe('marca Venka', () => {
     expect(externos).toEqual([])
   })
 
+  // Auditoría UX 00.8 (owner, 2026-10-16, opción B): los tonos de estado de Nuxt UI por
+  // defecto medían 2,22 / 1,91 / 3,81 sobre blanco. Se mide lo que resuelve el navegador
+  // —`app.config` + escalas de `main.css`—, no el hex escrito, y su contraste como texto
+  // sobre blanco y sobre el fondo `/10` de insignias y alertas suaves.
+  test('los tonos de estado se leen como texto', async ({ page }) => {
+    await page.goto('/login')
+    await expect(page.locator('button[type="submit"]')).toBeVisible()
+    const medidos = await page.evaluate(() => {
+      const canal = (c: number) => {
+        const v = c / 255
+        return v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4
+      }
+      const lum = ([r, g, b]: number[]) => 0.2126 * canal(r!) + 0.7152 * canal(g!) + 0.0722 * canal(b!)
+      const contraste = (a: number[], b: number[]) => {
+        const [x, y] = [lum(a), lum(b)].sort((m, n) => m - n)
+        return (y! + 0.05) / (x! + 0.05)
+      }
+      return Object.fromEntries(['success', 'warning', 'error'].map((tono) => {
+        const el = document.createElement('span')
+        el.style.color = `var(--ui-${tono})`
+        document.body.appendChild(el)
+        const rgb = getComputedStyle(el).color.match(/\d+/g)!.slice(0, 3).map(Number)
+        el.remove()
+        const blanco = [255, 255, 255]
+        const fondo10 = rgb.map(c => Math.round(255 + (c - 255) * 0.1))
+        return [tono, { rgb: rgb.join(','), blanco: contraste(rgb, blanco), fondo10: contraste(rgb, fondo10) }]
+      }))
+    })
+    expect(medidos.success!.rgb).toBe('0,120,111') // #00786F
+    expect(medidos.warning!.rgb).toBe('197,60,0') // #C53C00
+    expect(medidos.error!.rgb).toBe('193,0,7') // #C10007
+    for (const m of Object.values(medidos)) {
+      expect(m.blanco).toBeGreaterThanOrEqual(4.5)
+      expect(m.fondo10).toBeGreaterThanOrEqual(4.5)
+    }
+  })
+
   test('a 1280 se ve el panel de marca', async ({ page }) => {
     await page.setViewportSize({ width: 1280, height: 800 })
     await page.goto('/login')

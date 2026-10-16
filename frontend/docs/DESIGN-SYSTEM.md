@@ -14,6 +14,18 @@ La marca de la app es **Venka** (fuente de la marca, fuera del monorepo:
 | `neutral` | `slate` | Grises fríos de Nuxt UI |
 | `menta` (`bg-menta`, `text-menta`) | `#7FD8C3` | Sello, marca de la sección activa, acentos sobre petróleo |
 | `lima` (`bg-lima`) | `#C9E77E` | Acento de la línea Almacén (sin validar por el owner) |
+| `success` = escala `exito` | **500 `#00786F`** (verde petróleo) | Pagada, caja abierta, cifras positivas. Texto: 5,36:1 sobre blanco, 4,68:1 sobre el fondo `/10` |
+| `warning` = escala `alerta` | **500 `#C53C00`** | Avisos, pendientes. Texto: 5,22:1 sobre blanco, 4,52:1 sobre `/10` |
+| `error` = escala `peligro` | **500 `#C10007`** | Errores, anulado, cifras negativas. Texto: 6,42:1 sobre blanco, 5,35:1 sobre `/10` |
+
+- **Tonos de estado** (owner, 2026-10-16, opción B de la lámina; auditoría UX 00.8): los de Nuxt UI
+  por defecto medían 2,22 / 1,91 / 3,81 sobre blanco, debajo del 4,5:1 de un texto. Como en
+  `venka`, el 500 es el tono elegido (es el que resuelve `text-success` y compañía) y el resto de
+  la escala sale del mismo matiz en OKLCH. Ojo: el `/15` del hover de los botones suaves da 4,18
+  en ámbar; es transitorio y no se usa para texto quieto. `e2e/layout/marca.spec.ts` mide lo que
+  resuelve el navegador.
+- **Insignias: 12 px como mínimo** (owner, 2026-10-16; auditoría UX 01.17 y 05.17). `UBadge` en
+  `xs` y `sm` venía en 8 y 10 px; `app.config.ts` les pone `text-xs` y deja su relleno compacto.
 
 - **Letras:** DM Sans es `--font-sans`, la de toda la interfaz. Bricolage Grotesque es
   `font-display`, **solo** para títulos de pantalla (`AppNavbar`, `AppMarco`) y titulares de marca.
@@ -29,9 +41,9 @@ La marca de la app es **Venka** (fuente de la marca, fuera del monorepo:
   lo vigila (los diez dígitos, 4 pesos, 2 tamaños) y corre en Linux en CI.
 - **Logos:** `public/marca/venka-positivo.svg` (fondo claro), `venka-negativo.svg` (petróleo) y
   `venka-sello.svg` (cuadrado, menú colapsado). El texto va en trazos: no depende de la fuente.
-- **Dónde vive:** la escala, `menta`, `lima` y las fuentes en el `@theme static` de
+- **Dónde vive:** las escalas, `menta`, `lima` y las fuentes en el `@theme static` de
   `app/assets/css/main.css` (`static` porque Nuxt UI arma `--ui-color-primary-*` en runtime y
-  Tailwind descartaría las variables sin uso); la asignación `primary`/`neutral` en
+  Tailwind descartaría las variables sin uso); la asignación de colores (`primary`, `neutral` y los tres de estado) y el tamaño de las insignias en
   **`app/app.config.ts`**. ⚠️ El `frontend/app.config.ts` de la raíz **no lo carga Nuxt 4** (lee el
   de `app/`): sus alias y sus overrides de `card`, `modal` y `formField` no se aplican. Activarlos o
   borrarlos lo decide el owner.
@@ -49,9 +61,8 @@ La marca de la app es **Venka** (fuente de la marca, fuera del monorepo:
 - **text-highlighted**: Accent text (links, primary actions)
   - Light: `text-primary-600`
   - Dark: `dark:text-primary-400`
-- **text-error**: Error states
-  - Light: `text-red-600`
-  - Dark: `dark:text-red-400`
+- **text-error / text-warning / text-success**: estados. Resuelven al 500 de `peligro`,
+  `alerta` y `exito` (ver Identidad Venka); no usar `text-red-*` ni similares.
 
 ### Background Colors
 - **bg-default**: Primary background (cards, modals)

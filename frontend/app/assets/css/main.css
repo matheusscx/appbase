@@ -44,4 +44,46 @@
   --color-venka-800: #002329;
   --color-venka-900: #00181D;
   --color-venka-950: #000D11;
+
+  /* Tonos de estado (owner, 2026-10-16, opción B de la lámina, auditoría UX 00.8). Los
+     de Nuxt UI por defecto no se leían como texto: verde 2,22:1, ámbar 1,91:1 y rojo
+     3,81:1 sobre blanco. Como en `venka`, el 500 es el tono elegido —es el que Nuxt UI
+     usa para `text-success` y compañía— y el resto sale del mismo matiz en OKLCH.
+     Medido el 500: verde 5,36 / ámbar 5,22 / rojo 6,42 sobre blanco, y 4,68 / 4,52 /
+     5,35 sobre el fondo `/10` de insignias y alertas suaves. */
+  --color-exito-50: #EFF9F8;
+  --color-exito-100: #E1F3F0;
+  --color-exito-200: #C3E7E1;
+  --color-exito-300: #98D1CA;
+  --color-exito-400: #60AFA5;
+  --color-exito-500: #00786F;
+  --color-exito-600: #00625A;
+  --color-exito-700: #004F49;
+  --color-exito-800: #003D38;
+  --color-exito-900: #002F2B;
+  --color-exito-950: #001C1A;
+
+  --color-alerta-50: #FFF4F1;
+  --color-alerta-100: #FFE9E2;
+  --color-alerta-200: #FFD3C5;
+  --color-alerta-300: #FFAD93;
+  --color-alerta-400: #F07550;
+  --color-alerta-500: #C53C00;
+  --color-alerta-600: #A43000;
+  --color-alerta-700: #892700;
+  --color-alerta-800: #6F1E00;
+  --color-alerta-900: #5A1600;
+  --color-alerta-950: #3E0C00;
+
+  --color-peligro-50: #FFF4F2;
+  --color-peligro-100: #FFE9E5;
+  --color-peligro-200: #FFD2CB;
+  --color-peligro-300: #FFAB9F;
+  --color-peligro-400: #FC6859;
+  --color-peligro-500: #C10007;
+  --color-peligro-600: #9E0004;
+  --color-peligro-700: #810003;
+  --color-peligro-800: #660002;
+  --color-peligro-900: #500001;
+  --color-peligro-950: #320000;
 }

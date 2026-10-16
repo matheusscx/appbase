@@ -505,7 +505,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 |---|---|---|---|---|
 | ☐ | [00.1](00-transversal.md) | P2 | El archivo de estilos de tarjetas y modales de la raíz no se carga | owner |
 | ☐ | [00.7](00-transversal.md) | P2 | Las cifras de DM Sans no miden lo mismo: los montos no se alinean | owner |
-| ☐ | [00.8](00-transversal.md) | P2 | Verde, ámbar y rojo de los estados no tienen contraste suficiente sobre blanco *(ver 01.17, 02.17, 03.9, 03.10, 04.5, 04.6, 04.21, 05.17, 06.27, 07.16)* | agente + owner |
+| ☑ | [00.8](00-transversal.md) | P2 | Verde, ámbar y rojo de los estados no tienen contraste suficiente sobre blanco — **hecho 2026-10-16** (tokens; los citados quedan por revisar uno por uno) *(ver 01.17, 02.17, 03.9, 03.10, 04.5, 04.6, 04.21, 05.17, 06.27, 07.16)* | agente + owner |
 | ☐ | [00.9](00-transversal.md) | P2 | En las tablas de lista, una columna puede no dibujarse y acciones queda fuera *(ver 06.26, 07.1)* | agente |
 | ☐ | [00.12](00-transversal.md) | P2 | Pantallas que no se ven de Venka: tarjetas verdes y ámbar, montos en letra de terminal, MAYÚSCULAS | agente |
 | ☐ | [00.2](00-transversal.md) | P3 | Los links se ven negros y no petróleo, y la guía dice otra cosa | owner |
@@ -534,7 +534,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [01.14](01-pos-y-ventas.md) | P2 | A 768 el detalle de venta corta las líneas y pega etiquetas con valores | agente |
 | ☐ | [01.15](01-pos-y-ventas.md) | P2 | Sin impresora o sin QZ la boleta no sale y casi no se avisa | agente |
 | ☐ | [01.16](01-pos-y-ventas.md) | P2 | Entrar a Órdenes sin permiso muestra una lista vacía en vez de "sin permiso" | agente |
-| ☐ | [01.17](01-pos-y-ventas.md) | P2 | La insignia "Pagada" y las cifras de estado no tienen contraste suficiente *(ver 00.8)* | agente + owner |
+| ☑ | [01.17](01-pos-y-ventas.md) | P2 | La insignia "Pagada" y las cifras de estado no tienen contraste suficiente — **hecho 2026-10-16** *(ver 00.8)* | agente + owner |
 | ☐ | [01.18](01-pos-y-ventas.md) | P2 | Abrir caja sin datos avisa con un toast y no marca el campo | agente |
 | ☐ | [01.19](01-pos-y-ventas.md) | P2 | Si falla leer la propina sugerida, el cobro la deja activa con 10% | owner |
 | ☐ | [01.20](01-pos-y-ventas.md) | P3 | El aviso de boleta no impresa usa voseo y jerga ("QZ Tray", "timeout") | agente |
@@ -669,7 +669,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [05.14](05-inventario.md) | P2 | El menú dice "Stock" pero la pantalla es una lista de movimientos, no el saldo | agente + owner |
 | ☐ | [05.15](05-inventario.md) | P2 | Un stock mínimo inválido muestra un aviso técnico a medias en inglés | agente |
 | ☐ | [05.16](05-inventario.md) | P2 | Los dos campos de fecha de Mermas no dicen "Desde" ni "Hasta" | agente |
-| ☐ | [05.17](05-inventario.md) | P2 | En el kardex y Mermas, cantidades e insignias verde, ámbar y rojo se leen mal *(ver 00.8)* | owner |
+| ☑ | [05.17](05-inventario.md) | P2 | En el kardex y Mermas, cantidades e insignias verde, ámbar y rojo se leen mal — **hecho 2026-10-16** (colores e insignias; el placeholder no) *(ver 00.8)* | owner |
 | ☐ | [05.18](05-inventario.md) | P2 | Los botones de Inventario miden 20 a 28 px en la tablet | agente |
 | ☐ | [05.19](05-inventario.md) | P2 | Los selectores de Inventario se anuncian "Show popup" y el tacho no tiene nombre | agente |
 | ☐ | [05.20](05-inventario.md) | P2 | Si falla cargar una lista de inventario, la tabla dice "no hay nada" | agente |

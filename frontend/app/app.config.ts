@@ -7,6 +7,20 @@ export default {
     colors: {
       primary: 'venka',
       neutral: 'slate',
+      // Escalas en `assets/css/main.css` (auditoría UX 00.8).
+      success: 'exito',
+      warning: 'alerta',
+      error: 'peligro',
+    },
+    // Ninguna insignia por debajo de 12 px (owner, 2026-10-16, auditoría UX 01.17 y 05.17):
+    // `xs` y `sm` venían en 8 y 10 px. Se conserva su relleno compacto.
+    badge: {
+      variants: {
+        size: {
+          xs: { base: 'text-xs/4' },
+          sm: { base: 'text-xs/4' },
+        },
+      },
     },
   },
 }
