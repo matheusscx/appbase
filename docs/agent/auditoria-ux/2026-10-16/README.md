@@ -503,16 +503,16 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
-| ☐ | [00.1](00-transversal.md) | P2 | El archivo de estilos de tarjetas y modales de la raíz no se carga | owner |
+| ☑ | [00.1](00-transversal.md) | P2 | El archivo de estilos de tarjetas y modales de la raíz no se carga — **hecho 2026-10-16** | owner |
 | ☐ | [00.7](00-transversal.md) | P2 | Las cifras de DM Sans no miden lo mismo: los montos no se alinean | owner |
 | ☑ | [00.8](00-transversal.md) | P2 | Verde, ámbar y rojo de los estados no tienen contraste suficiente sobre blanco — **hecho 2026-10-16** (tokens; los citados quedan por revisar uno por uno) *(ver 01.17, 02.17, 03.9, 03.10, 04.5, 04.6, 04.21, 05.17, 06.27, 07.16)* | agente + owner |
 | ☐ | [00.9](00-transversal.md) | P2 | En las tablas de lista, una columna puede no dibujarse y acciones queda fuera *(ver 06.26, 07.1)* | agente |
 | ☐ | [00.12](00-transversal.md) | P2 | Pantallas que no se ven de Venka: tarjetas verdes y ámbar, montos en letra de terminal, MAYÚSCULAS | agente |
 | ☐ | [00.2](00-transversal.md) | P3 | Los links se ven negros y no petróleo, y la guía dice otra cosa | owner |
 | ☐ | [00.3](00-transversal.md) | P3 | Hay textos con voseo mezclados con tuteo en 49 archivos *(ver 01.21, 02.27, 03.19, 04.23, 05.21, 06.24, 07.28, 08.17, 09.18)* | agente |
-| ☐ | [00.4](00-transversal.md) | P3 | Swagger y una variable todavía dicen "Prueba Técnica" | agente |
-| ☐ | [00.5](00-transversal.md) | P3 | En el menú lateral, padre e hija se resaltan juntos y un nombre se corta | agente |
-| ☐ | [00.6](00-transversal.md) | P3 | Los íconos del menú no mostrarían un contador si alguien lo agrega | agente |
+| ☑ | [00.4](00-transversal.md) | P3 | Swagger y una variable todavía dicen "Prueba Técnica" — **hecho 2026-10-16** | agente |
+| ☑ | [00.5](00-transversal.md) | P3 | En el menú lateral, padre e hija se resaltan juntos y un nombre se corta — **hecho 2026-10-16** | agente |
+| ☑ | [00.6](00-transversal.md) | P3 | Los íconos del menú no mostrarían un contador si alguien lo agrega — **hecho 2026-10-16** | agente |
 
 ### 01 · POS y ventas
 

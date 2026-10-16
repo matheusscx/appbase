@@ -130,7 +130,6 @@ services:
       API_PROXY_TARGET: ${API_PROXY_TARGET:-http://backend:3000}
       # El mismo del backend (ADR-032): con él, el proxy le nombra al cliente.
       PROXY_SECRETO: ${PROXY_SECRETO:-solo-desarrollo}
-      VITE_APP_NAME: ${VITE_APP_NAME:-Prueba Técnica}
     command: npm run dev -- --host
     depends_on:
       - backend

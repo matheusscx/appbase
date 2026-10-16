@@ -44,9 +44,9 @@ La marca de la app es **Venka** (fuente de la marca, fuera del monorepo:
 - **Dónde vive:** las escalas, `menta`, `lima` y las fuentes en el `@theme static` de
   `app/assets/css/main.css` (`static` porque Nuxt UI arma `--ui-color-primary-*` en runtime y
   Tailwind descartaría las variables sin uso); la asignación de colores (`primary`, `neutral` y los tres de estado) y el tamaño de las insignias en
-  **`app/app.config.ts`**. ⚠️ El `frontend/app.config.ts` de la raíz **no lo carga Nuxt 4** (lee el
-  de `app/`): sus alias y sus overrides de `card`, `modal` y `formField` no se aplican. Activarlos o
-  borrarlos lo decide el owner.
+  **`app/app.config.ts`**, el único: Nuxt 4 lee el de `app/` (srcDir). Hasta el 2026-10-16 había
+  otro en la raíz de `frontend/` con alias y overrides de `card`, `modal` y `formField` que nunca se
+  cargaron; se borró (owner, auditoría UX 00.1) y la app quedó con los rellenos por defecto de Nuxt UI.
 - **Lo que no cambia de color:** los colores financieros de Caja y el verde y rojo de sube/baja.
 
 ## Semantic Color Tokens
@@ -121,7 +121,7 @@ Escala estándar del proyecto. Usar estas clases de Tailwind de forma consistent
 
 1. **Página de configuración** — contenedor raíz con `space-y-6` entre header, card(s) y drawer.
 2. **Formularios** — `space-y-4` entre campos; bloques temáticos (ej. datos + permisos) con `space-y-6`.
-3. **Shell con borde** (`AppDrawer`, `UCard`, `UModal`) — padding horizontal **`px-6`**, vertical **`py-4`** en header/body/footer. Ya aplicado en `AppDrawer`; los overrides de card/modal del `frontend/app.config.ts` de la raíz no se cargan (ver [Identidad Venka](#identidad-venka)).
+3. **Shell con borde** — `AppDrawer` lleva **`px-6`** horizontal y **`py-4`** vertical en header/body/footer. `UCard` y `UModal` usan los rellenos **por defecto de Nuxt UI** (no hay override global); si una pantalla necesita otro, va por su prop `ui`.
 4. **Componente anidado con borde propio** — un nivel menos: **`px-4`** en trigger/body para que iconos y texto no queden pegados al borde. Ejemplo: `UAccordion` dentro del drawer vía prop `ui`:
    ```vue
    :ui="{ trigger: 'px-4 gap-2', body: 'px-4 pb-4' }"
@@ -325,7 +325,7 @@ When adding a new page or updating an existing one:
 - [ ] Replace `bg-gray-50 dark:bg-gray-950` with `bg-elevated`
 - [ ] Replace `divide-gray-100 dark:divide-gray-800` with `divide-default`
 - [ ] Replace `border-gray-200 dark:border-gray-700` with `border-default`
-- [ ] Page sections: `space-y-6`; form fields: `space-y-4`; drawer/card shell: `px-6 py-4`; nested bordered UI: `px-4`
+- [ ] Page sections: `space-y-6`; form fields: `space-y-4`; drawer shell: `px-6 py-4` (card y modal: relleno por defecto de Nuxt UI); nested bordered UI: `px-4`
 - [ ] Iconos Lucide (`i-lucide-*`); no mezclar otras colecciones
 - [ ] Use UCard, UModal, UFormField for structure
 - [ ] Test in both light and dark modes
@@ -343,7 +343,7 @@ When in doubt, reference these files.
 
 ## Configuration
 
-La paleta y las letras viven en el `@theme static` de `frontend/app/assets/css/main.css`; la asignación de colores de Nuxt UI (`ui.colors`) y los defaults de componentes, en **`frontend/app/app.config.ts`**, que es el que Nuxt 4 carga. El `frontend/app.config.ts` de la raíz no se carga (ver [Identidad Venka](#identidad-venka)).
+La paleta y las letras viven en el `@theme static` de `frontend/app/assets/css/main.css`; la asignación de colores de Nuxt UI (`ui.colors`) y los defaults de componentes, en **`frontend/app/app.config.ts`**, que es el que Nuxt 4 carga (no hay otro: ver [Identidad Venka](#identidad-venka)).
 
 ## Dark Mode Support
 

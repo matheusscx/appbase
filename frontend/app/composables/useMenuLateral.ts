@@ -48,6 +48,10 @@ export function useMenuLateral() {
       // Marcado si la pantalla actual es una de sus hijas o un detalle suyo
       // (`/compras/123` es de Recepciones).
       active: visibles.some(hija => route.path === hija.to || route.path.startsWith(`${hija.to}/`)),
+      // Con el grupo desplegado se resalta solo la hija activa: el padre lleva la marca menta
+      // pero no el fondo (auditoría UX 00.5). Colapsado, el padre es lo único que se ve y
+      // conserva el fondo, salvo mientras su popover está abierto (ahí quedan la marca y el color).
+      class: 'data-[state=open]:before:bg-transparent',
       children: visibles,
     }]
   }

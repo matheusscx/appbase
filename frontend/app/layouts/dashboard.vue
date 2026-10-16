@@ -66,7 +66,8 @@ const ui = {
 
 <template>
   <UDashboardGroup>
-    <UDashboardSidebar collapsible resizable :ui="ui">
+    <!-- 18 % y no el 15 por defecto: a 1280 px «Punto de venta» se cortaba (auditoría UX 00.5). -->
+    <UDashboardSidebar collapsible resizable :default-size="18" :ui="ui">
       <template #header="{ collapsed }">
         <div class="flex min-w-0 flex-1 flex-col gap-2.5" :class="collapsed ? 'items-center' : 'px-1'">
           <img
@@ -106,7 +107,10 @@ const ui = {
           >
             <template #item-leading="{ item, active, ui: menuUi }">
               <!-- Marca de la sección activa: 3 px menta pegada al borde del lateral. Las hijas de un
-                   grupo comparten esta plantilla y no la llevan: la marca es de la sección. -->
+                   grupo comparten esta plantilla y no la llevan: la marca es de la sección.
+                   ⚠️ Esta plantilla reemplaza la del componente y solo dibuja el ícono: `avatar`,
+                   `chip` y el estado `disabled` de un ítem NO se ven (auditoría UX 00.6). Para un
+                   contador, usar `badge`, que va a la derecha y sí se dibuja. -->
               <span
                 v-if="active"
                 aria-hidden="true"

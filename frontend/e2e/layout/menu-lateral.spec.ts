@@ -150,3 +150,27 @@ test.describe('en celular', () => {
     await expect(panel).toBeHidden()
   })
 })
+
+// Auditoría UX 00.5: con una hija activa, el grupo padre y la hija llevaban los dos el fondo
+// resaltado, y a 1280 px «Punto de venta» se cortaba en «Punto de ven…».
+test('a 1280, solo la pantalla activa lleva fondo y su nombre entra entero', async ({ page }) => {
+  await page.setViewportSize({ width: 1280, height: 800 })
+  await page.goto('/ventas/pos', { waitUntil: 'networkidle' })
+  const menu = menuLateral(page)
+  const grupo = menu.getByRole('button', { name: 'Ventas', exact: true })
+  const hija = menu.getByRole('link', { name: 'Punto de venta' })
+  await expect(grupo).toHaveAttribute('aria-expanded', 'true')
+  await expect(hija).toBeVisible()
+
+  const fondo = (el: Element) => getComputedStyle(el, '::before').backgroundColor
+  const transparente = (c: string) => c === 'transparent' || /rgba\(.*,\s*0\)$/.test(c)
+  expect(transparente(await grupo.evaluate(fondo))).toBe(true)
+  expect(transparente(await hija.evaluate(fondo))).toBe(false)
+
+  // El rótulo de la hija no se corta: su texto cabe en la caja que lo muestra.
+  const cortado = await hija.evaluate((el) => {
+    const rotulo = [...el.querySelectorAll('span')].find(s => s.textContent?.trim() === 'Punto de venta') ?? el
+    return rotulo.scrollWidth > rotulo.clientWidth
+  })
+  expect(cortado).toBe(false)
+})

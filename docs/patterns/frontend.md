@@ -961,7 +961,7 @@ cambios sincronizados con debounce 300 ms. Uso:
 
 Orden de trabajo (siempre): **1)** `frontend-design` decide dirección estética
 (paleta 4-6 hex nombrados, tipografía, layout, elemento firma) → **2)** traducir ese
-plan a tokens **antes** de escribir componentes —escalas en el `@theme static` de `frontend/app/assets/css/main.css`, asignación en `frontend/app/app.config.ts` (el de la raíz no lo carga Nuxt 4)— → **3)** `nuxt-ui`
+plan a tokens **antes** de escribir componentes —escalas en el `@theme static` de `frontend/app/assets/css/main.css`, asignación en `frontend/app/app.config.ts`— → **3)** `nuxt-ui`
 construye con componentes reales consumiendo esos tokens.
 
 Puntos de choque (resueltos por ese orden):

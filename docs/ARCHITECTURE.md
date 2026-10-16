@@ -353,7 +353,6 @@ const data = await useApiFetch<ResponseType>(`${apiUrl}/endpoint`)
 | Variable | Propósito |
 |---|---|
 | `API_PROXY_TARGET` | Origen del backend al que el servidor de Nuxt reenvía `/api` (compose: `http://backend:3000`) |
-| `VITE_APP_NAME` | Título de la app |
 | `PROXY_SECRETO` | El mismo del backend: con él, el proxy firma la `x-cliente-ip` que le manda |
 | `IP_CABECERA_BORDE` | De qué cabecera saca el proxy la IP del cliente; sin ella, del par TCP |
 
