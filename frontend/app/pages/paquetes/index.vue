@@ -25,6 +25,13 @@ const { formatOficial } = useCurrency()
 const { rotuloEstadoPaquete, colorEstadoPaquete, fechaCorta } = usePaqueteria()
 const { pageSize } = useUserPreferences()
 const { diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
+const permissionsStore = usePermissionsStore()
+// Paquetería no trae Terceros: en un tenant que no lo contrató `GET /terceros` es un 403 en cada carga,
+// así que ni se pide ni se muestra el selector de remitente.
+const puedeVerTerceros = computed(() => permissionsStore.can('Terceros', 'Leer'))
+// El backend acepta hasta 500 caracteres de lo que lee la pistola (un QR de Mercado Libre es un JSON
+// bastante más largo que el código) y lo normaliza a ≤100: cortar antes rechazaría un escaneo válido.
+const MAX_ENTRADA_CODIGO = 500
 
 // ── Filtros ───────────────────────────────────────────────────────────────
 
@@ -131,6 +138,7 @@ async function cargarConfig() {
 }
 
 async function cargarTerceros() {
+  if (!puedeVerTerceros.value) return
   try {
     terceros.value = await useApiFetch<Tercero[]>(`${apiUrl}/terceros`)
   }
@@ -637,7 +645,7 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
           <UInput
             v-model="form.codigo"
             placeholder="Lo que lee la pistola"
-            maxlength="200"
+            :maxlength="MAX_ENTRADA_CODIGO"
             class="w-full font-mono"
             autofocus
           />
@@ -665,7 +673,7 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
         <UFormField label="Nota">
           <UTextarea v-model="form.nota" :rows="2" placeholder="Dejar con el conserje" class="w-full" />
         </UFormField>
-        <UFormField label="Remitente" description="Quién manda el paquete, si está registrado en Terceros.">
+        <UFormField v-if="puedeVerTerceros" label="Remitente" description="Quién manda el paquete, si está registrado en Terceros.">
           <USelectMenu
             v-model="form.remitenteTerceroId"
             :items="remitenteOptions"

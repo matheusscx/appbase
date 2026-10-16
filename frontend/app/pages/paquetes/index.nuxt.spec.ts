@@ -62,6 +62,14 @@ const repartidoresBackend = [
   { id: 'r-3', nombre: 'Beto Rojas', telefono: null, activo: true },
 ]
 
+let puedeVerTerceros = true
+
+mockNuxtImport('usePermissionsStore', () => {
+  return () => ({
+    can: (modulo: string, permiso: string) => puedeVerTerceros && modulo === 'Terceros' && permiso === 'Leer',
+  })
+})
+
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     const method = opts?.method ?? 'GET'
@@ -178,6 +186,7 @@ beforeEach(() => {
   diaNegocio = { horaCorte: 3, diaNegocioHoy: '2026-10-14' }
   falloAsignar = null
   falloDelete = null
+  puedeVerTerceros = true
 })
 
 describe('paquetes: listado y filtros', () => {
@@ -454,6 +463,37 @@ describe('paquetes: alta y edición', () => {
 
     const select = selectConOpcion(wrapper, 't-1')
     expect((select.props('items') as { value: string }[]).map(i => i.value)).toEqual(['t-1'])
+
+    wrapper.unmount()
+  })
+
+  it('sin permiso de Terceros no se pide la lista ni se muestra el remitente', async () => {
+    puedeVerTerceros = false
+    const wrapper = await montar()
+    await abrirNuevo(wrapper)
+
+    expect(llamadas.some(l => l.url.includes('/terceros'))).toBe(false)
+    expect(wrapper.text()).not.toContain('Remitente')
+    expect(wrapper.text()).not.toContain('Terceros')
+
+    wrapper.unmount()
+  })
+
+  it('con permiso de Terceros se pide la lista y se muestra el remitente', async () => {
+    const wrapper = await montar()
+    await abrirNuevo(wrapper)
+
+    expect(llamadas.some(l => l.url.includes('/terceros'))).toBe(true)
+    expect(wrapper.text()).toContain('Remitente')
+
+    wrapper.unmount()
+  })
+
+  it('el código admite hasta 500 caracteres: un QR de Mercado Libre es más largo que el código', async () => {
+    const wrapper = await montar()
+    await abrirNuevo(wrapper)
+
+    expect(wrapper.find('input[placeholder="Lo que lee la pistola"]').attributes('maxlength')).toBe('500')
 
     wrapper.unmount()
   })

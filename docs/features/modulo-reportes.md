@@ -64,9 +64,11 @@ está en la spec, § 3.3.
 
 ⛔ **Un `modulo_app` sin su fila en `tenant_modulos` da 403 hasta al admin del tenant**
 (`rbac.service.ts`): el borde es comercial y también aplica al rol fijo. Es el paso que más fácil se
-olvida, y el síntoma —*"no me deja entrar a mí, que soy el dueño"*— no apunta al seed. El menú y la
-pantalla usan `esAdmin || can(...)` como el resto de la app, así que **no** lo detectan: el admin
-ve la entrada y recibe el 403 recién al cargar.
+olvida, y el síntoma —*"no me deja entrar a mí, que soy el dueño"*— no apunta al seed. El menú y
+el índice de Reportes ya no cortocircuitan con `esAdmin` (esconden el reporte de un módulo no
+contratado), así que el síntoma ahí no aparece; solo el middleware `permiso` de la página sigue
+dejando pasar al admin (`esAdmin || can(...)`): quien entre por URL directa recibe el 403 recién
+al cargar.
 
 **Frontend:**
 

@@ -82,12 +82,16 @@ Las numeraciones (`regla 5b`, `3.1`) son las que citan los comentarios del códi
    - `ya_escaneado`: ya está `en_ruta` en esta misma hoja → no hace nada y no es error;
    - un `no_entregado` de **esta** hoja que se reescanea reactiva su línea a `en_ruta` (reintento
      del mismo día) en vez de crear otra;
-   - **rechazado**: en ruta en otra hoja o ya entregado → 409 con el motivo legible (*"El
-     paquete X está con Pedro (hoja del 12-10)."*, *"El paquete X ya se entregó el 12-10."*).
+   - **rechazado**: en ruta en otra hoja (otro repartidor) o ya entregado → 409 con el motivo
+     legible (*"El paquete X está con Pedro (hoja del 12-10)."*, *"El paquete X ya se entregó el
+     12-10."*). Vale también para un código **nuevo** escaneado a la vez por dos repartidores: uno
+     lo crea y el segundo recibe este 409 (e2e `paqueteria.e2e-spec.ts`, el caso de los dos
+     repartidores).
 
    Igual que asignar, crea la hoja si no existe y es 400 si está rendida o el repartidor
    inactivo. Dos escaneos simultáneos del mismo código nuevo: el índice único de `codigo` hace
-   que uno cree y el otro relea y asigne (o diga `ya_escaneado`), nunca un 500.
+   que uno cree y el otro relea y asigne (o diga `ya_escaneado`, o el 409 de arriba si es de otro
+   repartidor), nunca un 500.
 6. **Rendir** bloquea la hoja (`FOR UPDATE`), exige que no quede línea `en_ruta` y que la hoja
    tenga paquetes, congela los totales y anota quién y cuándo. Una hoja rendida es de solo
    lectura: no admite asignar, marcar ni quitar.
@@ -115,7 +119,7 @@ la búsqueda, para que el código tipeado y el escaneado sean el mismo paquete. 
 entrar hasta 500 caracteres crudos (`MAX_ENTRADA_CODIGO`) y el código normalizado cabe en 100
 (`MAX_CODIGO`).
 
-⚠️ **Supuesto sin confirmar (9):** que la etiqueta de Mercado Libre trae un JSON con `id` (el
+⚠️ **Supuesto sin confirmar** (también en *Risks & Mitigations*, abajo): que la etiqueta de Mercado Libre trae un JSON con `id` (el
 número de envío). Nadie lo comprobó con una etiqueta real. **Antes de usarlo con un cliente:**
 escanear dos o tres etiquetas en un editor de texto y pegar lo que sale. Si el formato es otro,
 cambia **solo** `idDelJson` en `codigo-paquete.ts` y su spec. Un caso ya conocido de ese
@@ -157,7 +161,8 @@ se podría marcar ni soltar nunca más). La hoja rendida lee sus columnas congel
 
 ## Orden de bloqueo
 
-Todo lo que escribe líneas de una hoja toma los cerrojos en este orden:
+Todo lo que escribe líneas de una hoja toma los cerrojos que necesita **respetando este orden**
+(ninguno toma los tres):
 
 **repartidor (`FOR SHARE`) → hoja (`FOR UPDATE`) → paquetes (`FOR UPDATE`, por `paquete_id`
 ascendente)**.
@@ -169,6 +174,9 @@ ascendente)**.
 - `RepartidoresService.remove` toma al repartidor `FOR UPDATE` antes de preguntar por sus hojas;
   asignar y escanear lo leen `FOR SHARE` (`exigirActivo(..., { bloquear: true })`). Uno de los
   dos espera al otro y no queda una hoja apuntando a un repartidor borrado.
+- Quién toma qué: **escanear** y **asignar** toman el repartidor (`FOR SHARE`), después la hoja y
+  los paquetes; **marcar** toma la hoja y después el paquete; **entregar-todos**, **quitar** y
+  **rendir** toman solo la hoja.
 - Mientras todos respeten el orden no hay ciclo; quien lo rompa abre un deadlock.
 
 ---
@@ -179,8 +187,10 @@ ascendente)**.
   real en el backend). Un usuario que no es admin recibe 403, incluso con el módulo contratado.
   Los permisos finos por rol son fase 2.
 - **Paquetería es un módulo en `modulos_app` con un solo permiso `Leer`** que sirve de **marca de
-  contratado**: es lo que lee el menú del frontend (`Paquetería:Leer` en `mis-permisos`, que solo
-  trae el admin). El menú del admin pasa a mostrar **solo lo contratado** (antes mostraba todo y
+  contratado**: es lo que lee el menú del frontend (`Paquetería:Leer` en `mis-permisos`). Ese permiso
+  también se puede asignar a un rol propio en Roles y permisos (la pantalla lista los permisos de
+  todo módulo contratado), pero el menú exige además ser **admin del tenant**: el backend es
+  admin-only y a un rol no admin le daría 403. El menú del admin pasa a mostrar **solo lo contratado** (antes mostraba todo y
   el backend daba 403 en lo que el tenant no pagó).
 - ⚠️ **El backend NO exige el contrato**: un admin de un tenant que no contrató Paquetería puede
   usar la API igual. Es un borde comercial (nadie ve datos de otro tenant), anotado para fase 2.
@@ -214,7 +224,7 @@ POST     /hojas-ruta/asignar               { repartidorId, fecha, paqueteIds[] }
 GET      /hojas-ruta?desde&hasta[&repartidorId]   lista con totales (dos consultas, sin N+1: las cabeceras y `totales` de las abiertas juntas)
 GET      /hojas-ruta/resumen?desde&hasta   KPIs
 GET      /hojas-ruta/:id                   cabecera + líneas
-PATCH    /hojas-ruta/:id/paquetes/:paqueteId   { estado: 'entregado' | 'no_entregado' }
+PATCH    /hojas-ruta/:id/paquetes/:paqueteId   { estado: 'entregado' | 'no_entregado' | 'en_ruta' }   (en_ruta = deshacer un marcado por error, con la hoja abierta; la pantalla de la hoja tiene el botón «En ruta»)
 POST     /hojas-ruta/:id/entregar-todos    pasa a entregado toda línea en_ruta
 DELETE   /hojas-ruta/:id/paquetes/:paqueteId   quitar de la hoja
 POST     /hojas-ruta/:id/rendir
@@ -268,10 +278,12 @@ presentación en `composables/usePaqueteria.ts` y `useColaEscaneo.ts`.
   falta un campo nuevo del backend (anotado en fase 2).
 - **Paquetes** (`/paquetes`): tabla con búsqueda y filtros (incluido *datos por completar*);
   *Nuevo paquete* con los montos precargados con los defaults; selección múltiple de disponibles
-  → *Asignar a repartidor*.
+  → *Asignar a repartidor*. El selector de *Remitente* solo aparece (y `GET /terceros` solo se
+  pide) si el usuario tiene `Terceros:Leer`: en un tenant que solo contrató Paquetería sería un
+  403 en cada carga.
 - **Rutas** (`/paquetes/rutas`): `AppRangoFechas`, las cuatro tarjetas de KPI del rango y una fila
   por hoja. **Detalle** (`/paquetes/rutas/:id`): totales con el neto destacado; cada paquete con
-  *Entregado* / *No entregado* / *Quitar*; *Marcar todos entregados*; **Rendir** con un modal que
+  *Entregado* / *No entregado* / *En ruta* (deshace un marcado por error) / *Quitar*; *Marcar todos entregados*; **Rendir** con un modal que
   dice *"Juan entrega $50.000"* o *"Se le pagan $X"*, bloqueado mientras quede algo en ruta.
 - **Configuración → Paquetería:** Repartidores (CRUD, activo/inactivo) y Valores por defecto.
 

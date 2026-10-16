@@ -111,12 +111,14 @@ export function useMenuLateral() {
       // pregunta "¿puede pagar?", porque TODA la pantalla es de quien paga).
       puede('Compras', 'Pagar') && { label: 'Por pagar', icon: 'i-lucide-hand-coins', to: '/compras/por-pagar' },
     ]))
+    const esPaqueteria = permissionsStore.esAdmin && puede('Paquetería', 'Leer')
     menu.push(...grupo('paqueteria', 'Paquetería', 'i-lucide-package', [
-      // El backend es admin-only (`TenantAdminGuard`); `Paquetería:Leer` es solo la marca de que el
-      // tenant lo contrató, y en `mis-permisos` solo la tiene el admin.
-      puede('Paquetería', 'Leer') && { label: 'Escanear', icon: 'i-lucide-scan-barcode', to: '/paquetes/escanear' },
-      puede('Paquetería', 'Leer') && { label: 'Paquetes', icon: 'i-lucide-package', to: '/paquetes' },
-      puede('Paquetería', 'Leer') && { label: 'Rutas', icon: 'i-lucide-route', to: '/paquetes/rutas' },
+      // El backend es admin-only (`TenantAdminGuard`) y las pantallas llevan el middleware `admin`.
+      // `Paquetería:Leer` se le puede asignar a un rol propio en Roles y permisos, pero ese rol
+      // chocaría con un 403: el menú pide ser admin del tenant además de tener el módulo.
+      esPaqueteria && { label: 'Escanear', icon: 'i-lucide-scan-barcode', to: '/paquetes/escanear' },
+      esPaqueteria && { label: 'Paquetes', icon: 'i-lucide-package', to: '/paquetes' },
+      esPaqueteria && { label: 'Rutas', icon: 'i-lucide-route', to: '/paquetes/rutas' },
     ]))
     // Visible si el usuario puede ver al menos un reporte: el catálogo y el
     // chequeo viven en `useReportes`, compartidos con el índice `/reportes`.

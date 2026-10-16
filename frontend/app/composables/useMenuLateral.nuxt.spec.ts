@@ -65,11 +65,14 @@ const GATE_POR_RUTA: Record<string, string> = {
   '/compras/por-pagar': 'Compras:Pagar',
   '/desfases': 'Items:Leer',
   '/ordenes': 'Pasarelas:Leer',
-  // Admin-only en el backend: `Paquetería:Leer` solo marca que el tenant contrató el módulo.
+  // Admin-only en el backend: el menú pide ser admin del tenant además de `Paquetería:Leer`.
   '/paquetes/escanear': 'Paquetería:Leer',
   '/paquetes': 'Paquetería:Leer',
   '/paquetes/rutas': 'Paquetería:Leer',
 }
+
+/** Gates que además exigen ser admin del tenant: el backend de esas pantallas es admin-only. */
+const GATES_SOLO_ADMIN = new Set(['Paquetería:Leer'])
 
 /** El árbol aprobado por el owner el 2026-10-02 (docs/patterns/frontend.md § 1). */
 const ARBOL_DEL_ADMIN = [
@@ -190,6 +193,7 @@ describe('useMenuLateral', () => {
       'con solo %s ve exactamente sus pantallas, y ningún grupo vacío',
       (gate) => {
         permisos.value = [gate]
+        esAdmin.value = GATES_SOLO_ADMIN.has(gate)
         const { items } = montarMenu()
         const suyas = Object.keys(GATE_POR_RUTA).filter(r => GATE_POR_RUTA[r] === gate)
 
@@ -233,6 +237,14 @@ describe('useMenuLateral', () => {
           ['Rutas', '/paquetes/rutas'],
         ]],
       ])
+    })
+
+    it('un rol propio con Paquetería:Leer que no es admin del tenant no ve el grupo (el backend le daría 403)', () => {
+      esAdmin.value = false
+      permisos.value = ['Paquetería:Leer']
+      const { items } = montarMenu()
+
+      expect(forma(items.value)).toEqual([['Inicio', '/']])
     })
 
     it('el admin de un tenant que no contrató Paquetería no ve el grupo, ni ningún módulo fuera de sus permisos', () => {

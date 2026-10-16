@@ -37,7 +37,7 @@ Eliminar, Ver todas, Reembolsar, Nota de crédito, Operar, Configurar, Liquidar,
 | Resumen del negocio | `/` | Leer | Dashboard "Hoy" del dueño (separado de Ventas a propósito) |
 | Compras | `/compras` | Leer, Crear, Actualizar, Anular, Pagar | Recepción de compras y deuda con proveedores |
 | Varianza | `/reportes/varianza` | Leer | Reporte de varianza real vs. teórico (AVT) |
-| Paquetería | `/paquetes` | Leer | Gestión de paquetes y hojas de ruta. Admin-only en el backend (`TenantAdminGuard`): `Leer` solo marca que el tenant lo contrató, y en `mis-permisos` solo lo tiene el admin |
+| Paquetería | `/paquetes` | Leer | Gestión de paquetes y hojas de ruta. Admin-only en el backend (`TenantAdminGuard`): `Leer` marca que el tenant lo contrató; se puede asignar a un rol propio en Roles, pero el menú exige además ser admin del tenant porque el backend es admin-only |
 
 Fuera de los módulos:
 
@@ -230,8 +230,8 @@ Los criterios de reparto de propinas son `PARTES_IGUALES`, `VENTAS_NETAS`,
 | **Repartidores** | Admin del tenant que contrató Paquetería | Nombre, teléfono y activo; no se puede eliminar uno con hojas de ruta: se desactiva |
 | **Valores por defecto** | Admin del tenant que contrató Paquetería | Precio de envío y pago al repartidor con que nace cada paquete; hasta guardarlos no se pueden escanear paquetes nuevos |
 
-El gate es `admin` **y** `Paquetería:Leer` (que en `mis-permisos` solo aparece si el tenant
-contrató el módulo): el backend de las dos es admin-only, y el `lee()` del resto de la página
+El gate es `admin` **y** `Paquetería:Leer` (que en `mis-permisos` aparece si el tenant
+contrató el módulo, y también si un rol propio lo recibió en Roles): el backend de las dos es admin-only, y el `lee()` del resto de la página
 no sirve acá porque con `admin ||` siempre da `true`.
 
 ### Rutas que solo redirigen
