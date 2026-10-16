@@ -3,6 +3,7 @@ import {
   IsNotEmpty,
   IsOptional,
   IsString,
+  IsUUID,
   MaxLength,
   ValidateIf,
 } from 'class-validator';
@@ -22,4 +23,9 @@ export class UpdateRepartidorDto {
   @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
   activo?: boolean;
+
+  /** `null` le saca la tarifa; ausente la deja como está. */
+  @IsOptional()
+  @IsUUID()
+  tarifaPagoId?: string | null;
 }

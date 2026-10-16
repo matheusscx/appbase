@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Db } from '../../common/db/db.service';
 import { unwrap } from '../../common/utils/pg-returning.util';
+import { TarifasPagoService } from './tarifas-pago.service';
 import { CreateRepartidorDto } from './dto/create-repartidor.dto';
 import { UpdateRepartidorDto } from './dto/update-repartidor.dto';
 import type { RepartidorFila } from './paqueteria.types';
@@ -14,20 +15,25 @@ interface RepartidorRow {
   nombre: string;
   telefono: string | null;
   activo: boolean;
+  tarifa_pago_id: string | null;
 }
 
-const COLUMNAS = 'repartidor_id, nombre, telefono, activo';
+const COLUMNAS = 'repartidor_id, nombre, telefono, activo, tarifa_pago_id';
 
 const aFila = (r: RepartidorRow): RepartidorFila => ({
   id: r.repartidor_id,
   nombre: r.nombre,
   telefono: r.telefono,
   activo: r.activo,
+  tarifaPagoId: r.tarifa_pago_id,
 });
 
 @Injectable()
 export class RepartidoresService {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly tarifas: TarifasPagoService,
+  ) {}
 
   /** Activos e inactivos: la pantalla de administración necesita ver al inactivo para reactivarlo. */
   async findAll(tenantId: string): Promise<RepartidorFila[]> {
@@ -44,15 +50,27 @@ export class RepartidoresService {
     tenantId: string,
     dto: CreateRepartidorDto,
   ): Promise<RepartidorFila> {
-    const rows = unwrap<RepartidorRow>(
-      await this.db.query(
-        `INSERT INTO repartidores (tenant_id, nombre, telefono)
-         VALUES ($1, $2, $3)
-         RETURNING ${COLUMNAS}`,
-        [tenantId, dto.nombre, dto.telefono ?? null],
-      ),
-    );
-    return aFila(rows[0]);
+    return this.db.transaccion(async () => {
+      if (dto.tarifaPagoId) {
+        await this.tarifas.exigirActivaDelTenant(tenantId, dto.tarifaPagoId, {
+          bloquear: true,
+        });
+      }
+      const rows = unwrap<RepartidorRow>(
+        await this.db.query(
+          `INSERT INTO repartidores (tenant_id, nombre, telefono, tarifa_pago_id)
+           VALUES ($1, $2, $3, $4)
+           RETURNING ${COLUMNAS}`,
+          [
+            tenantId,
+            dto.nombre,
+            dto.telefono ?? null,
+            dto.tarifaPagoId ?? null,
+          ],
+        ),
+      );
+      return aFila(rows[0]);
+    });
   }
 
   /** Solo toca lo que llegó: `telefono: null` lo borra, ausente lo deja como está. */
@@ -70,19 +88,29 @@ export class RepartidoresService {
     if (dto.nombre !== undefined) poner('nombre', dto.nombre);
     if (dto.telefono !== undefined) poner('telefono', dto.telefono);
     if (dto.activo !== undefined) poner('activo', dto.activo);
+    if (dto.tarifaPagoId !== undefined)
+      poner('tarifa_pago_id', dto.tarifaPagoId);
 
     if (sets.length === 0) return this.buscar(tenantId, id);
 
-    const rows = unwrap<RepartidorRow>(
-      await this.db.query(
-        `UPDATE repartidores SET ${sets.join(', ')}, actualizado_el = now()
-          WHERE repartidor_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
-          RETURNING ${COLUMNAS}`,
-        params,
-      ),
-    );
-    if (!rows.length) throw new NotFoundException('Repartidor no encontrado');
-    return aFila(rows[0]);
+    return this.db.transaccion(async () => {
+      // Sacarle la tarifa (`null`) no pide nada; ponerla exige una activa de este tenant.
+      if (dto.tarifaPagoId) {
+        await this.tarifas.exigirActivaDelTenant(tenantId, dto.tarifaPagoId, {
+          bloquear: true,
+        });
+      }
+      const rows = unwrap<RepartidorRow>(
+        await this.db.query(
+          `UPDATE repartidores SET ${sets.join(', ')}, actualizado_el = now()
+            WHERE repartidor_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+            RETURNING ${COLUMNAS}`,
+          params,
+        ),
+      );
+      if (!rows.length) throw new NotFoundException('Repartidor no encontrado');
+      return aFila(rows[0]);
+    });
   }
 
   /**

@@ -4,9 +4,12 @@ import {
   DeleteDateColumn,
   Entity,
   Index,
+  JoinColumn,
+  ManyToOne,
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { TarifaPago } from './tarifa-pago.entity';
 
 @Entity('repartidores')
 @Index('idx_repartidores_tenant', ['tenantId'])
@@ -25,6 +28,14 @@ export class Repartidor {
 
   @Column({ type: 'boolean', default: true })
   activo: boolean;
+
+  /** La tarifa de su vehículo. Sin ella se paga la del paquete o, si tampoco, la por defecto. */
+  @Column({ name: 'tarifa_pago_id', type: 'uuid', nullable: true })
+  tarifaPagoId: string | null;
+
+  @ManyToOne(() => TarifaPago, { nullable: true })
+  @JoinColumn({ name: 'tarifa_pago_id' })
+  tarifaPago?: TarifaPago;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

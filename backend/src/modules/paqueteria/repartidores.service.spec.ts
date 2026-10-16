@@ -9,16 +9,32 @@ describe('RepartidoresService', () => {
     query: jest.fn(),
     transaccion: (cb: () => unknown) => cb(),
   };
-  const service = new RepartidoresService(db as never);
+  const tarifas = { exigirActivaDelTenant: jest.fn() };
+  const service = new RepartidoresService(db as never, tarifas as never);
 
-  beforeEach(() => db.query.mockReset());
+  beforeEach(() => {
+    db.query.mockReset();
+    tarifas.exigirActivaDelTenant.mockReset();
+  });
 
   it('findAll: trae activos e inactivos del tenant, sin borrados', async () => {
     db.query.mockResolvedValueOnce([
-      { repartidor_id: ID, nombre: 'Juan', telefono: null, activo: false },
+      {
+        repartidor_id: ID,
+        nombre: 'Juan',
+        telefono: null,
+        activo: false,
+        tarifa_pago_id: null,
+      },
     ]);
     await expect(service.findAll(TENANT)).resolves.toEqual([
-      { id: ID, nombre: 'Juan', telefono: null, activo: false },
+      {
+        id: ID,
+        nombre: 'Juan',
+        telefono: null,
+        activo: false,
+        tarifaPagoId: null,
+      },
     ]);
     const sql = db.query.mock.calls[0][0] as string;
     expect(sql).toMatch(/tenant_id = \$1/);

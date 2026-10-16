@@ -207,6 +207,19 @@ donde el menú no la muestra. IDs en el bloque `PAQUETERIA` del seeder (502-589)
 
 ---
 
+## Tarifas de pago
+
+Tabla `tarifas_pago` por tenant (nombre, monto, `es_defecto`, `activa`); diseño en
+`docs/superpowers/specs/2026-10-16-cuenta-del-repartidor-design.md` § 1. Reglas ya vigentes:
+
+- Exactamente una por defecto y viva (índice único parcial); la **primera** que se crea lo es
+  aunque no se pida. La por defecto no se desactiva ni se borra: se marca otra antes (400).
+- Nombre único por tenant sin distinguir mayúsculas (409). Monto con la escala de la moneda oficial (400).
+- Borrar es soft; una tarifa en uso por un repartidor o un paquete vivo no se borra (400): se desactiva.
+- `repartidores.tarifa_pago_id` y `paquetes.tarifa_pago_id` son opcionales. Asignarlas exige una
+  tarifa activa del tenant (`exigirActivaDelTenant`, 400). Hoy solo el repartidor la recibe por la
+  API; el paquete y el cálculo del pago llegan con la tarea siguiente (`pago_repartidor` sigue vigente).
+
 ## API
 
 Todo con `JwtAuthGuard + TenantGuard + TenantAdminGuard`; el `tenantId` sale del token; todo id
@@ -215,7 +228,8 @@ entity.
 
 ```
 GET|PUT  /paquetes/configuracion
-GET|POST /repartidores                     PATCH|DELETE /repartidores/:id
+GET|POST /tarifas-pago                     PATCH|DELETE /tarifas-pago/:id   (PATCH { esDefecto: true } pasa el defecto en una transacción)
+GET|POST /repartidores                     PATCH|DELETE /repartidores/:id   (acepta `tarifaPagoId`, `null` la saca)
 GET|POST /paquetes                         PATCH|DELETE /paquetes/:id
          GET /paquetes: paginado en el servidor; filtros de estado, cobroEnDestino, datos por completar y búsqueda (código / destinatario)
 POST     /hojas-ruta/escanear              { repartidorId, fecha, codigo, cobroEnDestino } → { resultado, codigo, hoja }

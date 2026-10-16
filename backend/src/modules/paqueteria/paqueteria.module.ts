@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { MonedasModule } from '../monedas/monedas.module';
 import { PaqueteConfiguracion } from './entities/paquete-configuracion.entity';
+import { TarifaPago } from './entities/tarifa-pago.entity';
 import { Repartidor } from './entities/repartidor.entity';
 import { Paquete } from './entities/paquete.entity';
 import { HojaRuta } from './entities/hoja-ruta.entity';
@@ -12,6 +13,8 @@ import { PaqueteConfiguracionController } from './paquete-configuracion.controll
 import { PaqueteConfiguracionService } from './paquete-configuracion.service';
 import { PaquetesController } from './paquetes.controller';
 import { PaquetesService } from './paquetes.service';
+import { TarifasPagoController } from './tarifas-pago.controller';
+import { TarifasPagoService } from './tarifas-pago.service';
 import { RepartidoresController } from './repartidores.controller';
 import { RepartidoresService } from './repartidores.service';
 
@@ -19,6 +22,7 @@ import { RepartidoresService } from './repartidores.service';
   imports: [
     RepositoriosModule.forFeature([
       PaqueteConfiguracion,
+      TarifaPago,
       Repartidor,
       Paquete,
       HojaRuta,
@@ -30,18 +34,21 @@ import { RepartidoresService } from './repartidores.service';
   // `paquetes/configuracion` antes que `paquetes/:id`: el orden de registro decide qué ruta gana.
   controllers: [
     PaqueteConfiguracionController,
+    TarifasPagoController,
     PaquetesController,
     RepartidoresController,
     HojasRutaController,
   ],
   providers: [
     PaqueteConfiguracionService,
+    TarifasPagoService,
     PaquetesService,
     RepartidoresService,
     HojasRutaService,
   ],
   exports: [
     PaqueteConfiguracionService,
+    TarifasPagoService,
     PaquetesService,
     RepartidoresService,
     HojasRutaService,

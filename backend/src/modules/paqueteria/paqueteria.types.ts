@@ -15,6 +15,15 @@ export interface RepartidorFila {
   nombre: string;
   telefono: string | null;
   activo: boolean;
+  tarifaPagoId: string | null;
+}
+
+export interface TarifaPagoFila {
+  id: string;
+  nombre: string;
+  monto: string;
+  esDefecto: boolean;
+  activa: boolean;
 }
 
 export interface PaqueteFila {

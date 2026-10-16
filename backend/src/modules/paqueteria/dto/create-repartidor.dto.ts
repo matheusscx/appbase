@@ -1,4 +1,10 @@
-import { IsNotEmpty, IsOptional, IsString, MaxLength } from 'class-validator';
+import {
+  IsNotEmpty,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+} from 'class-validator';
 
 export class CreateRepartidorDto {
   @IsString()
@@ -10,4 +16,8 @@ export class CreateRepartidorDto {
   @IsString()
   @MaxLength(30)
   telefono?: string | null;
+
+  @IsOptional()
+  @IsUUID()
+  tarifaPagoId?: string | null;
 }

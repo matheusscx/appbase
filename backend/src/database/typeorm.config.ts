@@ -88,6 +88,7 @@ import { UmbralIdentidadPagador } from '../modules/ventas/entities/umbral-identi
 import { Tercero } from '../modules/terceros/entities/tercero.entity';
 import { PaqueteConfiguracion } from '../modules/paqueteria/entities/paquete-configuracion.entity';
 import { Repartidor } from '../modules/paqueteria/entities/repartidor.entity';
+import { TarifaPago } from '../modules/paqueteria/entities/tarifa-pago.entity';
 import { Paquete } from '../modules/paqueteria/entities/paquete.entity';
 import { HojaRuta } from '../modules/paqueteria/entities/hoja-ruta.entity';
 import { HojaRutaPaquete } from '../modules/paqueteria/entities/hoja-ruta-paquete.entity';
@@ -233,6 +234,7 @@ export const ENTIDADES = [
   LiquidacionPropinasFuente,
   LiquidacionPropinasEvento,
   PaqueteConfiguracion,
+  TarifaPago,
   Repartidor,
   Paquete,
   HojaRuta,

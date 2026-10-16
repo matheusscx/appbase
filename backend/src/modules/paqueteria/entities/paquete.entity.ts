@@ -10,6 +10,7 @@ import {
   UpdateDateColumn,
 } from 'typeorm';
 import { Tercero } from '../../terceros/entities/tercero.entity';
+import { TarifaPago } from './tarifa-pago.entity';
 
 @Entity('paquetes')
 @Index('uq_paquetes_tenant_codigo', ['tenantId', 'codigo'], {
@@ -67,6 +68,14 @@ export class Paquete {
 
   @Column({ name: 'pago_repartidor', type: 'numeric', precision: 18, scale: 4 })
   pagoRepartidor: string;
+
+  /** Tarifa especial de este paquete (p. ej. "Colina"); reemplaza a la del repartidor. */
+  @Column({ name: 'tarifa_pago_id', type: 'uuid', nullable: true })
+  tarifaPagoId: string | null;
+
+  @ManyToOne(() => TarifaPago, { nullable: true })
+  @JoinColumn({ name: 'tarifa_pago_id' })
+  tarifaPago?: TarifaPago;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
