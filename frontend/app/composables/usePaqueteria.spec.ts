@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { ref } from 'vue'
 import type { MonedaTenantApi } from '~/types/moneda'
+import type { LineaHoja } from '~/types/paqueteria'
 
 // Mismo andamiaje que `useMonedaConversion.spec.ts`: el store de monedas llama a
 // `useRuntimeConfig()` al armarse y necesita una app Nuxt que acá no hay.
@@ -58,6 +59,35 @@ describe('usePaqueteria', () => {
 
     it('un cero con decimales sigue siendo cero (se compara como Decimal, no como texto)', () => {
       expect(usePaqueteria().textoNeto('Juan', '0.00')).toBe('Juan no entrega ni recibe plata')
+    })
+  })
+
+  describe('lineasConCobro: las líneas que cobran en destino', () => {
+    const linea = (estado: LineaHoja['estado'], cobroEnDestino: boolean): LineaHoja => ({
+      paqueteId: `p-${estado}-${cobroEnDestino}`,
+      codigo: 'X',
+      destinatarioNombre: null,
+      direccion: null,
+      comuna: null,
+      cobroEnDestino,
+      precioEnvio: '2500',
+      pagoRepartidor: '1000',
+      estado,
+    })
+
+    it('cuenta las en ruta y las entregadas con cobro; no las sin cobro ni las no entregadas', () => {
+      const lineas = [
+        linea('en_ruta', true),
+        linea('entregado', true),
+        linea('en_ruta', false),
+        linea('entregado', false),
+        linea('no_entregado', true),
+      ]
+      expect(usePaqueteria().lineasConCobro(lineas)).toBe(2)
+    })
+
+    it('una hoja vacía da cero', () => {
+      expect(usePaqueteria().lineasConCobro([])).toBe(0)
     })
   })
 

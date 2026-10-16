@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js'
-import type { EstadoLinea, EstadoPaquete } from '~/types/paqueteria'
+import type { EstadoLinea, EstadoPaquete, LineaHoja } from '~/types/paqueteria'
 
 type ColorEstadoPaquete = 'neutral' | 'info' | 'success'
 type ColorEstadoLinea = 'info' | 'success' | 'warning'
@@ -39,7 +39,19 @@ export function usePaqueteria() {
     return `${nombre} entrega ${formatOficial(monto.toFixed())}`
   }
 
+  /**
+   * Cuántas líneas de la hoja cobran en destino. Cuenta las `en_ruta` y las `entregado`: lo que el
+   * repartidor cobra o ya cobró. Una `no_entregado` no cobra, así que no entra; por eso este número
+   * puede ser menor que `asignados` aun si todas tienen el interruptor prendido (`asignados`
+   * cuenta toda línea). No es el `cobroDestino` del servidor, que cuenta solo los entregados y
+   * mientras se escanea vale siempre 0.
+   */
+  function lineasConCobro(lineas: LineaHoja[]): number {
+    return lineas.filter(l => l.estado !== 'no_entregado' && l.cobroEnDestino).length
+  }
+
   return {
+    lineasConCobro,
     rotuloEstadoPaquete: (estado: EstadoPaquete) => PAQUETE[estado].rotulo,
     colorEstadoPaquete: (estado: EstadoPaquete) => PAQUETE[estado].color,
     rotuloEstadoLinea: (estado: EstadoLinea) => LINEA[estado].rotulo,
