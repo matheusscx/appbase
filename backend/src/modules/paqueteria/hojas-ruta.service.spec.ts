@@ -462,4 +462,381 @@ describe('HojasRutaService', () => {
       );
     });
   });
+
+  describe('escritura de líneas', () => {
+    const hojaDe = (estado: 'abierta' | 'rendida'): Respuesta => [
+      /SELECT estado FROM hojas_ruta/,
+      [{ estado }],
+    ];
+    const lineaPropia: Respuesta = [
+      /SELECT hoja_ruta_paquete_id AS id FROM hoja_ruta_paquetes/,
+      [{ id: 'l1' }],
+    ];
+    const paquete: Respuesta = [
+      /SELECT codigo FROM paquetes/,
+      [{ codigo: 'ABC' }],
+    ];
+    const marcar = (estado: 'en_ruta' | 'entregado' | 'no_entregado') =>
+      service.marcar(TENANT, HOJA, PAQUETE, estado);
+
+    it('toda escritura bloquea la hoja con FOR UPDATE antes de tocar líneas', async () => {
+      responder(hojaDe('abierta'), lineaPropia, paquete);
+      await marcar('entregado');
+      const todas = sqls();
+      expect(todas[0]).toMatch(/FROM hojas_ruta[\s\S]*FOR UPDATE/);
+      expect(todas.findIndex((x) => /FROM paquetes/.test(x))).toBeGreaterThan(
+        0,
+      );
+    });
+
+    describe('marcar', () => {
+      it('hoja rendida: 400, sin tocar nada', async () => {
+        responder(hojaDe('rendida'));
+        await expect(marcar('entregado')).rejects.toThrow(
+          /ya está rendida: no se puede modificar/,
+        );
+        expect(sqls()).toHaveLength(1);
+      });
+
+      it('hoja de otro tenant: 404', async () => {
+        responder([/SELECT estado FROM hojas_ruta/, []]);
+        await expect(marcar('entregado')).rejects.toBeInstanceOf(
+          NotFoundException,
+        );
+      });
+
+      it('el paquete no está en la hoja: 404', async () => {
+        responder(hojaDe('abierta'), [
+          /SELECT hoja_ruta_paquete_id AS id FROM hoja_ruta_paquetes/,
+          [],
+        ]);
+        await expect(marcar('entregado')).rejects.toBeInstanceOf(
+          NotFoundException,
+        );
+      });
+
+      it('entregado con otra línea viva en_ruta/entregado en otra hoja: 409 que nombra al repartidor', async () => {
+        responder(
+          hojaDe('abierta'),
+          lineaPropia,
+          paquete,
+          lineasDelPaquete(
+            linea({ id: 'l1', estado: 'no_entregado', hoja_ruta_id: HOJA }),
+            linea({ id: 'l9', estado: 'en_ruta' }),
+          ),
+        );
+        await expect(marcar('entregado')).rejects.toBeInstanceOf(
+          ConflictException,
+        );
+        await expect(marcar('entregado')).rejects.toThrow(
+          'El paquete ABC ya salió con Pedro: no se puede marcar acá.',
+        );
+        expect(sqls().some((x) => /UPDATE hoja_ruta_paquetes/.test(x))).toBe(
+          false,
+        );
+      });
+
+      it('toma el cerrojo del paquete (sin borrados) ANTES de leer sus otras líneas', async () => {
+        responder(hojaDe('abierta'), lineaPropia, paquete);
+        await marcar('en_ruta');
+        const todas = sqls();
+        const cerrojo = todas.findIndex((x) =>
+          /FROM paquetes[\s\S]*eliminado_el IS NULL[\s\S]*FOR UPDATE/.test(x),
+        );
+        const lectura = todas.findIndex((x) =>
+          /FROM hoja_ruta_paquetes l\s+JOIN hojas_ruta h/.test(x),
+        );
+        expect(cerrojo).toBeGreaterThan(-1);
+        expect(lectura).toBeGreaterThan(cerrojo);
+      });
+
+      it('no_entregado no necesita el cerrojo del paquete y escribe el estado', async () => {
+        responder(hojaDe('abierta'), lineaPropia);
+        await marcar('no_entregado');
+        expect(sqls().some((x) => /FROM paquetes/.test(x))).toBe(false);
+        const update = db.query.mock.calls.find((c) =>
+          /UPDATE hoja_ruta_paquetes/.test(c[0] as string),
+        )!;
+        expect(update[1]).toEqual([TENANT, 'l1', 'no_entregado']);
+      });
+
+      it('el 23505 del índice único se traduce a 409', async () => {
+        db.query.mockImplementation((sql: string) => {
+          if (/SELECT estado FROM hojas_ruta/.test(sql))
+            return Promise.resolve([{ estado: 'abierta' }]);
+          if (/SELECT hoja_ruta_paquete_id AS id/.test(sql))
+            return Promise.resolve([{ id: 'l1' }]);
+          if (/SELECT codigo FROM paquetes/.test(sql))
+            return Promise.resolve([{ codigo: 'ABC' }]);
+          if (/UPDATE hoja_ruta_paquetes/.test(sql))
+            return Promise.reject(
+              Object.assign(new Error('unique'), { code: '23505' }),
+            );
+          return Promise.resolve([]);
+        });
+        await expect(marcar('en_ruta')).rejects.toBeInstanceOf(
+          ConflictException,
+        );
+      });
+    });
+
+    describe('quitar', () => {
+      const quitar = () => service.quitar(TENANT, HOJA, PAQUETE);
+
+      it('una línea entregada: 400 (solo se quita lo que está en ruta)', async () => {
+        responder(hojaDe('abierta'), [
+          /SELECT hoja_ruta_paquete_id AS id, estado FROM/,
+          [{ id: 'l1', estado: 'entregado' }],
+        ]);
+        await expect(quitar()).rejects.toThrow(
+          'Solo se quita un paquete que sigue en ruta.',
+        );
+        expect(sqls().some((x) => /^\s*UPDATE/.test(x))).toBe(false);
+      });
+
+      it('una línea en ruta: la borra con soft delete, nunca DELETE', async () => {
+        responder(hojaDe('abierta'), [
+          /SELECT hoja_ruta_paquete_id AS id, estado FROM/,
+          [{ id: 'l1', estado: 'en_ruta' }],
+        ]);
+        await quitar();
+        expect(sqls().some((x) => /SET eliminado_el = now\(\)/.test(x))).toBe(
+          true,
+        );
+        expect(sqls().some((x) => /DELETE FROM/.test(x))).toBe(false);
+      });
+
+      it('hoja rendida: 400', async () => {
+        responder(hojaDe('rendida'));
+        await expect(quitar()).rejects.toBeInstanceOf(BadRequestException);
+      });
+    });
+
+    describe('entregarTodos', () => {
+      it('solo toca las en_ruta de la hoja', async () => {
+        responder(hojaDe('abierta'));
+        await service.entregarTodos(TENANT, HOJA);
+        expect(sqls().find((x) => /^\s*UPDATE/.test(x))).toMatch(
+          /estado = 'en_ruta' AND eliminado_el IS NULL/,
+        );
+      });
+
+      it('hoja rendida: 400', async () => {
+        responder(hojaDe('rendida'));
+        await expect(service.entregarTodos(TENANT, HOJA)).rejects.toThrow(
+          /ya está rendida/,
+        );
+      });
+    });
+  });
+
+  describe('rendir y congelarTotales', () => {
+    const totales = jest.spyOn(service, 'totales');
+    const t = (extra: object = {}) => ({
+      asignados: 3,
+      enRuta: 0,
+      entregados: 2,
+      cobroDestino: 1,
+      montoCobradoDestino: '10000.0000',
+      montoPagoRepartidor: '8000.0000',
+      montoTotalGeneral: '17000.0000',
+      netoARendir: '2000.0000',
+      ...extra,
+    });
+    const hojaDe = (estado: 'abierta' | 'rendida'): Respuesta => [
+      /SELECT estado FROM hojas_ruta/,
+      [{ estado }],
+    ];
+    const rendir = () => service.rendir(TENANT, HOJA, 'u1');
+    const actualiza: Respuesta = [
+      /UPDATE hojas_ruta/,
+      [{ hoja_ruta_id: HOJA }],
+    ];
+
+    beforeEach(() => {
+      totales.mockReset().mockResolvedValue(new Map([[HOJA, t()]]));
+    });
+
+    it('con líneas en ruta: 400 que dice cuántas', async () => {
+      responder(hojaDe('abierta'));
+      totales.mockResolvedValue(new Map([[HOJA, t({ enRuta: 2 })]]));
+      await expect(rendir()).rejects.toThrow(
+        'Quedan 2 paquetes en ruta: marcalos entregados o no entregados antes de rendir.',
+      );
+      expect(sqls().some((x) => /UPDATE hojas_ruta/.test(x))).toBe(false);
+    });
+
+    it('una hoja vacía: 400', async () => {
+      responder(hojaDe('abierta'));
+      totales.mockResolvedValue(new Map([[HOJA, t({ asignados: 0 })]]));
+      await expect(rendir()).rejects.toThrow('La hoja no tiene paquetes.');
+    });
+
+    it('una hoja ya rendida: 400 "ya está rendida"', async () => {
+      responder(hojaDe('rendida'));
+      await expect(rendir()).rejects.toThrow(/ya está rendida/);
+      expect(totales).not.toHaveBeenCalled();
+    });
+
+    it('una hoja de otro tenant: 404', async () => {
+      responder([/SELECT estado FROM hojas_ruta/, []]);
+      await expect(rendir()).rejects.toBeInstanceOf(NotFoundException);
+    });
+
+    it('congela los totales de this.totales y anota rendida_por con el usuario del token', async () => {
+      responder(hojaDe('abierta'), actualiza);
+      await rendir();
+      const update = db.query.mock.calls.find((c) =>
+        /UPDATE hojas_ruta/.test(c[0] as string),
+      )!;
+      expect(update[0]).toMatch(/SET estado = 'rendida', rendida_por = \$3/);
+      expect(update[1]).toEqual([
+        TENANT,
+        HOJA,
+        'u1',
+        3,
+        2,
+        1,
+        '10000.0000',
+        '8000.0000',
+        '17000.0000',
+        '2000.0000',
+      ]);
+    });
+
+    it('congelarTotales sin usuario (el seed): rendida_por null', async () => {
+      responder(actualiza);
+      await service.congelarTotales(TENANT, HOJA, null);
+      const update = db.query.mock.calls.find((c) =>
+        /UPDATE hojas_ruta/.test(c[0] as string),
+      )!;
+      expect((update[1] as unknown[])[2]).toBeNull();
+    });
+
+    it('congelarTotales sobre una hoja ya rendida: 400 y no escribe (el UPDATE solo toca abiertas)', async () => {
+      responder([/UPDATE hojas_ruta/, []]);
+      await expect(service.congelarTotales(TENANT, HOJA, null)).rejects.toThrow(
+        'La hoja ya está rendida.',
+      );
+      const update = sqls().find((x) => /^\s*UPDATE hojas_ruta/.test(x))!;
+      expect(update).toMatch(/AND estado = 'abierta'/);
+    });
+
+    it('congelarTotales con líneas en ruta: 400 y no escribe', async () => {
+      responder(actualiza);
+      totales.mockResolvedValue(new Map([[HOJA, t({ enRuta: 1 })]]));
+      await expect(service.congelarTotales(TENANT, HOJA, null)).rejects.toThrow(
+        /Quedan 1 paquetes en ruta/,
+      );
+      expect(db.query).not.toHaveBeenCalled();
+    });
+
+    it('congelarTotales de una hoja que no existe en el tenant: 404', async () => {
+      totales.mockResolvedValue(new Map());
+      await expect(
+        service.congelarTotales(TENANT, HOJA, null),
+      ).rejects.toBeInstanceOf(NotFoundException);
+    });
+  });
+
+  describe('lista y resumen', () => {
+    const totales = jest.spyOn(service, 'totales');
+    const cab = (extra: object) => ({
+      id: HOJA,
+      repartidor_id: REPARTIDOR,
+      repartidor_nombre: 'Juan',
+      fecha: FECHA,
+      estado: 'abierta',
+      rendida_el: null,
+      total_asignados: null,
+      total_entregados: null,
+      total_cobro_destino: null,
+      monto_cobrado_destino: null,
+      monto_pago_repartidor: null,
+      monto_total_general: null,
+      neto_a_rendir: null,
+      ...extra,
+    });
+    const vivos = {
+      asignados: 4,
+      enRuta: 1,
+      entregados: 3,
+      cobroDestino: 1,
+      montoCobradoDestino: '0.3000',
+      montoPagoRepartidor: '0.1000',
+      montoTotalGeneral: '0.5000',
+      netoARendir: '0.2000',
+    };
+    const rango = { desde: '2026-10-01', hasta: '2026-10-31' };
+    const hojas = (): Respuesta => [
+      /h\.fecha BETWEEN \$2 AND \$3/,
+      [
+        cab({ id: 'abierta1' }),
+        cab({
+          id: 'rendida1',
+          estado: 'rendida',
+          rendida_el: new Date('2026-10-15T20:00:00.000Z'),
+          total_asignados: 2,
+          total_entregados: 2,
+          total_cobro_destino: 0,
+          monto_cobrado_destino: '0.0000',
+          monto_pago_repartidor: '0.2000',
+          monto_total_general: '0.7000',
+        }),
+      ],
+    ];
+
+    beforeEach(() => {
+      totales.mockReset().mockResolvedValue(new Map([['abierta1', vivos]]));
+    });
+
+    it('rango invertido: 400', async () => {
+      await expect(
+        service.lista(TENANT, { desde: '2026-10-31', hasta: '2026-10-01' }),
+      ).rejects.toThrow('El rango de fechas está invertido.');
+    });
+
+    it('dos consultas en total: congeladas para las rendidas, totales solo de las abiertas', async () => {
+      responder(hojas());
+      const res = await service.lista(TENANT, rango);
+      expect(db.query).toHaveBeenCalledTimes(1);
+      expect(totales).toHaveBeenCalledTimes(1);
+      expect(totales).toHaveBeenCalledWith(TENANT, ['abierta1']);
+      expect(res[0]).toMatchObject({ id: 'abierta1', enRuta: 1 });
+      expect(res[1]).toMatchObject({
+        id: 'rendida1',
+        enRuta: 0,
+        montoPagoRepartidor: '0.2000',
+        netoARendir: '-0.2000',
+        rendidaEl: '2026-10-15T20:00:00.000Z',
+      });
+    });
+
+    it('sin hojas abiertas no llama a totales', async () => {
+      responder([/h\.fecha BETWEEN/, []]);
+      expect(await service.lista(TENANT, rango)).toEqual([]);
+      expect(totales).not.toHaveBeenCalled();
+    });
+
+    it('el filtro de repartidor entra como parámetro', async () => {
+      responder([/h\.fecha BETWEEN/, []]);
+      await service.lista(TENANT, { ...rango, repartidorId: REPARTIDOR });
+      const [sql, params] = db.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toMatch(/h\.repartidor_id = \$4/);
+      expect(params).toEqual([TENANT, rango.desde, rango.hasta, REPARTIDOR]);
+    });
+
+    it('resumen: suma con Decimal (0.3 + 0.0 y 0.1 + 0.2 sin error de coma flotante)', async () => {
+      responder(hojas());
+      const res = await service.resumen(TENANT, rango);
+      expect(res).toEqual({
+        asignados: 6,
+        entregados: 5,
+        cobroDestino: 1,
+        montoCobradoDestino: '0.3000',
+        montoTotalGeneral: '1.2000',
+        montoPagoRepartidor: '0.3000',
+      });
+    });
+  });
 });

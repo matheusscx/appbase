@@ -16,11 +16,14 @@ import type {
   EstadoLinea,
   HojaRutaDetalle,
   LineaHoja,
+  HojaRutaFila,
   RespuestaEscaneo,
   ResultadoEscaneo,
+  ResumenPaqueteria,
   TotalesHoja,
 } from './paqueteria.types';
 import { RepartidoresService } from './repartidores.service';
+import type { QueryHojasRutaDto } from './dto/query-hojas-ruta.dto';
 
 interface FilaTotales {
   hoja_ruta_id: string;
@@ -103,6 +106,18 @@ const aTotales = (f: {
     .minus(f.monto_pago_repartidor)
     .toFixed(4),
 });
+
+/** Lo que una hoja rendida congeló al rendir (no hay línea `en_ruta`: rendir lo exige). */
+const totalesCongelados = (c: FilaCabecera): TotalesHoja =>
+  aTotales({
+    asignados: c.total_asignados ?? 0,
+    en_ruta: 0,
+    entregados: c.total_entregados ?? 0,
+    cobro_destino: c.total_cobro_destino ?? 0,
+    monto_cobrado_destino: c.monto_cobrado_destino ?? '0.0000',
+    monto_pago_repartidor: c.monto_pago_repartidor ?? '0.0000',
+    monto_total_general: c.monto_total_general ?? '0.0000',
+  });
 
 /**
  * Qué se puede hacer con un paquete a partir de sus líneas vivas (`en_ruta` y `entregado` de
@@ -295,6 +310,276 @@ export class HojasRutaService {
     });
   }
 
+  /**
+   * Cambia el estado de la línea viva de ese paquete en esa hoja. `en_ruta` deshace un marcado
+   * por error. Volver a `en_ruta` o pasar a `entregado` deja al paquete ocupando una ruta, así
+   * que se toma su cerrojo ANTES de mirar sus otras líneas: sin él, dos hojas podrían marcarlo
+   * a la vez.
+   */
+  async marcar(
+    tenantId: string,
+    hojaId: string,
+    paqueteId: string,
+    estado: EstadoLinea,
+  ): Promise<HojaRutaDetalle> {
+    return this.db.transaccion(async () => {
+      await this.exigirHojaAbierta(tenantId, hojaId);
+      const propias: { id: string }[] = await this.db.query(
+        `SELECT hoja_ruta_paquete_id AS id FROM hoja_ruta_paquetes
+          WHERE tenant_id = $1 AND hoja_ruta_id = $2 AND paquete_id = $3 AND eliminado_el IS NULL`,
+        [tenantId, hojaId, paqueteId],
+      );
+      if (!propias.length) {
+        throw new NotFoundException('El paquete no está en esta hoja.');
+      }
+      const lineaId = propias[0].id;
+
+      if (estado !== 'no_entregado') {
+        const paquetes: { codigo: string }[] = await this.db.query(
+          `SELECT codigo FROM paquetes
+            WHERE tenant_id = $1 AND paquete_id = $2 AND eliminado_el IS NULL
+              FOR UPDATE`,
+          [tenantId, paqueteId],
+        );
+        if (!paquetes.length) {
+          throw new NotFoundException('El paquete no existe.');
+        }
+        const lineas = await this.lineasVivas(tenantId, [paqueteId], hojaId);
+        const ocupa = lineas.find(
+          (l) =>
+            l.id !== lineaId &&
+            (l.estado === 'en_ruta' || l.estado === 'entregado'),
+        );
+        if (ocupa) {
+          throw new ConflictException(
+            `El paquete ${paquetes[0].codigo} ya salió con ${ocupa.repartidor_nombre}: no se puede marcar acá.`,
+          );
+        }
+      }
+
+      try {
+        await this.db.query(
+          `UPDATE hoja_ruta_paquetes SET estado = $3, actualizado_el = now()
+            WHERE tenant_id = $1 AND hoja_ruta_paquete_id = $2 AND eliminado_el IS NULL`,
+          [tenantId, lineaId, estado],
+        );
+      } catch (e) {
+        // El índice único de `en_ruta` es la última defensa si dos marcados llegaran juntos.
+        if ((e as { code?: string }).code === '23505') {
+          throw new ConflictException(
+            'El paquete ya está en ruta en otra hoja: no se puede marcar acá.',
+          );
+        }
+        throw e;
+      }
+      return this.detalle(tenantId, hojaId);
+    });
+  }
+
+  /** Solo pasa a `entregado` lo que sigue en ruta; un `no_entregado` ya marcado no se toca. */
+  async entregarTodos(
+    tenantId: string,
+    hojaId: string,
+  ): Promise<HojaRutaDetalle> {
+    return this.db.transaccion(async () => {
+      await this.exigirHojaAbierta(tenantId, hojaId);
+      await this.db.query(
+        `UPDATE hoja_ruta_paquetes SET estado = 'entregado', actualizado_el = now()
+          WHERE tenant_id = $1 AND hoja_ruta_id = $2 AND estado = 'en_ruta' AND eliminado_el IS NULL`,
+        [tenantId, hojaId],
+      );
+      return this.detalle(tenantId, hojaId);
+    });
+  }
+
+  /** Solo se quita lo que sigue en ruta: un entregado o un no entregado es historia de la hoja. */
+  async quitar(
+    tenantId: string,
+    hojaId: string,
+    paqueteId: string,
+  ): Promise<HojaRutaDetalle> {
+    return this.db.transaccion(async () => {
+      await this.exigirHojaAbierta(tenantId, hojaId);
+      const lineas: { id: string; estado: EstadoLinea }[] = await this.db.query(
+        `SELECT hoja_ruta_paquete_id AS id, estado FROM hoja_ruta_paquetes
+            WHERE tenant_id = $1 AND hoja_ruta_id = $2 AND paquete_id = $3 AND eliminado_el IS NULL`,
+        [tenantId, hojaId, paqueteId],
+      );
+      if (!lineas.length) {
+        throw new NotFoundException('El paquete no está en esta hoja.');
+      }
+      if (lineas[0].estado !== 'en_ruta') {
+        throw new BadRequestException(
+          'Solo se quita un paquete que sigue en ruta.',
+        );
+      }
+      await this.db.query(
+        `UPDATE hoja_ruta_paquetes SET eliminado_el = now(), actualizado_el = now()
+          WHERE tenant_id = $1 AND hoja_ruta_paquete_id = $2 AND eliminado_el IS NULL`,
+        [tenantId, lineas[0].id],
+      );
+      return this.detalle(tenantId, hojaId);
+    });
+  }
+
+  /**
+   * Cierra la hoja: congela sus totales y la deja sin posibilidad de cambio (los montos de sus
+   * paquetes entregados quedan bloqueados). No admite líneas en ruta: cada paquete tiene que
+   * estar entregado o no entregado, o la plata a rendir sería un número a medias.
+   */
+  async rendir(
+    tenantId: string,
+    hojaId: string,
+    usuarioId: string,
+  ): Promise<HojaRutaDetalle> {
+    return this.db.transaccion(async () => {
+      const estado = await this.bloquearHoja(tenantId, hojaId);
+      if (estado === 'rendida') {
+        throw new BadRequestException('La hoja ya está rendida.');
+      }
+      const t = (await this.totales(tenantId, [hojaId])).get(hojaId)!;
+      if (t.asignados === 0) {
+        throw new BadRequestException('La hoja no tiene paquetes.');
+      }
+      await this.congelar(tenantId, hojaId, usuarioId, t);
+      return this.detalle(tenantId, hojaId);
+    });
+  }
+
+  /**
+   * Marca la hoja como rendida y le escribe los totales que `totales` calcula ahora. La usa
+   * `rendir` y el seed de la demo (sin usuario) para sus hojas de ejemplo: es la única forma de
+   * congelar, así lo congelado y lo calculado no pueden diferir.
+   *
+   * Precondición: quien llama tiene la hoja bloqueada (`FOR UPDATE`) dentro de su transacción.
+   * Se defiende sola de lo que quedaría mal: una hoja ya rendida (400) o con paquetes todavía en
+   * ruta (400: rendida, su línea `en_ruta` no se podría marcar ni soltar nunca más).
+   */
+  async congelarTotales(
+    tenantId: string,
+    hojaId: string,
+    usuarioId: string | null,
+  ): Promise<void> {
+    const t = (await this.totales(tenantId, [hojaId])).get(hojaId);
+    if (!t) throw new NotFoundException('Hoja de ruta no encontrada');
+    await this.congelar(tenantId, hojaId, usuarioId, t);
+  }
+
+  private async congelar(
+    tenantId: string,
+    hojaId: string,
+    usuarioId: string | null,
+    t: TotalesHoja,
+  ): Promise<void> {
+    if (t.enRuta > 0) {
+      throw new BadRequestException(
+        `Quedan ${t.enRuta} paquetes en ruta: marcalos entregados o no entregados antes de rendir.`,
+      );
+    }
+    const filas = unwrap<{ hoja_ruta_id: string }>(
+      await this.db.query(
+        `UPDATE hojas_ruta
+            SET estado = 'rendida', rendida_por = $3, rendida_el = now(),
+                total_asignados = $4, total_entregados = $5, total_cobro_destino = $6,
+                monto_cobrado_destino = $7, monto_pago_repartidor = $8,
+                monto_total_general = $9, neto_a_rendir = $10, actualizado_el = now()
+          WHERE tenant_id = $1 AND hoja_ruta_id = $2 AND estado = 'abierta' AND eliminado_el IS NULL
+          RETURNING hoja_ruta_id`,
+        [
+          tenantId,
+          hojaId,
+          usuarioId,
+          t.asignados,
+          t.entregados,
+          t.cobroDestino,
+          t.montoCobradoDestino,
+          t.montoPagoRepartidor,
+          t.montoTotalGeneral,
+          t.netoARendir,
+        ],
+      ),
+    );
+    // Los totales salieron de una hoja que existe: sin fila actualizada, ya estaba rendida.
+    if (!filas.length)
+      throw new BadRequestException('La hoja ya está rendida.');
+  }
+
+  /**
+   * Las hojas del rango con sus totales, en dos consultas sin importar cuántas sean: las
+   * rendidas leen lo que congelaron y las abiertas pasan juntas por `totales`.
+   */
+  async lista(tenantId: string, q: QueryHojasRutaDto): Promise<HojaRutaFila[]> {
+    if (q.desde > q.hasta) {
+      throw new BadRequestException('El rango de fechas está invertido.');
+    }
+    const params: unknown[] = [tenantId, q.desde, q.hasta];
+    let filtroRepartidor = '';
+    if (q.repartidorId) {
+      params.push(q.repartidorId);
+      filtroRepartidor = `AND h.repartidor_id = $${params.length}`;
+    }
+    const cabeceras: FilaCabecera[] = await this.db.query(
+      `SELECT h.hoja_ruta_id AS id, h.repartidor_id, r.nombre AS repartidor_nombre,
+              h.fecha::text AS fecha, h.estado, h.rendida_el,
+              h.total_asignados, h.total_entregados, h.total_cobro_destino,
+              h.monto_cobrado_destino, h.monto_pago_repartidor,
+              h.monto_total_general, h.neto_a_rendir
+         FROM hojas_ruta h
+         JOIN repartidores r ON r.repartidor_id = h.repartidor_id
+                            AND r.tenant_id = h.tenant_id AND r.eliminado_el IS NULL
+        WHERE h.tenant_id = $1 AND h.fecha BETWEEN $2 AND $3 AND h.eliminado_el IS NULL
+          ${filtroRepartidor}
+        ORDER BY h.fecha DESC, r.nombre, h.hoja_ruta_id`,
+      params,
+    );
+    const abiertas = cabeceras
+      .filter((c) => c.estado === 'abierta')
+      .map((c) => c.id);
+    const vivos = abiertas.length
+      ? await this.totales(tenantId, abiertas)
+      : new Map<string, TotalesHoja>();
+
+    return cabeceras.map((c) => ({
+      id: c.id,
+      repartidorId: c.repartidor_id,
+      repartidorNombre: c.repartidor_nombre,
+      fecha: c.fecha,
+      estado: c.estado,
+      rendidaEl: c.rendida_el ? c.rendida_el.toISOString() : null,
+      ...(c.estado === 'rendida' ? totalesCongelados(c) : vivos.get(c.id)!),
+    }));
+  }
+
+  /** Los KPIs del rango: la suma de `lista`, con Decimal sobre los strings de `numeric`. */
+  async resumen(
+    tenantId: string,
+    q: QueryHojasRutaDto,
+  ): Promise<ResumenPaqueteria> {
+    const hojas = await this.lista(tenantId, q);
+    let asignados = 0;
+    let entregados = 0;
+    let cobroDestino = 0;
+    let montoCobradoDestino = new Decimal(0);
+    let montoTotalGeneral = new Decimal(0);
+    let montoPagoRepartidor = new Decimal(0);
+    for (const h of hojas) {
+      asignados += h.asignados;
+      entregados += h.entregados;
+      cobroDestino += h.cobroDestino;
+      montoCobradoDestino = montoCobradoDestino.plus(h.montoCobradoDestino);
+      montoTotalGeneral = montoTotalGeneral.plus(h.montoTotalGeneral);
+      montoPagoRepartidor = montoPagoRepartidor.plus(h.montoPagoRepartidor);
+    }
+    return {
+      asignados,
+      entregados,
+      cobroDestino,
+      montoCobradoDestino: montoCobradoDestino.toFixed(4),
+      montoTotalGeneral: montoTotalGeneral.toFixed(4),
+      montoPagoRepartidor: montoPagoRepartidor.toFixed(4),
+    };
+  }
+
   /** Cabecera + líneas (la más reciente primero) + totales; 404 si la hoja no es del tenant. */
   async detalle(tenantId: string, hojaId: string): Promise<HojaRutaDetalle> {
     const cabeceras: FilaCabecera[] = await this.db.query(
@@ -325,19 +610,10 @@ export class HojasRutaService {
       [hojaId, tenantId],
     );
 
-    // Una hoja rendida lee lo que congeló al rendir (no hay línea `en_ruta`: rendir lo exige);
-    // una abierta, el cálculo en vivo.
+    // Una hoja rendida lee lo que congeló al rendir; una abierta, el cálculo en vivo.
     const totales: TotalesHoja =
       c.estado === 'rendida'
-        ? aTotales({
-            asignados: c.total_asignados ?? 0,
-            en_ruta: 0,
-            entregados: c.total_entregados ?? 0,
-            cobro_destino: c.total_cobro_destino ?? 0,
-            monto_cobrado_destino: c.monto_cobrado_destino ?? '0.0000',
-            monto_pago_repartidor: c.monto_pago_repartidor ?? '0.0000',
-            monto_total_general: c.monto_total_general ?? '0.0000',
-          })
+        ? totalesCongelados(c)
         : (await this.totales(tenantId, [hojaId])).get(hojaId)!;
 
     return {
@@ -424,6 +700,34 @@ export class HojasRutaService {
       );
     }
     return hoja;
+  }
+
+  /** Bloquea la hoja (`FOR UPDATE`) y dice su estado; 404 si no es del tenant. Primer cerrojo de todo escritor de líneas. */
+  private async bloquearHoja(
+    tenantId: string,
+    hojaId: string,
+  ): Promise<EstadoHoja> {
+    const hojas: { estado: EstadoHoja }[] = await this.db.query(
+      `SELECT estado FROM hojas_ruta
+        WHERE tenant_id = $1 AND hoja_ruta_id = $2 AND eliminado_el IS NULL
+        FOR UPDATE`,
+      [tenantId, hojaId],
+    );
+    if (!hojas.length) {
+      throw new NotFoundException('Hoja de ruta no encontrada');
+    }
+    return hojas[0].estado;
+  }
+
+  private async exigirHojaAbierta(
+    tenantId: string,
+    hojaId: string,
+  ): Promise<void> {
+    if ((await this.bloquearHoja(tenantId, hojaId)) === 'rendida') {
+      throw new BadRequestException(
+        'La hoja ya está rendida: no se puede modificar.',
+      );
+    }
   }
 
   /** El filtro de borrado va en el mismo `WHERE` del cerrojo: un `remove` que gane lo deja sin fila (404/409), no con una línea sobre un paquete borrado. */
