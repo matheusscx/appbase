@@ -27,6 +27,7 @@ import { RecetaIngrediente } from '../../modules/items/entities/receta-ingredien
 import { StockUbicacion } from '../../modules/items/entities/stock-ubicacion.entity';
 import { RecetaExtraPermitido } from '../../modules/items/entities/receta-extra-permitido.entity';
 import { Pago } from '../../modules/pagos/entities/pago.entity';
+import { EntregaRepartidor } from '../../modules/paqueteria/entities/entrega-repartidor.entity';
 import { Paquete } from '../../modules/paqueteria/entities/paquete.entity';
 import { TarifaPago } from '../../modules/paqueteria/entities/tarifa-pago.entity';
 import { PaqueteConfiguracion } from '../../modules/paqueteria/entities/paquete-configuracion.entity';
@@ -114,6 +115,8 @@ const COLUMNAS: Record<string, [Entidad, string][]> = {
   'paqueteria/PutPaqueteConfiguracionDto.precioEnvioDefecto': [
     [PaqueteConfiguracion, 'precioEnvioDefecto'],
   ],
+  'paqueteria/CreateEntregaRepartidorDto.monto': [[EntregaRepartidor, 'monto']],
+  'paqueteria/UpdateEntregaRepartidorDto.monto': [[EntregaRepartidor, 'monto']],
   'paqueteria/CreateTarifaPagoDto.monto': [[TarifaPago, 'monto']],
   'paqueteria/UpdateTarifaPagoDto.monto': [[TarifaPago, 'monto']],
   'promociones/CreatePromocionDto.valorMonto': [[Promocion, 'valorMonto']],

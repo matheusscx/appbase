@@ -95,11 +95,4 @@ export class HojasRutaController {
     const user = req.user as JwtUser;
     return this.service.quitar(user.tenantId!, id, paqueteId);
   }
-
-  @Post(':id/rendir')
-  @HttpCode(200)
-  rendir(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {
-    const user = req.user as JwtUser;
-    return this.service.rendir(user.tenantId!, id, user.id);
-  }
 }

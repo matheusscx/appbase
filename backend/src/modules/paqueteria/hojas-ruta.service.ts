@@ -525,54 +525,83 @@ export class HojasRutaService {
   }
 
   /**
-   * Cierra la hoja: congela sus totales y la deja sin posibilidad de cambio (los montos de sus
-   * paquetes entregados quedan bloqueados). No admite líneas en ruta: cada paquete tiene que
-   * estar entregado o no entregado, o la plata a rendir sería un número a medias.
+   * Lo que toda rendición exige de las hojas elegidas, antes de escribir nada: que existan en el
+   * tenant, que sean de ese repartidor, que ninguna esté rendida y que no quede una línea `en_ruta`
+   * ni una hoja sin paquetes (la plata a rendir sería un número a medias). Devuelve lo que `totales`
+   * calcula AHORA para cada hoja, que es lo que `congelar` escribe: por eso `rendir` y `previa`
+   * no pueden dar números distintos.
+   *
+   * Con `bloquear` (el `rendir` real) toma las hojas `FOR UPDATE` por `hoja_ruta_id` ascendente, el
+   * orden de todo el módulo, y debe llamarse con el repartidor ya tomado `FOR SHARE`. El estado se
+   * mira DESPUÉS del cerrojo: quien pierde una carrera ve la hoja ya rendida y rebota con 400.
    */
-  async rendir(
+  async exigirRendibles(
     tenantId: string,
-    hojaId: string,
-    usuarioId: string,
-  ): Promise<HojaRutaDetalle> {
-    return this.db.transaccion(async () => {
-      const estado = await this.bloquearHoja(tenantId, hojaId);
-      if (estado === 'rendida') {
-        throw new BadRequestException('La hoja ya está rendida.');
+    repartidorId: string,
+    hojaIds: string[],
+    { bloquear = false }: { bloquear?: boolean } = {},
+  ): Promise<{ id: string; fecha: string; totales: TotalesHoja }[]> {
+    const ids = [...new Set(hojaIds)];
+    if (!ids.length) {
+      throw new BadRequestException('Elegí al menos una hoja para rendir.');
+    }
+    const hojas: {
+      id: string;
+      repartidor_id: string;
+      fecha: string;
+      estado: EstadoHoja;
+    }[] = await this.db.query(
+      `SELECT hoja_ruta_id AS id, repartidor_id, fecha::text AS fecha, estado
+         FROM hojas_ruta
+        WHERE tenant_id = $1 AND hoja_ruta_id = ANY($2::uuid[]) AND eliminado_el IS NULL
+        ORDER BY hoja_ruta_id
+        ${bloquear ? 'FOR UPDATE' : ''}`,
+      [tenantId, ids],
+    );
+    if (
+      hojas.length !== ids.length ||
+      hojas.some((h) => h.repartidor_id !== repartidorId)
+    ) {
+      throw new BadRequestException(
+        'Alguna de las hojas no existe o no es de este repartidor.',
+      );
+    }
+    const rendida = hojas.find((h) => h.estado === 'rendida');
+    if (rendida) {
+      throw new BadRequestException(
+        `La hoja del ${diaMes(rendida.fecha)} ya está rendida.`,
+      );
+    }
+    const totales = await this.totales(tenantId, ids);
+    return hojas.map((h) => {
+      const t = totales.get(h.id)!;
+      if (t.enRuta > 0) {
+        throw new BadRequestException(
+          `Quedan ${t.enRuta} paquetes en ruta en la hoja del ${diaMes(h.fecha)}: marcalos entregados o no entregados antes de rendir.`,
+        );
       }
-      const t = (await this.totales(tenantId, [hojaId])).get(hojaId)!;
       if (t.asignados === 0) {
-        throw new BadRequestException('La hoja no tiene paquetes.');
+        throw new BadRequestException(
+          `La hoja del ${diaMes(h.fecha)} no tiene paquetes.`,
+        );
       }
-      await this.congelar(tenantId, hojaId, usuarioId, t);
-      return this.detalle(tenantId, hojaId);
+      return { id: h.id, fecha: h.fecha, totales: t };
     });
   }
 
   /**
-   * Envoltorio público de `congelar` (el que usa `rendir`): lo llama el seed de la demo, sin
-   * usuario, para sus hojas de ejemplo. Marca la hoja como rendida y le escribe los totales que
-   * `totales` calcula ahora; `congelar` es la única forma de hacerlo, así lo congelado y lo
-   * calculado no pueden diferir.
-   *
-   * Precondición: quien llama tiene la hoja bloqueada (`FOR UPDATE`) dentro de su transacción.
-   * Se defiende sola de lo que quedaría mal: una hoja ya rendida (400) o con paquetes todavía en
-   * ruta (400: rendida, su línea `en_ruta` no se podría marcar ni soltar nunca más).
+   * Escribe el estado `rendida` de UNA hoja con los totales que `totales` calculó y la ata a su
+   * rendición. Es la única forma de congelar una hoja, así lo congelado y lo calculado no pueden
+   * diferir. Precondición: quien llama tiene la hoja `FOR UPDATE` en su transacción.
+   * Se defiende sola de lo que quedaría mal: una hoja ya rendida (400) y una con líneas `en_ruta`
+   * (400: rendida, esa línea no se podría marcar ni soltar nunca más).
    */
-  async congelarTotales(
-    tenantId: string,
-    hojaId: string,
-    usuarioId: string | null,
-  ): Promise<void> {
-    const t = (await this.totales(tenantId, [hojaId])).get(hojaId);
-    if (!t) throw new NotFoundException('Hoja de ruta no encontrada');
-    await this.congelar(tenantId, hojaId, usuarioId, t);
-  }
-
-  private async congelar(
+  async congelar(
     tenantId: string,
     hojaId: string,
     usuarioId: string | null,
     t: TotalesHoja,
+    rendicionId: string,
   ): Promise<void> {
     if (t.enRuta > 0) {
       throw new BadRequestException(
@@ -587,7 +616,7 @@ export class HojasRutaService {
                 monto_cobrado_destino = $7, monto_pago_repartidor = $8,
                 monto_total_general = $9, neto_a_rendir = $10,
                 monto_cobrado_efectivo = $11, monto_cobrado_transferencia = $12,
-                actualizado_el = now()
+                rendicion_id = $13, actualizado_el = now()
           WHERE tenant_id = $1 AND hoja_ruta_id = $2 AND estado = 'abierta' AND eliminado_el IS NULL
           RETURNING hoja_ruta_id`,
         [
@@ -603,6 +632,7 @@ export class HojasRutaService {
           t.netoARendir,
           t.montoCobradoEfectivo,
           t.montoCobradoTransferencia,
+          rendicionId,
         ],
       ),
     );
@@ -613,18 +643,59 @@ export class HojasRutaService {
 
   /**
    * Las hojas del rango con sus totales, en dos consultas sin importar cuántas sean: las
-   * rendidas leen lo que congelaron y las abiertas pasan juntas por `totales`.
+   * rendidas leen lo que congelaron y las abiertas pasan juntas por `totales`. Con `pendientes`
+   * solo las que no se rindieron (el rango pasa a ser opcional).
    */
   async lista(tenantId: string, q: QueryHojasRutaDto): Promise<HojaRutaFila[]> {
-    if (q.desde > q.hasta) {
+    if (q.desde && q.hasta && q.desde > q.hasta) {
       throw new BadRequestException('El rango de fechas está invertido.');
     }
-    const params: unknown[] = [tenantId, q.desde, q.hasta];
-    let filtroRepartidor = '';
+    const params: unknown[] = [tenantId];
+    const filtros: string[] = [];
+    if (q.pendientes) filtros.push(`h.estado = 'abierta'`);
+    // El rango es obligatorio salvo con `pendientes`, donde puede venir entero, a medias o ausente.
+    if (q.desde && q.hasta) {
+      params.push(q.desde, q.hasta);
+      filtros.push('h.fecha BETWEEN $2 AND $3');
+    } else if (q.desde) {
+      params.push(q.desde);
+      filtros.push(`h.fecha >= $${params.length}`);
+    } else if (q.hasta) {
+      params.push(q.hasta);
+      filtros.push(`h.fecha <= $${params.length}`);
+    }
     if (q.repartidorId) {
       params.push(q.repartidorId);
-      filtroRepartidor = `AND h.repartidor_id = $${params.length}`;
+      filtros.push(`h.repartidor_id = $${params.length}`);
     }
+    return this.leerFilas(
+      tenantId,
+      filtros.length ? `AND ${filtros.join(' AND ')}` : '',
+      params,
+      'h.fecha DESC, r.nombre, h.hoja_ruta_id',
+    );
+  }
+
+  /** Las hojas de una rendición cerrada (por fecha ascendente: el orden de la planilla), con lo que congelaron. */
+  filasDeRendicion(
+    tenantId: string,
+    rendicionId: string,
+  ): Promise<HojaRutaFila[]> {
+    return this.leerFilas(
+      tenantId,
+      'AND h.rendicion_id = $2',
+      [tenantId, rendicionId],
+      'h.fecha, h.hoja_ruta_id',
+    );
+  }
+
+  /** `filtro` y `orden` son SQL fijo de quien llama (nunca entrada); los valores van en `params`. */
+  private async leerFilas(
+    tenantId: string,
+    filtro: string,
+    params: unknown[],
+    orden: string,
+  ): Promise<HojaRutaFila[]> {
     const cabeceras: FilaCabecera[] = await this.db.query(
       `SELECT h.hoja_ruta_id AS id, h.repartidor_id, r.nombre AS repartidor_nombre,
               h.fecha::text AS fecha, h.estado, h.rendida_el,
@@ -635,9 +706,9 @@ export class HojasRutaService {
          FROM hojas_ruta h
          JOIN repartidores r ON r.repartidor_id = h.repartidor_id
                             AND r.tenant_id = h.tenant_id AND r.eliminado_el IS NULL
-        WHERE h.tenant_id = $1 AND h.fecha BETWEEN $2 AND $3 AND h.eliminado_el IS NULL
-          ${filtroRepartidor}
-        ORDER BY h.fecha DESC, r.nombre, h.hoja_ruta_id`,
+        WHERE h.tenant_id = $1 AND h.eliminado_el IS NULL
+          ${filtro}
+        ORDER BY ${orden}`,
       params,
     );
     const abiertas = cabeceras

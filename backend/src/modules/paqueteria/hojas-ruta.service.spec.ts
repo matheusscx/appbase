@@ -819,7 +819,7 @@ describe('HojasRutaService', () => {
     });
   });
 
-  describe('rendir y congelarTotales', () => {
+  describe('exigirRendibles y congelar', () => {
     const totales = jest.spyOn(service, 'totales');
     const t = (extra: object = {}) => ({
       asignados: 3,
@@ -834,11 +834,20 @@ describe('HojasRutaService', () => {
       netoARendir: '2000.0000',
       ...extra,
     });
-    const hojaDe = (estado: 'abierta' | 'rendida'): Respuesta => [
-      /SELECT estado FROM hojas_ruta/,
-      [{ estado }],
+    const hojaDe = (extra: object = {}): Respuesta => [
+      /SELECT hoja_ruta_id AS id, repartidor_id, fecha::text/,
+      [
+        {
+          id: HOJA,
+          repartidor_id: REPARTIDOR,
+          fecha: FECHA,
+          estado: 'abierta',
+          ...extra,
+        },
+      ],
     ];
-    const rendir = () => service.rendir(TENANT, HOJA, 'u1');
+    const exigir = (bloquear = true) =>
+      service.exigirRendibles(TENANT, REPARTIDOR, [HOJA], { bloquear });
     const actualiza: Respuesta = [
       /UPDATE hojas_ruta/,
       [{ hoja_ruta_id: HOJA }],
@@ -848,39 +857,66 @@ describe('HojasRutaService', () => {
       totales.mockReset().mockResolvedValue(new Map([[HOJA, t()]]));
     });
 
-    it('con líneas en ruta: 400 que dice cuántas', async () => {
-      responder(hojaDe('abierta'));
+    it('con líneas en ruta: 400 que dice cuántas y de qué hoja', async () => {
+      responder(hojaDe());
       totales.mockResolvedValue(new Map([[HOJA, t({ enRuta: 2 })]]));
-      await expect(rendir()).rejects.toThrow(
-        'Quedan 2 paquetes en ruta: marcalos entregados o no entregados antes de rendir.',
+      await expect(exigir()).rejects.toThrow(
+        'Quedan 2 paquetes en ruta en la hoja del 15-10: marcalos entregados o no entregados antes de rendir.',
       );
-      expect(sqls().some((x) => /UPDATE hojas_ruta/.test(x))).toBe(false);
     });
 
     it('una hoja vacía: 400', async () => {
-      responder(hojaDe('abierta'));
+      responder(hojaDe());
       totales.mockResolvedValue(new Map([[HOJA, t({ asignados: 0 })]]));
-      await expect(rendir()).rejects.toThrow('La hoja no tiene paquetes.');
+      await expect(exigir()).rejects.toThrow(
+        'La hoja del 15-10 no tiene paquetes.',
+      );
     });
 
-    it('una hoja ya rendida: 400 "ya está rendida"', async () => {
-      responder(hojaDe('rendida'));
-      await expect(rendir()).rejects.toThrow(/ya está rendida/);
+    it('una hoja ya rendida: 400 "ya está rendida" y no calcula totales', async () => {
+      responder(hojaDe({ estado: 'rendida' }));
+      await expect(exigir()).rejects.toThrow(/ya está rendida/);
       expect(totales).not.toHaveBeenCalled();
     });
 
-    it('una hoja de otro tenant: 404', async () => {
-      responder([/SELECT estado FROM hojas_ruta/, []]);
-      await expect(rendir()).rejects.toBeInstanceOf(NotFoundException);
+    it('una hoja que no existe en el tenant, o de otro repartidor: 400', async () => {
+      responder([/SELECT hoja_ruta_id AS id, repartidor_id/, []]);
+      await expect(exigir()).rejects.toBeInstanceOf(BadRequestException);
+      responder(hojaDe({ repartidor_id: 'otro' }));
+      await expect(exigir()).rejects.toThrow(/no es de este repartidor/);
     });
 
-    it('congela los totales de this.totales y anota rendida_por con el usuario del token', async () => {
-      responder(hojaDe('abierta'), actualiza);
-      await rendir();
+    it('sin hojas: 400 y no consulta', async () => {
+      await expect(
+        service.exigirRendibles(TENANT, REPARTIDOR, []),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(db.query).not.toHaveBeenCalled();
+    });
+
+    it('bloquear toma las hojas FOR UPDATE por id ascendente; sin bloquear no las toma', async () => {
+      responder(hojaDe());
+      await exigir(true);
+      expect(sqls()[0]).toMatch(/ORDER BY hoja_ruta_id\s+FOR UPDATE/);
+      db.query.mockClear();
+      await exigir(false);
+      expect(sqls()[0]).not.toMatch(/FOR UPDATE/);
+    });
+
+    it('devuelve lo que calcula this.totales, que es lo que congelar escribe', async () => {
+      responder(hojaDe());
+      expect(await exigir()).toEqual([
+        { id: HOJA, fecha: FECHA, totales: t() },
+      ]);
+    });
+
+    it('congelar escribe los totales, quién y la rendición', async () => {
+      responder(actualiza);
+      await service.congelar(TENANT, HOJA, 'u1', t(), 'rend1');
       const update = db.query.mock.calls.find((c) =>
         /UPDATE hojas_ruta/.test(c[0] as string),
       )!;
       expect(update[0]).toMatch(/SET estado = 'rendida', rendida_por = \$3/);
+      expect(update[0]).toMatch(/rendicion_id = \$13/);
       expect(update[1]).toEqual([
         TENANT,
         HOJA,
@@ -894,41 +930,33 @@ describe('HojasRutaService', () => {
         '2000.0000',
         '6000.0000',
         '4000.0000',
+        'rend1',
       ]);
     });
 
-    it('congelarTotales sin usuario (el seed): rendida_por null', async () => {
+    it('congelar sin usuario (el seed): rendida_por null', async () => {
       responder(actualiza);
-      await service.congelarTotales(TENANT, HOJA, null);
+      await service.congelar(TENANT, HOJA, null, t(), 'rend1');
       const update = db.query.mock.calls.find((c) =>
         /UPDATE hojas_ruta/.test(c[0] as string),
       )!;
       expect((update[1] as unknown[])[2]).toBeNull();
     });
 
-    it('congelarTotales sobre una hoja ya rendida: 400 y no escribe (el UPDATE solo toca abiertas)', async () => {
+    it('congelar sobre una hoja ya rendida: 400 y el UPDATE solo toca abiertas', async () => {
       responder([/UPDATE hojas_ruta/, []]);
-      await expect(service.congelarTotales(TENANT, HOJA, null)).rejects.toThrow(
-        'La hoja ya está rendida.',
-      );
+      await expect(
+        service.congelar(TENANT, HOJA, null, t(), 'rend1'),
+      ).rejects.toThrow('La hoja ya está rendida.');
       const update = sqls().find((x) => /^\s*UPDATE hojas_ruta/.test(x))!;
       expect(update).toMatch(/AND estado = 'abierta'/);
     });
 
-    it('congelarTotales con líneas en ruta: 400 y no escribe', async () => {
-      responder(actualiza);
-      totales.mockResolvedValue(new Map([[HOJA, t({ enRuta: 1 })]]));
-      await expect(service.congelarTotales(TENANT, HOJA, null)).rejects.toThrow(
-        /Quedan 1 paquetes en ruta/,
-      );
-      expect(db.query).not.toHaveBeenCalled();
-    });
-
-    it('congelarTotales de una hoja que no existe en el tenant: 404', async () => {
-      totales.mockResolvedValue(new Map());
+    it('congelar con líneas en ruta: 400 y no escribe', async () => {
       await expect(
-        service.congelarTotales(TENANT, HOJA, null),
-      ).rejects.toBeInstanceOf(NotFoundException);
+        service.congelar(TENANT, HOJA, null, t({ enRuta: 1 }), 'rend1'),
+      ).rejects.toThrow(/Quedan 1 paquetes en ruta/);
+      expect(db.query).not.toHaveBeenCalled();
     });
   });
 
@@ -1023,6 +1051,19 @@ describe('HojasRutaService', () => {
       const [sql, params] = db.query.mock.calls[0] as [string, unknown[]];
       expect(sql).toMatch(/h\.repartidor_id = \$4/);
       expect(params).toEqual([TENANT, rango.desde, rango.hasta, REPARTIDOR]);
+    });
+
+    it('pendientes: solo las abiertas y el rango deja de ser obligatorio', async () => {
+      responder([/h\.estado = 'abierta'/, []]);
+      await service.lista(TENANT, {
+        pendientes: true,
+        repartidorId: REPARTIDOR,
+      });
+      const [sql, params] = db.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toMatch(/AND h\.estado = 'abierta'/);
+      expect(sql).not.toMatch(/BETWEEN/);
+      expect(sql).toMatch(/h\.repartidor_id = \$2/);
+      expect(params).toEqual([TENANT, REPARTIDOR]);
     });
 
     it('resumen: suma con Decimal (0.3 + 0.0 y 0.1 + 0.2 sin error de coma flotante)', async () => {

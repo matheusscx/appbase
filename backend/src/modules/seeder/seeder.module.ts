@@ -55,8 +55,8 @@ import { PromocionScopeItem } from '../promociones/entities/promocion-scope-item
     // Por `ItemsService.asegurarItemAjuste`: el ítem de sistema "Ajuste" de
     // cada tenant del seed se crea por el mismo camino que el del alta real.
     ItemsModule,
-    // Por `HojasRutaService.congelarTotales`: las hojas rendidas del demo de
-    // Paquetería congelan sus totales por el mismo camino que `rendir`.
+    // Por `RendicionesService.rendir`: las rendiciones del demo de Paquetería
+    // pasan por el mismo camino que la API.
     PaqueteriaModule,
     RepositoriosModule.forFeature([
       Moneda,

@@ -107,3 +107,63 @@ export interface ResumenPaqueteria {
   montoTotalGeneral: string;
   montoPagoRepartidor: string;
 }
+
+export interface EntregaRepartidorFila {
+  id: string;
+  repartidorId: string;
+  repartidorNombre: string;
+  fecha: string; // YYYY-MM-DD
+  monto: string;
+  medio: MedioCobro;
+  nota: string | null;
+  rendicionId: string | null; // null = pendiente: se puede corregir o anular
+  creadoEl: string;
+}
+
+/** Un día de la planilla: una hoja del repartidor (hay una sola por repartidor y día). */
+export interface DiaRendicion {
+  hojaId: string;
+  fecha: string; // YYYY-MM-DD
+  // Entregados por tarifa de pago. La clave es el id de la tarifa o 'sin_tarifa' (una entrega
+  // anterior a las tarifas); Σ valores = entregados. Es un conteo: la plata va en los montos.
+  porTarifa: Record<string, number>;
+  entregados: number;
+  montoPagoRepartidor: string;
+  montoCobradoEfectivo: string;
+  montoCobradoTransferencia: string;
+  neto: string; // cobrado − pago del día (puede ser negativo)
+}
+
+export interface TotalesRendicion {
+  entregados: number;
+  montoCobradoDestino: string;
+  montoCobradoEfectivo: string;
+  montoCobradoTransferencia: string;
+  montoPagoRepartidor: string;
+  montoEntregadoACuenta: string;
+  saldo: string; // cobrado − pago − entregado a cuenta: positivo lo debe el repartidor, negativo se le paga
+}
+
+export interface RendicionDetalle {
+  id: string | null; // null = la previa (todavía no se rindió)
+  repartidorId: string;
+  repartidorNombre: string;
+  rendidaEl: string | null;
+  dias: DiaRendicion[]; // por fecha ascendente
+  // Las tarifas usadas en el período (una columna de la planilla cada una), con el pago que
+  // llevan las líneas entregadas; si el monto cambió a mitad del período, el más alto.
+  tarifas: { id: string; nombre: string; monto: string }[];
+  entregas: EntregaRepartidorFila[];
+  totales: TotalesRendicion;
+}
+
+export interface RendicionFila {
+  id: string;
+  repartidorId: string;
+  repartidorNombre: string;
+  rendidaEl: string;
+  desde: string; // la primera y la última fecha de sus hojas
+  hasta: string;
+  hojas: number;
+  totales: TotalesRendicion;
+}

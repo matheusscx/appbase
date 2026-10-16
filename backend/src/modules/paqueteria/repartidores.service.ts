@@ -114,8 +114,8 @@ export class RepartidoresService {
   }
 
   /**
-   * Una hoja de ruta nunca apunta a un repartidor borrado: con hojas se
-   * desactiva (`activo = false`), no se elimina.
+   * Una hoja de ruta ni una entrega de plata apuntan nunca a un repartidor borrado: con hojas o
+   * con entregas se desactiva (`activo = false`), no se elimina.
    */
   async remove(tenantId: string, id: string): Promise<{ success: true }> {
     return this.db.transaccion(async () => {
@@ -128,16 +128,26 @@ export class RepartidoresService {
       if (!existe.length)
         throw new NotFoundException('Repartidor no encontrado');
 
-      const hojas: { tiene: boolean }[] = await this.db.query(
-        `SELECT EXISTS (
-           SELECT 1 FROM hojas_ruta
-            WHERE repartidor_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
-         ) AS tiene`,
-        [id, tenantId],
-      );
+      const hojas: { tiene: boolean; entregas: boolean }[] =
+        await this.db.query(
+          `SELECT EXISTS (
+             SELECT 1 FROM hojas_ruta
+              WHERE repartidor_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+           ) AS tiene,
+           EXISTS (
+             SELECT 1 FROM entregas_repartidor
+              WHERE repartidor_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+           ) AS entregas`,
+          [id, tenantId],
+        );
       if (hojas[0].tiene) {
         throw new BadRequestException(
           'El repartidor tiene hojas de ruta: desactivalo en vez de eliminarlo.',
+        );
+      }
+      if (hojas[0].entregas) {
+        throw new BadRequestException(
+          'El repartidor tiene entregas de plata: desactivalo en vez de eliminarlo.',
         );
       }
 
@@ -167,6 +177,19 @@ export class RepartidoresService {
       throw new BadRequestException(`${fila.nombre} está inactivo`);
     }
     return fila;
+  }
+
+  /**
+   * El repartidor del tenant, activo o no: una entrega de plata o una rendición también se anotan
+   * para quien ya se desactivó (todavía puede deber). Con `bloquear` lo lee `FOR SHARE`, el
+   * primer cerrojo del orden del módulo (`remove` lo toma `FOR UPDATE`). 404 si no es del tenant.
+   */
+  exigirExistente(
+    tenantId: string,
+    repartidorId: string,
+    { bloquear = false }: { bloquear?: boolean } = {},
+  ): Promise<RepartidorFila> {
+    return this.buscar(tenantId, repartidorId, bloquear);
   }
 
   private async buscar(

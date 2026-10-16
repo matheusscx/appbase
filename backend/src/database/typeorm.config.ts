@@ -92,6 +92,8 @@ import { TarifaPago } from '../modules/paqueteria/entities/tarifa-pago.entity';
 import { Paquete } from '../modules/paqueteria/entities/paquete.entity';
 import { HojaRuta } from '../modules/paqueteria/entities/hoja-ruta.entity';
 import { HojaRutaPaquete } from '../modules/paqueteria/entities/hoja-ruta-paquete.entity';
+import { Rendicion } from '../modules/paqueteria/entities/rendicion.entity';
+import { EntregaRepartidor } from '../modules/paqueteria/entities/entrega-repartidor.entity';
 import { Suscripcion } from '../modules/suscripciones/entities/suscripcion.entity';
 import { Pasarela } from '../modules/pasarela/entities/pasarela.entity';
 import { TenantPasarela } from '../modules/pasarela/entities/tenant-pasarela.entity';
@@ -239,6 +241,8 @@ export const ENTIDADES = [
   Paquete,
   HojaRuta,
   HojaRutaPaquete,
+  Rendicion,
+  EntregaRepartidor,
   TipoDocumentoTributario,
   UmbralIdentidadPagador,
   Tercero,

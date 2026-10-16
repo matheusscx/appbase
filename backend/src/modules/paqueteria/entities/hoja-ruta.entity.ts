@@ -9,6 +9,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { Rendicion } from './rendicion.entity';
 import { Repartidor } from './repartidor.entity';
 
 @Entity('hojas_ruta')
@@ -18,6 +19,7 @@ import { Repartidor } from './repartidor.entity';
   { unique: true, where: '"eliminado_el" IS NULL' },
 )
 @Index('idx_hojas_ruta_tenant_fecha', ['tenantId', 'fecha'])
+@Index('idx_hojas_ruta_rendicion', ['rendicionId'])
 export class HojaRuta {
   @PrimaryGeneratedColumn('uuid', { name: 'hoja_ruta_id' })
   id: string;
@@ -38,6 +40,14 @@ export class HojaRuta {
 
   @Column({ type: 'varchar', length: 20, default: 'abierta' })
   estado: 'abierta' | 'rendida';
+
+  /** La rendición que la cerró (null mientras está abierta). Varias hojas del mismo repartidor comparten una. */
+  @Column({ name: 'rendicion_id', type: 'uuid', nullable: true })
+  rendicionId: string | null;
+
+  @ManyToOne(() => Rendicion, { nullable: true })
+  @JoinColumn({ name: 'rendicion_id' })
+  rendicion?: Rendicion;
 
   @Column({ name: 'rendida_por', type: 'uuid', nullable: true })
   rendidaPor: string | null;

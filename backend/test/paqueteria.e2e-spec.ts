@@ -14,8 +14,11 @@ import type {
   PaqueteFila,
   RepartidorFila,
   TarifaPagoFila,
+  RendicionDetalle,
+  RendicionFila,
   RespuestaEscaneo,
   ResumenPaqueteria,
+  EntregaRepartidorFila,
 } from '../src/modules/paqueteria/paqueteria.types';
 import type { PaginatedResponse } from '../src/common/interfaces/paginated-response.interface';
 import { fechaMenosDias } from '../src/common/utils/rango-fecha.util';
@@ -180,7 +183,15 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       ['post', '/api/hojas-ruta/escanear'],
       ['post', '/api/hojas-ruta/asignar'],
       ['get', '/api/hojas-ruta?desde=2026-10-01&hasta=2026-10-31'],
-      ['post', '/api/hojas-ruta/550e8400-e29b-41d4-a716-446655440999/rendir'],
+      ['get', '/api/entregas-repartidor'],
+      ['post', '/api/entregas-repartidor'],
+      ['get', '/api/rendiciones?desde=2026-10-01&hasta=2026-10-31'],
+      [
+        'get',
+        '/api/rendiciones/previa?repartidorId=550e8400-e29b-41d4-a716-446655440999&hojaIds=550e8400-e29b-41d4-a716-446655440998',
+      ],
+      ['post', '/api/rendiciones'],
+      ['get', '/api/rendiciones/550e8400-e29b-41d4-a716-446655440999'],
     ] as const) {
       const res = await llamar(metodo, ruta, tokenVendedor, {});
       expect(res.status).toBe(403);
@@ -1888,8 +1899,19 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           tokenAdmin,
           { estado },
         );
-      const rendir = (hojaId: string, token = tokenAdmin) =>
-        llamar('post', `/api/hojas-ruta/${hojaId}/rendir`, token, {});
+      const rendirHojas = (
+        repartidorId: string,
+        hojaIds: string[],
+        token = tokenAdmin,
+      ) => llamar('post', '/api/rendiciones', token, { repartidorId, hojaIds });
+      /** Rinde UNA hoja (la rendición de un solo día). Una hoja que no existe rinde con un repartidor que tampoco. */
+      const rendir = async (hojaId: string, token = tokenAdmin) => {
+        const [fila] = await ds().query<{ repartidor_id: string }[]>(
+          `SELECT repartidor_id FROM hojas_ruta WHERE hoja_ruta_id = $1`,
+          [hojaId],
+        );
+        return rendirHojas(fila?.repartidor_id ?? uuidAjeno, [hojaId], token);
+      };
       const detalle = async (hojaId: string) => {
         const res = await llamar('get', `/api/hojas-ruta/${hojaId}`);
         expect(res.status).toBe(200);
@@ -2006,8 +2028,8 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       it('rendir congela; GET /hojas-ruta y GET /:id devuelven lo mismo; los montos de un entregado ya no se editan', async () => {
         const { repartidor, hoja, cobros, final } = await ejemploDelOwner();
         const res = await rendir(hoja.id);
-        expect(res.status).toBe(200);
-        const rendida = res.body as HojaRutaDetalle;
+        expect(res.status).toBe(201);
+        const rendida = await detalle(hoja.id);
         expect(rendida).toMatchObject({
           estado: 'rendida',
           asignados: 12,
@@ -2069,7 +2091,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
 
       it('una hoja rendida no se modifica: marcar, quitar, entregar-todos, rendir de nuevo y asignar a esa fecha dan 400', async () => {
         const { repartidor, hoja, cobros, pagadoNo } = await ejemploDelOwner();
-        expect((await rendir(hoja.id)).status).toBe(200);
+        expect((await rendir(hoja.id)).status).toBe(201);
 
         const marcado = await marcar(hoja.id, cobros[0].id, 'no_entregado');
         expect(marcado.status).toBe(400);
@@ -2160,8 +2182,10 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           netoARendir: '-5000.0000',
         });
         const rendida = await rendir(hoja.id);
-        expect(rendida.status).toBe(200);
-        expect(rendida.body).toMatchObject({ netoARendir: '-5000.0000' });
+        expect(rendida.status).toBe(201);
+        expect(await detalle(hoja.id)).toMatchObject({
+          netoARendir: '-5000.0000',
+        });
         expect((await congelado(hoja.id)).neto_a_rendir).toBe('-5000.0000');
         expect(
           await resumen(
@@ -2211,7 +2235,9 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
         ).toBe(200);
         const sinPaquetes = await rendir(hojaVacia.id);
         expect(sinPaquetes.status).toBe(400);
-        expect(mensajeDe(sinPaquetes)).toBe('La hoja no tiene paquetes.');
+        expect(mensajeDe(sinPaquetes)).toBe(
+          'La hoja del 15-10 no tiene paquetes.',
+        );
       });
 
       it('marcar: deshacer a en_ruta con la hoja abierta; el estado, los ids y los extraños se validan', async () => {
@@ -2389,7 +2415,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           ).toBe(200);
           hojas.push(hoja);
         }
-        expect((await rendir(hojas[0].id)).status).toBe(200);
+        expect((await rendir(hojas[0].id)).status).toBe(201);
 
         const res = await llamar(
           'get',
@@ -2557,8 +2583,8 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           );
           // Y al rendir queda congelado igual.
           const rendida = await rendir(hoja.id);
-          expect(rendida.status).toBe(200);
-          expect(rendida.body).toMatchObject({
+          expect(rendida.status).toBe(201);
+          expect(await detalle(hoja.id)).toMatchObject({
             montoPagoRepartidor: '4400.0000',
           });
         });
@@ -2607,7 +2633,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
             '1900.0000',
           );
 
-          expect((await rendir(hoja.id)).status).toBe(200);
+          expect((await rendir(hoja.id)).status).toBe(201);
           const tarde = await llamar(
             'patch',
             `/api/paquetes/${p.id}`,
@@ -2776,8 +2802,8 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
 
           // Rendir congela el desglose y la hoja rendida lo lee igual.
           const rendida = await rendir(hoja.id);
-          expect(rendida.status).toBe(200);
-          expect(rendida.body).toMatchObject({
+          expect(rendida.status).toBe(201);
+          expect(await detalle(hoja.id)).toMatchObject({
             estado: 'rendida',
             montoCobradoEfectivo: '60000.0000',
             montoCobradoTransferencia: '40000.0000',
@@ -3039,6 +3065,700 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
         });
       });
 
+      describe('entregas de plata y rendición por repartidor', () => {
+        const unaEntrega: Spec = {
+          cantidad: 1,
+          cobroEnDestino: true,
+          precioEnvio: '10000',
+          pagoRepartidor: '5000',
+        };
+        const entrega = (
+          repartidorId: string,
+          monto: string,
+          extra: object = {},
+          token = tokenAdmin,
+        ) =>
+          llamar('post', '/api/entregas-repartidor', token, {
+            repartidorId,
+            fecha: FECHA,
+            monto,
+            medio: 'efectivo',
+            ...extra,
+          });
+        const entregaOk = async (
+          repartidorId: string,
+          monto: string,
+          extra: object = {},
+        ) => {
+          const res = await entrega(repartidorId, monto, extra);
+          expect(res.status).toBe(201);
+          return res.body as EntregaRepartidorFila;
+        };
+        const pendientesDe = async (repartidorId: string) => {
+          const res = await llamar(
+            'get',
+            `/api/entregas-repartidor?repartidorId=${repartidorId}&pendientes=true`,
+          );
+          expect(res.status).toBe(200);
+          return res.body as EntregaRepartidorFila[];
+        };
+        const previa = (repartidorId: string, hojaIds: string[]) =>
+          llamar(
+            'get',
+            `/api/rendiciones/previa?repartidorId=${repartidorId}&hojaIds=${hojaIds.join(',')}`,
+          );
+        const entregarTodos = (hojaId: string) =>
+          llamar(
+            'post',
+            `/api/hojas-ruta/${hojaId}/entregar-todos`,
+            tokenAdmin,
+            {},
+          );
+        const marcarMedio = (
+          hojaId: string,
+          paqueteId: string,
+          medioCobro: string,
+        ) =>
+          llamar(
+            'patch',
+            `/api/hojas-ruta/${hojaId}/paquetes/${paqueteId}`,
+            tokenAdmin,
+            { estado: 'entregado', medioCobro },
+          );
+        /** Una hoja de ese día con todo entregado (los cobros en destino, en efectivo). */
+        const hojaEntregada = async (
+          repartidorId: string,
+          fecha: string,
+          specs: Spec[] = [unaEntrega],
+        ) => {
+          const armada = await armar(repartidorId, specs, fecha);
+          expect((await entregarTodos(armada.hoja.id)).status).toBe(200);
+          return armada;
+        };
+        const rendicionDe = async (id: string) => {
+          const res = await llamar('get', `/api/rendiciones/${id}`);
+          expect(res.status).toBe(200);
+          return res.body as RendicionDetalle;
+        };
+        /** Lo que una rendición escribe, leído de la base: estado y `rendicion_id` de las hojas, y de las entregas del repartidor. */
+        const escrito = (hojaIds: string[], repartidorId: string) =>
+          ds().query<unknown[]>(
+            `SELECT 'hoja' AS t, hoja_ruta_id::text AS id, estado AS a, rendicion_id::text AS b
+               FROM hojas_ruta WHERE hoja_ruta_id = ANY($1)
+             UNION ALL
+             SELECT 'entrega', entrega_repartidor_id::text, eliminado_el::text, rendicion_id::text
+               FROM entregas_repartidor WHERE repartidor_id = $2
+             UNION ALL
+             SELECT 'rendicion', rendicion_id::text, eliminado_el::text, repartidor_id::text
+               FROM rendiciones WHERE repartidor_id = $2
+             ORDER BY 1, 2`,
+            [hojaIds, repartidorId],
+          );
+
+        it('el ejemplo del spec: cobrado 100.000 (70.000 efectivo, 30.000 transferencia), pago 50.000 y 40.000 entregados el martes dejan saldo 10.000; previa y rendir dan lo mismo', async () => {
+          const repartidor = await nuevoRepartidor();
+          const martes = '2026-10-13';
+          const { hoja, grupos } = await armar(
+            repartidor.id,
+            [{ ...unaEntrega, cantidad: 10 }],
+            martes,
+          );
+          for (const [i, p] of grupos[0].entries()) {
+            expect(
+              (
+                await marcarMedio(
+                  hoja.id,
+                  p.id,
+                  i < 7 ? 'efectivo' : 'transferencia',
+                )
+              ).status,
+            ).toBe(200);
+          }
+          const e = await entregaOk(repartidor.id, '40000', { fecha: martes });
+
+          const antes = await previa(repartidor.id, [hoja.id]);
+          expect(antes.status).toBe(200);
+          const p = antes.body as RendicionDetalle;
+          expect(p).toMatchObject({ id: null, rendidaEl: null });
+          expect(p.totales).toEqual({
+            entregados: 10,
+            montoCobradoDestino: '100000.0000',
+            montoCobradoEfectivo: '70000.0000',
+            montoCobradoTransferencia: '30000.0000',
+            montoPagoRepartidor: '50000.0000',
+            montoEntregadoACuenta: '40000.0000',
+            saldo: '10000.0000',
+          });
+          expect(p.entregas.map((x) => x.id)).toEqual([e.id]);
+          // La previa no escribe nada.
+          expect((await detalle(hoja.id)).estado).toBe('abierta');
+          expect(await pendientesDe(repartidor.id)).toHaveLength(1);
+
+          const res = await rendirHojas(repartidor.id, [hoja.id]);
+          expect(res.status).toBe(201);
+          const r = res.body as RendicionDetalle;
+          expect(r.id).not.toBeNull();
+          expect(r.totales).toEqual(p.totales);
+          expect(r.dias).toEqual(p.dias);
+          expect(r.tarifas).toEqual(p.tarifas);
+          expect(r.entregas).toEqual([{ ...e, rendicionId: r.id }]);
+          expect(await rendicionDe(r.id!)).toEqual(r);
+        });
+
+        it('con un pago mayor a lo cobrado el saldo es negativo: la empresa le paga', async () => {
+          const repartidor = await nuevoRepartidor();
+          const { hoja } = await hojaEntregada(repartidor.id, FECHA, [
+            { ...unaEntrega, cantidad: 2, cobroEnDestino: false },
+          ]);
+          const res = await rendirHojas(repartidor.id, [hoja.id]);
+          expect(res.status).toBe(201);
+          expect((res.body as RendicionDetalle).totales).toMatchObject({
+            montoCobradoDestino: '0.0000',
+            montoPagoRepartidor: '10000.0000',
+            montoEntregadoACuenta: '0.0000',
+            saldo: '-10000.0000',
+          });
+        });
+
+        it('la planilla: una semana de 6 hojas por fecha ascendente, el conteo por tarifa y Σ pago de los días = pago total', async () => {
+          const moto = await tarifaPropia('planilla moto', '1900');
+          const colina = await tarifaPropia('planilla colina', '4000');
+          const repartidor = await nuevoRepartidor(tokenAdmin, {
+            tarifaPagoId: moto.id,
+          });
+          const dias = [
+            '2026-11-09',
+            '2026-11-10',
+            '2026-11-11',
+            '2026-11-12',
+            '2026-11-13',
+            '2026-11-14',
+          ];
+          const cantidades = [3, 2, 4, 1, 3, 2];
+          const colinas = new Map([
+            [2, 1],
+            [5, 1],
+          ]);
+          const hojaIds: string[] = [];
+          // Se crean en desorden: la planilla las ordena por fecha, no por creación.
+          for (const i of [3, 0, 5, 1, 4, 2]) {
+            const ids: string[] = [];
+            for (let k = 0; k < cantidades[i]; k++) {
+              const p = await crearPaquete(
+                k < (colinas.get(i) ?? 0)
+                  ? { tarifaPagoId: colina.id, cobroEnDestino: k === 0 }
+                  : { cobroEnDestino: k === 0 },
+              );
+              ids.push(p.id);
+            }
+            const hoja = (await asignar(repartidor.id, ids, { fecha: dias[i] }))
+              .body as HojaRutaDetalle;
+            expect((await entregarTodos(hoja.id)).status).toBe(200);
+            hojaIds.push(hoja.id);
+          }
+
+          const res = await previa(repartidor.id, hojaIds);
+          expect(res.status).toBe(200);
+          const p = res.body as RendicionDetalle;
+          expect(p.dias.map((d) => d.fecha)).toEqual(dias);
+          expect(p.dias.map((d) => d.porTarifa)).toEqual([
+            { [moto.id]: 3 },
+            { [moto.id]: 2 },
+            { [moto.id]: 3, [colina.id]: 1 },
+            { [moto.id]: 1 },
+            { [moto.id]: 3 },
+            { [moto.id]: 1, [colina.id]: 1 },
+          ]);
+          expect(p.tarifas).toEqual([
+            { id: moto.id, nombre: moto.nombre, monto: '1900.0000' },
+            { id: colina.id, nombre: colina.nombre, monto: '4000.0000' },
+          ]);
+          const sumaDias = p.dias
+            .reduce((acc, d) => acc.plus(d.montoPagoRepartidor), new Decimal(0))
+            .toFixed(4);
+          // 13 × 1.900 + 2 × 4.000
+          expect(p.totales.montoPagoRepartidor).toBe('32700.0000');
+          expect(sumaDias).toBe(p.totales.montoPagoRepartidor);
+          expect(p.dias.reduce((n, d) => n + d.entregados, 0)).toBe(15);
+          expect(p.totales.entregados).toBe(15);
+          for (const d of p.dias) {
+            expect(Object.values(d.porTarifa).reduce((a, b) => a + b, 0)).toBe(
+              d.entregados,
+            );
+          }
+
+          const rendida = await rendirHojas(repartidor.id, hojaIds);
+          expect(rendida.status).toBe(201);
+          expect((rendida.body as RendicionDetalle).dias).toEqual(p.dias);
+          expect(
+            await rendicionDe((rendida.body as RendicionDetalle).id!),
+          ).toEqual(rendida.body);
+        });
+
+        it('después de rendir: las hojas y las entregas apuntan a la rendición, y su detalle no cambia si cambia el monto de una tarifa', async () => {
+          const moto = await tarifaPropia('congela moto', '1900');
+          const repartidor = await nuevoRepartidor(tokenAdmin, {
+            tarifaPagoId: moto.id,
+          });
+          const uno = await hojaEntregada(repartidor.id, '2026-11-16');
+          const dos = await hojaEntregada(repartidor.id, '2026-11-17');
+          const e = await entregaOk(repartidor.id, '2500');
+          const hojaIds = [uno.hoja.id, dos.hoja.id];
+          const res = await rendirHojas(repartidor.id, hojaIds);
+          expect(res.status).toBe(201);
+          const r = res.body as RendicionDetalle;
+
+          const guardado = await escrito(hojaIds, repartidor.id);
+          expect(guardado).toHaveLength(4);
+          expect(guardado).toEqual(
+            expect.arrayContaining([
+              ...hojaIds.map((id) => ({
+                t: 'hoja',
+                id,
+                a: 'rendida',
+                b: r.id,
+              })),
+              { t: 'entrega', id: e.id, a: null, b: r.id },
+            ]),
+          );
+          for (const id of hojaIds) {
+            expect((await detalle(id)).estado).toBe('rendida');
+          }
+
+          const cambio = await llamar(
+            'patch',
+            `/api/tarifas-pago/${moto.id}`,
+            tokenAdmin,
+            { monto: '2500' },
+          );
+          expect(cambio.status).toBe(200);
+          expect(await rendicionDe(r.id!)).toEqual(r);
+        });
+
+        it('RF4: hojaIds con una hoja de otro repartidor, una rendida, una con paquetes en ruta, una ajena, repetida o vacío: 400 y ninguna hoja ni entrega cambia', async () => {
+          const repartidor = await nuevoRepartidor();
+          const otro = await nuevoRepartidor();
+          const buena = await hojaEntregada(repartidor.id, '2026-10-20');
+          const deOtro = await hojaEntregada(otro.id, '2026-10-20');
+          const yaRendida = await hojaEntregada(repartidor.id, '2026-10-21');
+          expect(
+            (await rendirHojas(repartidor.id, [yaRendida.hoja.id])).status,
+          ).toBe(201);
+          const enRuta = await armar(
+            repartidor.id,
+            [{ ...unaEntrega, cantidad: 2 }],
+            '2026-10-22',
+          );
+          expect(
+            (await marcar(enRuta.hoja.id, enRuta.grupos[0][0].id, 'entregado'))
+              .status,
+          ).toBe(200);
+          await entregaOk(repartidor.id, '1000');
+
+          const todas = [
+            buena.hoja.id,
+            deOtro.hoja.id,
+            yaRendida.hoja.id,
+            enRuta.hoja.id,
+          ];
+          const antes = await escrito(todas, repartidor.id);
+          for (const [hojaIds, mensaje] of [
+            [[buena.hoja.id, deOtro.hoja.id], /no es de este repartidor/],
+            [[buena.hoja.id, yaRendida.hoja.id], /ya está rendida/],
+            [[buena.hoja.id, enRuta.hoja.id], /Quedan 1 paquetes en ruta/],
+            [[buena.hoja.id, uuidAjeno], /no existe o no es de este/],
+            [[], /hojaIds/],
+            [[buena.hoja.id, buena.hoja.id], /hojaIds/],
+            [['no-es-uuid'], /hojaIds/],
+          ] as const) {
+            const res = await rendirHojas(repartidor.id, [...hojaIds]);
+            expect(res.status).toBe(400);
+            expect(JSON.stringify(res.body)).toMatch(mensaje);
+            expect(await escrito(todas, repartidor.id)).toEqual(antes);
+          }
+          // La previa exige lo mismo.
+          expect(
+            (await previa(repartidor.id, [buena.hoja.id, enRuta.hoja.id]))
+              .status,
+          ).toBe(400);
+
+          const bien = await rendirHojas(repartidor.id, [buena.hoja.id]);
+          expect(bien.status).toBe(201);
+          expect((bien.body as RendicionDetalle).entregas).toHaveLength(1);
+        });
+
+        it('RF3: una entrega anulada o corregida después de rendir es 400; una creada después queda pendiente para la próxima', async () => {
+          const repartidor = await nuevoRepartidor();
+          const uno = await hojaEntregada(repartidor.id, '2026-10-23');
+          const e1 = await entregaOk(repartidor.id, '2000');
+          const r1 = await rendirHojas(repartidor.id, [uno.hoja.id]);
+          expect(r1.status).toBe(201);
+          const primera = r1.body as RendicionDetalle;
+          expect(primera.totales.montoEntregadoACuenta).toBe('2000.0000');
+
+          const anula = await llamar(
+            'delete',
+            `/api/entregas-repartidor/${e1.id}`,
+          );
+          expect(anula.status).toBe(400);
+          expect(mensajeDe(anula)).toContain('ya está rendida');
+          const corrige = await llamar(
+            'patch',
+            `/api/entregas-repartidor/${e1.id}`,
+            tokenAdmin,
+            { monto: '1' },
+          );
+          expect(corrige.status).toBe(400);
+          expect(await rendicionDe(primera.id!)).toEqual(primera);
+
+          const e2 = await entregaOk(repartidor.id, '3000');
+          expect(e2.rendicionId).toBeNull();
+          expect((await pendientesDe(repartidor.id)).map((x) => x.id)).toEqual([
+            e2.id,
+          ]);
+          const dos = await hojaEntregada(repartidor.id, '2026-10-24');
+          const r2 = await rendirHojas(repartidor.id, [dos.hoja.id]);
+          expect(r2.status).toBe(201);
+          const segunda = r2.body as RendicionDetalle;
+          expect(segunda.entregas.map((x) => x.id)).toEqual([e2.id]);
+          expect(segunda.totales.montoEntregadoACuenta).toBe('3000.0000');
+          expect(await rendicionDe(primera.id!)).toEqual(primera);
+        });
+
+        it('RF3: dos POST /rendiciones simultáneos con las mismas hojas: uno rinde, el otro 400, y las entregas suman una sola vez', async () => {
+          const repartidor = await nuevoRepartidor();
+          const { hoja } = await hojaEntregada(repartidor.id, FECHA);
+          const e = await entregaOk(repartidor.id, '7000');
+          const [a, b] = await Promise.all([
+            rendirHojas(repartidor.id, [hoja.id]),
+            rendirHojas(repartidor.id, [hoja.id]),
+          ]);
+          expect([a.status, b.status].sort()).toEqual([201, 400]);
+          const ganadora = (a.status === 201 ? a : b).body as RendicionDetalle;
+          expect(ganadora.totales.montoEntregadoACuenta).toBe('7000.0000');
+          const perdedora = a.status === 400 ? a : b;
+          expect(mensajeDe(perdedora)).toContain('ya está rendida');
+          const [{ n }] = await ds().query<{ n: number }[]>(
+            `SELECT COUNT(*)::int AS n FROM rendiciones WHERE repartidor_id = $1`,
+            [repartidor.id],
+          );
+          expect(n).toBe(1);
+          expect(await escrito([hoja.id], repartidor.id)).toEqual([
+            { t: 'entrega', id: e.id, a: null, b: ganadora.id },
+            { t: 'hoja', id: hoja.id, a: 'rendida', b: ganadora.id },
+            { t: 'rendicion', id: ganadora.id, a: null, b: repartidor.id },
+          ]);
+        });
+
+        it.each([
+          [
+            'la rendición llega primero: gana, y la corrección rebota con 400',
+            'patch',
+            'rendir',
+            400,
+            '5000.0000',
+          ],
+          [
+            'la corrección llega primero: gana, y la rendición suma el monto nuevo',
+            'patch',
+            'cambio',
+            200,
+            '9000.0000',
+          ],
+          [
+            'la rendición llega primero: gana, y la anulación rebota con 400',
+            'delete',
+            'rendir',
+            400,
+            '5000.0000',
+          ],
+          [
+            'la anulación llega primero: gana, y la rendición no la cuenta',
+            'delete',
+            'cambio',
+            200,
+            '0.0000',
+          ],
+        ] as const)(
+          'RF3: corregir o anular una entrega a la vez que se rinde (%s)',
+          async (_titulo, accion, primero, esperadoCambio, aCuenta) => {
+            const repartidor = await nuevoRepartidor();
+            const { hoja } = await hojaEntregada(repartidor.id, FECHA);
+            const e = await entregaOk(repartidor.id, '5000');
+            const rendicion = async () => rendirHojas(repartidor.id, [hoja.id]);
+            const cambio = async () =>
+              accion === 'patch'
+                ? llamar(
+                    'patch',
+                    `/api/entregas-repartidor/${e.id}`,
+                    tokenAdmin,
+                    { monto: '9000' },
+                  )
+                : llamar('delete', `/api/entregas-repartidor/${e.id}`);
+            const { respuestas, esperando } = await correrCarrera(
+              ds(),
+              [
+                'SELECT 1 FROM entregas_repartidor WHERE entrega_repartidor_id = $1 FOR UPDATE',
+                [e.id],
+              ],
+              primero === 'rendir' ? [rendicion, cambio] : [cambio, rendicion],
+              { escalonarMs: 300 },
+            );
+            expect(esperando).toBe(2);
+            const [rRendir, rCambio] =
+              primero === 'rendir'
+                ? [respuestas[0], respuestas[1]]
+                : [respuestas[1], respuestas[0]];
+            expect([rRendir.status, rCambio.status]).toEqual([
+              201,
+              esperadoCambio,
+            ]);
+            if (rCambio.status === 400) {
+              expect(mensajeDe(rCambio)).toContain('ya está rendida');
+            }
+            // Dentro con su monto final o afuera: nunca contada dos veces ni perdida.
+            const r = rRendir.body as RendicionDetalle;
+            expect(r.totales.montoEntregadoACuenta).toBe(aCuenta);
+            expect(r.entregas).toHaveLength(aCuenta === '0.0000' ? 0 : 1);
+            expect(await rendicionDe(r.id!)).toEqual(r);
+          },
+        );
+
+        it('POST /hojas-ruta/:id/rendir ya no existe: 404', async () => {
+          const repartidor = await nuevoRepartidor();
+          const { hoja } = await hojaEntregada(repartidor.id, FECHA);
+          const res = await llamar(
+            'post',
+            `/api/hojas-ruta/${hoja.id}/rendir`,
+            tokenAdmin,
+            {},
+          );
+          expect(res.status).toBe(404);
+          expect((await detalle(hoja.id)).estado).toBe('abierta');
+        });
+
+        it('GET /hojas-ruta?pendientes=true trae solo las hojas sin rendir, sin pedir rango', async () => {
+          const repartidor = await nuevoRepartidor();
+          const rendida = await hojaEntregada(repartidor.id, '2026-10-26');
+          const abierta = await armar(
+            repartidor.id,
+            [unaEntrega],
+            '2026-10-27',
+          );
+          expect(
+            (await rendirHojas(repartidor.id, [rendida.hoja.id])).status,
+          ).toBe(201);
+          const res = await llamar(
+            'get',
+            `/api/hojas-ruta?pendientes=true&repartidorId=${repartidor.id}`,
+          );
+          expect(res.status).toBe(200);
+          expect((res.body as HojaRutaFila[]).map((h) => h.id)).toEqual([
+            abierta.hoja.id,
+          ]);
+          // Sin `pendientes` el rango sigue siendo obligatorio.
+          expect(
+            (
+              await llamar(
+                'get',
+                `/api/hojas-ruta?repartidorId=${repartidor.id}`,
+              )
+            ).status,
+          ).toBe(400);
+        });
+
+        it('GET /rendiciones: por rango de las hojas y repartidor; rango inválido, 400; otro tenant no ve nada', async () => {
+          const repartidor = await nuevoRepartidor();
+          const uno = await hojaEntregada(repartidor.id, '2026-12-01');
+          const dos = await hojaEntregada(repartidor.id, '2026-12-03');
+          const res = await rendirHojas(repartidor.id, [
+            uno.hoja.id,
+            dos.hoja.id,
+          ]);
+          expect(res.status).toBe(201);
+          const r = res.body as RendicionDetalle;
+
+          const lista = await llamar(
+            'get',
+            `/api/rendiciones?desde=2026-12-03&hasta=2026-12-09&repartidorId=${repartidor.id}`,
+          );
+          expect(lista.status).toBe(200);
+          expect(lista.body as RendicionFila[]).toEqual([
+            {
+              id: r.id,
+              repartidorId: repartidor.id,
+              repartidorNombre: repartidor.nombre,
+              rendidaEl: r.rendidaEl,
+              desde: '2026-12-01',
+              hasta: '2026-12-03',
+              hojas: 2,
+              totales: r.totales,
+            },
+          ]);
+          const fuera = await llamar(
+            'get',
+            `/api/rendiciones?desde=2026-12-04&hasta=2026-12-09&repartidorId=${repartidor.id}`,
+          );
+          expect(fuera.status).toBe(200);
+          expect(fuera.body).toEqual([]);
+          for (const q of [
+            'desde=2026-12-09&hasta=2026-12-01',
+            'desde=2026-12-01',
+            'desde=2026-12-01&hasta=2026-12-09&repartidorId=nada',
+          ]) {
+            expect((await llamar('get', `/api/rendiciones?${q}`)).status).toBe(
+              400,
+            );
+          }
+          const ajena = await llamar(
+            'get',
+            `/api/rendiciones?desde=2026-12-01&hasta=2026-12-09&repartidorId=${repartidor.id}`,
+            tokenSegundoTenant,
+          );
+          expect(ajena.status).toBe(200);
+          expect(ajena.body).toEqual([]);
+          expect(
+            (
+              await llamar(
+                'get',
+                `/api/rendiciones/${r.id}`,
+                tokenSegundoTenant,
+              )
+            ).status,
+          ).toBe(404);
+          expect(
+            (await llamar('get', `/api/rendiciones/${uuidAjeno}`)).status,
+          ).toBe(404);
+          expect((await previa(uuidAjeno, [uno.hoja.id])).status).toBe(404);
+          expect(
+            (
+              await llamar(
+                'get',
+                `/api/rendiciones/previa?repartidorId=${repartidor.id}`,
+              )
+            ).status,
+          ).toBe(400);
+          // `hojaIds` repetido en vez de separado por comas también vale.
+          expect(
+            (
+              await llamar(
+                'get',
+                `/api/rendiciones/previa?repartidorId=${repartidor.id}&hojaIds=${uno.hoja.id}&hojaIds=${dos.hoja.id}`,
+              )
+            ).status,
+          ).toBe(400); // ya rendidas: llega al service, que las rechaza
+        });
+
+        it('las entregas de plata: se validan, se corrigen, se anulan y no se mezclan entre tenants', async () => {
+          const repartidor = await nuevoRepartidor();
+          const ajeno = await nuevoRepartidor(tokenSegundoTenant);
+          for (const malo of [
+            { monto: '0' },
+            { monto: '-5' },
+            { monto: '1000.5' },
+            { monto: 'mucho' },
+            { medio: 'cheque' },
+            { fecha: '2026-13-45' },
+            { nota: 'x'.repeat(501) },
+            { repartidorId: 'no-es-uuid' },
+            { pagadoPor: 'x' },
+          ]) {
+            expect((await entrega(repartidor.id, '1000', malo)).status).toBe(
+              400,
+            );
+          }
+          expect((await entrega(uuidAjeno, '1000')).status).toBe(404);
+          expect((await entrega(ajeno.id, '1000')).status).toBe(404);
+
+          const e = await entregaOk(repartidor.id, '1000', {
+            nota: 'Dejó la plata',
+            medio: 'transferencia',
+          });
+          expect(e).toMatchObject({
+            repartidorId: repartidor.id,
+            repartidorNombre: repartidor.nombre,
+            fecha: FECHA,
+            monto: '1000.0000',
+            medio: 'transferencia',
+            nota: 'Dejó la plata',
+            rendicionId: null,
+          });
+          const url = `/api/entregas-repartidor/${e.id}`;
+          const editada = await llamar('patch', url, tokenAdmin, {
+            monto: '12000',
+            medio: 'efectivo',
+            fecha: '2026-10-14',
+          });
+          expect(editada.status).toBe(200);
+          expect(editada.body).toMatchObject({
+            monto: '12000.0000',
+            medio: 'efectivo',
+            fecha: '2026-10-14',
+            nota: 'Dejó la plata',
+          });
+          const sinNota = await llamar('patch', url, tokenAdmin, {
+            nota: null,
+          });
+          expect(sinNota.status).toBe(200);
+          expect((sinNota.body as EntregaRepartidorFila).nota).toBeNull();
+          expect((await llamar('patch', url, tokenAdmin, {})).status).toBe(200);
+          for (const malo of [{ monto: '0' }, { medio: 'cheque' }, { x: 1 }]) {
+            expect((await llamar('patch', url, tokenAdmin, malo)).status).toBe(
+              400,
+            );
+          }
+          expect(
+            (await llamar('patch', url, tokenSegundoTenant, { monto: '5' }))
+              .status,
+          ).toBe(404);
+          expect((await llamar('delete', url, tokenSegundoTenant)).status).toBe(
+            404,
+          );
+          const delAjeno = await llamar(
+            'get',
+            `/api/entregas-repartidor?repartidorId=${repartidor.id}`,
+            tokenSegundoTenant,
+          );
+          expect(delAjeno.status).toBe(200);
+          expect(delAjeno.body).toEqual([]);
+
+          // Con entregas el repartidor no se borra: se desactiva (y sigue pudiendo recibir una).
+          const borrar = await llamar(
+            'delete',
+            `/api/repartidores/${repartidor.id}`,
+          );
+          expect(borrar.status).toBe(400);
+          expect(mensajeDe(borrar)).toContain('entregas de plata');
+          expect(
+            (
+              await llamar(
+                'patch',
+                `/api/repartidores/${repartidor.id}`,
+                tokenAdmin,
+                { activo: false },
+              )
+            ).status,
+          ).toBe(200);
+          expect((await entrega(repartidor.id, '500')).status).toBe(201);
+
+          const anulada = await llamar('delete', url);
+          expect(anulada.status).toBe(200);
+          expect(anulada.body).toEqual({ success: true });
+          expect((await llamar('delete', url)).status).toBe(404);
+          expect(
+            (await llamar('patch', url, tokenAdmin, { monto: '5' })).status,
+          ).toBe(404);
+          const todas = await llamar(
+            'get',
+            `/api/entregas-repartidor?repartidorId=${repartidor.id}`,
+          );
+          expect(todas.status).toBe(200);
+          expect(
+            (todas.body as EntregaRepartidorFila[]).map((x) => x.id),
+          ).not.toContain(e.id);
+        });
+      });
+
       describe('carreras', () => {
         it('rendir dos veces a la vez: una 200 y otra 400, totales sin cambio', async () => {
           const repartidor = await nuevoRepartidor();
@@ -3062,7 +3782,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
             [async () => rendir(hoja.id), async () => rendir(hoja.id)],
           );
           expect(esperando).toBe(2);
-          expect(respuestas.map((r) => r.status).sort()).toEqual([200, 400]);
+          expect(respuestas.map((r) => r.status).sort()).toEqual([201, 400]);
           const perdedora = respuestas.find((r) => r.status === 400)!;
           expect(mensajeDe(perdedora)).toContain('ya está rendida');
           expect(await congelado(hoja.id)).toMatchObject({
@@ -3076,14 +3796,14 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           [
             'la rendición llega primero: gana, y el cambio de monto rebota con 400',
             'rendir',
-            200,
+            201,
             400,
             '10000.0000',
           ],
           [
             'el cambio de monto llega primero: gana, y la rendición congela el monto nuevo',
             'patch',
-            200,
+            201,
             200,
             '12000.0000',
           ],
@@ -3150,14 +3870,14 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           [
             'la rendición llega primero: gana, y el cambio de tarifa rebota con 400',
             'rendir',
-            200,
+            201,
             400,
             '5000.0000',
           ],
           [
             'el cambio de tarifa llega primero: gana, y la rendición congela el pago nuevo',
             'patch',
-            200,
+            201,
             200,
             '3000.0000',
           ],
@@ -3304,7 +4024,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       expect([401, 403]).toContain(res.status);
     });
 
-    it('abre con números: 3 hojas (dos rendidas con totales congelados y una abierta con 5 en ruta) y 30 paquetes', async () => {
+    it('abre con números: 8 hojas (la semana de Juan y el día de María rendidos, una abierta hoy con 4 en ruta) y 30 paquetes', async () => {
       const yo = await llamar('get', '/api/tenants/me', tokenDemo);
       expect(yo.status).toBe(200);
       const hoy = (yo.body as { diaNegocioHoy: string }).diaNegocioHoy;
@@ -3320,39 +4040,47 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
         [hoy, 'abierta'],
         [fechaMenosDias(hoy, 1), 'rendida'],
         [fechaMenosDias(hoy, 2), 'rendida'],
+        [fechaMenosDias(hoy, 3), 'rendida'],
+        [fechaMenosDias(hoy, 4), 'rendida'],
+        [fechaMenosDias(hoy, 5), 'rendida'],
+        [fechaMenosDias(hoy, 6), 'rendida'],
+        [fechaMenosDias(hoy, 7), 'rendida'],
       ]);
 
-      const [abierta, ayer, antesDeAyer] = hojas;
-      expect(abierta).toMatchObject({ asignados: 5, enRuta: 5, entregados: 0 });
-      // Las rendidas leen lo congelado: un neto negativo y uno positivo, como el demo promete.
-      // Juan va en Moto (1.900) y lleva 2 paquetes "Colina" (4.000) entre 10 entregados: 8 × 1.900
-      // + 2 × 4.000 = 23.200. Cobró 1 envío en destino, en efectivo.
-      expect(antesDeAyer).toMatchObject({
-        asignados: 12,
-        enRuta: 0,
-        entregados: 10,
-        cobroDestino: 1,
-        montoCobradoDestino: '10000.0000',
-        montoCobradoEfectivo: '10000.0000',
-        montoCobradoTransferencia: '0.0000',
-        montoPagoRepartidor: '23200.0000',
-        montoTotalGeneral: '100000.0000',
-        netoARendir: '-13200.0000',
-      });
-      // María va en Bicicleta (1.800) con 2 "Colina" entre 9 entregados: 7 × 1.800 + 2 × 4.000 =
-      // 20.600. Cobró 6 envíos en destino, 2 de ellos por transferencia.
+      const [abierta, ayer, ...semana] = hojas;
+      expect(abierta).toMatchObject({ asignados: 4, enRuta: 4, entregados: 0 });
+      // La hoja pendiente de hoy es la única que ofrece la pantalla de rendición.
+      const pendientes = await llamar(
+        'get',
+        '/api/hojas-ruta?pendientes=true',
+        tokenDemo,
+      );
+      expect(pendientes.status).toBe(200);
+      expect((pendientes.body as HojaRutaFila[]).map((h) => h.id)).toEqual([
+        abierta.id,
+      ]);
+      // María va en Bicicleta (1.800) con 1 "Colina" entre 5 entregados (el 6º no se entregó):
+      // 4 × 1.800 + 4.000 = 11.200. Cobró 3 envíos en destino, 1 de ellos por transferencia.
       expect(ayer).toMatchObject({
-        asignados: 10,
+        asignados: 6,
         enRuta: 0,
-        entregados: 9,
-        cobroDestino: 6,
-        montoCobradoDestino: '60000.0000',
-        montoCobradoEfectivo: '40000.0000',
-        montoCobradoTransferencia: '20000.0000',
-        montoPagoRepartidor: '20600.0000',
-        montoTotalGeneral: '90000.0000',
-        netoARendir: '39400.0000',
+        entregados: 5,
+        cobroDestino: 3,
+        montoCobradoDestino: '30000.0000',
+        montoCobradoEfectivo: '20000.0000',
+        montoCobradoTransferencia: '10000.0000',
+        montoPagoRepartidor: '11200.0000',
+        netoARendir: '18800.0000',
       });
+      // Juan va en Moto (1.900): 17 entregados (uno no se entregó) y 3 "Colina" → 14 × 1.900 +
+      // 3 × 4.000 = 38.600. Cobró 5 envíos en destino, 1 por transferencia.
+      expect(semana).toHaveLength(6);
+      const suma = (campo: 'montoPagoRepartidor' | 'montoCobradoDestino') =>
+        semana
+          .reduce((acc, h) => acc.plus(h[campo]), new Decimal(0))
+          .toFixed(4);
+      expect(suma('montoPagoRepartidor')).toBe('38600.0000');
+      expect(suma('montoCobradoDestino')).toBe('50000.0000');
 
       const paquetes = await llamar(
         'get',
@@ -3368,6 +4096,54 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       expect(pagina.data.filter((p) => p.direccion && p.comuna)).toHaveLength(
         15,
       );
+    });
+
+    it('trae dos rendiciones: la semana de Juan (6 días, una entrega de plata) y el día de María', async () => {
+      const yo = await llamar('get', '/api/tenants/me', tokenDemo);
+      expect(yo.status).toBe(200);
+      const hoy = (yo.body as { diaNegocioHoy: string }).diaNegocioHoy;
+      const lista = await llamar(
+        'get',
+        `/api/rendiciones?desde=${fechaMenosDias(hoy, 7)}&hasta=${hoy}`,
+        tokenDemo,
+      );
+      expect(lista.status).toBe(200);
+      const filas = lista.body as RendicionFila[];
+      expect(filas.map((f) => [f.repartidorNombre, f.hojas]).sort()).toEqual([
+        ['Juan Pérez', 6],
+        ['María Soto', 1],
+      ]);
+      const juan = filas.find((f) => f.repartidorNombre === 'Juan Pérez')!;
+      expect([juan.desde, juan.hasta]).toEqual([
+        fechaMenosDias(hoy, 7),
+        fechaMenosDias(hoy, 2),
+      ]);
+
+      const res = await llamar('get', `/api/rendiciones/${juan.id}`, tokenDemo);
+      expect(res.status).toBe(200);
+      const d = res.body as RendicionDetalle;
+      expect(d.dias.map((x) => x.fecha)).toEqual(
+        [7, 6, 5, 4, 3, 2].map((n) => fechaMenosDias(hoy, n)),
+      );
+      expect(d.tarifas.map((t) => [t.nombre, t.monto])).toEqual([
+        ['Moto', '1900.0000'],
+        ['Colina', '4000.0000'],
+      ]);
+      expect(d.totales).toEqual({
+        entregados: 17,
+        montoCobradoDestino: '50000.0000',
+        montoCobradoEfectivo: '40000.0000',
+        montoCobradoTransferencia: '10000.0000',
+        montoPagoRepartidor: '38600.0000',
+        montoEntregadoACuenta: '8000.0000',
+        saldo: '3400.0000',
+      });
+      expect(d.entregas).toHaveLength(1);
+      expect(d.entregas[0]).toMatchObject({
+        monto: '8000.0000',
+        medio: 'efectivo',
+      });
+      expect(juan.totales).toEqual(d.totales);
     });
 
     it('trae sus tarifas de pago (Auto por defecto), repartidores con la suya y paquetes con Colina; la configuración queda completa', async () => {
@@ -3463,13 +4239,15 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
            UNION ALL SELECT 'repartidores', COUNT(*)::int FROM repartidores
            UNION ALL SELECT 'paquetes', COUNT(*)::int FROM paquetes
            UNION ALL SELECT 'hojas_ruta', COUNT(*)::int FROM hojas_ruta
-           UNION ALL SELECT 'hoja_ruta_paquetes', COUNT(*)::int FROM hoja_ruta_paquetes`,
+           UNION ALL SELECT 'hoja_ruta_paquetes', COUNT(*)::int FROM hoja_ruta_paquetes
+           UNION ALL SELECT 'rendiciones', COUNT(*)::int FROM rendiciones
+           UNION ALL SELECT 'entregas_repartidor', COUNT(*)::int FROM entregas_repartidor`,
           );
         return Object.fromEntries(filas.map((f) => [f.tabla, f.n]));
       };
       const hojasDemo = async () =>
         app.get(DataSource).query<unknown[]>(
-          `SELECT hoja_ruta_id, estado, rendida_el, total_asignados, neto_a_rendir
+          `SELECT hoja_ruta_id, estado, rendida_el, rendicion_id, total_asignados, neto_a_rendir
              FROM hojas_ruta WHERE tenant_id = $1 ORDER BY hoja_ruta_id`,
           [DEMO_TENANT_ID],
         );
@@ -3484,7 +4262,15 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           [DEMO_TENANT_ID],
         );
       const tarifasAntes = await tarifasDemo();
-      // Un demo sembrado antes de las tarifas: repartidores y paquetes sin tarifa. El seed la completa.
+      // Un demo sembrado antes de las tarifas: repartidores y paquetes sin tarifa. El seed la
+      // completa, salvo en lo entregado en una hoja rendida (regla 7: de solo lectura).
+      const [{ ids }] = await app.get(DataSource).query<{ ids: string[] }[]>(
+        `SELECT COALESCE(array_agg(DISTINCT l.paquete_id), '{}') AS ids
+           FROM hoja_ruta_paquetes l
+           JOIN hojas_ruta h ON h.hoja_ruta_id = l.hoja_ruta_id
+          WHERE l.tenant_id = $1 AND l.estado = 'entregado' AND h.estado = 'rendida'`,
+        [DEMO_TENANT_ID],
+      );
       for (const tabla of ['repartidores', 'paquetes']) {
         await app
           .get(DataSource)
@@ -3494,9 +4280,63 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           );
       }
       await app.get(SeederService).onApplicationBootstrap();
-      expect(await tarifasDemo()).toEqual(tarifasAntes);
+      const rendidos = new Set(ids);
+      const antesFilas = tarifasAntes as {
+        t: string;
+        id: string;
+        tarifa_pago_id: string | null;
+      }[];
+      try {
+        expect(await tarifasDemo()).toEqual(
+          antesFilas.map((f) =>
+            f.t === 'p' && rendidos.has(f.id)
+              ? { ...f, tarifa_pago_id: null }
+              : f,
+          ),
+        );
+      } finally {
+        // La base de pruebas queda como estaba: lo de una hoja rendida el seed no lo repone.
+        for (const f of antesFilas) {
+          if (f.t !== 'p' || !rendidos.has(f.id)) continue;
+          await app
+            .get(DataSource)
+            .query(
+              `UPDATE paquetes SET tarifa_pago_id = $2 WHERE paquete_id = $1`,
+              [f.id, f.tarifa_pago_id],
+            );
+        }
+      }
       expect(await contar()).toEqual(antes);
       expect(await hojasDemo()).toEqual(hojasAntes);
+    });
+
+    // Va al final: deja el demo a medias a propósito (`reset-db.sh` antes de cada corrida).
+    it('un demo sembrado por una versión anterior: el seed nunca deja una hoja abierta y vacía', async () => {
+      const ds = app.get(DataSource);
+      const HOJA_NUEVA = '550e8400-e29b-41d4-a716-446655440590';
+      const HOJA_VIEJA = '550e8400-e29b-41d4-a716-446655440516';
+      // Estado viejo: los paquetes de la hoja 590 ya tienen su línea en otra hoja y la 590 no existe.
+      await ds.query(
+        `UPDATE hoja_ruta_paquetes SET hoja_ruta_id = $2 WHERE hoja_ruta_id = $1`,
+        [HOJA_NUEVA, HOJA_VIEJA],
+      );
+      await ds.query(`DELETE FROM hojas_ruta WHERE hoja_ruta_id = $1`, [
+        HOJA_NUEVA,
+      ]);
+      await app.get(SeederService).onApplicationBootstrap();
+      const [{ vacias, nueva }] = await ds.query<
+        { vacias: number; nueva: number }[]
+      >(
+        `SELECT
+           (SELECT COUNT(*)::int FROM hojas_ruta h
+             WHERE h.tenant_id = $1 AND h.eliminado_el IS NULL AND h.estado = 'abierta'
+               AND NOT EXISTS (SELECT 1 FROM hoja_ruta_paquetes l
+                                WHERE l.hoja_ruta_id = h.hoja_ruta_id AND l.eliminado_el IS NULL)) AS vacias,
+           (SELECT COUNT(*)::int FROM hojas_ruta WHERE hoja_ruta_id = $2) AS nueva`,
+        [DEMO_TENANT_ID, HOJA_NUEVA],
+      );
+      expect(vacias).toBe(0);
+      expect(nueva).toBe(0);
     });
   });
 });

@@ -2,7 +2,7 @@
 
 **Status**: Complete (MVP)
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-10-15
+**Last Updated**: 2026-10-16
 
 ---
 
@@ -96,9 +96,30 @@ Las numeraciones (`regla 5b`, `3.1`) son las que citan los comentarios del códi
    inactivo. Dos escaneos simultáneos del mismo código nuevo: el índice único de `codigo` hace
    que uno cree y el otro relea y asigne (o diga `ya_escaneado`, o el 409 de arriba si es de otro
    repartidor), nunca un 500.
-6. **Rendir** bloquea la hoja (`FOR UPDATE`), exige que no quede línea `en_ruta` y que la hoja
-   tenga paquetes, congela los totales y anota quién y cuándo. Una hoja rendida es de solo
-   lectura: no admite asignar, marcar ni quitar.
+6. **Rendir** es por **repartidor** y por las hojas que se elijan (un día, varios, una semana):
+   `POST /rendiciones { repartidorId, hojaIds[] }`. Es todo o nada: las hojas tienen que ser de ese
+   repartidor, estar abiertas, tener paquetes y no tener ninguna línea `en_ruta`; si alguna no
+   cumple es 400 y no cambia nada. Crea una **rendición** (quién, cuándo, totales y saldo
+   congelados), congela cada hoja (`congelar`, con su `rendicion_id`) y reclama las entregas de
+   plata pendientes del repartidor, todo en una transacción. Una hoja rendida es de solo lectura:
+   no admite asignar, marcar ni quitar. Una rendición cerrada es de solo lectura y **no se
+   anula**. `GET /rendiciones/previa` da la misma cuenta sin escribir.
+   **6b. La cuenta de una rendición:** cobrado en destino (partido en efectivo y transferencia),
+   pago al repartidor y **entregado a cuenta** (la suma de las entregas de plata reclamadas);
+   **saldo = cobrado − pago − entregado a cuenta**: positivo lo debe el repartidor, negativo la
+   empresa le paga. El saldo se arregla al rendir: no se arrastra a la siguiente rendición. Los
+   totales de la rendición son la suma de lo que congeló cada hoja más las entregas; las dos
+   cuentas (previa y rendir) salen del mismo código y de `totales`.
+   **6c. Entregas de plata** (`entregas_repartidor`): plata que el repartidor le deja a la oficina
+   en cualquier momento (`fecha`, `monto` > 0, `medio`, `nota`). No pertenecen a un día: **entran
+   todas las pendientes del repartidor** en la próxima rendición. Se corrigen o anulan (soft) solo
+   mientras no estén rendidas; rendida, 400. Una entrega creada después de rendir queda pendiente
+   para la siguiente. Un repartidor con entregas no se borra (se desactiva) y una entrega se puede
+   anotar para uno inactivo (puede seguir debiendo).
+   **6d. La planilla:** la rendición devuelve `dias` (una fila por hoja, por fecha ascendente:
+   entregados, pago, cobrado por medio y neto del día, y `porTarifa`, el **conteo** de entregados
+   por tarifa de pago), `tarifas` (las usadas en el período, una columna de la planilla cada una)
+   y `entregas`. La plata de cada día es la de su hoja; `porTarifa` no lleva plata.
 7. **Editar un paquete:** se puede mientras no esté *entregado en una hoja rendida*; desde ahí
    el precio, la tarifa de pago y `cobro_en_destino` son de solo lectura (cambiarlos movería una
    rendición cerrada). La dirección y el destinatario sí se pueden completar. Con la hoja
@@ -178,12 +199,15 @@ suman al total general y no al cobrado en destino) y no en unitarios: el mock de
 SQL.
 
 **Rendir congela lo que `totales` calcula en ese momento.** Escribir el estado `rendida` es el
-método privado `congelar` de `HojasRutaService`, que usan `rendir` (con el usuario del token) y
-`congelarTotales`, su envoltorio público que llama el seed de la demo (sin usuario): lo
-congelado y lo calculado no pueden diferir. **Precondición** de ambos: quien llama tiene la hoja
-bloqueada (`FOR UPDATE`) dentro de su transacción. `congelar` se defiende solo de lo que
-quedaría mal: una hoja ya rendida (400) y una con líneas `en_ruta` (400: rendida, esa línea no
-se podría marcar ni soltar nunca más). La hoja rendida lee sus columnas congeladas; la abierta, el cálculo en vivo.
+método público `congelar` de `HojasRutaService`, que llama `RendicionesService.rendir` (con el
+usuario del token, o sin usuario desde el seed de la demo) una vez por hoja: lo congelado y lo
+calculado no pueden diferir. `HojasRutaService.exigirRendibles` valida las hojas elegidas y devuelve
+lo que `totales` calcula para cada una; ese mismo resultado es el que `congelar` escribe y el que
+suma la rendición. **Precondición** de `congelar`: quien llama tiene la hoja bloqueada (`FOR UPDATE`)
+dentro de su transacción; se defiende solo de lo que quedaría mal: una hoja ya rendida (400) y una
+con líneas `en_ruta` (400: rendida, esa línea no se podría marcar ni soltar nunca más). La hoja
+rendida lee sus columnas congeladas; la abierta, el cálculo en vivo. La rendición sigue la misma
+regla: lee las columnas que congeló.
 
 ---
 
@@ -203,13 +227,27 @@ ascendente)**.
   asignar y escanear lo leen `FOR SHARE` (`exigirActivo(..., { bloquear: true })`). Uno de los
   dos espera al otro y no queda una hoja apuntando a un repartidor borrado.
 - Quién toma qué: **escanear** y **asignar** toman el repartidor (`FOR SHARE`), después la hoja y
-  los paquetes; **marcar** toma la hoja y después el paquete; **entregar-todos**, **quitar** y
-  **rendir** toman solo la hoja.
-- **La tarifa de pago es siempre el último cerrojo.** Crear, editar (`tarifaPagoId`) y escanear un
-  paquete la toman con `FOR SHARE` explícito (`exigirActivaDelTenant(..., { bloquear: true })`),
-  después de la hoja y del paquete; escribir `hoja_ruta_paquetes.tarifa_pago_id` toma además un
-  `KEY SHARE` implícito por la FK. `TarifasPagoService.eliminar` / `actualizar` la toman `FOR UPDATE`
-  y no toman nada después, así uno de los dos espera al otro y no hay ciclo.
+  los paquetes; **marcar** toma la hoja y después el paquete; **entregar-todos** y **quitar** toman
+  solo la hoja; **rendir** toma el repartidor (`FOR SHARE`) y después TODAS las hojas elegidas
+  `FOR UPDATE` **por `hoja_ruta_id` ascendente** (`ORDER BY … FOR UPDATE` bloquea en ese orden), no
+  los paquetes. El estado de cada hoja se mira DESPUÉS del cerrojo: quien pierde una carrera la ve
+  ya rendida y rebota con 400.
+- **Las entregas de plata no usan cerrojo explícito: el candado es el `WHERE rendicion_id IS NULL`
+  del `UPDATE`.** Rendir las reclama con `UPDATE entregas_repartidor SET rendicion_id = $r WHERE …
+  AND rendicion_id IS NULL AND eliminado_el IS NULL RETURNING monto` y suma lo devuelto; corregir o
+  anular una es un `UPDATE … WHERE rendicion_id IS NULL` (0 filas → 400 *"ya está rendida"*, o 404 si
+  no existe). Si gana la rendición, el `UPDATE` espera su fila, relee y no encuentra nada; si gana el
+  cambio, la rendición suma el monto ya cambiado: la entrega queda dentro con su monto final o fuera
+  para la siguiente, nunca contada dos veces ni perdida. Crear una entrega toma al repartidor `FOR
+  SHARE` (`remove` lo toma `FOR UPDATE` y mira también las entregas). Ninguna toma hojas después de
+  una entrega, así que no hay ciclo.
+- **La tarifa de pago se toma después de la hoja y, en `PaquetesService.update`, antes que el
+  paquete.** `PaquetesService.update` toma la hoja `FOR SHARE`, después la tarifa `FOR SHARE` y por
+  último el paquete; crear y escanear un paquete toman la tarifa `FOR SHARE` explícito
+  (`exigirActivaDelTenant(..., { bloquear: true })`) después de la hoja. Escribir
+  `hoja_ruta_paquetes.tarifa_pago_id` toma además un `KEY SHARE` implícito por la FK.
+  `TarifasPagoService.eliminar` / `actualizar` la toman `FOR UPDATE` y no toman nada después (ni
+  hoja ni paquete), así uno de los dos espera al otro y no hay ciclo.
 - Mientras todos respeten el orden no hay ciclo; quien lo rompa abre un deadlock.
 
 ---
@@ -235,9 +273,11 @@ ascendente)**.
 superadmin) y Paquetería como único módulo. Precio por defecto $10.000, cuatro tarifas de pago
 (Bicicleta $1.800, Moto $1.900, **Auto $1.900 por defecto**, Colina $4.000), 3 repartidores con la
 suya, 30 paquetes con códigos con forma de Mercado Libre (mezcla de pagados y con cobro en
-destino, cinco con Colina, algunos cobros por transferencia), dos hojas rendidas en días
-anteriores y una abierta hoy. Las rendidas se congelan con
-`congelarTotales(tenantId, hojaId, null)`, no con números escritos a mano. *Demo Restaurante*
+destino, cinco con Colina, algunos cobros por transferencia) y 8 hojas: la **semana de Juan**
+(6 días, tres paquetes por día, rendida de una vez junto con una entrega de plata de $8.000), un
+**día de María** (rendido solo) y una abierta hoy de Pedro. Las rendiciones pasan por
+`RendicionesService.rendir(..., null)`, la misma ruta que la API, no por números escritos a mano.
+*Demo Restaurante*
 también contrata Paquetería (ahí corren los e2e); *Demo Bodega* no, a propósito: es el tenant
 donde el menú no la muestra. *Demo Restaurante* no trae tarifas de pago (los e2e las crean): ahí `configurada` es `false` hasta
 cargar una. IDs en el bloque `PAQUETERIA` del seeder (502-589; 580-583 las tarifas).
@@ -280,24 +320,35 @@ GET      /hojas-ruta/:id                   cabecera + líneas
 PATCH    /hojas-ruta/:id/paquetes/:paqueteId   { estado: 'entregado' | 'no_entregado' | 'en_ruta', medioCobro?: 'efectivo' | 'transferencia' }   (medioCobro solo con entregado y un paquete con cobro en destino: regla 12; en_ruta = deshacer un marcado por error, con la hoja abierta; la pantalla de la hoja tiene el botón «En ruta»)
 POST     /hojas-ruta/:id/entregar-todos    pasa a entregado toda línea en_ruta (resuelve el pago de todas en una sentencia; cobros en efectivo)
 DELETE   /hojas-ruta/:id/paquetes/:paqueteId   quitar de la hoja
-POST     /hojas-ruta/:id/rendir
+GET      /hojas-ruta?pendientes=true[&repartidorId]   las hojas sin rendir (el rango pasa a ser opcional)
+GET|POST /entregas-repartidor              ?repartidorId&pendientes=true   POST { repartidorId, fecha, monto, medio, nota? }
+         PATCH|DELETE /entregas-repartidor/:id   (solo mientras no esté rendida: 400 si lo está; DELETE es soft)
+GET      /rendiciones?desde&hasta[&repartidorId]   las rendiciones cuyas hojas tocan el rango (por la fecha de las hojas)
+GET      /rendiciones/previa?repartidorId&hojaIds=a,b,c   la cuenta como quedaría, sin escribir (las mismas exigencias que rendir)
+POST     /rendiciones                      { repartidorId, hojaIds[] } → 201 con el detalle (planilla); todo o nada
+GET      /rendiciones/:id                  el detalle congelado
 ```
+
+`POST /hojas-ruta/:id/rendir` **ya no existe** (404): rendir un solo día es elegir una sola hoja.
 
 ## Backend
 
 Módulo `backend/src/modules/paqueteria/` (registrado en `app.module.ts`, también en `entities`;
-migraciones `1792108344263-Paqueteria.ts`, `…-TarifasPago.ts` y `…-PagoEnLaLinea.ts`).
+migraciones `1792108344263-Paqueteria.ts`, `…-TarifasPago.ts`, `…-PagoEnLaLinea.ts` y `…-Rendiciones.ts`).
 
 | Tabla | Para qué | Restricciones |
 |---|---|---|
 | `paquete_configuracion` | `precio_envio_defecto` | única por tenant |
 | `repartidores` | `nombre`, `telefono`, `activo` | — |
 | `paquetes` | `codigo`, `destinatario_nombre`, `destinatario_telefono`, `direccion`, `comuna`, `nota` (nullable: el escaneo crea con solo el código), `remitente_tercero_id` → `terceros`, `cobro_en_destino`, `precio_envio`, `tarifa_pago_id` (opcional) | `codigo` único por tenant entre los vivos |
-| `hojas_ruta` | `repartidor_id`, `fecha` (`date`), `estado` (`abierta` \| `rendida`), `rendida_por`, `rendida_el`, totales congelados, con el cobrado partido en `monto_cobrado_efectivo` y `monto_cobrado_transferencia` (nulos mientras está abierta) | única por `(tenant, repartidor, fecha)` entre las vivas |
+| `hojas_ruta` | `repartidor_id`, `fecha` (`date`), `estado` (`abierta` \| `rendida`), `rendicion_id`, `rendida_por`, `rendida_el`, totales congelados, con el cobrado partido en `monto_cobrado_efectivo` y `monto_cobrado_transferencia` (nulos mientras está abierta) | única por `(tenant, repartidor, fecha)` entre las vivas |
+| `rendiciones` | `repartidor_id`, `rendida_por` (null: el seed), `rendida_el`, totales congelados (`total_entregados`, cobrado en destino partido en efectivo y transferencia, `monto_pago_repartidor`, `monto_entregado_a_cuenta`) y `saldo` | solo lectura |
+| `entregas_repartidor` | `repartidor_id`, `fecha` (`date`), `monto`, `medio`, `nota`, `registrada_por`, `rendicion_id` (null = pendiente) | `CHECK` `monto > 0` y `medio` en efectivo \| transferencia |
 | `hoja_ruta_paquetes` | `hoja_ruta_id`, `paquete_id`, `estado` (`en_ruta` \| `entregado` \| `no_entregado`), `tarifa_pago_id`, `pago_repartidor` y `medio_cobro` (fijados al entregar; nulos si no está entregada) | `CHECK` de la regla 12; índice único parcial sobre `paquete_id` donde `estado = 'en_ruta'` y vivo: un paquete está en una sola ruta a la vez |
 
-Servicios: `HojasRutaService` (escanear, asignar, marcar, quitar, rendir, totales),
-`PaquetesService`, `RepartidoresService`, `PaqueteConfiguracionService`. Toda `SELECT`/`JOIN`
+Servicios: `HojasRutaService` (escanear, asignar, marcar, quitar, `exigirRendibles`, `congelar`, totales),
+`RendicionesService` (rendir, previa, lista, detalle), `EntregasRepartidorService`, `PaquetesService`,
+`RepartidoresService`, `PaqueteConfiguracionService`, `TarifasPagoService`. Toda `SELECT`/`JOIN`
 filtra `tenant_id` y `eliminado_el IS NULL` **en cada tabla unida**.
 
 ## Frontend

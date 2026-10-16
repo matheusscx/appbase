@@ -3135,6 +3135,28 @@ CREATE UNIQUE INDEX uq_paquetes_tenant_codigo
     ON paquetes (tenant_id, codigo) WHERE eliminado_el IS NULL;
 CREATE INDEX idx_paquetes_remitente ON paquetes (remitente_tercero_id);
 
+-- El cierre de la cuenta de UN repartidor sobre las hojas que se eligieron (un día, varios, una
+-- semana): totales y saldo congelados. Solo lectura. saldo = cobrado - pago - entregado a cuenta
+-- (positivo: lo debe el repartidor; negativo: la empresa le paga).
+CREATE TABLE rendiciones (
+    rendicion_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id             UUID NOT NULL REFERENCES tenants(tenant_id),
+    repartidor_id         UUID NOT NULL REFERENCES repartidores(repartidor_id),
+    rendida_por           UUID,                                   -- null: la rindió el seed del demo
+    rendida_el            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    total_entregados      INTEGER NOT NULL,
+    monto_cobrado_destino NUMERIC(18,4) NOT NULL,
+    monto_cobrado_efectivo NUMERIC(18,4) NOT NULL,
+    monto_cobrado_transferencia NUMERIC(18,4) NOT NULL,
+    monto_pago_repartidor NUMERIC(18,4) NOT NULL,
+    monto_entregado_a_cuenta NUMERIC(18,4) NOT NULL,
+    saldo                 NUMERIC(18,4) NOT NULL,
+    creado_el             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el          TIMESTAMPTZ
+);
+CREATE INDEX idx_rendiciones_repartidor ON rendiciones (tenant_id, repartidor_id, rendida_el);
+
 -- Una hoja por repartidor y día. Los totales se congelan al rendir (null mientras está abierta).
 CREATE TABLE hojas_ruta (
     hoja_ruta_id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -3142,6 +3164,7 @@ CREATE TABLE hojas_ruta (
     repartidor_id         UUID NOT NULL REFERENCES repartidores(repartidor_id),
     fecha                 DATE NOT NULL,
     estado                VARCHAR(20) NOT NULL DEFAULT 'abierta',   -- 'abierta' | 'rendida'
+    rendicion_id          UUID REFERENCES rendiciones(rendicion_id),   -- la que la cerró; null mientras está abierta
     rendida_por           UUID,
     rendida_el            TIMESTAMPTZ,
     total_asignados       INTEGER,
@@ -3160,6 +3183,7 @@ CREATE TABLE hojas_ruta (
 CREATE UNIQUE INDEX uq_hojas_ruta_repartidor_fecha
     ON hojas_ruta (tenant_id, repartidor_id, fecha) WHERE eliminado_el IS NULL;
 CREATE INDEX idx_hojas_ruta_tenant_fecha ON hojas_ruta (tenant_id, fecha);
+CREATE INDEX idx_hojas_ruta_rendicion ON hojas_ruta (rendicion_id);
 
 -- Un paquete solo puede estar 'en_ruta' en una hoja a la vez (índice parcial único).
 CREATE TABLE hoja_ruta_paquetes (
@@ -3188,3 +3212,24 @@ CREATE UNIQUE INDEX uq_hoja_ruta_paquetes_en_ruta
     ON hoja_ruta_paquetes (paquete_id) WHERE estado = 'en_ruta' AND eliminado_el IS NULL;
 CREATE INDEX idx_hoja_ruta_paquetes_hoja ON hoja_ruta_paquetes (hoja_ruta_id);
 CREATE INDEX idx_hoja_ruta_paquetes_paquete ON hoja_ruta_paquetes (paquete_id);
+
+-- Plata que el repartidor le deja a la oficina en cualquier momento. Sin rendicion_id está
+-- pendiente (se corrige o se anula); al rendir queda dentro de la rendición y es de solo lectura.
+CREATE TABLE entregas_repartidor (
+    entrega_repartidor_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id             UUID NOT NULL REFERENCES tenants(tenant_id),
+    repartidor_id         UUID NOT NULL REFERENCES repartidores(repartidor_id),
+    fecha                 DATE NOT NULL,
+    monto                 NUMERIC(18,4) NOT NULL,
+    medio                 VARCHAR(20) NOT NULL,                   -- 'efectivo' | 'transferencia'
+    nota                  VARCHAR(500),
+    registrada_por        UUID NOT NULL,
+    rendicion_id          UUID REFERENCES rendiciones(rendicion_id),
+    creado_el             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el          TIMESTAMPTZ,
+    CONSTRAINT chk_entregas_repartidor_monto CHECK (monto > 0),
+    CONSTRAINT chk_entregas_repartidor_medio CHECK (medio IN ('efectivo', 'transferencia'))
+);
+CREATE INDEX idx_entregas_repartidor_repartidor ON entregas_repartidor (tenant_id, repartidor_id);
+CREATE INDEX idx_entregas_repartidor_rendicion ON entregas_repartidor (rendicion_id);

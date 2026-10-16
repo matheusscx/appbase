@@ -65,20 +65,21 @@ import {
   diaNegocioTenant,
   fechaMenosDias,
 } from '../../common/utils/rango-fecha.util';
-import { HojasRutaService } from '../paqueteria/hojas-ruta.service';
+import { RendicionesService } from '../paqueteria/rendiciones.service';
 import { tarifaResueltaSql } from '../paqueteria/tarifa-resuelta';
 
 /**
  * Tenant demo de Paquetería y todo lo que cuelga de él. Los usan varios métodos del
  * seed, así que viven acá y no como locales de cada uno.
  *
- * Bloque 502-589 (medido el 2026-10-15 contra el CÓDIGO, no `docs/`): los literales
+ * Bloque 502-599 (medido el 2026-10-15 contra el CÓDIGO, no `docs/`): los literales
  * `44665544XXXX` llegan a 457 y los generadores dinámicos (`uuid(n)`, `uuid(id++)`)
  * a 471 (`NUEVOS` de `seedMotivosBaja`); 481-495 los reserva el plan de aviso de stock
  * bajo. 496-501 se dejan libres: 500 y 501 los usan como ids de mentira unos specs.
  * Reparto: 502-511 tenant/usuario/rol/módulo/contratos/caja/configuraciones,
  * 512-514 repartidores, 515-517 hojas, 520-549 paquetes (520 + índice),
- * 550-579 líneas de hoja (550 + índice del paquete), 580-583 tarifas de pago.
+ * 550-579 líneas de hoja (550 + índice del paquete), 580-583 tarifas de pago,
+ * 590-594 las otras cinco hojas de la semana de Juan, 595 su entrega de plata.
  */
 const uuidPaqueteria = (n: number): string =>
   `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
@@ -189,7 +190,7 @@ export class SeederService implements OnApplicationBootstrap {
     private readonly credencialesService: CredencialesService,
     private readonly itemsService: ItemsService,
     private readonly db: Db,
-    private readonly hojasRutaService: HojasRutaService,
+    private readonly rendicionesService: RendicionesService,
     @InjectDataSource()
     private readonly dataSource: DataSource,
   ) {}
@@ -5485,25 +5486,30 @@ export class SeederService implements OnApplicationBootstrap {
    * Los datos del demo de Paquetería, para que abra con números: el precio de envío por
    * defecto de los dos tenants que la contratan y, solo en Demo Gestión de Paquetes,
    * 4 tarifas de pago (Bicicleta, Moto, Auto por defecto y Colina), 3 repartidores con la
-   * suya, 30 paquetes (algunos con Colina) y 3 hojas (dos rendidas en días anteriores y una
-   * abierta hoy). IDs fijos de `PAQUETERIA` (bloque 502-589): 512-514 repartidores,
-   * 515-517 hojas, 520 + i los paquetes, 550 + i la línea del paquete i, 580-583 las tarifas.
+   * suya, 30 paquetes (algunos con Colina) y 8 hojas: la semana de Juan (6 días, rendida
+   * de una vez con una entrega de plata a cuenta), un día de María (rendido solo) y una
+   * abierta hoy de Pedro. IDs fijos de `PAQUETERIA` (bloque 502-599): 512-514 repartidores,
+   * 515-517 y 590-594 hojas, 520 + i los paquetes, 550 + i la línea del paquete i,
+   * 580-583 las tarifas, 595 la entrega de plata.
    *
    * "Hoy" sale del mismo cálculo que `GET /tenants/me` (`diaNegocioEnZona`: zona y hora de
-   * corte del tenant) y los días anteriores se restan sobre ese string; el día en la zona
+   * corte del tenant) y los días anteriores se restan sobre ese string; el día en el huso
    * de la sesión de Postgres (`CURRENT_DATE`) lo rechaza `dia-negocio.invariant.spec`.
    *
    * El pago de cada entrega se resuelve con `tarifaResueltaSql`, la regla que usa entregar
    * (paquete, repartidor, defecto), y se fija en la línea como lo hace `marcar`.
    *
-   * Los totales de las rendidas no se escriben a mano: se congelan con
-   * `congelarTotales`, la misma consulta que usa rendir, así lo congelado y lo calculado
-   * no pueden diferir. Por eso las líneas de una rendida son solo `entregado` /
-   * `no_entregado` (rendir exige que no quede ninguna en ruta).
+   * Las rendiciones no se escriben a mano: pasan por `RendicionesService.rendir`, la misma
+   * ruta que usa la API, así lo congelado y lo calculado no pueden diferir. Por eso las
+   * líneas de una hoja rendida son solo `entregado` / `no_entregado` (rendir exige que no
+   * quede ninguna en ruta).
    *
-   * Idempotente: nada se actualiza, así que un reinicio no pisa lo que el demo ya cambió
-   * (una hoja rendida se salta entera). Corre dentro de `onApplicationBootstrap`, que
-   * ya no corre en producción.
+   * Idempotente: los INSERT son `ON CONFLICT DO NOTHING` y los únicos UPDATE solo llenan lo
+   * que está en NULL (la tarifa de un repartidor o de un paquete que un demo anterior no
+   * tenía; nunca un paquete entregado en una hoja rendida, regla 7), así que un reinicio no
+   * pisa lo que el demo ya cambió. Una hoja rendida se salta entera y una rendición cuyas
+   * hojas ya no están todas abiertas no se repite. Corre dentro de `onApplicationBootstrap`,
+   * que ya no corre en producción.
    */
   private async seedPaqueteria(): Promise<void> {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
@@ -5662,12 +5668,21 @@ export class SeederService implements OnApplicationBootstrap {
         paquetes.map((p) => p.tarifaPagoId),
       ],
     );
-    // Igual para los paquetes con Colina de un demo ya sembrado.
+    // Igual para los paquetes con Colina de un demo ya sembrado, salvo los entregados en una hoja
+    // rendida: desde ahí su tarifa es de solo lectura (regla 7), cambiarla movería esa rendición.
     await this.db.query(
       `UPDATE paquetes p SET tarifa_pago_id = x.tarifa, actualizado_el = now()
          FROM unnest($2::uuid[], $3::uuid[]) AS x(id, tarifa)
         WHERE p.paquete_id = x.id AND p.tenant_id = $1
-          AND p.tarifa_pago_id IS NULL AND p.eliminado_el IS NULL`,
+          AND p.tarifa_pago_id IS NULL AND p.eliminado_el IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM hoja_ruta_paquetes l
+              JOIN hojas_ruta h ON h.hoja_ruta_id = l.hoja_ruta_id
+                               AND h.tenant_id = l.tenant_id AND h.eliminado_el IS NULL
+             WHERE l.paquete_id = p.paquete_id AND l.tenant_id = p.tenant_id
+               AND l.estado = 'entregado' AND l.eliminado_el IS NULL
+               AND h.estado = 'rendida'
+          )`,
       [
         tenantId,
         paquetes.filter((p) => p.tarifaPagoId).map((p) => p.id),
@@ -5679,34 +5694,37 @@ export class SeederService implements OnApplicationBootstrap {
       await diaNegocioTenant(this.db, tenantId),
       new Date(),
     );
-    // `desde`/`hasta`: los índices de `paquetes` de cada hoja. Quedan 3 sin hoja
-    // (27-29) y 3 con un intento `no_entregado` que volvió a estar disponible.
+    // `desde`/`hasta`: los índices de `paquetes` de cada hoja. Juan sale seis días seguidos con
+    // tres paquetes cada uno (0-17, uno no entregado); María un día con seis (18-23, uno no
+    // entregado); Pedro, hoy, con cuatro todavía en ruta (24-27). Quedan 2 sin hoja (28-29) y 2
+    // con un intento `no_entregado` que volvió a estar disponible.
+    const SEMANA_DE_JUAN = [515, 590, 591, 592, 593, 594];
     const hojas = [
-      {
-        id: uuidPaqueteria(515),
+      ...SEMANA_DE_JUAN.map((n, dia) => ({
+        id: uuidPaqueteria(n),
         repartidorId: repartidores[0].id,
-        fecha: fechaMenosDias(hoy, 2),
-        rendir: true,
-        desde: 0,
-        hasta: 12,
-        noEntregados: new Set([4, 8]),
-      },
+        fecha: fechaMenosDias(hoy, 7 - dia),
+        terminada: true,
+        desde: dia * 3,
+        hasta: dia * 3 + 3,
+        noEntregados: new Set(dia === 1 ? [4] : []),
+      })),
       {
         id: uuidPaqueteria(516),
         repartidorId: repartidores[1].id,
         fecha: fechaMenosDias(hoy, 1),
-        rendir: true,
-        desde: 12,
-        hasta: 22,
-        noEntregados: new Set([14]),
+        terminada: true,
+        desde: 18,
+        hasta: 24,
+        noEntregados: new Set([20]),
       },
       {
         id: uuidPaqueteria(517),
         repartidorId: repartidores[2].id,
         fecha: hoy,
-        rendir: false,
-        desde: 22,
-        hasta: 27,
+        terminada: false,
+        desde: 24,
+        hasta: 28,
         noEntregados: new Set<number>(),
       },
     ];
@@ -5717,14 +5735,25 @@ export class SeederService implements OnApplicationBootstrap {
         (_, k) => hoja.desde + k,
       );
       await this.db.transaccion(async () => {
+        // Un demo sembrado por una versión anterior ya trae líneas de estos paquetes en OTRAS
+        // hojas (los ids de línea `550 + i` coinciden y el `ON CONFLICT` las descartaría en
+        // silencio): crear esta hoja la dejaría abierta y vacía, o con una entrega repetida. Si
+        // alguno ya salió en otra hoja, esta no se crea.
+        const ocupados: { n: number }[] = await this.db.query(
+          `SELECT 1 AS n FROM hoja_ruta_paquetes
+            WHERE tenant_id = $1 AND paquete_id = ANY($2::uuid[]) AND hoja_ruta_id <> $3
+              AND eliminado_el IS NULL
+            LIMIT 1`,
+          [tenantId, indices.map((i) => paquetes[i].id), hoja.id],
+        );
+        if (ocupados.length) return;
         await this.db.query(
           `INSERT INTO hojas_ruta (hoja_ruta_id, tenant_id, repartidor_id, fecha)
            VALUES ($1, $2, $3, $4)
            ON CONFLICT DO NOTHING`,
           [hoja.id, tenantId, hoja.repartidorId, hoja.fecha],
         );
-        // Cerrojo de la hoja: `congelarTotales` lo exige tomado por quien llama. Sin fila
-        // viva (borrada) o ya rendida no hay nada que sembrar: es lo que dejó el demo.
+        // Sin fila viva (borrada) o ya rendida no hay nada que sembrar: es lo que dejó el demo.
         const filas: { estado: string }[] = await this.db.query(
           `SELECT estado FROM hojas_ruta
             WHERE hoja_ruta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
@@ -5759,7 +5788,7 @@ export class SeederService implements OnApplicationBootstrap {
             indices.map((i) => uuidPaqueteria(550 + i)),
             indices.map((i) => paquetes[i].id),
             indices.map((i) =>
-              !hoja.rendir
+              !hoja.terminada
                 ? 'en_ruta'
                 : hoja.noEntregados.has(i)
                   ? 'no_entregado'
@@ -5770,9 +5799,63 @@ export class SeederService implements OnApplicationBootstrap {
             ),
           ],
         );
-        if (hoja.rendir) {
-          await this.hojasRutaService.congelarTotales(tenantId, hoja.id, null);
+      });
+    }
+
+    // Las rendiciones del demo: la semana de Juan de una vez (con una entrega de plata a cuenta)
+    // y el día de María sola. Una cuyas hojas ya no están todas abiertas (ya se rindió, o un demo
+    // anterior dejó alguna rendida) se salta.
+    const rendiciones = [
+      {
+        repartidorId: repartidores[0].id,
+        hojaIds: SEMANA_DE_JUAN.map(uuidPaqueteria),
+        entrega: {
+          id: uuidPaqueteria(595),
+          fecha: fechaMenosDias(hoy, 3),
+          monto: '8000',
+          medio: 'efectivo',
+          nota: 'Dejó la plata de la mitad de la semana',
+        },
+      },
+      {
+        repartidorId: repartidores[1].id,
+        hojaIds: [uuidPaqueteria(516)],
+        entrega: null,
+      },
+    ];
+    for (const r of rendiciones) {
+      await this.db.transaccion(async () => {
+        const abiertas: { hoja_ruta_id: string }[] = await this.db.query(
+          `SELECT hoja_ruta_id FROM hojas_ruta
+            WHERE tenant_id = $1 AND hoja_ruta_id = ANY($2::uuid[])
+              AND estado = 'abierta' AND eliminado_el IS NULL`,
+          [tenantId, r.hojaIds],
+        );
+        if (abiertas.length !== r.hojaIds.length) return;
+        if (r.entrega) {
+          await this.db.query(
+            `INSERT INTO entregas_repartidor
+               (entrega_repartidor_id, tenant_id, repartidor_id, fecha, monto, medio, nota,
+                registrada_por)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             ON CONFLICT DO NOTHING`,
+            [
+              r.entrega.id,
+              tenantId,
+              r.repartidorId,
+              r.entrega.fecha,
+              r.entrega.monto,
+              r.entrega.medio,
+              r.entrega.nota,
+              PAQUETERIA.adminUsuarioId,
+            ],
+          );
         }
+        await this.rendicionesService.rendir(
+          tenantId,
+          { repartidorId: r.repartidorId, hojaIds: r.hojaIds },
+          null,
+        );
       });
     }
   }
