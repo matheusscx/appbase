@@ -5,7 +5,7 @@ defineProps<{
 </script>
 
 <template>
-  <UDashboardNavbar :title="title">
+  <UDashboardNavbar :title="title" :ui="{ title: 'font-display' }">
     <template #leading>
       <UDashboardSidebarCollapse />
     </template>
