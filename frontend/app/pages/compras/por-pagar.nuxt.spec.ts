@@ -91,4 +91,48 @@ describe('compras/por-pagar', () => {
     await montar()
     expect(document.body.querySelector('[data-qa="por-pagar-detalle"]')).toBeNull()
   })
+  // Auditoría UX 06.22: la acción principal no se veía hasta tocar una fila.
+  it('06.22: el título dice que se toca un proveedor para ver sus compras y pagar', async () => {
+    await montar()
+    expect(document.body.querySelector('[data-qa="por-pagar"]')!.textContent).toContain('Toca un proveedor para ver sus compras y pagar')
+  })
+
+  // 06.19: "FacturaAUDIT-001" sin espacio entre el tipo y el folio.
+  it('06.19: el documento se lee "Factura 10", con espacio', async () => {
+    const wrapper = await montar()
+    await wrapper.findAll('tbody tr')[0]!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    const tabla = document.body.querySelector('[data-qa="por-pagar-compras"]')!.textContent!
+    expect(tabla).toContain('Factura 10')
+  })
+
+  // 06.7: la tabla solo trae pagos con saldo a favor; "Sin pagos registrados" mentía.
+  it('06.7: la tabla de pagos se llama "Pagos con saldo a favor" y su vacío no dice que no hay pagos', async () => {
+    const wrapper = await montar()
+    await wrapper.findAll('tbody tr')[0]!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    const detalle = document.body.querySelector('[data-qa="por-pagar-detalle"]')!.textContent!
+    expect(detalle).toContain('Pagos con saldo a favor')
+    expect(detalle).toContain('No hay pagos con saldo a favor.')
+    expect(detalle).not.toContain('Sin pagos registrados')
+  })
+
+  // 06.18: sin deuda, el panel queda en "Al día" y "Pagar" no ofrece pagar lo que no se debe.
+  it('06.18: un proveedor sin compras abiertas queda "Al día" y "Pagar" está apagado', async () => {
+    const wrapper = await montar()
+    await wrapper.findAll('tbody tr')[1]!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    const detalle = document.body.querySelector('[data-qa="por-pagar-detalle"]')!
+    expect(detalle.textContent).toContain('Al día')
+    const pagar = document.body.querySelector<HTMLButtonElement>('[data-qa="por-pagar-pagar-abrir"]')!
+    expect(pagar.disabled).toBe(true)
+  })
+
+  it('06.18: con compras abiertas, "Pagar" sigue activo', async () => {
+    const wrapper = await montar()
+    await wrapper.findAll('tbody tr')[0]!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    const pagar = document.body.querySelector<HTMLButtonElement>('[data-qa="por-pagar-pagar-abrir"]')!
+    expect(pagar.disabled).toBe(false)
+  })
 })

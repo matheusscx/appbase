@@ -113,6 +113,20 @@ describe('CompraConfirmada — total, vencimiento y su corrección (spec compras
     expect(w.find('[data-qa="compra-documento-vencimiento"]').text()).toContain('16')
   })
 
+  // Auditoría UX 06.31: "Total del documento" y "Total" mostraban lo mismo, uno sobre otro.
+  it('06.31: si el total del documento es el de la compra, el monto se muestra una sola vez', async () => {
+    permisos = new Set(['Compras:Leer'])
+    const w = await montar(compra({ totalDocumento: '30000', total: '30000' }))
+    expect(w.find('[data-qa="compra-documento-total"]').exists()).toBe(false)
+    expect(w.text()).toContain('$30.000')
+  })
+
+  it('06.31: si difieren (descuento al total), se muestran los dos', async () => {
+    permisos = new Set(['Compras:Leer'])
+    const w = await montar(compra({ totalDocumento: '35000', total: '30000' }))
+    expect(w.find('[data-qa="compra-documento-total"]').text()).toContain('35.000')
+  })
+
   it('un tipo suma_lineas no muestra "Total del documento" (no hay nada transcrito)', async () => {
     permisos = new Set(['Compras:Leer'])
     const w = await montar(compra({ totalDocumento: null }), 'suma_lineas')

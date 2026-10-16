@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import Decimal from 'decimal.js'
 import type { TableColumn } from '@nuxt/ui'
 import type { CambioCompra, CompraDetalle, LineaCompra, PagoProveedorInfo, TotalDocumentoTipo } from '~/composables/useCompras'
 
@@ -26,6 +27,18 @@ const permissionsStore = usePermissionsStore()
 // `puedeAnular`, acá abajo): los datos de pago (spec § 8, decisión 12) son
 // SOLO de quien tiene `Compras:Pagar`, nunca de `Leer` a secas.
 const puedePagar = computed(() => permissionsStore.can('Compras', 'Pagar'))
+
+/**
+ * "Total del documento" solo si agrega algo: cuando coincide con el "Total" de abajo era el mismo
+ * monto dos veces (auditoría UX 06.31). Si difieren —un descuento al total, un costo que falta—
+ * la diferencia es justo lo que hay que ver.
+ */
+const mostrarTotalDocumento = computed(() => {
+  if (props.totalDocumentoTipo === 'suma_lineas') return false
+  const { totalDocumento, total } = props.compra
+  if (totalDocumento == null || total == null) return true
+  return !new Decimal(totalDocumento).equals(total)
+})
 
 const confirmada = computed(() => props.compra.estado === 'confirmada')
 const puedeCorregir = computed(() => confirmada.value && puedeActualizar.value)
@@ -137,7 +150,7 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
       <div><dt class="text-muted">Proveedor</dt><dd>{{ compra.proveedorNombre || '—' }}</dd></div>
       <div><dt class="text-muted">Fecha del documento</dt><dd>{{ formatFecha(compra.fechaDocumento) }}</dd></div>
       <div><dt class="text-muted">Entró a</dt><dd>{{ compra.ubicacionNombre || '—' }}</dd></div>
-      <div v-if="totalDocumentoTipo !== 'suma_lineas'" data-qa="compra-documento-total">
+      <div v-if="mostrarTotalDocumento" data-qa="compra-documento-total">
         <dt class="text-muted">Total del documento</dt>
         <dd>{{ compra.totalDocumento != null ? formatMonto(compra.totalDocumento) : '—' }}</dd>
       </div>

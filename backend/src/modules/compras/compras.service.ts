@@ -3709,7 +3709,7 @@ export class ComprasService {
         rows[0].estado === 'borrador' ? ' (está en un borrador)' : '';
       throw new ConflictException(
         `Ya cargaste ${enc.tipoDocumentoNombre} ${enc.folio} de ` +
-          `${enc.proveedorNombre}, con fecha ${rows[0].fecha_documento}${donde}`,
+          `${enc.proveedorNombre}, con fecha ${fechaDDMMAAAA(rows[0].fecha_documento)}${donde}`,
       );
     }
   }
@@ -4179,4 +4179,13 @@ export class ComprasService {
     if (bruto == null) return null;
     return cuantizar(new Decimal(bruto), cfg).toString();
   }
+}
+
+/**
+ * `2026-09-15` → `15-09-2026`, como la muestra la pantalla (auditoría UX 06.9): el mensaje del
+ * folio repetido era el único texto con la fecha cruda.
+ */
+function fechaDDMMAAAA(iso: string): string {
+  const [a, m, d] = iso.slice(0, 10).split('-');
+  return a && m && d ? `${d}-${m}-${a}` : iso;
 }

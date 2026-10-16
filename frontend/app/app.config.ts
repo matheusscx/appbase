@@ -27,6 +27,9 @@ export default {
     switch: {
       slots: { base: 'relative after:absolute after:left-1/2 after:top-1/2 after:size-11 after:-translate-x-1/2 after:-translate-y-1/2 after:content-[\'\']' },
     },
+    // Los selectores pintan su texto guía con el slot `placeholder` (auditoría UX 06.27).
+    select: { slots: { placeholder: 'truncate text-muted' } },
+    selectMenu: { slots: { placeholder: 'truncate text-muted' } },
     // Ninguna insignia por debajo de 12 px (owner, 2026-10-16, auditoría UX 01.17 y 05.17):
     // `xs` y `sm` venían en 8 y 10 px. Se conserva su relleno compacto.
     badge: {

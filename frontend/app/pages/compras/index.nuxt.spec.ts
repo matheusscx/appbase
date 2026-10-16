@@ -120,4 +120,17 @@ describe('compras/index — la compra es un enlace', () => {
     expect(enlace).toBeTruthy()
     expect(enlace!.textContent).toContain('4521')
   })
+  // Auditoría UX 06.9: la lista mostraba el dato crudo (2026-09-15) y el detalle 15-09-2026.
+  it('06.9: la fecha de la lista sale con el mismo formato que el detalle', async () => {
+    await montar()
+    const texto = document.body.textContent!
+    expect(texto).toContain('15-09-2026')
+    expect(texto).not.toContain('2026-09-15')
+  })
+
+  // 06.19: "Factura4521" sin espacio entre el tipo y el folio.
+  it('06.19: el documento se lee "Factura 4521"', async () => {
+    await montar()
+    expect(document.body.querySelector('a[href="/compras/compra-1"]')!.textContent!.trim()).toBe('Factura 4521')
+  })
 })

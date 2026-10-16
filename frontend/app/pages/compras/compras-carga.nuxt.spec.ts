@@ -1486,3 +1486,155 @@ describe('compras/[id] — una línea incompleta bloquea el envío', () => {
     wrapper.unmount()
   })
 })
+
+describe('compras/[id] — auditoría UX 06.8, 06.11, 06.23 y 06.30', () => {
+  beforeEach(() => {
+    enviados = []
+    avisos = []
+    routeId = 'nueva'
+    razaRemonte = null
+    confirmarFalla = false
+    guardarFalla = null
+    confirmLlamado = false
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  async function cabecera(wrapper: Wrapper) {
+    await emitir(selectConOpcion(wrapper, PROVEEDOR.id), PROVEEDOR.id)
+    await emitir(selectConOpcion(wrapper, FACTURA.id), FACTURA.id)
+    await wrapper.find('input[data-qa="compra-folio"]').setValue('4521')
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+  }
+  const lineasEnPantalla = (w: Wrapper) => w.findAllComponents({ name: 'ComprasLineaCompraForm' }).length
+
+  // ── 06.8: quitar una línea con lo tipeado se puede deshacer ────────────────
+
+  it('06.8: quitar una línea con datos avisa con "Deshacer", y deshacer la devuelve en su lugar', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+    const botonAgregar = wrapper.findAll('button').find(b => b.text().includes('Agregar línea'))!
+    await botonAgregar.trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    expect(lineasEnPantalla(wrapper)).toBe(2)
+
+    await wrapper.findAll('button[aria-label="Quitar línea"]')[0]!.trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    expect(lineasEnPantalla(wrapper)).toBe(1)
+    const aviso = avisos.at(-1) as unknown as { title: string, actions?: { label: string, onClick: () => void }[] }
+    expect(aviso.title).toContain('Línea quitada')
+    expect(aviso.actions![0]!.label).toBe('Deshacer')
+
+    aviso.actions![0]!.onClick()
+    await new Promise(r => setTimeout(r, 0))
+    expect(lineasEnPantalla(wrapper)).toBe(2)
+    const cantidades = wrapper.findAll('input[data-qa="compra-cantidad"]').map(i => (i.element as HTMLInputElement).value)
+    expect(cantidades[0]).toBe('20')
+    wrapper.unmount()
+  })
+
+  it('06.8: quitar una línea vacía no avisa nada (no se pierde nada)', async () => {
+    const wrapper = await montar()
+    const botonAgregar = wrapper.findAll('button').find(b => b.text().includes('Agregar línea'))!
+    await botonAgregar.trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    avisos = []
+    await wrapper.findAll('button[aria-label="Quitar línea"]')[0]!.trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    expect(lineasEnPantalla(wrapper)).toBe(1)
+    expect(avisos).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  // ── 06.11: crear el proveedor sin salir de la carga ────────────────────────
+
+  it('06.11: "Nuevo proveedor" abre el alta y el proveedor creado queda elegido', async () => {
+    const wrapper = await montar()
+    const boton = wrapper.find('[data-qa="compra-proveedor-nuevo"]')
+    expect(boton.exists()).toBe(true)
+    await boton.trigger('click')
+    const modal = wrapper.findComponent({ name: 'ComprasCrearProveedorModal' })
+    expect(modal.props('open')).toBe(true)
+
+    modal.vm.$emit('creado', { id: 'prov-nuevo', nombre: 'Frutas del Sur', rut: null, plazoPagoDias: 15 })
+    await new Promise(r => setTimeout(r, 20))
+    const select = selectConOpcion(wrapper, 'prov-nuevo')
+    expect(select.props('modelValue')).toBe('prov-nuevo')
+    wrapper.unmount()
+  })
+
+  // ── 06.23: el modal de confirmar muestra qué entra ─────────────────────────
+
+  it('06.23: confirmar lista cada producto con su cantidad, unidad y costo, y el total', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+    await emitir(precioInput(wrapper), '1500')
+
+    await wrapper.find('[data-qa="compra-confirmar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    const lineas = document.body.querySelector('[data-qa="compra-confirmar-lineas"]')!.textContent!
+    expect(lineas).toContain('Harina')
+    expect(lineas).toContain('20 kg')
+    expect(lineas).toContain('$1.500')
+    expect(document.body.querySelector('[data-qa="compra-confirmar-total"]')!.textContent).toContain('$30.000')
+    wrapper.unmount()
+  })
+
+  it('06.23: una línea sin precio lo dice en su renglón', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+
+    await wrapper.find('[data-qa="compra-confirmar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(document.body.querySelector('[data-qa="compra-confirmar-lineas"]')!.textContent).toContain('sin precio')
+    wrapper.unmount()
+  })
+
+  // ── 06.30: salir de una compra tipeada a mano avisa ────────────────────────
+
+  it('06.30: con un proveedor elegido a mano, salir pregunta', async () => {
+    const wrapper = await montar()
+    confirmLlamado = false
+    await emitir(selectConOpcion(wrapper, PROVEEDOR.id), PROVEEDOR.id)
+    await capturedGuard!()
+    expect(confirmLlamado).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('06.30: con una línea con producto, salir pregunta', async () => {
+    const wrapper = await montar()
+    confirmLlamado = false
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await capturedGuard!()
+    expect(confirmLlamado).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('06.30: sin nada tipeado, salir no pregunta', async () => {
+    const wrapper = await montar()
+    // `espiarReplace` (de un test anterior) deja el `router.replace` espiado y el montaje lo llama
+    // con el guard de la instancia previa: se mide solo lo que pasa desde acá.
+    confirmLlamado = false
+    await capturedGuard!()
+    expect(confirmLlamado).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('06.30: ya guardado el borrador, salir no pregunta', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('20')
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 30))
+    confirmLlamado = false
+    await capturedGuard!()
+    expect(confirmLlamado).toBe(false)
+    wrapper.unmount()
+  })
+})

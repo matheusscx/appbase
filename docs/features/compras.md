@@ -541,6 +541,11 @@ recarga los dos (`recargarTodo`): la deuda y el saldo a favor cambiaron en los d
 columna **Debe** de las compras abiertas usa `useCompras() → textoDeuda`: el monto si se conoce,
 "Al menos $X" con la `deudaMinima` de una `falta_precio`, o "falta el total" en una `falta_total`.
 
+La pantalla dice que se toca un proveedor para ver sus compras y pagar. Con el detalle cargado y
+sin compras abiertas, el panel queda en **"Al día"** y **Pagar** se apaga (06.18). La tabla de pagos
+se rotula **"Pagos con saldo a favor"** porque solo trae esos (06.7); anular cualquier pago vigente es
+un frente propio de plata (06.6, decidido, aún no construido).
+
 ### `components/compras/PagarProveedorModal.vue`
 
 Monto, medio de pago (solo si el monto es positivo: `monto` 0 con aplicaciones es "usar el
@@ -563,6 +568,17 @@ fila a mano** (`repartoTocado`): desde ahí la pantalla no vuelve a pisar lo edi
 aplicaciones con monto > 0 — el DTO de `POST /compras/pagos` exige `monto` positivo por línea
 (spec § 5.1) — y el servidor **valida el reparto que llega, no lo recalcula**: la propuesta es
 enteramente de pantalla.
+
+**Atajos y avisos de pantalla (auditoría UX 06.12, 06.13, 06.18, 2026-10-16).** Nada de esto cambia
+lo que se envía: el servidor sigue validando igual.
+
+- **"Pagar todo ($X)"** precarga el monto con la deuda conocida menos el saldo a favor; el reparto se
+  propone como siempre y el usuario confirma con **Pagar**. No incluye las compras sin precio (lo dice).
+- **Por qué "Pagar" está apagado:** una línea bajo el reparto dice el motivo (sin monto, medio sin
+  elegir, reparto que supera el monto en $X, efectivo sin caja).
+- **Caja abierta:** con `MiCaja:Leer` el modal consulta `GET /caja/activa`; sin caja, el efectivo se
+  apaga con un enlace "Abrir mi caja". Sin ese permiso no se sabe y queda el aviso general.
+- **El aviso de éxito dice el dato:** "Pago de $4.950 registrado a Andina (Efectivo)".
 
 La clave de idempotencia (`useIntentoCobro`, ámbito `pago-proveedor:<proveedorId>`) persiste
 entre aperturas del modal para el mismo proveedor: si el modal se cierra y se reabre tras un
@@ -929,6 +945,7 @@ Todas bajo `JwtAuthGuard + TenantGuard + PermisosGuard`, con el `tenant_id` del 
 | `GET /compras` (paginado; filtros `estado`, `proveedorId`, `faltaCosto`, `desde`, `hasta`, `estadoPago`) — con `Pagar` suma `estadoPago`/`deuda`/`vencida` por fila (ver [Confirmar con pago, el recorte y las lecturas de deuda](#confirmar-con-pago-el-recorte-y-las-lecturas-de-deuda-pieza-5-tarea-3)); `estadoPago` es 403 sin `Pagar` | Leer |
 | `GET /compras/:id`: encabezado, líneas, historial y motivo de anulación — con `Pagar` suma `aplicado` y `pagos` | Leer |
 | `GET /compras/tipos-documento` · `GET /compras/proveedores` | Leer |
+| `POST /compras/proveedores` con `{ nombre, rut?, correo?, telefono?, plazoPagoDias? }`: alta de un proveedor en plena carga (auditoría UX 06.11, owner 2026-10-16). Crea un tercero `tipo = 'proveedor'` del tenant del token; el tipo no viaja (400 si llega). **No da el módulo Terceros**: listar, editar y borrar terceros sigue exigiendo sus permisos. Test: `backend/test/compras-proveedor-alta.e2e-spec.ts` | Crear |
 | `GET /compras/productos` (paginado; `search` por nombre o descripción, `ids` hasta 100): productos e ingredientes con stock, lo que se puede comprar | Crear |
 | `GET /compras/:id/lineas/:lineaId/unidades`: las series de la línea, disponibles en su ubicación | Actualizar |
 | `POST /compras` · `PATCH /compras/:id` (reemplaza el borrador entero) · `DELETE /compras/:id` | Crear |

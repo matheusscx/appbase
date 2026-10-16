@@ -68,6 +68,14 @@ Request:
 Response (201): el tercero creado (incluye tercero_id, creado_el, etc.)
 ```
 
+### Alta de proveedor desde Compras (auditoría UX 06.11, 2026-10-16)
+
+Quien carga compras (`Compras:Crear`) puede crear el proveedor sin salir de la carga, con
+`POST /compras/proveedores` ([compras](./compras.md#api-endpoints)). Es una ruta propia y angosta:
+el tipo lo fija el servidor (`proveedor`) y el tenant sale del token. **No da el módulo Terceros**: ver
+la lista, crear de otro tipo, editar y borrar siguen detrás de `Terceros:*`. En la carga aparece como
+"Nuevo proveedor" bajo el selector (`CrearProveedorModal.vue`).
+
 ### `PATCH /terceros/:id`
 
 Requiere `Terceros:Actualizar`. Mismos campos, todos opcionales.

@@ -6,6 +6,7 @@ import { InventarioModule } from '../inventario/inventario.module';
 import { UbicacionesModule } from '../ubicaciones/ubicaciones.module';
 import { CalculoPreciosModule } from '../calculo-precios/calculo-precios.module';
 import { CajaModule } from '../caja/caja.module';
+import { TercerosModule } from '../terceros/terceros.module';
 import { IdempotenciaModule } from '../idempotencia/idempotencia.module';
 import { Compra } from './entities/compra.entity';
 import { CompraLinea } from './entities/compra-linea.entity';
@@ -54,6 +55,9 @@ import { LecturaDteService } from './lectura-dte.service';
     // `POST /compras/pagos` es un cobro: corre dentro de
     // `IdempotenciaService.ejecutar` (ADR-026, pattern backend § 18).
     IdempotenciaModule,
+    // `POST /compras/proveedores`: el alta del proveedor es la de Terceros
+    // (auditoría UX 06.11); no se reimplementa.
+    TercerosModule,
   ],
   controllers: [ComprasController],
   providers: [ComprasService, PresentacionesCompraService, LecturaDteService],

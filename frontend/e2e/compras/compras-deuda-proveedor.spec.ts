@@ -259,12 +259,12 @@ test('pagar dos compras de un proveedor desde "Por pagar"', async ({ page, reque
 
   // El detalle se recargó solo: las dos compras ya no aparecen como abiertas.
   // `CrudTable` dibuja el estado vacío como una fila propia ("Sin compras
-  // abiertas."), así que la cuenta de filas nunca llega a 0 — se afirma por
+  // abiertas.", ahora "Al día: no tiene compras abiertas."), así que la cuenta de filas nunca llega a 0 — se afirma por
   // el texto, no por `toHaveCount(0)`. Y el `tbody`, no el `[data-qa]` a
   // secas: `CrudTable` pasa `$attrs` (con el `data-qa`) tanto a su `UCard`
   // raíz como, explícito, a `UTable` por dentro — dos elementos con el MISMO
   // atributo, y un `locator` sin acotar más es un strict-mode violation
   // (medido). El `tbody` sí resuelve a uno solo: hay un solo `<tbody>` real,
   // sin importar cuántos ancestros compartan el atributo.
-  await expect(page.locator('[data-qa="por-pagar-compras"] tbody')).toContainText('Sin compras abiertas.')
+  await expect(page.locator('[data-qa="por-pagar-compras"] tbody')).toContainText('Al día: no tiene compras abiertas.')
 })

@@ -48,7 +48,8 @@ const open = defineModel<boolean>('open', { required: true })
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatMonto, formatFecha } = useFormatters()
-const { proponerReparto, insigniaPago, textoDeuda, compararPorVencimiento } = useCompras()
+const { proponerReparto, insigniaPago, textoDeuda, compararPorVencimiento, etiquetaDocumento } = useCompras()
+const permissionsStore = usePermissionsStore()
 const intentoCobro = useIntentoCobro()
 
 const cargando = ref(false)
@@ -70,6 +71,24 @@ const medioPagoOpts = computed(() => mediosPago.value.map(m => ({ label: m.nombr
 const medioSeleccionado = computed(() => mediosPago.value.find(m => m.id === medioPagoId.value) ?? null)
 const medioEsEfectivo = computed(() => medioSeleccionado.value?.esEfectivo ?? false)
 
+/**
+ * ¿Tiene caja abierta quien paga? El efectivo sale de ella y el servidor rechaza el pago sin
+ * una (auditoría UX 06.12). `null` = no se sabe (no puede ver su caja, o la consulta falló): ahí
+ * no se apaga nada y queda el aviso general; el servidor sigue siendo quien decide.
+ */
+const cajaAbierta = ref<boolean | null>(null)
+
+async function cargarCaja() {
+  cajaAbierta.value = null
+  if (!permissionsStore.can('MiCaja', 'Leer')) return
+  try {
+    const caja = await useApiFetch<{ id: string } | null | ''>(`${apiUrl}/caja/activa`)
+    cajaAbierta.value = !!caja && typeof caja === 'object'
+  } catch {
+    cajaAbierta.value = null
+  }
+}
+
 /** Mismo comparador que `proponerReparto`: la más vieja primero. */
 const comprasOrdenadas = computed(() => [...compras.value].sort(compararPorVencimiento))
 
@@ -85,6 +104,7 @@ async function cargar() {
     const [detalle, medios] = await Promise.all([
       useApiFetch<ProveedorDetalle>(`${apiUrl}/compras/por-pagar/${props.proveedorId}`),
       useApiFetch<MedioPagoOpcion[]>(`${apiUrl}/compras/medios-pago`),
+      cargarCaja(),
     ])
     compras.value = detalle.compras
     pagos.value = detalle.pagos
@@ -156,12 +176,55 @@ const montoEsValido = computed(() => {
 const montoEsPositivo = computed(() => {
   try { return new Decimal(monto.value || '0').greaterThan(0) } catch { return false }
 })
+/** Efectivo sin caja abierta: el servidor lo rechazaría, así que no se ofrece enviarlo. */
+const sinCajaParaEfectivo = computed(() =>
+  montoEsPositivo.value && medioEsEfectivo.value && cajaAbierta.value === false)
 /** `monto` 0 con aplicaciones es "usar el saldo a favor" (spec § 5.1, decisión 5). */
 const puedeEnviar = computed(() =>
   montoEsValido.value
   && (!montoEsPositivo.value || !!medioPagoId.value)
   && (montoEsPositivo.value || aplicaciones.value.length > 0)
-  && totalRepartido.value.lessThanOrEqualTo(disponible.value))
+  && totalRepartido.value.lessThanOrEqualTo(disponible.value)
+  && !sinCajaParaEfectivo.value)
+
+/** Por qué "Pagar" está apagado: un botón gris sin motivo no dice qué hacer (auditoría UX 06.13). */
+const motivoNoPuede = computed(() => {
+  if (puedeEnviar.value) return ''
+  if (!montoEsValido.value) return 'El monto no es válido.'
+  if (montoEsPositivo.value && !medioPagoId.value) return 'Elige el medio de pago.'
+  if (!montoEsPositivo.value && aplicaciones.value.length === 0) return 'Escribe el monto a pagar.'
+  if (totalRepartido.value.greaterThan(disponible.value)) {
+    return `El reparto supera el monto en ${formatMonto(totalRepartido.value.minus(disponible.value).toString())}.`
+  }
+  if (sinCajaParaEfectivo.value) return 'Para pagar en efectivo necesitas tu caja abierta.'
+  return ''
+})
+
+/**
+ * "Pagar todo": lo que se debe en las compras con deuda conocida, menos el saldo a favor. Solo
+ * precarga el monto —el reparto se propone como siempre y el usuario confirma con "Pagar"—; lo
+ * que se envía lo sigue decidiendo lo que queda en pantalla.
+ */
+const totalAPagar = computed(() => {
+  const deuda = compras.value.reduce((acc, c) => (c.deuda != null ? acc.plus(c.deuda) : acc), new Decimal(0))
+  const neto = deuda.minus(saldoAFavor.value)
+  return neto.greaterThan(0) ? neto : new Decimal(0)
+})
+const comprasSinDeudaConocida = computed(() => compras.value.filter(c => c.deuda == null).length)
+
+function pagarTodo() {
+  repartoTocado.value = false
+  monto.value = totalAPagar.value.toFixed()
+}
+
+/** Lo que quedó registrado, con su dato (auditoría UX 06.18): monto, a quién y con qué medio. */
+function avisoDePago(): string {
+  if (!montoEsPositivo.value) {
+    return `Saldo a favor aplicado a ${props.proveedorNombre}: ${formatMonto(totalRepartido.value.toString())}`
+  }
+  const medio = medioSeleccionado.value?.nombre
+  return `Pago de ${formatMonto(monto.value.trim())} registrado a ${props.proveedorNombre}${medio ? ` (${medio})` : ''}`
+}
 
 async function enviar() {
   if (!puedeEnviar.value || enviando.value) return
@@ -182,7 +245,7 @@ async function enviar() {
     )
     intentoCobro.terminar(ambito)
     intentoCobro.avisarSiRepetido(res)
-    toast.add({ title: 'Pago registrado', color: 'success' })
+    toast.add({ title: avisoDePago(), color: 'success' })
     open.value = false
     emit('success')
   } catch (e: unknown) {
@@ -208,6 +271,21 @@ async function enviar() {
           <UFormField label="Monto a pagar">
             <MoneyInput v-model="monto" oficial class="w-full" data-qa="pagar-monto" />
           </UFormField>
+          <div v-if="comprasOrdenadas.length && totalAPagar.greaterThan(0)" class="-mt-2 space-y-1">
+            <UButton
+              size="md"
+              class="min-h-11"
+              variant="soft"
+              color="neutral"
+              icon="i-lucide-hand-coins"
+              :label="`Pagar todo (${formatMonto(totalAPagar.toFixed())})`"
+              data-qa="pagar-todo"
+              @click="pagarTodo"
+            />
+            <p v-if="comprasSinDeudaConocida" class="text-xs text-muted">
+              No incluye {{ comprasSinDeudaConocida }} {{ comprasSinDeudaConocida === 1 ? 'compra sin precio' : 'compras sin precio' }}: su deuda todavía no se conoce.
+            </p>
+          </div>
           <UFormField v-if="montoEsPositivo" label="Medio de pago">
             <USelectMenu
               v-model="medioPagoId"
@@ -218,7 +296,22 @@ async function enviar() {
               data-qa="pagar-medio"
             />
           </UFormField>
-          <p v-if="medioEsEfectivo" class="text-xs text-muted" data-qa="pagar-aviso-efectivo">
+          <p
+            v-if="sinCajaParaEfectivo"
+            class="text-sm text-warning"
+            data-qa="pagar-sin-caja"
+          >
+            No tienes una caja abierta y el efectivo sale de ella.
+            <NuxtLink to="/mi-caja" class="font-medium text-primary underline">
+              Abrir mi caja
+            </NuxtLink>
+            o elige otro medio de pago.
+          </p>
+          <p
+            v-else-if="medioEsEfectivo && montoEsPositivo && cajaAbierta === null"
+            class="text-xs text-muted"
+            data-qa="pagar-aviso-efectivo"
+          >
             Sale de tu caja física abierta: si no tienes una, ábrela antes de pagar.
           </p>
           <UFormField label="Referencia (opcional)">
@@ -248,9 +341,7 @@ async function enviar() {
               >
                 <div class="min-w-0">
                   <div class="flex items-center gap-2">
-                    <span class="truncate">
-                      {{ c.tipoDocumentoNombre }}<template v-if="c.folio"> {{ c.folio }}</template>
-                    </span>
+                    <span class="truncate">{{ etiquetaDocumento(c) }}</span>
                     <UBadge
                       :label="insigniaPago({ estadoPago: c.estadoPago, deuda: c.deuda, deudaMinima: c.deudaMinima, vencida: c.vencida }, formatMonto).label"
                       :color="insigniaPago({ estadoPago: c.estadoPago, deuda: c.deuda, deudaMinima: c.deudaMinima, vencida: c.vencida }, formatMonto).color"
@@ -279,6 +370,9 @@ async function enviar() {
 
           <p class="text-sm text-muted" data-qa="pagar-sobra">
             Lo que no se reparte queda a favor del proveedor: <span class="tabular-nums font-medium text-highlighted">{{ formatMonto(sobraAFavor) }}</span>
+          </p>
+          <p v-if="motivoNoPuede" class="text-sm text-warning" role="status" data-qa="pagar-motivo">
+            {{ motivoNoPuede }}
           </p>
         </template>
       </div>

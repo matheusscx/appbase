@@ -11,6 +11,7 @@
 //      ni la cabecera.
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import { ref } from 'vue'
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { useMonedasStore } from '~/stores/monedas'
@@ -29,9 +30,16 @@ const TARJETA = { id: 'medio-tarjeta', nombre: 'Tarjeta', esEfectivo: false }
 let permisos = new Set(['Compras:Leer', 'Compras:Crear', 'Compras:Pagar'])
 let esAdmin = false
 let enviados: { url: string, method?: string, body?: unknown, headers?: Record<string, string> }[] = []
+/** Cuántas veces se pidieron los medios de pago. */
+let pedidosMedios = 0
+/** Los permisos llegan DESPUÉS de montar la página al recargar con F5: subir esto los "carga". */
+const permisosVersion = ref(0)
 
 mockNuxtImport('usePermissionsStore', () => {
-  return () => ({ get esAdmin() { return esAdmin }, can: (m: string, a: string) => permisos.has(`${m}:${a}`) })
+  return () => ({
+    get esAdmin() { return esAdmin },
+    can: (m: string, a: string) => { void permisosVersion.value; return permisos.has(`${m}:${a}`) },
+  })
 })
 mockNuxtImport('useRoute', () => () => ({ params: { id: 'nueva' }, query: {} }))
 mockNuxtImport('useToast', () => () => ({ add: () => {} }))
@@ -59,7 +67,7 @@ mockNuxtImport('useApiFetch', () => {
         descuentoTotal: null, total: null, totalDocumento: null, fechaVencimiento: null, lineas: [],
       })
     }
-    if (url.includes('/compras/medios-pago')) return Promise.resolve([EFECTIVO, TARJETA])
+    if (url.includes('/compras/medios-pago')) { pedidosMedios++; return Promise.resolve([EFECTIVO, TARJETA]) }
     if (url.includes('/compras/presentaciones')) return Promise.resolve([])
     if (url.includes('/compras/tipos-documento')) return Promise.resolve([FACTURA])
     if (url.includes('/compras/proveedores')) return Promise.resolve([PROVEEDOR])
@@ -154,6 +162,7 @@ beforeEach(() => {
   permisos = new Set(['Compras:Leer', 'Compras:Crear', 'Compras:Pagar'])
   esAdmin = false
   enviados = []
+  pedidosMedios = 0
 })
 
 describe('compras/[id] — el XML precarga total, vencimiento y la forma de pago (spec § 7 y § 10)', () => {
@@ -270,6 +279,43 @@ describe('compras/[id] — "¿La pagaste ya?" (spec § 7, § 10 y decisión 7/12
     await abrirConfirmar(wrapper)
     // FmaPago 1 ya propone "Sí" con el primer medio (Efectivo).
     expect(document.body.querySelector('[data-qa="compra-pago-aviso-efectivo"]')).not.toBeNull()
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 06.4: tras recargar (F5) los permisos llegan después de montar la página; los
+// medios de pago se pedían solo si `Pagar` ya estaba al montar, y "Sí, la pagué" salía con el
+// medio vacío y el botón apagado, sin explicación.
+describe('compras/[id] — los medios de pago al recargar (06.4)', () => {
+  it('si Pagar llega después de montar, los medios se piden y el medio queda elegido', async () => {
+    permisos = new Set(['Compras:Leer', 'Compras:Crear'])
+    const wrapper = await montar()
+    expect(pedidosMedios).toBe(0)
+
+    permisos.add('Compras:Pagar')
+    permisosVersion.value++
+    await new Promise(r => setTimeout(r, 30))
+    expect(pedidosMedios).toBe(1)
+
+    await prepararParaConfirmar(wrapper, 'credito-fchvenc.xml')
+    await abrirConfirmar(wrapper)
+    wrapper.findComponent({ name: 'URadioGroup' }).vm.$emit('update:modelValue', true)
+    await new Promise(r => setTimeout(r, 20))
+    const medio = wrapper.findAllComponents({ name: 'USelectMenu' }).find(s => s.props('modelValue') === EFECTIVO.id)
+    expect(medio, 'el medio de pago arranca en el primero de la lista').toBeTruthy()
+    wrapper.unmount()
+  })
+
+  it('con Pagar desde el montaje, se piden una sola vez', async () => {
+    const wrapper = await montar()
+    expect(pedidosMedios).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('sin Pagar no se piden nunca', async () => {
+    permisos = new Set(['Compras:Leer', 'Compras:Crear'])
+    const wrapper = await montar()
+    expect(pedidosMedios).toBe(0)
     wrapper.unmount()
   })
 })

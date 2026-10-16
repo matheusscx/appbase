@@ -547,6 +547,14 @@ export function useCompras() {
     return reparto
   }
 
+  /**
+   * "Factura 4521": tipo y folio con su espacio. El espacio dentro de un `<template v-if>`
+   * se perdía y la pantalla decía "Factura4521" (auditoría UX 06.19).
+   */
+  function etiquetaDocumento(c: { tipoDocumentoNombre: string | null, folio: string | null }): string {
+    return [c.tipoDocumentoNombre, c.folio].filter(Boolean).join(' ')
+  }
+
   return {
     totalLinea,
     subtotal,
@@ -572,5 +580,6 @@ export function useCompras() {
     proponerReparto,
     compararPorVencimiento,
     montoEsPositivo,
+    etiquetaDocumento,
   }
 }

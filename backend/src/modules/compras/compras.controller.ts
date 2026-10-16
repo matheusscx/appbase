@@ -24,6 +24,7 @@ import {
   resolverClaveIdempotencia,
 } from '../../common/decorators/clave-idempotencia.decorator';
 import { RbacService } from '../rbac/rbac.service';
+import { TercerosService } from '../terceros/terceros.service';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { ComprasService } from './compras.service';
 import { PresentacionesCompraService } from './presentaciones-compra.service';
@@ -32,6 +33,7 @@ import { CompraBorradorDto } from './dto/compra-borrador.dto';
 import { FindComprasDto } from './dto/find-compras.dto';
 import { QueryProductosCompraDto } from './dto/productos-compra.dto';
 import { AnularCompraDto } from './dto/anular-compra.dto';
+import { CrearProveedorCompraDto } from './dto/crear-proveedor-compra.dto';
 import {
   ActualizarDocumentoDto,
   CorregirDescuentoDto,
@@ -66,6 +68,7 @@ export class ComprasController {
     private readonly presentacionesService: PresentacionesCompraService,
     private readonly lecturaDteService: LecturaDteService,
     private readonly rbacService: RbacService,
+    private readonly tercerosService: TercerosService,
   ) {}
 
   /**
@@ -97,6 +100,38 @@ export class ComprasController {
   proveedores(@Req() req: Request) {
     const { tenantId } = req.user as { tenantId: string };
     return this.comprasService.proveedores(tenantId);
+  }
+
+  /**
+   * Alta de un proveedor en plena carga (auditoría UX 06.11, owner
+   * 2026-10-16): `Compras:Crear`, no `Terceros:Crear`. Quien recibe la factura
+   * de un proveedor nuevo lo crea sin pedirle a un admin, pero solo crea:
+   * editar y borrar terceros sigue siendo del módulo Terceros. Por eso es una
+   * ruta propia y angosta (el tipo lo fija el servidor, el tenant sale del
+   * token) y no `POST /terceros` abierto a un segundo permiso, que dejaría
+   * crear terceros de cualquier tipo.
+   */
+  @Post('proveedores')
+  @RequiresPermiso('Compras', 'Crear')
+  async crearProveedor(
+    @Req() req: Request,
+    @Body() dto: CrearProveedorCompraDto,
+  ) {
+    const { tenantId } = req.user as { tenantId: string };
+    const t = await this.tercerosService.create(tenantId, {
+      tipo: 'proveedor',
+      nombre: dto.nombre.trim(),
+      rut: dto.rut?.trim() || undefined,
+      correo: dto.correo,
+      telefono: dto.telefono?.trim() || undefined,
+      plazoPagoDias: dto.plazoPagoDias,
+    });
+    return {
+      id: t.id,
+      nombre: t.nombre,
+      rut: t.rut ?? null,
+      plazoPagoDias: t.plazoPagoDias ?? null,
+    };
   }
 
   /**

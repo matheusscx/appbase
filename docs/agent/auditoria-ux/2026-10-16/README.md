@@ -57,7 +57,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☑ | [06.1](06-compras-y-terceros.md) | P1 | Guardar o confirmar una compra descarta en silencio las líneas sin cantidad *(es 00.10)* — **hecho 2026-10-16** | medido | agente |
 | ☐ | [06.2](06-compras-y-terceros.md) | P1 | La cantidad de una compra acepta texto, cero y negativos, y falla en inglés *(parte en 00.11)* — *parcial 2026-10-16: mensaje y campo marcado tras el rechazo; cero, texto y negativos bloquean Guardar y Confirmar con su motivo junto al campo (lote 1); la coma decimal se avisa pero NO se normaliza a punto: aceptarla cambiaría qué se guarda y espera decisión del owner* | medido | agente |
 | ☑ | [06.3](06-compras-y-terceros.md) | P1 | "Confirmar recepción" no mira el total del documento y avisa recién después de confirmar — **hecho 2026-10-16** (el rechazo se marca en el campo Total, y lote 1: Confirmar no abre el modal sin el total obligatorio y marca el campo) | medido | agente |
-| ☐ | [06.4](06-compras-y-terceros.md) | P1 | Al recargar "Nueva compra", el medio de pago sale vacío y el botón apagado | medido | agente |
+| ☑ | [06.4](06-compras-y-terceros.md) | P1 | Al recargar "Nueva compra", el medio de pago sale vacío y el botón apagado — **hecho 2026-10-16** | medido | agente |
 | ☐ | [06.6](06-compras-y-terceros.md) | P1 | Un pago hecho no se puede anular desde la pantalla, salvo que sobre plata | medido | owner |
 | ☑ | [07.1](07-configuracion.md) | P1 | En Configuración, la columna de acciones queda fuera de la tarjeta en 15 pantallas *(causa en 00.9)* — **hecho 2026-10-16** | medido | agente |
 | ☐ | [07.2](07-configuracion.md) | P1 | Los formularios de Configuración rechazan con avisos en inglés, sin marcar el campo *(es 00.11)* — *parcial 2026-10-16: traducción global y campos en Ítems, Impresoras, Descuentos, Recargos; faltan Salones/mesa e Impuestos (fiscal, frente aparte)* | medido | agente |
@@ -686,31 +686,31 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
 | ☑ | [06.5](06-compras-y-terceros.md) | P2 | En la cabecera de la compra, lo que falta apaga "Guardar borrador" sin decir qué — **hecho 2026-10-16** | agente |
-| ☐ | [06.7](06-compras-y-terceros.md) | P2 | "Pagos" de Por pagar dice "Sin pagos registrados" aunque se acabe de pagar | agente |
-| ☐ | [06.8](06-compras-y-terceros.md) | P2 | Los botones de la línea de compra no tienen nombre y quitar no se deshace — **parcial 2026-10-16** (papelera, lápiz y selectores con nombre y a 44 px; queda el "Deshacer" del toast al quitar una línea) | agente |
-| ☐ | [06.9](06-compras-y-terceros.md) | P2 | La fecha de una compra sale en tres formatos distintos | agente |
+| ☑ | [06.7](06-compras-y-terceros.md) | P2 | "Pagos" de Por pagar dice "Sin pagos registrados" aunque se acabe de pagar — **hecho 2026-10-16** | agente |
+| ☑ | [06.8](06-compras-y-terceros.md) | P2 | Los botones de la línea de compra no tienen nombre y quitar no se deshace — **hecho 2026-10-16** (nombres y 44 px, y el aviso al quitar una línea trae "Deshacer") | agente |
+| ☑ | [06.9](06-compras-y-terceros.md) | P2 | La fecha de una compra sale en tres formatos distintos — **hecho 2026-10-16** | agente |
 | ☑ | [06.10](06-compras-y-terceros.md) | P2 | Sin permiso, Nueva compra y el detalle de compra quedan en blanco — **hecho 2026-10-16** | agente |
-| ☐ | [06.11](06-compras-y-terceros.md) | P2 | Sin permiso de Terceros, la pantalla dice "No hay terceros registrados" — **parcial 2026-10-16** (hecha la mitad de pantalla: sin permiso dice "Sin acceso a los terceros", no el vacío falso; falta que quien carga compras pueda crear el proveedor, que es el frente de permisos del backend) | agente + owner |
-| ☐ | [06.12](06-compras-y-terceros.md) | P2 | Pagar en efectivo sin caja abierta falla con un aviso lejos del botón | agente |
-| ☐ | [06.13](06-compras-y-terceros.md) | P2 | "Pagar todo lo que debo" no tiene atajo y "Pagar" se apaga sin explicar | agente |
+| ☑ | [06.11](06-compras-y-terceros.md) | P2 | Sin permiso de Terceros, la pantalla dice "No hay terceros registrados" — **hecho 2026-10-16** (sin permiso dice "Sin acceso", no el vacío falso; `POST /compras/proveedores` con `Compras:Crear`: crea solo proveedores y no abre el módulo Terceros; la carga ofrece "Nuevo proveedor") | agente + owner |
+| ☑ | [06.12](06-compras-y-terceros.md) | P2 | Pagar en efectivo sin caja abierta falla con un aviso lejos del botón — **hecho 2026-10-16** | agente |
+| ☑ | [06.13](06-compras-y-terceros.md) | P2 | "Pagar todo lo que debo" no tiene atajo y "Pagar" se apaga sin explicar — **hecho 2026-10-16** ("Pagar todo" solo precarga el monto; lo que se envía lo sigue decidiendo "Pagar") | agente |
 | ☑ | [06.14](06-compras-y-terceros.md) | P2 | En la tablet, la columna "Pago" de la lista de compras queda fuera de vista — **hecho 2026-10-16** (medido a 768: la lista entra, 672 de 672 px) | agente |
 | ☑ | [06.15](06-compras-y-terceros.md) | P2 | Un XML con RUT mal formado da un mensaje técnico y no deja elegir otro — **hecho 2026-10-16** | agente |
-| ☐ | [06.16](06-compras-y-terceros.md) | P2 | El formulario de Terceros no valida nada y los errores llegan por toast — *parcial 2026-10-16: Nombre y correo junto al campo; el formato de RUT no, porque el servidor no lo valida hoy* | agente |
+| ☐ | [06.16](06-compras-y-terceros.md) | P2 | El formulario de Terceros no valida nada y los errores llegan por toast — *parcial 2026-10-16: Nombre y correo junto al campo; el formato de RUT no, porque el servidor no lo valida hoy; se deja así a propósito (decisión 2026-10-16, grupo 06)* | agente |
 | ☑ | [06.17](06-compras-y-terceros.md) | P2 | Un filtro de compras sin resultados dice "No hay compras registradas" — **hecho 2026-10-16** | agente |
-| ☐ | [06.18](06-compras-y-terceros.md) | P2 | Tras pagar, el aviso no dice monto ni medio y "Pagar" sigue activo sin deuda | agente |
-| ☐ | [06.19](06-compras-y-terceros.md) | P2 | El documento se lee "FacturaAUDIT-001", sin espacio entre tipo y folio | agente |
-| ☐ | [06.20](06-compras-y-terceros.md) | P2 | Los botones de uso frecuente de Compras miden 16 a 32 px en la tablet — **parcial 2026-10-16** ("Corregir", "Corregir total o vencimiento", "Cargar descuento", "Agregar línea", la papelera y el radio "Sí, la pagué" a 44 px; queda el interruptor de Terceros) | agente |
-| ☐ | [06.22](06-compras-y-terceros.md) | P2 | En Por pagar, "Pagar" no se ve hasta tocar una fila de proveedor | agente |
-| ☐ | [06.23](06-compras-y-terceros.md) | P2 | El modal "¿Confirmar la recepción?" no muestra qué productos entran ni a qué costo | agente |
+| ☑ | [06.18](06-compras-y-terceros.md) | P2 | Tras pagar, el aviso no dice monto ni medio y "Pagar" sigue activo sin deuda — **hecho 2026-10-16** | agente |
+| ☑ | [06.19](06-compras-y-terceros.md) | P2 | El documento se lee "FacturaAUDIT-001", sin espacio entre tipo y folio — **hecho 2026-10-16** | agente |
+| ☑ | [06.20](06-compras-y-terceros.md) | P2 | Los botones de uso frecuente de Compras miden 16 a 32 px en la tablet — **hecho 2026-10-16** (botones de Compras, radio "Sí, la pagué" e interruptores de Terceros con área de 44 px) | agente |
+| ☑ | [06.22](06-compras-y-terceros.md) | P2 | En Por pagar, "Pagar" no se ve hasta tocar una fila de proveedor — **hecho 2026-10-16** | agente |
+| ☑ | [06.23](06-compras-y-terceros.md) | P2 | El modal "¿Confirmar la recepción?" no muestra qué productos entran ni a qué costo — **hecho 2026-10-16** | agente |
 | ☑ | [06.26](06-compras-y-terceros.md) | P2 | La columna "Pago" de la lista de compras sale vacía al recargar *(causa en 00.9)* — **hecho 2026-10-16** | agente |
 | ☑ | [06.21](06-compras-y-terceros.md) | P3 | Las filas de Compras no son enlaces: no abren en otra pestaña — **hecho 2026-10-16** | agente |
 | ☑ | [06.24](06-compras-y-terceros.md) | P3 | Voseo en Compras y Terceros *(lote 00.3)* — **hecho 2026-10-16** | agente |
 | ☑ | [06.25](06-compras-y-terceros.md) | P3 | El menú dice "Recepciones" y la pantalla dice "Compras" — **hecho 2026-10-16** | owner |
-| ☐ | [06.27](06-compras-y-terceros.md) | P3 | La insignia verde, "Confirmar recepción" y el placeholder de Compras se leen mal *(ver 00.8)* | agente |
+| ☑ | [06.27](06-compras-y-terceros.md) | P3 | La insignia verde, "Confirmar recepción" y el placeholder de Compras se leen mal *(ver 00.8)* — **hecho 2026-10-16** (tonos de 00.8 y texto guía de los selectores en `text-muted`) | agente |
 | ☑ | [06.28](06-compras-y-terceros.md) | P3 | El interruptor "Activo" de Terceros no tiene nombre y la lista no tiene buscador — **hecho 2026-10-16** | agente |
 | ☑ | [06.29](06-compras-y-terceros.md) | P3 | "Tercero" en pantalla (el local dice proveedor) y una ayuda que cita la especificación — **hecho 2026-10-16** | agente + owner |
-| ☐ | [06.30](06-compras-y-terceros.md) | P3 | Salir de "Nueva compra" con datos tipeados no avisa que se pierden | agente |
-| ☐ | [06.31](06-compras-y-terceros.md) | P3 | En la compra confirmada, "Total del documento" y "Total" repiten el mismo monto | agente |
+| ☑ | [06.30](06-compras-y-terceros.md) | P3 | Salir de "Nueva compra" con datos tipeados no avisa que se pierden — **hecho 2026-10-16** | agente |
+| ☑ | [06.31](06-compras-y-terceros.md) | P3 | En la compra confirmada, "Total del documento" y "Total" repiten el mismo monto — **hecho 2026-10-16** | agente |
 
 ### 07 · Configuración
 

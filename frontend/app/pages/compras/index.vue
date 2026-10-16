@@ -34,9 +34,9 @@ interface Opt { label: string, value: string }
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const router = useRouter()
-const { formatMonto } = useFormatters()
+const { formatMonto, formatFecha } = useFormatters()
 const { pageSize } = useUserPreferences()
-const { insigniaEstado, insigniaPago, estadoOptions } = useCompras()
+const { insigniaEstado, insigniaPago, estadoOptions, etiquetaDocumento } = useCompras()
 const permissionsStore = usePermissionsStore()
 
 // El nav abre esta página con Compras/Leer; crear exige Compras/Crear.
@@ -197,7 +197,7 @@ const columns = computed<TableColumn<CompraListItem>[]>(() => [
             <span
               class="whitespace-nowrap"
               :class="{ 'line-through text-muted': row.original.estado === 'anulada' }"
-            >{{ row.original.fechaDocumento }}</span>
+            >{{ formatFecha(row.original.fechaDocumento) }}</span>
           </template>
           <template #proveedorNombre-cell="{ row }">
             <span :class="{ 'line-through text-muted': row.original.estado === 'anulada' }">
@@ -212,7 +212,7 @@ const columns = computed<TableColumn<CompraListItem>[]>(() => [
               class="text-sm text-primary hover:underline"
               @click.stop
             >
-              {{ row.original.tipoDocumentoNombre }}<template v-if="row.original.folio"> {{ row.original.folio }}</template>
+              {{ etiquetaDocumento(row.original) }}
             </NuxtLink>
           </template>
           <template #ubicacionNombre-cell="{ row }">

@@ -348,7 +348,9 @@ const columns: TableColumn<Tercero>[] = [
                    el backend rechaza el restaurar, así que mostrar la
                    papelera sería ofrecer una acción que termina en 403. -->
               <div v-if="puedeEliminar" class="flex items-center gap-2">
-                <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+                <label class="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
+                  <USwitch v-model="verEliminados" aria-label="Ver eliminados" />
+                </label>
                 <span class="text-sm text-muted">Ver eliminados</span>
               </div>
               <UButton
@@ -390,12 +392,15 @@ const columns: TableColumn<Tercero>[] = [
 
           <template #activo-cell="{ row }">
             <div class="flex justify-end">
-              <USwitch
-                :aria-label="`Activo: ${row.original.nombre}`"
-                :model-value="row.original.activo"
-                :disabled="toggling.has(row.original.id) || !puedeActualizar || !!row.original.eliminadoEl"
-                @update:model-value="toggleActivo(row.original)"
-              />
+              <!-- La etiqueta le da al interruptor (36x20) un área de 44 px para el dedo. -->
+              <label class="inline-flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
+                <USwitch
+                  :aria-label="`Activo: ${row.original.nombre}`"
+                  :model-value="row.original.activo"
+                  :disabled="toggling.has(row.original.id) || !puedeActualizar || !!row.original.eliminadoEl"
+                  @update:model-value="toggleActivo(row.original)"
+                />
+              </label>
             </div>
           </template>
 

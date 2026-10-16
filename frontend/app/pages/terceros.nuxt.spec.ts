@@ -335,6 +335,33 @@ describe('terceros — cada control con el permiso de SU endpoint', () => {
   })
 })
 
+// Auditoría UX 06.20: el interruptor mide 36x20 px; en la tablet el dedo necesita 44.
+describe('terceros — los interruptores tienen un área tocable de 44 px', () => {
+  beforeEach(() => {
+    tercerosBackend = [tercero()]
+    reset()
+  })
+
+  it('el "Activo" de cada fila va dentro de una etiqueta de 44 px', async () => {
+    esAdmin = false
+    permisos = ['Terceros:Leer', 'Terceros:Actualizar']
+    const wrapper = await montar()
+    const interruptor = wrapper.find('button[role="switch"][aria-label^="Activo:"]')
+    expect(interruptor.exists()).toBe(true)
+    const area = interruptor.element.closest('label')
+    expect(area?.className).toContain('min-h-11')
+    expect(area?.className).toContain('min-w-11')
+  })
+
+  it('"Ver eliminados" también', async () => {
+    esAdmin = false
+    permisos = ['Terceros:Leer', 'Terceros:Eliminar']
+    const wrapper = await montar()
+    const area = wrapper.find('button[role="switch"][aria-label="Ver eliminados"]').element.closest('label')
+    expect(area?.className).toContain('min-h-11')
+  })
+})
+
 describe('terceros — papelera: eliminar respeta el toggle', () => {
   beforeEach(() => {
     tercerosBackend = [tercero()]

@@ -576,7 +576,7 @@ describe('ComprasService (borrador)', () => {
     const intento = service.crearBorrador(TENANT, USUARIO, dto());
     await expect(intento).rejects.toBeInstanceOf(ConflictException);
     await expect(service.crearBorrador(TENANT, USUARIO, dto())).rejects.toThrow(
-      'Ya cargaste Factura 4521 de Distribuidora X, con fecha 2026-09-15',
+      'Ya cargaste Factura 4521 de Distribuidora X, con fecha 15-09-2026',
     );
   });
 

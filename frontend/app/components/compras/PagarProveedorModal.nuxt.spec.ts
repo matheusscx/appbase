@@ -35,17 +35,30 @@ const DETALLE = {
   ],
   pagos: [],
 }
+/** Pagos vigentes del proveedor: un sobrante es saldo a favor. */
+let pagosFixture: unknown[] = []
 const MEDIOS = [
   { id: 'efectivo', nombre: 'Efectivo', esEfectivo: true },
   { id: 'transferencia', nombre: 'Transferencia', esEfectivo: false },
 ]
 
-mockNuxtImport('useToast', () => () => ({ add: vi.fn() }))
+let avisos: { title: string, color?: string }[] = []
+/** `GET /caja/activa`: `null` = sin caja abierta; el 403 de quien no tiene Mi caja lo da `cajaForbidden`. */
+let cajaActiva: { id: string } | null = { id: 'caja-1' }
+let cajaForbidden = false
+let tieneMiCaja = true
+
+mockNuxtImport('useToast', () => () => ({ add: (t: { title: string, color?: string }) => avisos.push(t) }))
+mockNuxtImport('usePermissionsStore', () => () => ({
+  get esAdmin() { return false },
+  can: (modulo: string) => modulo === 'MiCaja' ? tieneMiCaja : true,
+}))
 mockNuxtImport('useApiFetch', () => (url: string, opts?: { method?: string, body?: unknown, headers?: Record<string, string> }) => {
   const ruta = url.split('/api').pop()!
   llamadas.push({ url: ruta, method: opts?.method, body: opts?.body, headers: opts?.headers })
-  if (ruta.startsWith('/compras/por-pagar/')) return Promise.resolve(DETALLE)
+  if (ruta.startsWith('/compras/por-pagar/')) return Promise.resolve({ ...DETALLE, pagos: pagosFixture })
   if (ruta === '/compras/medios-pago') return Promise.resolve(MEDIOS)
+  if (ruta === '/caja/activa') return cajaForbidden ? Promise.reject({ status: 403 }) : Promise.resolve(cajaActiva)
   if (ruta === '/compras/pagos') return Promise.resolve({ id: 'pago-nuevo', ...(opts?.body as object) })
   return Promise.reject(new Error(`ruta no mockeada: ${ruta}`))
 })
@@ -89,6 +102,11 @@ async function enviar() {
 beforeEach(() => {
   document.body.innerHTML = ''
   llamadas.length = 0
+  avisos = []
+  pagosFixture = []
+  cajaActiva = { id: 'caja-1' }
+  cajaForbidden = false
+  tieneMiCaja = true
 })
 
 describe('PagarProveedorModal — la propuesta (spec § 5.1 y § 10, decisión 2)', () => {
@@ -177,3 +195,121 @@ describe('PagarProveedorModal — la propuesta (spec § 5.1 y § 10, decisión 2
     expect(document.body.querySelector('[data-qa="pagar-medio"]')).toBeNull()
   })
 })
+
+describe('PagarProveedorModal — pagar todo, motivo y caja (auditoría UX 06.13, 06.12, 06.18, 06.19)', () => {
+  it('06.19: cada compra se lee "Factura 2", con espacio entre el tipo y el folio', async () => {
+    await abrir()
+    expect(document.body.querySelector('[data-qa="pagar-fila-martes"]')!.textContent).toContain('Factura 2')
+  })
+
+  it('06.13: "Pagar todo" precarga el monto con lo que se debe; no envía nada hasta tocar Pagar', async () => {
+    const wrapper = await abrir()
+    const todo = document.body.querySelector<HTMLButtonElement>('[data-qa="pagar-todo"]')!
+    expect(todo.textContent).toContain('$200.000')
+    todo.click()
+    await new Promise(r => setTimeout(r, 20))
+    expect(llamadas.some(l => l.url === '/compras/pagos')).toBe(false)
+    expect(wrapper.findAllComponents({ name: 'MoneyInput' })[0]!.props('modelValue')).toBe('200000')
+    expect(valorFila('lunes')).toBe('120.000')
+    expect(valorFila('martes')).toBe('80.000')
+    await enviar()
+    expect(llamadas.find(l => l.url === '/compras/pagos')!.body).toMatchObject({ monto: '200000' })
+  })
+
+  it('06.13: "Pagar todo" descuenta el saldo a favor', async () => {
+    pagosFixture = [{ id: 'p-1', estado: 'vigente', monto: '60000', sobranteAFavor: '50000', fecha: '2026-09-01', metodoPagoNombre: 'Efectivo' }]
+    const wrapper = await abrir()
+    const todo = document.body.querySelector<HTMLButtonElement>('[data-qa="pagar-todo"]')!
+    expect(todo.textContent).toContain('$150.000')
+    todo.click()
+    await new Promise(r => setTimeout(r, 20))
+    expect(wrapper.findAllComponents({ name: 'MoneyInput' })[0]!.props('modelValue')).toBe('150000')
+  })
+
+  it('06.13: si el saldo a favor cubre todo, no hay "Pagar todo"', async () => {
+    pagosFixture = [{ id: 'p-1', estado: 'vigente', monto: '300000', sobranteAFavor: '300000', fecha: '2026-09-01', metodoPagoNombre: 'Efectivo' }]
+    await abrir()
+    expect(document.body.querySelector('[data-qa="pagar-todo"]')).toBeNull()
+  })
+
+  it('06.13: la compra sin precio no entra en "Pagar todo" y se avisa', async () => {
+    await abrir()
+    expect(document.body.querySelector('[data-qa="pagar-proveedor-modal"]')!.textContent).toContain('No incluye 1 compra sin precio')
+  })
+
+  it('06.13: sin monto, "Pagar" apagado dice por qué', async () => {
+    await abrir()
+    expect(boton().disabled).toBe(true)
+    expect(document.body.querySelector('[data-qa="pagar-motivo"]')!.textContent).toContain('Escribe el monto a pagar')
+  })
+
+  it('06.13: si el reparto supera el monto, el motivo dice cuánto', async () => {
+    const wrapper = await abrir()
+    await tipearMonto(wrapper, '1000')
+    const inputs = wrapper.findAllComponents({ name: 'MoneyInput' })
+    inputs[1]!.vm.$emit('update:modelValue', '3000')
+    await new Promise(r => setTimeout(r, 0))
+    expect(boton().disabled).toBe(true)
+    expect(document.body.querySelector('[data-qa="pagar-motivo"]')!.textContent).toContain('El reparto supera el monto en $2.000')
+  })
+
+  it('06.13: listo para pagar, no hay motivo', async () => {
+    const wrapper = await abrir()
+    await tipearMonto(wrapper, '1000')
+    expect(boton().disabled).toBe(false)
+    expect(document.body.querySelector('[data-qa="pagar-motivo"]')).toBeNull()
+  })
+
+  it('06.18: el aviso de éxito dice monto, proveedor y medio', async () => {
+    const wrapper = await abrir()
+    await tipearMonto(wrapper, '150000')
+    await enviar()
+    expect(avisos.map(a => a.title)).toContain('Pago de $150.000 registrado a Don Pedro (Efectivo)')
+  })
+
+  it('06.12: sin caja abierta, el pago en efectivo se apaga y el aviso lleva a "Mi caja"', async () => {
+    cajaActiva = null
+    const wrapper = await abrir()
+    await tipearMonto(wrapper, '1000')
+    const aviso = document.body.querySelector('[data-qa="pagar-sin-caja"]')!
+    expect(aviso.textContent).toContain('No tienes una caja abierta')
+    expect(aviso.querySelector('a')!.getAttribute('href')).toBe('/mi-caja')
+    expect(boton().disabled).toBe(true)
+    expect(document.body.querySelector('[data-qa="pagar-motivo"]')!.textContent).toContain('caja')
+  })
+
+  it('06.12: sin caja, pagar con otro medio sigue permitido', async () => {
+    cajaActiva = null
+    const wrapper = await abrir()
+    await tipearMonto(wrapper, '1000')
+    const menu = wrapper.findComponent({ name: 'USelectMenu' })
+    menu.vm.$emit('update:modelValue', 'transferencia')
+    await new Promise(r => setTimeout(r, 0))
+    expect(document.body.querySelector('[data-qa="pagar-sin-caja"]')).toBeNull()
+    expect(boton().disabled).toBe(false)
+  })
+
+  it('06.12: con caja abierta no hay aviso de caja', async () => {
+    const wrapper = await abrir()
+    await tipearMonto(wrapper, '1000')
+    expect(document.body.querySelector('[data-qa="pagar-sin-caja"]')).toBeNull()
+    expect(document.body.querySelector('[data-qa="pagar-aviso-efectivo"]')).toBeNull()
+    expect(boton().disabled).toBe(false)
+  })
+
+  it('06.12: quien no puede ver su caja conserva el aviso general y no se le apaga nada', async () => {
+    tieneMiCaja = false
+    const wrapper = await abrir()
+    await tipearMonto(wrapper, '1000')
+    expect(llamadas.some(l => l.url === '/caja/activa')).toBe(false)
+    expect(document.body.querySelector('[data-qa="pagar-aviso-efectivo"]')).toBeTruthy()
+    expect(boton().disabled).toBe(false)
+  })
+
+  it('06.12: el aviso general no aparece con el monto vacío', async () => {
+    tieneMiCaja = false
+    await abrir()
+    expect(document.body.querySelector('[data-qa="pagar-aviso-efectivo"]')).toBeNull()
+  })
+})
+

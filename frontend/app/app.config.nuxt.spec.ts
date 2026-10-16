@@ -4,7 +4,7 @@
 // objeto: un override con la clave mal escrita no falla, simplemente no se aplica.
 import { describe, it, expect } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
-import { UBadge, UCheckbox, UFormField, UInput, USwitch, UTextarea } from '#components'
+import { UBadge, UCheckbox, UFormField, UInput, USelect, USelectMenu, USwitch, UTextarea } from '#components'
 
 describe('app.config — insignias', () => {
   // Auditoría UX 01.17 y 05.17 (owner, 2026-10-16): ninguna insignia por debajo de 12 px.
@@ -57,5 +57,16 @@ describe('app.config — área táctil', () => {
   it('casilla: sin área agregada, el contenedor no le tapa el toque al botón', async () => {
     const wrapper = await mountSuspended(UCheckbox)
     expect(wrapper.find('button').element.parentElement!.className).not.toContain('after:')
+  })
+})
+
+describe('app.config — placeholder de los selectores', () => {
+  // Auditoría UX 06.27: el texto guía de "Proveedor", "Documento" y "Entra a" usaba `text-dimmed` (~2,6:1).
+  it.each([['USelectMenu', USelectMenu], ['USelect', USelect]])('%s: el texto guía va en text-muted', async (_n, Comp) => {
+    const wrapper = await mountSuspended(Comp, { props: { placeholder: 'Elige uno', items: ['a', 'b'] } })
+    const guia = wrapper.findAll('span').find(e => e.text() === 'Elige uno')
+    expect(guia, 'el texto guía').toBeTruthy()
+    expect(guia!.element.className).toContain('text-muted')
+    expect(guia!.element.className).not.toContain('text-dimmed')
   })
 })

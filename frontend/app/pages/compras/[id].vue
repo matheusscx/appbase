@@ -54,7 +54,7 @@ const unidadesMedidaStore = useUnidadesMedidaStore()
 const monedasStore = useMonedasStore()
 const {
   subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado, cantidadParaEditar,
-  cuerpoDocumento, fechaVencimientoSugerida,
+  cuerpoDocumento, fechaVencimientoSugerida, cantidadConUnidad,
 } = useCompras()
 const { puedeCrear } = usePermisosCrud('Compras')
 const permissionsStore = usePermissionsStore()
@@ -280,22 +280,45 @@ watch(
   },
 )
 
+// ── Alta de proveedor desde la carga (auditoría UX 06.11) ───────────────────
+
+const proveedorModalOpen = ref(false)
+
+function onProveedorCreado(p: Proveedor) {
+  proveedores.value = [...proveedores.value, p].sort((a, b) => a.nombre.localeCompare(b.nombre, 'es'))
+  onSeleccionarProveedor(p.id)
+}
+
 // ── Carga ──────────────────────────────────────────────────────────────────
 
 async function cargarCatalogos() {
   await unidadesMedidaStore.ensureLoaded()
-  const [tiposRes, provRes, , mediosRes] = await Promise.all([
+  const [tiposRes, provRes] = await Promise.all([
     useApiFetch<TipoDocumento[]>(`${apiUrl}/compras/tipos-documento`),
     useApiFetch<Proveedor[]>(`${apiUrl}/compras/proveedores`),
     cargarUbicaciones(),
-    // Solo con `Pagar` (spec § 5.1, decisión 12): sin el permiso el endpoint
-    // es 403, y el que carga sin pagar no necesita esta lista.
-    puedePagar.value ? useApiFetch<MedioPagoOpcion[]>(`${apiUrl}/compras/medios-pago`) : Promise.resolve([]),
   ])
   tipos.value = tiposRes
   proveedores.value = provRes
-  mediosPago.value = mediosRes as MedioPagoOpcion[]
 }
+
+/**
+ * Solo con `Pagar` (spec § 5.1, decisión 12): sin el permiso el endpoint es 403, y el que carga sin
+ * pagar no necesita esta lista. Se pide cuando `puedePagar` pasa a verdadero y no al montar: al
+ * recargar (F5) los permisos llegan después, y "Sí, la pagué" salía con el medio vacío (auditoría
+ * UX 06.4).
+ */
+async function cargarMediosPago() {
+  try {
+    mediosPago.value = await useApiFetch<MedioPagoOpcion[]>(`${apiUrl}/compras/medios-pago`)
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudieron cargar los medios de pago'), color: 'error' })
+  }
+}
+watch(puedePagar, (puede) => {
+  if (puede && !mediosPago.value.length) void cargarMediosPago()
+}, { immediate: true })
 
 function lineaDesdeDetalle(l: LineaDetalle): LineaForm {
   return {
@@ -366,9 +389,37 @@ function agregarLinea() {
   lineas.value.push(nuevaLinea())
 }
 
+function lineaTieneDatos(l: LineaForm): boolean {
+  return !!(l.itemId || l.cantidad.trim() || l.precioUnitario || l.seriesTexto.trim() || l.codigoLote.trim())
+}
+
+/**
+ * Quitar es un toque, pegado al total de la línea: si la línea traía algo tipeado, el aviso
+ * ofrece "Deshacer" y la devuelve en su lugar (auditoría UX 06.8). Una línea vacía no avisa.
+ */
 function quitarLinea(key: string) {
+  const posicion = lineas.value.findIndex(l => l.key === key)
+  if (posicion < 0) return
+  const quitada = lineas.value[posicion]!
+  const eraLaUnica = lineas.value.length === 1
   lineas.value = lineas.value.filter(l => l.key !== key)
   if (!lineas.value.length) lineas.value.push(nuevaLinea())
+  if (!lineaTieneDatos(quitada)) return
+  toast.add({
+    title: 'Línea quitada',
+    color: 'neutral',
+    actions: [{
+      label: 'Deshacer',
+      color: 'neutral',
+      variant: 'outline',
+      onClick: () => {
+        // Si era la única, lo que hay ahora es la línea vacía que se agregó sola: la devuelta ocupa su lugar.
+        const resto = eraLaUnica && lineas.value.length === 1 && !lineaTieneDatos(lineas.value[0]!) ? [] : lineas.value
+        resto.splice(Math.min(posicion, resto.length), 0, quitada)
+        lineas.value = [...resto]
+      },
+    }],
+  })
 }
 
 type CampoLinea = 'producto' | 'cantidad' | 'series' | 'lote'
@@ -791,6 +842,16 @@ function pedirConfirmacion() {
 const ubicacionNombre = computed(() =>
   ubicaciones.value.find(u => u.id === form.value.ubicacionId)?.nombre ?? '',
 )
+/** Lo que entra, línea por línea, para leerlo antes de confirmar (auditoría UX 06.23). */
+const resumenLineas = computed(() => lineasCargadas.value.map((l) => {
+  const unidad = presentacionDe(l)?.nombre ?? l.unidadCodigo
+  return {
+    key: l.key,
+    nombre: catalogoProductos.porId.get(l.itemId)?.nombre ?? '—',
+    cantidad: cantidadConUnidad(l.cantidad, unidad),
+    precio: l.precioUnitario ? formatMonto(l.precioUnitario) : null,
+  }
+}))
 const lineasSinPrecio = computed(() =>
   lineasCargadas.value.filter(l => !l.precioUnitario).length,
 )
@@ -822,6 +883,11 @@ watch(confirmarOpen, (open) => {
   pagoMedioId.value = mediosPago.value[0]?.id ?? ''
   pagoMonto.value = totalParaConfirmar.value ?? ''
   pagoReferencia.value = ''
+})
+
+// Si los medios llegan con el modal ya abierto, el medio arranca en el primero igual.
+watch(mediosPago, (medios) => {
+  if (!pagoMedioId.value) pagoMedioId.value = medios[0]?.id ?? ''
 })
 
 /** El body de `pago` para `POST /compras/:id/confirmar` (spec § 7): solo lo
@@ -931,13 +997,23 @@ const titulo = computed(() => {
 // de su propio `router.replace`, así esta misma navegación no se frena a sí
 // misma. Precedente: `pages/salones/index.vue:1079`.
 
+/**
+ * Lo tipeado a mano en una compra nueva también se pierde al salir (auditoría UX 06.30). Una vez
+ * guardada hay compra con id y el borrador vive en el servidor: no hay nada que perder.
+ */
+const tipeadoSinGuardar = computed(() =>
+  esNueva.value && !compra.value
+  && (!!form.value.proveedorId || lineas.value.some(l => l.itemId)),
+)
+
 onBeforeRouteLeave(() => {
-  if (!origenDte.value) return true
-  return confirm('Vas a salir sin guardar la factura que cargaste desde el XML. ¿Seguro?')
+  if (origenDte.value) return confirm('Vas a salir sin guardar la factura que cargaste desde el XML. ¿Seguro?')
+  if (tipeadoSinGuardar.value) return confirm('Vas a salir sin guardar lo que cargaste. ¿Seguro?')
+  return true
 })
 
 function onBeforeUnload(e: BeforeUnloadEvent) {
-  if (!origenDte.value) return
+  if (!origenDte.value && !tipeadoSinGuardar.value) return
   e.preventDefault()
   e.returnValue = ''
 }
@@ -1057,6 +1133,15 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
                 placeholder="A quién se le compró"
                 class="w-full"
                 @update:model-value="onSeleccionarProveedor"
+              />
+              <UButton
+                variant="link"
+                size="md"
+                icon="i-lucide-plus"
+                class="min-h-11 -ml-2.5"
+                label="Nuevo proveedor"
+                data-qa="compra-proveedor-nuevo"
+                @click="() => { proveedorModalOpen = true }"
               />
             </UFormField>
             <UFormField label="Documento" required>
@@ -1274,6 +1359,18 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
                 Entran {{ lineasCargadas.length }} {{ lineasCargadas.length === 1 ? 'línea' : 'líneas' }}
                 a <strong>{{ ubicacionNombre }}</strong>: el stock sube ahora.
               </p>
+              <ul class="divide-y divide-default rounded-md border border-default" data-qa="compra-confirmar-lineas">
+                <li v-for="r in resumenLineas" :key="r.key" class="flex items-baseline justify-between gap-3 px-3 py-2">
+                  <span class="min-w-0 truncate">{{ r.nombre }}</span>
+                  <span class="shrink-0 tabular-nums text-muted">
+                    {{ r.cantidad }} · {{ r.precio ? `a ${r.precio}` : 'sin precio' }}
+                  </span>
+                </li>
+              </ul>
+              <p class="flex items-baseline justify-between gap-3 font-medium" data-qa="compra-confirmar-total">
+                <span>{{ totalDocumentoVisible ? 'Total del documento' : 'Total' }}</span>
+                <span class="tabular-nums">{{ totalParaConfirmar != null ? formatMonto(totalParaConfirmar) : '—' }}</span>
+              </p>
               <p v-if="lineasSinPrecio > 0" class="text-muted">
                 {{ lineasSinPrecio }} {{ lineasSinPrecio === 1 ? 'línea entra' : 'líneas entran' }} sin precio:
                 el costo se completa cuando llegue la factura.
@@ -1297,7 +1394,14 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
                 :ui="{ item: 'items-center', label: 'py-3 cursor-pointer' }"
                 data-qa="compra-pago-si-no"
               />
-              <div v-if="pagarAhora" class="mt-3 flex flex-col gap-3">
+              <p
+                v-if="pagarAhora && !mediosPago.length"
+                class="mt-3 text-sm text-warning"
+                data-qa="compra-pago-sin-medios"
+              >
+                No hay medios de pago habilitados. Pídele al administrador que active uno, o confirma sin pago.
+              </p>
+              <div v-else-if="pagarAhora" class="mt-3 flex flex-col gap-3">
                 <UFormField label="Medio de pago">
                   <USelectMenu
                     v-model="pagoMedioId"
@@ -1364,6 +1468,12 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
           :presentacion="presentacionEnEdicion"
           @guardada="onPresentacionGuardada"
           @retirada="onPresentacionRetirada"
+        />
+
+        <ComprasCrearProveedorModal
+          v-if="esNueva && editable"
+          v-model:open="proveedorModalOpen"
+          @creado="onProveedorCreado"
         />
 
         <ComprasCargarDteModal

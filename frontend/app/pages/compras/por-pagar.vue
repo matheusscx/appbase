@@ -51,7 +51,7 @@ interface ProveedorDetalle {
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatMonto, formatFecha } = useFormatters()
-const { insigniaPago, textoDeuda, montoEsPositivo } = useCompras()
+const { insigniaPago, textoDeuda, montoEsPositivo, etiquetaDocumento } = useCompras()
 
 const proveedores = ref<ProveedorPorPagar[]>([])
 const loading = ref(false)
@@ -60,6 +60,9 @@ const errorCarga = ref(false)
 const seleccionado = ref<ProveedorPorPagar | null>(null)
 const detalle = ref<ProveedorDetalle | null>(null)
 const cargandoDetalle = ref(false)
+
+/** Cargado el detalle y sin compras abiertas: no hay nada que pagar (auditoría UX 06.18). */
+const alDia = computed(() => !!detalle.value && !cargandoDetalle.value && detalle.value.compras.length === 0)
 
 const pagarOpen = ref(false)
 const anularOpen = ref(false)
@@ -147,7 +150,7 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
         <CrudPageHeader
           large
           title="Por pagar"
-          description="Lo que se le debe a cada proveedor, ordenado por lo más urgente."
+          description="Lo que se le debe a cada proveedor, ordenado por lo más urgente. Toca un proveedor para ver sus compras y pagar."
         />
 
         <CrudTable
@@ -203,12 +206,16 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
               <h2 class="text-sm font-medium text-default">
                 {{ seleccionado.proveedorNombre || '—' }}
               </h2>
-              <UButton
-                icon="i-lucide-hand-coins"
-                label="Pagar"
-                data-qa="por-pagar-pagar-abrir"
-                @click="() => { pagarOpen = true }"
-              />
+              <div class="flex items-center gap-2">
+                <UBadge v-if="alDia" label="Al día" color="success" variant="subtle" data-qa="por-pagar-al-dia" />
+                <UButton
+                  icon="i-lucide-hand-coins"
+                  label="Pagar"
+                  :disabled="alDia"
+                  data-qa="por-pagar-pagar-abrir"
+                  @click="() => { pagarOpen = true }"
+                />
+              </div>
             </div>
           </template>
 
@@ -225,9 +232,7 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
                   <span class="whitespace-nowrap">{{ formatFecha(row.original.fechaDocumento) }}</span>
                 </template>
                 <template #folio-cell="{ row }">
-                  <span class="text-sm">
-                    {{ row.original.tipoDocumentoNombre }}<template v-if="row.original.folio"> {{ row.original.folio }}</template>
-                  </span>
+                  <span class="text-sm">{{ etiquetaDocumento(row.original) }}</span>
                 </template>
                 <template #fechaVencimiento-cell="{ row }">
                   <span class="whitespace-nowrap">{{ row.original.fechaVencimiento ? formatFecha(row.original.fechaVencimiento) : '—' }}</span>
@@ -245,7 +250,7 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
                 </template>
                 <template #empty>
                   <div class="py-6 text-center text-sm text-muted">
-                    Sin compras abiertas.
+                    Al día: no tiene compras abiertas.
                   </div>
                 </template>
               </CrudTable>
@@ -253,7 +258,7 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
 
             <div class="mt-6 space-y-2">
               <h3 class="text-sm font-medium text-default">
-                Pagos
+                Pagos con saldo a favor
               </h3>
               <CrudTable :data="detalle.pagos" :columns="columnsPagos" data-qa="por-pagar-pagos">
                 <template #fecha-cell="{ row }">
@@ -290,7 +295,7 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
                 </template>
                 <template #empty>
                   <div class="py-6 text-center text-sm text-muted">
-                    Sin pagos registrados.
+                    No hay pagos con saldo a favor.
                   </div>
                 </template>
               </CrudTable>
