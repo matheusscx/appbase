@@ -8,33 +8,43 @@ describe('PaqueteConfiguracionService', () => {
     query: jest.fn(),
     transaccion: (cb: () => unknown) => cb(),
   };
-  const service = new PaqueteConfiguracionService(db as never);
+  const tarifas = { hayDefecto: jest.fn() };
+  const service = new PaqueteConfiguracionService(
+    db as never,
+    tarifas as never,
+  );
 
-  beforeEach(() => db.query.mockReset());
+  beforeEach(() => {
+    db.query.mockReset();
+    tarifas.hayDefecto.mockReset().mockResolvedValue(true);
+  });
 
-  it('obtener sin fila: no configurada, montos en 0', async () => {
+  it('obtener sin fila: no configurada, precio en 0', async () => {
     db.query.mockResolvedValueOnce([]);
     await expect(service.obtener(TENANT)).resolves.toEqual({
       configurada: false,
       precioEnvioDefecto: '0',
-      pagoRepartidorDefecto: '0',
     });
     const sql = db.query.mock.calls[0][0] as string;
     expect(sql).toMatch(/tenant_id = \$1/);
     expect(sql).toMatch(/eliminado_el IS NULL/);
   });
 
-  it('obtener con fila: configurada, con los montos de la fila', async () => {
-    db.query.mockResolvedValueOnce([
-      {
-        precio_envio_defecto: '10000.0000',
-        pago_repartidor_defecto: '5000.0000',
-      },
-    ]);
+  it('obtener con fila y con tarifa por defecto: configurada', async () => {
+    db.query.mockResolvedValueOnce([{ precio_envio_defecto: '10000.0000' }]);
     await expect(service.obtener(TENANT)).resolves.toEqual({
       configurada: true,
       precioEnvioDefecto: '10000.0000',
-      pagoRepartidorDefecto: '5000.0000',
+    });
+    expect(tarifas.hayDefecto).toHaveBeenCalledWith(TENANT);
+  });
+
+  it('obtener con fila pero sin tarifa por defecto: NO configurada (falta con qué pagar)', async () => {
+    tarifas.hayDefecto.mockResolvedValue(false);
+    db.query.mockResolvedValueOnce([{ precio_envio_defecto: '10000.0000' }]);
+    await expect(service.obtener(TENANT)).resolves.toEqual({
+      configurada: false,
+      precioEnvioDefecto: '10000.0000',
     });
   });
 
@@ -47,41 +57,27 @@ describe('PaqueteConfiguracionService', () => {
     );
   });
 
-  it('exigirDefaults con fila: devuelve los dos montos', async () => {
-    db.query.mockResolvedValueOnce([
-      {
-        precio_envio_defecto: '10000.0000',
-        pago_repartidor_defecto: '5000.0000',
-      },
-    ]);
+  it('exigirDefaults con fila: devuelve el precio', async () => {
+    db.query.mockResolvedValueOnce([{ precio_envio_defecto: '10000.0000' }]);
     await expect(service.exigirDefaults(TENANT)).resolves.toEqual({
       precioEnvio: '10000.0000',
-      pagoRepartidor: '5000.0000',
     });
   });
 
-  it('guardar: upsert por tenant sobre el índice parcial, devuelve configurada', async () => {
+  it('guardar: upsert por tenant sobre el índice parcial; configurada depende de la tarifa por defecto', async () => {
+    tarifas.hayDefecto.mockResolvedValue(false);
     db.query.mockResolvedValueOnce([
-      [
-        {
-          precio_envio_defecto: '10000.0000',
-          pago_repartidor_defecto: '5000.0000',
-        },
-      ],
+      [{ precio_envio_defecto: '10000.0000' }],
       1,
     ]);
     await expect(
-      service.guardar(TENANT, {
-        precioEnvioDefecto: '10000',
-        pagoRepartidorDefecto: '5000',
-      }),
+      service.guardar(TENANT, { precioEnvioDefecto: '10000' }),
     ).resolves.toEqual({
-      configurada: true,
+      configurada: false,
       precioEnvioDefecto: '10000.0000',
-      pagoRepartidorDefecto: '5000.0000',
     });
     const [sql, params] = db.query.mock.calls[0] as [string, unknown[]];
     expect(sql).toMatch(/ON CONFLICT \(tenant_id\) WHERE eliminado_el IS NULL/);
-    expect(params).toEqual([TENANT, '10000', '5000']);
+    expect(params).toEqual([TENANT, '10000']);
   });
 });

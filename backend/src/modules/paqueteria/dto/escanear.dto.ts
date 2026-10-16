@@ -1,6 +1,7 @@
 import {
   IsBoolean,
   IsNotEmpty,
+  IsOptional,
   IsString,
   IsUUID,
   MaxLength,
@@ -25,4 +26,9 @@ export class EscanearDto {
   /** Solo vale para un paquete que este escaneo crea; uno existente conserva el suyo. */
   @IsBoolean()
   cobroEnDestino: boolean;
+
+  /** Solo vale para un paquete que este escaneo crea; ausente = se paga con la del repartidor o la por defecto. */
+  @IsOptional()
+  @IsUUID()
+  tarifaPagoId?: string;
 }

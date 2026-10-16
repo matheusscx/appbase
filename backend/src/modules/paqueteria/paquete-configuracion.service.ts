@@ -3,19 +3,22 @@ import { Db } from '../../common/db/db.service';
 import { unwrap } from '../../common/utils/pg-returning.util';
 import { PutPaqueteConfiguracionDto } from './dto/put-paquete-configuracion.dto';
 import type { PaqueteConfiguracionRespuesta } from './paqueteria.types';
+import { TarifasPagoService } from './tarifas-pago.service';
 
 interface ConfiguracionRow {
   precio_envio_defecto: string;
-  pago_repartidor_defecto: string;
 }
 
 @Injectable()
 export class PaqueteConfiguracionService {
-  constructor(private readonly db: Db) {}
+  constructor(
+    private readonly db: Db,
+    private readonly tarifas: TarifasPagoService,
+  ) {}
 
   private async leer(tenantId: string): Promise<ConfiguracionRow | undefined> {
     const rows: ConfiguracionRow[] = await this.db.query(
-      `SELECT precio_envio_defecto, pago_repartidor_defecto
+      `SELECT precio_envio_defecto
          FROM paquete_configuracion
         WHERE tenant_id = $1 AND eliminado_el IS NULL`,
       [tenantId],
@@ -23,36 +26,24 @@ export class PaqueteConfiguracionService {
     return rows[0];
   }
 
+  /** Configurada = hay precio de envío por defecto Y una tarifa de pago por defecto. */
   async obtener(tenantId: string): Promise<PaqueteConfiguracionRespuesta> {
     const fila = await this.leer(tenantId);
-    if (!fila) {
-      return {
-        configurada: false,
-        precioEnvioDefecto: '0',
-        pagoRepartidorDefecto: '0',
-      };
-    }
     return {
-      configurada: true,
-      precioEnvioDefecto: fila.precio_envio_defecto,
-      pagoRepartidorDefecto: fila.pago_repartidor_defecto,
+      configurada: !!fila && (await this.tarifas.hayDefecto(tenantId)),
+      precioEnvioDefecto: fila?.precio_envio_defecto ?? '0',
     };
   }
 
-  /** Los montos con los que se crea un paquete que no trae los suyos. Sin configurar no hay montos que inventar. */
-  async exigirDefaults(
-    tenantId: string,
-  ): Promise<{ precioEnvio: string; pagoRepartidor: string }> {
+  /** El precio con el que se crea un paquete que no trae el suyo. Sin configurar no hay monto que inventar. */
+  async exigirDefaults(tenantId: string): Promise<{ precioEnvio: string }> {
     const fila = await this.leer(tenantId);
     if (!fila) {
       throw new BadRequestException(
         'Configurá los valores por defecto de Paquetería antes de cargar paquetes.',
       );
     }
-    return {
-      precioEnvio: fila.precio_envio_defecto,
-      pagoRepartidor: fila.pago_repartidor_defecto,
-    };
+    return { precioEnvio: fila.precio_envio_defecto };
   }
 
   async guardar(
@@ -62,22 +53,19 @@ export class PaqueteConfiguracionService {
     const filas = await this.db.transaccion(async () =>
       unwrap<ConfiguracionRow>(
         await this.db.query(
-          `INSERT INTO paquete_configuracion
-             (tenant_id, precio_envio_defecto, pago_repartidor_defecto)
-           VALUES ($1, $2, $3)
+          `INSERT INTO paquete_configuracion (tenant_id, precio_envio_defecto)
+           VALUES ($1, $2)
            ON CONFLICT (tenant_id) WHERE eliminado_el IS NULL
            DO UPDATE SET precio_envio_defecto = EXCLUDED.precio_envio_defecto,
-                         pago_repartidor_defecto = EXCLUDED.pago_repartidor_defecto,
                          actualizado_el = now()
-           RETURNING precio_envio_defecto, pago_repartidor_defecto`,
-          [tenantId, dto.precioEnvioDefecto, dto.pagoRepartidorDefecto],
+           RETURNING precio_envio_defecto`,
+          [tenantId, dto.precioEnvioDefecto],
         ),
       ),
     );
     return {
-      configurada: true,
+      configurada: await this.tarifas.hayDefecto(tenantId),
       precioEnvioDefecto: filas[0].precio_envio_defecto,
-      pagoRepartidorDefecto: filas[0].pago_repartidor_defecto,
     };
   }
 }

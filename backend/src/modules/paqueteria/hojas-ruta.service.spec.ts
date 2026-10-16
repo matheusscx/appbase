@@ -21,10 +21,15 @@ describe('HojasRutaService', () => {
   };
   const repartidores = { exigirActivo: jest.fn() };
   const configuracion = { exigirDefaults: jest.fn() };
+  const tarifas = {
+    exigirActivaDelTenant: jest.fn(),
+    exigirDefecto: jest.fn(),
+  };
   const service = new HojasRutaService(
     db as never,
     repartidores as never,
     configuracion as never,
+    tarifas as never,
   );
   const detalle = jest.spyOn(service, 'detalle');
   const detalleFalso = { id: HOJA } as HojaRutaDetalle;
@@ -76,8 +81,9 @@ describe('HojasRutaService', () => {
     repartidores.exigirActivo.mockReset().mockResolvedValue({});
     configuracion.exigirDefaults.mockReset().mockResolvedValue({
       precioEnvio: '10000.0000',
-      pagoRepartidor: '5000.0000',
     });
+    tarifas.exigirActivaDelTenant.mockReset().mockResolvedValue(undefined);
+    tarifas.exigirDefecto.mockReset().mockResolvedValue(undefined);
     detalle.mockReset().mockResolvedValue(detalleFalso);
   });
 
@@ -140,6 +146,44 @@ describe('HojasRutaService', () => {
       );
     });
 
+    it('sin ninguna tarifa y código nuevo → 400, y no crea el paquete', async () => {
+      tarifas.exigirDefecto.mockRejectedValue(
+        new BadRequestException('Cargá al menos una tarifa de pago'),
+      );
+      responder(hojaAbierta);
+      await expect(escanear()).rejects.toThrow(/Cargá al menos una tarifa/);
+      expect(sqls().some((s) => /INSERT INTO paquetes/.test(s))).toBe(false);
+    });
+
+    it('código nuevo con tarifaPagoId: la valida con cerrojo y la guarda en el paquete', async () => {
+      responder(
+        hojaAbierta,
+        [/INSERT INTO paquetes/, [[{ paquete_id: PAQUETE }], 1]],
+        lineasDelPaquete(),
+      );
+      await service.escanear(TENANT, {
+        repartidorId: REPARTIDOR,
+        fecha: FECHA,
+        codigo: '461',
+        cobroEnDestino: false,
+        tarifaPagoId: 'tarifa-colina',
+      });
+      expect(tarifas.exigirActivaDelTenant).toHaveBeenCalledWith(
+        TENANT,
+        'tarifa-colina',
+        { bloquear: true },
+      );
+      expect(tarifas.exigirDefecto).not.toHaveBeenCalled();
+      const i = sqls().findIndex((s) => /INSERT INTO paquetes/.test(s));
+      expect(db.query.mock.calls[i][1]).toEqual([
+        TENANT,
+        '461',
+        false,
+        '10000.0000',
+        'tarifa-colina',
+      ]);
+    });
+
     it('código nuevo: crea el paquete con el interruptor y los defaults, y lo asigna', async () => {
       responder(
         hojaAbierta,
@@ -158,7 +202,7 @@ describe('HojasRutaService', () => {
         '461',
         true,
         '10000.0000',
-        '5000.0000',
+        null,
       ]);
       expect(sqls().some((s) => /INSERT INTO hoja_ruta_paquetes/.test(s))).toBe(
         true,
@@ -377,6 +421,8 @@ describe('HojasRutaService', () => {
       total_entregados: null,
       total_cobro_destino: null,
       monto_cobrado_destino: null,
+      monto_cobrado_efectivo: null,
+      monto_cobrado_transferencia: null,
       monto_pago_repartidor: null,
       monto_total_general: null,
       neto_a_rendir: null,
@@ -403,6 +449,8 @@ describe('HojasRutaService', () => {
               entregados: 2,
               cobro_destino: 1,
               monto_cobrado_destino: '0.3000',
+              monto_cobrado_efectivo: '0.2000',
+              monto_cobrado_transferencia: '0.1000',
               monto_pago_repartidor: '0.1000',
               monto_total_general: '20000.0000',
             },
@@ -417,6 +465,8 @@ describe('HojasRutaService', () => {
         // 0.3 − 0.1 con number da 0.19999999999999998
         netoARendir: '0.2000',
         montoTotalGeneral: '20000.0000',
+        montoCobradoEfectivo: '0.2000',
+        montoCobradoTransferencia: '0.1000',
         lineas: [],
       });
     });
@@ -432,6 +482,8 @@ describe('HojasRutaService', () => {
             total_entregados: 3,
             total_cobro_destino: 1,
             monto_cobrado_destino: '10000.0000',
+            monto_cobrado_efectivo: '7000.0000',
+            monto_cobrado_transferencia: '3000.0000',
             monto_pago_repartidor: '15000.0000',
             monto_total_general: '30000.0000',
           }),
@@ -444,8 +496,12 @@ describe('HojasRutaService', () => {
         asignados: 4,
         enRuta: 0,
         netoARendir: '-5000.0000',
+        montoCobradoEfectivo: '7000.0000',
+        montoCobradoTransferencia: '3000.0000',
       });
-      expect(sqls().some((s) => /LEFT JOIN/.test(s))).toBe(false);
+      expect(sqls().some((s) => /FROM hojas_ruta h\s+LEFT JOIN/.test(s))).toBe(
+        false,
+      );
     });
 
     it('totales: cada tabla unida filtra tenant y borrado', async () => {
@@ -461,6 +517,16 @@ describe('HojasRutaService', () => {
         /p\.tenant_id = h\.tenant_id AND p\.eliminado_el IS NULL/,
       );
     });
+
+    it('totales: el pago sale de la línea (no del paquete) y el cobrado se parte por medio', async () => {
+      responder();
+      await service.totales(TENANT, [HOJA]);
+      const sql = sqls()[0];
+      expect(sql).toMatch(/SUM\(l\.pago_repartidor\)/);
+      expect(sql).not.toMatch(/p\.pago_repartidor/);
+      expect(sql).toMatch(/medio_cobro = 'transferencia'/);
+      expect(sql).toMatch(/medio_cobro IS DISTINCT FROM 'transferencia'/);
+    });
   });
 
   describe('escritura de líneas', () => {
@@ -468,19 +534,26 @@ describe('HojasRutaService', () => {
       /SELECT estado FROM hojas_ruta/,
       [{ estado }],
     ];
-    const lineaPropia: Respuesta = [
-      /SELECT hoja_ruta_paquete_id AS id FROM hoja_ruta_paquetes/,
-      [{ id: 'l1' }],
+    const lineaPropia = (estado = 'en_ruta'): Respuesta => [
+      /SELECT hoja_ruta_paquete_id AS id, estado FROM hoja_ruta_paquetes/,
+      [{ id: 'l1', estado }],
     ];
-    const paquete: Respuesta = [
-      /SELECT codigo FROM paquetes/,
-      [{ codigo: 'ABC' }],
+    const paquete = (cobro = true): Respuesta => [
+      /SELECT codigo, cobro_en_destino FROM paquetes/,
+      [{ codigo: 'ABC', cobro_en_destino: cobro }],
     ];
-    const marcar = (estado: 'en_ruta' | 'entregado' | 'no_entregado') =>
-      service.marcar(TENANT, HOJA, PAQUETE, estado);
+    // El UPDATE … FROM que fija el pago devuelve la línea si encontró una tarifa que aplicar.
+    const fijaElPago: Respuesta = [
+      /UPDATE hoja_ruta_paquetes l\s+SET estado = 'entregado'/,
+      [[{ id: 'l1' }], 1],
+    ];
+    const marcar = (
+      estado: 'en_ruta' | 'entregado' | 'no_entregado',
+      medioCobro?: 'efectivo' | 'transferencia',
+    ) => service.marcar(TENANT, HOJA, PAQUETE, estado, medioCobro);
 
     it('toda escritura bloquea la hoja con FOR UPDATE antes de tocar líneas', async () => {
-      responder(hojaDe('abierta'), lineaPropia, paquete);
+      responder(hojaDe('abierta'), lineaPropia(), paquete(), fijaElPago);
       await marcar('entregado');
       const todas = sqls();
       expect(todas[0]).toMatch(/FROM hojas_ruta[\s\S]*FOR UPDATE/);
@@ -507,7 +580,7 @@ describe('HojasRutaService', () => {
 
       it('el paquete no está en la hoja: 404', async () => {
         responder(hojaDe('abierta'), [
-          /SELECT hoja_ruta_paquete_id AS id FROM hoja_ruta_paquetes/,
+          /SELECT hoja_ruta_paquete_id AS id, estado FROM hoja_ruta_paquetes/,
           [],
         ]);
         await expect(marcar('entregado')).rejects.toBeInstanceOf(
@@ -518,8 +591,8 @@ describe('HojasRutaService', () => {
       it('entregado con otra línea viva en_ruta/entregado en otra hoja: 409 que nombra al repartidor', async () => {
         responder(
           hojaDe('abierta'),
-          lineaPropia,
-          paquete,
+          lineaPropia(),
+          paquete(),
           lineasDelPaquete(
             linea({ id: 'l1', estado: 'no_entregado', hoja_ruta_id: HOJA }),
             linea({ id: 'l9', estado: 'en_ruta' }),
@@ -537,7 +610,7 @@ describe('HojasRutaService', () => {
       });
 
       it('toma el cerrojo del paquete (sin borrados) ANTES de leer sus otras líneas', async () => {
-        responder(hojaDe('abierta'), lineaPropia, paquete);
+        responder(hojaDe('abierta'), lineaPropia(), paquete());
         await marcar('en_ruta');
         const todas = sqls();
         const cerrojo = todas.findIndex((x) =>
@@ -551,7 +624,7 @@ describe('HojasRutaService', () => {
       });
 
       it('no_entregado no necesita el cerrojo del paquete y escribe el estado', async () => {
-        responder(hojaDe('abierta'), lineaPropia);
+        responder(hojaDe('abierta'), lineaPropia());
         await marcar('no_entregado');
         expect(sqls().some((x) => /FROM paquetes/.test(x))).toBe(false);
         const update = db.query.mock.calls.find((c) =>
@@ -560,14 +633,108 @@ describe('HojasRutaService', () => {
         expect(update[1]).toEqual([TENANT, 'l1', 'no_entregado']);
       });
 
+      it('entregado: fija tarifa y pago con la regla compartida, en una sentencia y sin leer tarifas en TypeScript', async () => {
+        responder(hojaDe('abierta'), lineaPropia(), paquete(true), fijaElPago);
+        await marcar('entregado');
+        const update = db.query.mock.calls.find((c) =>
+          /UPDATE hoja_ruta_paquetes l/.test(c[0] as string),
+        )!;
+        expect(update[0]).toMatch(/tarifa_pago_id = tr\.tarifa_pago_id/);
+        expect(update[0]).toMatch(/pago_repartidor = tr\.monto/);
+        // Paquete → repartidor → por defecto, todo dentro del UPDATE.
+        expect(update[0]).toMatch(/t1\.tarifa_pago_id = p\.tarifa_pago_id/);
+        expect(update[0]).toMatch(/t2\.tarifa_pago_id = r\.tarifa_pago_id/);
+        expect(update[0]).toMatch(
+          /t3\.tenant_id = p\.tenant_id AND t3\.es_defecto/,
+        );
+        // Cada tabla que junta filtra borrado.
+        expect(update[0]).toMatch(/p\.eliminado_el IS NULL/);
+        expect(update[0]).toMatch(/r\.eliminado_el IS NULL/);
+        expect(update[0]).toMatch(/t1\.eliminado_el IS NULL/);
+        // Cobro en destino sin medio elegido → efectivo.
+        expect(update[1]).toEqual([TENANT, 'l1', 'efectivo']);
+        expect(
+          sqls().some((x) => /^\s*SELECT[\s\S]*FROM tarifas_pago/.test(x)),
+        ).toBe(false);
+      });
+
+      it('entregado con medioCobro transferencia en un cobro en destino: lo guarda', async () => {
+        responder(hojaDe('abierta'), lineaPropia(), paquete(true), fijaElPago);
+        await marcar('entregado', 'transferencia');
+        const update = db.query.mock.calls.find((c) =>
+          /UPDATE hoja_ruta_paquetes l/.test(c[0] as string),
+        )!;
+        expect(update[1]).toEqual([TENANT, 'l1', 'transferencia']);
+      });
+
+      it('entregado sin cobro en destino: medio_cobro null', async () => {
+        responder(hojaDe('abierta'), lineaPropia(), paquete(false), fijaElPago);
+        await marcar('entregado');
+        const update = db.query.mock.calls.find((c) =>
+          /UPDATE hoja_ruta_paquetes l/.test(c[0] as string),
+        )!;
+        expect(update[1]).toEqual([TENANT, 'l1', null]);
+      });
+
+      it('medioCobro en un paquete sin cobro en destino: 400 y no escribe', async () => {
+        responder(hojaDe('abierta'), lineaPropia(), paquete(false), fijaElPago);
+        await expect(marcar('entregado', 'efectivo')).rejects.toThrow(
+          /no tiene cobro en destino/,
+        );
+        expect(sqls().some((x) => /^\s*UPDATE/.test(x))).toBe(false);
+      });
+
+      it.each(['no_entregado', 'en_ruta'] as const)(
+        'medioCobro con %s: 400 antes de tocar la base',
+        async (estado) => {
+          await expect(marcar(estado, 'efectivo')).rejects.toBeInstanceOf(
+            BadRequestException,
+          );
+          expect(db.query).not.toHaveBeenCalled();
+        },
+      );
+
+      it('sin tarifa que aplicar (el UPDATE no encuentra ninguna): 400 y la línea no se entrega', async () => {
+        responder(hojaDe('abierta'), lineaPropia(), paquete(true), [
+          /UPDATE hoja_ruta_paquetes l\s+SET estado = 'entregado'/,
+          [[], 0],
+        ]);
+        await expect(marcar('entregado')).rejects.toThrow(
+          /No hay una tarifa de pago/,
+        );
+      });
+
+      it('marcar entregado una línea ya entregada NO la vuelve a resolver: solo cambia el medio', async () => {
+        responder(hojaDe('abierta'), lineaPropia('entregado'), paquete(true));
+        await marcar('entregado', 'transferencia');
+        const updates = db.query.mock.calls.filter((c) =>
+          /^\s*UPDATE/.test(c[0] as string),
+        );
+        expect(updates).toHaveLength(1);
+        expect(updates[0][0]).toMatch(/SET medio_cobro = \$3/);
+        expect(updates[0][0]).not.toMatch(/tarifas_pago/);
+        expect(updates[0][1]).toEqual([TENANT, 'l1', 'transferencia']);
+      });
+
+      it('volver a en_ruta o no_entregado limpia tarifa, pago y medio', async () => {
+        responder(hojaDe('abierta'), lineaPropia('entregado'), paquete());
+        await marcar('en_ruta');
+        const update = db.query.mock.calls.find((c) =>
+          /UPDATE hoja_ruta_paquetes/.test(c[0] as string),
+        )!;
+        expect(update[0]).toMatch(
+          /tarifa_pago_id = NULL, pago_repartidor = NULL,\s+medio_cobro = NULL/,
+        );
+      });
+
       it('el 23505 del índice único se traduce a 409', async () => {
         db.query.mockImplementation((sql: string) => {
           if (/SELECT estado FROM hojas_ruta/.test(sql))
             return Promise.resolve([{ estado: 'abierta' }]);
           if (/SELECT hoja_ruta_paquete_id AS id/.test(sql))
-            return Promise.resolve([{ id: 'l1' }]);
-          if (/SELECT codigo FROM paquetes/.test(sql))
-            return Promise.resolve([{ codigo: 'ABC' }]);
+            return Promise.resolve([{ id: 'l1', estado: 'entregado' }]);
+          if (/SELECT codigo, cobro_en_destino FROM paquetes/.test(sql))
+            return Promise.resolve([{ codigo: 'ABC', cobro_en_destino: true }]);
           if (/UPDATE hoja_ruta_paquetes/.test(sql))
             return Promise.reject(
               Object.assign(new Error('unique'), { code: '23505' }),
@@ -613,11 +780,33 @@ describe('HojasRutaService', () => {
     });
 
     describe('entregarTodos', () => {
-      it('solo toca las en_ruta de la hoja', async () => {
-        responder(hojaDe('abierta'));
+      const cuentaEnRuta = (n: number): Respuesta => [
+        /SELECT COUNT\(\*\)::int AS n FROM hoja_ruta_paquetes/,
+        [{ n }],
+      ];
+      const entrega = (n: number): Respuesta => [
+        /UPDATE hoja_ruta_paquetes l/,
+        [Array.from({ length: n }, (_, i) => ({ id: `l${i}` })), n],
+      ];
+
+      it('solo toca las en_ruta de la hoja, y resuelve el pago de todas en UNA sentencia', async () => {
+        responder(hojaDe('abierta'), cuentaEnRuta(3), entrega(3));
         await service.entregarTodos(TENANT, HOJA);
-        expect(sqls().find((x) => /^\s*UPDATE/.test(x))).toMatch(
-          /estado = 'en_ruta' AND eliminado_el IS NULL/,
+        const updates = sqls().filter((x) => /^\s*UPDATE/.test(x));
+        expect(updates).toHaveLength(1);
+        expect(updates[0]).toMatch(/l\.estado = 'en_ruta'/);
+        expect(updates[0]).toMatch(/l\.eliminado_el IS NULL/);
+        expect(updates[0]).toMatch(/pago_repartidor = tr\.monto/);
+        // Los cobros en destino quedan en efectivo; el resto sin medio.
+        expect(updates[0]).toMatch(
+          /medio_cobro = CASE WHEN p\.cobro_en_destino THEN 'efectivo' END/,
+        );
+      });
+
+      it('si alguna línea no tiene tarifa que aplicar: 400 y no se entrega ninguna', async () => {
+        responder(hojaDe('abierta'), cuentaEnRuta(3), entrega(2));
+        await expect(service.entregarTodos(TENANT, HOJA)).rejects.toThrow(
+          /No hay una tarifa de pago/,
         );
       });
 
@@ -638,6 +827,8 @@ describe('HojasRutaService', () => {
       entregados: 2,
       cobroDestino: 1,
       montoCobradoDestino: '10000.0000',
+      montoCobradoEfectivo: '6000.0000',
+      montoCobradoTransferencia: '4000.0000',
       montoPagoRepartidor: '8000.0000',
       montoTotalGeneral: '17000.0000',
       netoARendir: '2000.0000',
@@ -701,6 +892,8 @@ describe('HojasRutaService', () => {
         '8000.0000',
         '17000.0000',
         '2000.0000',
+        '6000.0000',
+        '4000.0000',
       ]);
     });
 
@@ -752,6 +945,8 @@ describe('HojasRutaService', () => {
       total_entregados: null,
       total_cobro_destino: null,
       monto_cobrado_destino: null,
+      monto_cobrado_efectivo: null,
+      monto_cobrado_transferencia: null,
       monto_pago_repartidor: null,
       monto_total_general: null,
       neto_a_rendir: null,
@@ -763,6 +958,8 @@ describe('HojasRutaService', () => {
       entregados: 3,
       cobroDestino: 1,
       montoCobradoDestino: '0.3000',
+      montoCobradoEfectivo: '0.2000',
+      montoCobradoTransferencia: '0.1000',
       montoPagoRepartidor: '0.1000',
       montoTotalGeneral: '0.5000',
       netoARendir: '0.2000',
@@ -780,6 +977,8 @@ describe('HojasRutaService', () => {
           total_entregados: 2,
           total_cobro_destino: 0,
           monto_cobrado_destino: '0.0000',
+          monto_cobrado_efectivo: '0.0000',
+          monto_cobrado_transferencia: '0.0000',
           monto_pago_repartidor: '0.2000',
           monto_total_general: '0.7000',
         }),
@@ -834,6 +1033,7 @@ describe('HojasRutaService', () => {
         entregados: 5,
         cobroDestino: 1,
         montoCobradoDestino: '0.3000',
+        montoCobradoTransferencia: '0.1000',
         montoTotalGeneral: '1.2000',
         montoPagoRepartidor: '0.3000',
       });

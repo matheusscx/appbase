@@ -66,6 +66,7 @@ import {
   fechaMenosDias,
 } from '../../common/utils/rango-fecha.util';
 import { HojasRutaService } from '../paqueteria/hojas-ruta.service';
+import { tarifaResueltaSql } from '../paqueteria/tarifa-resuelta';
 
 /**
  * Tenant demo de Paquetería y todo lo que cuelga de él. Los usan varios métodos del
@@ -77,7 +78,7 @@ import { HojasRutaService } from '../paqueteria/hojas-ruta.service';
  * bajo. 496-501 se dejan libres: 500 y 501 los usan como ids de mentira unos specs.
  * Reparto: 502-511 tenant/usuario/rol/módulo/contratos/caja/configuraciones,
  * 512-514 repartidores, 515-517 hojas, 520-549 paquetes (520 + índice),
- * 550-579 líneas de hoja (550 + índice del paquete).
+ * 550-579 líneas de hoja (550 + índice del paquete), 580-583 tarifas de pago.
  */
 const uuidPaqueteria = (n: number): string =>
   `550e8400-e29b-41d4-a716-44665544${String(n).padStart(4, '0')}`;
@@ -5481,15 +5482,19 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   /**
-   * Los datos del demo de Paquetería, para que abra con números: los montos por
+   * Los datos del demo de Paquetería, para que abra con números: el precio de envío por
    * defecto de los dos tenants que la contratan y, solo en Demo Gestión de Paquetes,
-   * 3 repartidores, 30 paquetes y 3 hojas (dos rendidas en días anteriores y una
+   * 4 tarifas de pago (Bicicleta, Moto, Auto por defecto y Colina), 3 repartidores con la
+   * suya, 30 paquetes (algunos con Colina) y 3 hojas (dos rendidas en días anteriores y una
    * abierta hoy). IDs fijos de `PAQUETERIA` (bloque 502-589): 512-514 repartidores,
-   * 515-517 hojas, 520 + i los paquetes, 550 + i la línea del paquete i.
+   * 515-517 hojas, 520 + i los paquetes, 550 + i la línea del paquete i, 580-583 las tarifas.
    *
    * "Hoy" sale del mismo cálculo que `GET /tenants/me` (`diaNegocioEnZona`: zona y hora de
    * corte del tenant) y los días anteriores se restan sobre ese string; el día en la zona
    * de la sesión de Postgres (`CURRENT_DATE`) lo rechaza `dia-negocio.invariant.spec`.
+   *
+   * El pago de cada entrega se resuelve con `tarifaResueltaSql`, la regla que usa entregar
+   * (paquete, repartidor, defecto), y se fija en la línea como lo hace `marcar`.
    *
    * Los totales de las rendidas no se escriben a mano: se congelan con
    * `congelarTotales`, la misma consulta que usa rendir, así lo congelado y lo calculado
@@ -5504,12 +5509,11 @@ export class SeederService implements OnApplicationBootstrap {
     const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const { tenantId } = PAQUETERIA;
     const PRECIO_ENVIO = '10000';
-    const PAGO_REPARTIDOR = '5000';
 
     await this.db.query(
       `INSERT INTO paquete_configuracion
-         (paquete_configuracion_id, tenant_id, precio_envio_defecto, pago_repartidor_defecto)
-       VALUES ($1, $2, $5, $6), ($3, $4, $5, $6)
+         (paquete_configuracion_id, tenant_id, precio_envio_defecto)
+       VALUES ($1, $2, $5), ($3, $4, $5)
        ON CONFLICT DO NOTHING`,
       [
         PAQUETERIA.configuracionPaquetesId,
@@ -5517,44 +5521,103 @@ export class SeederService implements OnApplicationBootstrap {
         PAQUETERIA.configuracionRestauranteId,
         PARIS,
         PRECIO_ENVIO,
-        PAGO_REPARTIDOR,
       ],
     );
+
+    // Montos de la planilla del cliente. Auto es la por defecto (el índice único parcial exige
+    // una sola); Colina es la especial que se elige por paquete.
+    const tarifas = [
+      {
+        id: uuidPaqueteria(580),
+        nombre: 'Bicicleta',
+        monto: '1800',
+        defecto: false,
+      },
+      {
+        id: uuidPaqueteria(581),
+        nombre: 'Moto',
+        monto: '1900',
+        defecto: false,
+      },
+      { id: uuidPaqueteria(582), nombre: 'Auto', monto: '1900', defecto: true },
+      {
+        id: uuidPaqueteria(583),
+        nombre: 'Colina',
+        monto: '4000',
+        defecto: false,
+      },
+    ];
+    await this.db.query(
+      `INSERT INTO tarifas_pago (tarifa_pago_id, tenant_id, nombre, monto, es_defecto)
+       SELECT x.id, $1, x.nombre, x.monto, x.defecto
+         FROM unnest($2::uuid[], $3::text[], $4::numeric[], $5::boolean[])
+              AS x(id, nombre, monto, defecto)
+       ON CONFLICT DO NOTHING`,
+      [
+        tenantId,
+        tarifas.map((t) => t.id),
+        tarifas.map((t) => t.nombre),
+        tarifas.map((t) => t.monto),
+        tarifas.map((t) => t.defecto),
+      ],
+    );
+    const [bicicleta, moto, auto, colina] = tarifas.map((t) => t.id);
 
     const repartidores = [
       {
         id: uuidPaqueteria(512),
         nombre: 'Juan Pérez',
         telefono: '+56911110001',
+        tarifaPagoId: moto,
       },
       {
         id: uuidPaqueteria(513),
         nombre: 'María Soto',
         telefono: '+56911110002',
+        tarifaPagoId: bicicleta,
       },
       {
         id: uuidPaqueteria(514),
         nombre: 'Pedro Rojas',
         telefono: '+56911110003',
+        tarifaPagoId: auto,
       },
     ];
     await this.db.query(
-      `INSERT INTO repartidores (repartidor_id, tenant_id, nombre, telefono)
-       SELECT x.id, $1, x.nombre, x.telefono
-         FROM unnest($2::uuid[], $3::text[], $4::text[]) AS x(id, nombre, telefono)
+      `INSERT INTO repartidores (repartidor_id, tenant_id, nombre, telefono, tarifa_pago_id)
+       SELECT x.id, $1, x.nombre, x.telefono, x.tarifa
+         FROM unnest($2::uuid[], $3::text[], $4::text[], $5::uuid[])
+              AS x(id, nombre, telefono, tarifa)
        ON CONFLICT DO NOTHING`,
       [
         tenantId,
         repartidores.map((r) => r.id),
         repartidores.map((r) => r.nombre),
         repartidores.map((r) => r.telefono),
+        repartidores.map((r) => r.tarifaPagoId),
+      ],
+    );
+    // Un demo ya sembrado antes de las tarifas conserva sus repartidores con `tarifa_pago_id` NULL
+    // (el INSERT no pisa): se les completa solo si siguen sin tarifa, así queda como uno nuevo.
+    await this.db.query(
+      `UPDATE repartidores r SET tarifa_pago_id = x.tarifa, actualizado_el = now()
+         FROM unnest($2::uuid[], $3::uuid[]) AS x(id, tarifa)
+        WHERE r.repartidor_id = x.id AND r.tenant_id = $1
+          AND r.tarifa_pago_id IS NULL AND r.eliminado_el IS NULL`,
+      [
+        tenantId,
+        repartidores.map((r) => r.id),
+        repartidores.map((r) => r.tarifaPagoId),
       ],
     );
 
     // Códigos de 11 dígitos que empiezan con 46 (la forma de una etiqueta de Mercado
     // Libre). Un tercio con cobro en destino, repartido para que una rendida dé neto
-    // negativo (pagó más al repartidor de lo que cobró) y la otra positivo.
-    const CON_COBRO_DESTINO = new Set([1, 5, 9, 12, 13, 15, 17, 19, 23, 26]);
+    // negativo (pagó más al repartidor de lo que cobró) y la otra positivo. Algunos paquetes
+    // llevan la tarifa especial Colina, y dos cobros en destino se pagaron por transferencia.
+    const CON_COBRO_DESTINO = new Set([1, 12, 13, 15, 17, 19, 21, 23, 25, 26]);
+    const CON_COLINA = new Set([3, 7, 15, 18, 24]);
+    const POR_TRANSFERENCIA = new Set([17, 19]);
     const COMUNAS = [
       'Providencia',
       'Ñuñoa',
@@ -5573,17 +5636,18 @@ export class SeederService implements OnApplicationBootstrap {
         direccion: completo ? `Calle Demo ${100 + i * 13}` : null,
         comuna: completo ? COMUNAS[(i / 2) % COMUNAS.length] : null,
         cobroEnDestino: CON_COBRO_DESTINO.has(i),
+        tarifaPagoId: CON_COLINA.has(i) ? colina : null,
       };
     });
     await this.db.query(
       `INSERT INTO paquetes
          (paquete_id, tenant_id, codigo, destinatario_nombre, destinatario_telefono,
-          direccion, comuna, cobro_en_destino, precio_envio, pago_repartidor)
+          direccion, comuna, cobro_en_destino, precio_envio, tarifa_pago_id)
        SELECT x.id, $1, x.codigo, x.nombre, x.telefono, x.direccion, x.comuna,
-              x.cobro, $9::numeric, $10::numeric
+              x.cobro, $9::numeric, x.tarifa
          FROM unnest($2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[],
-                     $7::text[], $8::boolean[])
-              AS x(id, codigo, nombre, telefono, direccion, comuna, cobro)
+                     $7::text[], $8::boolean[], $10::uuid[])
+              AS x(id, codigo, nombre, telefono, direccion, comuna, cobro, tarifa)
        ON CONFLICT DO NOTHING`,
       [
         tenantId,
@@ -5595,7 +5659,19 @@ export class SeederService implements OnApplicationBootstrap {
         paquetes.map((p) => p.comuna),
         paquetes.map((p) => p.cobroEnDestino),
         PRECIO_ENVIO,
-        PAGO_REPARTIDOR,
+        paquetes.map((p) => p.tarifaPagoId),
+      ],
+    );
+    // Igual para los paquetes con Colina de un demo ya sembrado.
+    await this.db.query(
+      `UPDATE paquetes p SET tarifa_pago_id = x.tarifa, actualizado_el = now()
+         FROM unnest($2::uuid[], $3::uuid[]) AS x(id, tarifa)
+        WHERE p.paquete_id = x.id AND p.tenant_id = $1
+          AND p.tarifa_pago_id IS NULL AND p.eliminado_el IS NULL`,
+      [
+        tenantId,
+        paquetes.filter((p) => p.tarifaPagoId).map((p) => p.id),
+        paquetes.filter((p) => p.tarifaPagoId).map((p) => p.tarifaPagoId),
       ],
     );
 
@@ -5659,9 +5735,23 @@ export class SeederService implements OnApplicationBootstrap {
 
         await this.db.query(
           `INSERT INTO hoja_ruta_paquetes
-             (hoja_ruta_paquete_id, tenant_id, hoja_ruta_id, paquete_id, estado)
-           SELECT x.id, $1, $2, x.paquete, x.estado
-             FROM unnest($3::uuid[], $4::uuid[], $5::text[]) AS x(id, paquete, estado)
+             (hoja_ruta_paquete_id, tenant_id, hoja_ruta_id, paquete_id, estado,
+              tarifa_pago_id, pago_repartidor, medio_cobro)
+           SELECT x.id, $1, $2, x.paquete, x.estado,
+                  CASE WHEN x.estado = 'entregado' THEN tr.tarifa_pago_id END,
+                  CASE WHEN x.estado = 'entregado' THEN tr.monto END,
+                  CASE WHEN x.estado = 'entregado' AND p.cobro_en_destino THEN x.medio END
+             FROM unnest($3::uuid[], $4::uuid[], $5::text[], $6::text[])
+                  AS x(id, paquete, estado, medio)
+             JOIN paquetes p ON p.paquete_id = x.paquete AND p.tenant_id = $1
+                            AND p.eliminado_el IS NULL
+             JOIN hojas_ruta h ON h.hoja_ruta_id = $2 AND h.tenant_id = $1
+                              AND h.eliminado_el IS NULL
+             JOIN repartidores r ON r.repartidor_id = h.repartidor_id AND r.tenant_id = $1
+                                AND r.eliminado_el IS NULL
+             LEFT JOIN tarifas_pago tr
+                    ON tr.tarifa_pago_id = ${tarifaResueltaSql({ paquete: 'p', repartidor: 'r' })}
+                   AND tr.tenant_id = $1
            ON CONFLICT DO NOTHING`,
           [
             tenantId,
@@ -5674,6 +5764,9 @@ export class SeederService implements OnApplicationBootstrap {
                 : hoja.noEntregados.has(i)
                   ? 'no_entregado'
                   : 'entregado',
+            ),
+            indices.map((i) =>
+              POR_TRANSFERENCIA.has(i) ? 'transferencia' : 'efectivo',
             ),
           ],
         );

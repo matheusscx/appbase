@@ -2,12 +2,14 @@
 export type EstadoPaquete = 'disponible' | 'en_ruta' | 'entregado';
 export type EstadoLinea = 'en_ruta' | 'entregado' | 'no_entregado';
 export type EstadoHoja = 'abierta' | 'rendida';
+export type MedioCobro = 'efectivo' | 'transferencia';
 export type ResultadoEscaneo = 'asignado_nuevo' | 'asignado' | 'ya_escaneado';
 
 export interface PaqueteConfiguracionRespuesta {
-  configurada: boolean; // false = nunca se guardó: escanear y crear sin montos dan 400
+  // false = no se guardó el precio de envío por defecto o no hay una tarifa de pago por defecto:
+  // escanear y crear sin montos dan 400
+  configurada: boolean;
   precioEnvioDefecto: string;
-  pagoRepartidorDefecto: string;
 }
 
 export interface RepartidorFila {
@@ -38,7 +40,8 @@ export interface PaqueteFila {
   remitenteNombre: string | null;
   cobroEnDestino: boolean;
   precioEnvio: string;
-  pagoRepartidor: string;
+  tarifaPagoId: string | null; // null = se paga con la del repartidor o la por defecto (regla 10)
+  tarifaPagoNombre: string | null;
   estado: EstadoPaquete; // derivado de las líneas (docs/features/paqueteria.md, regla 2)
   hojaRutaId: string | null; // la hoja de la línea en_ruta / entregado
   repartidorNombre: string | null;
@@ -51,6 +54,8 @@ export interface TotalesHoja {
   entregados: number;
   cobroDestino: number; // cantidad de entregados con cobro en destino
   montoCobradoDestino: string;
+  montoCobradoEfectivo: string; // montoCobradoEfectivo + montoCobradoTransferencia = montoCobradoDestino
+  montoCobradoTransferencia: string;
   montoPagoRepartidor: string;
   montoTotalGeneral: string; // Σ precio_envio de todos los entregados
   netoARendir: string; // cobrado − pago (puede ser negativo)
@@ -73,7 +78,13 @@ export interface LineaHoja {
   comuna: string | null;
   cobroEnDestino: boolean;
   precioEnvio: string;
+  // Entregada: lo fijado al entregar. Si no: lo que se pagaría hoy (`pagoEstimado`), que cambia
+  // con la tarifa; null/0 si no hay ninguna que aplique.
+  tarifaPagoId: string | null;
+  tarifaPagoNombre: string | null;
   pagoRepartidor: string;
+  pagoEstimado: boolean;
+  medioCobro: MedioCobro | null; // solo en una entregada con cobro en destino
   estado: EstadoLinea;
 }
 
@@ -92,6 +103,7 @@ export interface ResumenPaqueteria {
   entregados: number;
   cobroDestino: number;
   montoCobradoDestino: string;
+  montoCobradoTransferencia: string;
   montoTotalGeneral: string;
   montoPagoRepartidor: string;
 }

@@ -25,7 +25,8 @@ const filaSql = (cambios: Partial<PaqueteFilaRow> = {}): PaqueteFilaRow => ({
   remitente_nombre: null,
   cobro_en_destino: false,
   precio_envio: '10000.0000',
-  pago_repartidor: '5000.0000',
+  tarifa_pago_id: null,
+  tarifa_pago_nombre: null,
   estado: 'disponible',
   hoja_ruta_id: null,
   repartidor_nombre: null,
@@ -39,7 +40,15 @@ describe('PaquetesService', () => {
     transaccion: jest.fn((cb: () => unknown) => cb()),
   };
   const configMock = { exigirDefaults: jest.fn() };
-  const service = new PaquetesService(db as never, configMock as never);
+  const tarifasMock = {
+    exigirActivaDelTenant: jest.fn(),
+    exigirDefecto: jest.fn(),
+  };
+  const service = new PaquetesService(
+    db as never,
+    configMock as never,
+    tarifasMock as never,
+  );
 
   const sqlDe = (n: number) => db.query.mock.calls[n][0] as string;
   const paramsDe = (n: number) => db.query.mock.calls[n][1] as unknown[];
@@ -48,11 +57,13 @@ describe('PaquetesService', () => {
     db.query.mockReset();
     db.transaccion.mockClear();
     configMock.exigirDefaults.mockReset();
+    tarifasMock.exigirActivaDelTenant.mockReset().mockResolvedValue(undefined);
+    tarifasMock.exigirDefecto.mockReset().mockResolvedValue(undefined);
   });
 
   describe('SELECT_PAQUETE_FILA', () => {
     it('cada tabla unida filtra tenant y borrado', () => {
-      for (const alias of ['t', 'l', 'h', 'r']) {
+      for (const alias of ['t', 'tp', 'l', 'h', 'r']) {
         expect(SELECT_PAQUETE_FILA).toMatch(
           new RegExp(`${alias}\\.tenant_id = p\\.tenant_id`),
         );
@@ -180,10 +191,9 @@ describe('PaquetesService', () => {
   });
 
   describe('create', () => {
-    it('sin montos copia los defaults de la configuración', async () => {
+    it('sin precio copia el default de la configuración, y sin tarifa exige que haya una por defecto', async () => {
       configMock.exigirDefaults.mockResolvedValue({
         precioEnvio: '10000',
-        pagoRepartidor: '5000',
       });
       db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
       db.query.mockResolvedValueOnce([filaSql()]);
@@ -205,36 +215,70 @@ describe('PaquetesService', () => {
         null,
         false,
         '10000',
-        '5000',
+        null,
       ]);
+      expect(tarifasMock.exigirDefecto).toHaveBeenCalledWith(TENANT);
+      expect(tarifasMock.exigirActivaDelTenant).not.toHaveBeenCalled();
     });
 
-    it('con montos explícitos no exige la configuración', async () => {
+    it('con precio explícito no exige la configuración', async () => {
       db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
       db.query.mockResolvedValueOnce([filaSql()]);
       await service.create(TENANT, {
         codigo: '461',
         cobroEnDestino: true,
         precioEnvio: '8000',
-        pagoRepartidor: '4000',
       });
       expect(configMock.exigirDefaults).not.toHaveBeenCalled();
-      expect(paramsDe(0).slice(-2)).toEqual(['8000', '4000']);
+      expect(paramsDe(0).slice(-2)).toEqual(['8000', null]);
     });
 
-    it('con un solo monto explícito completa el otro con la configuración', async () => {
-      configMock.exigirDefaults.mockResolvedValue({
-        precioEnvio: '10000',
-        pagoRepartidor: '5000',
-      });
+    it('con tarifaPagoId la valida con cerrojo dentro de la transacción y la guarda', async () => {
       db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
       db.query.mockResolvedValueOnce([filaSql()]);
       await service.create(TENANT, {
         codigo: '461',
         cobroEnDestino: false,
         precioEnvio: '8000',
+        tarifaPagoId: 'tarifa-1',
       });
-      expect(paramsDe(0).slice(-2)).toEqual(['8000', '5000']);
+      expect(db.transaccion).toHaveBeenCalledTimes(1);
+      expect(tarifasMock.exigirActivaDelTenant).toHaveBeenCalledWith(
+        TENANT,
+        'tarifa-1',
+        { bloquear: true },
+      );
+      expect(tarifasMock.exigirDefecto).not.toHaveBeenCalled();
+      expect(paramsDe(0).slice(-2)).toEqual(['8000', 'tarifa-1']);
+    });
+
+    it('sin ninguna tarifa cargada: 400 y no se inserta', async () => {
+      tarifasMock.exigirDefecto.mockRejectedValue(
+        new BadRequestException('Cargá al menos una tarifa de pago'),
+      );
+      await expect(
+        service.create(TENANT, {
+          codigo: '461',
+          cobroEnDestino: false,
+          precioEnvio: '8000',
+        }),
+      ).rejects.toThrow(/Cargá al menos una tarifa/);
+      expect(db.query).not.toHaveBeenCalled();
+    });
+
+    it('una tarifa ajena o inactiva: 400 y no se inserta', async () => {
+      tarifasMock.exigirActivaDelTenant.mockRejectedValue(
+        new BadRequestException('La tarifa de pago no existe o está inactiva'),
+      );
+      await expect(
+        service.create(TENANT, {
+          codigo: '461',
+          cobroEnDestino: false,
+          precioEnvio: '8000',
+          tarifaPagoId: 'ajena',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(db.query).not.toHaveBeenCalled();
     });
 
     it('sin configuración y sin montos: el 400 de la configuración sube y no se inserta', async () => {
@@ -250,7 +294,6 @@ describe('PaquetesService', () => {
     it('código repetido: 409 con el código normalizado', async () => {
       configMock.exigirDefaults.mockResolvedValue({
         precioEnvio: '1',
-        pagoRepartidor: '1',
       });
       db.query.mockResolvedValueOnce([[], 0]);
       const intento = service.create(TENANT, {
@@ -340,7 +383,7 @@ describe('PaquetesService', () => {
     it('un paquete entregado en hoja rendida: 400 al tocar montos o cobro en destino', async () => {
       for (const dto of [
         { precioEnvio: '1' },
-        { pagoRepartidor: '1' },
+        { tarifaPagoId: 'tarifa-1' },
         { cobroEnDestino: true },
       ]) {
         db.query.mockReset();
@@ -351,6 +394,89 @@ describe('PaquetesService', () => {
         );
         expect(db.query).toHaveBeenCalledTimes(2);
       }
+    });
+
+    it('cambiar la tarifa valida con cerrojo, la guarda y vuelve a resolver la línea entregada de una hoja abierta', async () => {
+      bloqueoDeHoja();
+      db.query.mockResolvedValueOnce([filaSql()]);
+      db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
+      db.query.mockResolvedValueOnce([[], 0]); // la re-resolución
+      db.query.mockResolvedValueOnce([filaSql({ tarifa_pago_id: 'tarifa-1' })]);
+      await service.update(TENANT, ID, { tarifaPagoId: 'tarifa-1' });
+      expect(tarifasMock.exigirActivaDelTenant).toHaveBeenCalledWith(
+        TENANT,
+        'tarifa-1',
+        { bloquear: true },
+      );
+      expect(sqlDe(2)).toMatch(/SET tarifa_pago_id = \$3/);
+      expect(paramsDe(2)).toEqual([ID, TENANT, 'tarifa-1']);
+      // Misma regla que al entregar, solo sobre hojas abiertas.
+      expect(sqlDe(3)).toMatch(/SET tarifa_pago_id = tr\.tarifa_pago_id/);
+      expect(sqlDe(3)).toMatch(/l\.estado = 'entregado'/);
+      expect(sqlDe(3)).toMatch(/h\.estado = 'abierta'/);
+      expect(sqlDe(3)).toMatch(/t1\.tarifa_pago_id = p\.tarifa_pago_id/);
+    });
+
+    it('reenviar la MISMA tarifa no re-resuelve la línea entregada (RF1)', async () => {
+      bloqueoDeHoja();
+      db.query.mockResolvedValueOnce([filaSql({ tarifa_pago_id: 'tarifa-1' })]);
+      db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
+      db.query.mockResolvedValueOnce([filaSql({ tarifa_pago_id: 'tarifa-1' })]);
+      await service.update(TENANT, ID, {
+        tarifaPagoId: 'tarifa-1',
+        direccion: 'x',
+      });
+      expect(db.query).toHaveBeenCalledTimes(4);
+      expect(
+        db.query.mock.calls.some((c) =>
+          /SET tarifa_pago_id = tr\.tarifa_pago_id/.test(c[0] as string),
+        ),
+      ).toBe(false);
+    });
+
+    it('quitar la tarifa (null) no valida nada y también re-resuelve', async () => {
+      bloqueoDeHoja();
+      db.query.mockResolvedValueOnce([filaSql({ tarifa_pago_id: 'tarifa-1' })]);
+      db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
+      db.query.mockResolvedValueOnce([[], 0]);
+      db.query.mockResolvedValueOnce([filaSql()]);
+      await service.update(TENANT, ID, { tarifaPagoId: null });
+      expect(tarifasMock.exigirActivaDelTenant).not.toHaveBeenCalled();
+      expect(paramsDe(2)).toEqual([ID, TENANT, null]);
+      expect(sqlDe(3)).toMatch(/SET tarifa_pago_id = tr\.tarifa_pago_id/);
+    });
+
+    it('una tarifa ajena o inactiva: 400 y no se escribe el paquete', async () => {
+      bloqueoDeHoja();
+      db.query.mockResolvedValueOnce([filaSql()]);
+      tarifasMock.exigirActivaDelTenant.mockRejectedValue(
+        new BadRequestException('La tarifa de pago no existe o está inactiva'),
+      );
+      await expect(
+        service.update(TENANT, ID, { tarifaPagoId: 'ajena' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(db.query).toHaveBeenCalledTimes(2);
+    });
+
+    it('cambiar el cobro en destino ajusta el medio de la línea entregada: efectivo al activarlo, limpio al quitarlo', async () => {
+      bloqueoDeHoja();
+      db.query.mockResolvedValueOnce([filaSql({ cobro_en_destino: false })]);
+      db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
+      db.query.mockResolvedValueOnce([[], 0]);
+      db.query.mockResolvedValueOnce([filaSql({ cobro_en_destino: true })]);
+      await service.update(TENANT, ID, { cobroEnDestino: true });
+      expect(sqlDe(3)).toMatch(/SET medio_cobro = CASE WHEN \$3::boolean/);
+      expect(sqlDe(3)).toMatch(/h\.estado = 'abierta'/);
+      expect(paramsDe(3)).toEqual([ID, TENANT, true]);
+    });
+
+    it('mandar el mismo cobro en destino que ya tiene no toca el medio elegido', async () => {
+      bloqueoDeHoja();
+      db.query.mockResolvedValueOnce([filaSql({ cobro_en_destino: true })]);
+      db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
+      db.query.mockResolvedValueOnce([filaSql({ cobro_en_destino: true })]);
+      await service.update(TENANT, ID, { cobroEnDestino: true });
+      expect(db.query).toHaveBeenCalledTimes(4);
     });
 
     it('un paquete rendido sí deja completar la dirección', async () => {

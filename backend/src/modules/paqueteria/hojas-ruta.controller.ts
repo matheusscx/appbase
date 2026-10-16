@@ -70,7 +70,13 @@ export class HojasRutaController {
     @Body() dto: MarcarLineaDto,
   ) {
     const user = req.user as JwtUser;
-    return this.service.marcar(user.tenantId!, id, paqueteId, dto.estado);
+    return this.service.marcar(
+      user.tenantId!,
+      id,
+      paqueteId,
+      dto.estado,
+      dto.medioCobro,
+    );
   }
 
   @Post(':id/entregar-todos')

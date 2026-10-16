@@ -1,4 +1,5 @@
 import {
+  Check,
   Column,
   CreateDateColumn,
   DeleteDateColumn,
@@ -11,8 +12,21 @@ import {
 } from 'typeorm';
 import { HojaRuta } from './hoja-ruta.entity';
 import { Paquete } from './paquete.entity';
+import { TarifaPago } from './tarifa-pago.entity';
 
 @Entity('hoja_ruta_paquetes')
+@Check(
+  'chk_hoja_ruta_paquetes_medio_cobro',
+  `"medio_cobro" IN ('efectivo', 'transferencia')`,
+)
+@Check(
+  'chk_hoja_ruta_paquetes_pago',
+  `("estado" = 'entregado') = ("pago_repartidor" IS NOT NULL)`,
+)
+@Check(
+  'chk_hoja_ruta_paquetes_medio_entregado',
+  `"medio_cobro" IS NULL OR "estado" = 'entregado'`,
+)
 @Index('uq_hoja_ruta_paquetes_en_ruta', ['paqueteId'], {
   unique: true,
   where: `"estado" = 'en_ruta' AND "eliminado_el" IS NULL`,
@@ -42,6 +56,31 @@ export class HojaRutaPaquete {
 
   @Column({ type: 'varchar', length: 20, default: 'en_ruta' })
   estado: 'en_ruta' | 'entregado' | 'no_entregado';
+
+  /**
+   * Lo que se le paga al repartidor por esta entrega, FIJADO al marcarla entregada: cambiar
+   * después el monto de la tarifa no lo mueve. Null mientras no está entregada (el CHECK
+   * `chk_hoja_ruta_paquetes_pago` lo exige en las dos direcciones).
+   */
+  @Column({ name: 'tarifa_pago_id', type: 'uuid', nullable: true })
+  tarifaPagoId: string | null;
+
+  @ManyToOne(() => TarifaPago, { nullable: true })
+  @JoinColumn({ name: 'tarifa_pago_id' })
+  tarifaPago?: TarifaPago;
+
+  @Column({
+    name: 'pago_repartidor',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  pagoRepartidor: string | null;
+
+  /** Cómo se pagó un cobro en destino: solo en una línea entregada de un paquete con cobro en destino. */
+  @Column({ name: 'medio_cobro', type: 'varchar', length: 20, nullable: true })
+  medioCobro: 'efectivo' | 'transferencia' | null;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

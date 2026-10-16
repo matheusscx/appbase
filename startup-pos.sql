@@ -3071,12 +3071,12 @@ ALTER TABLE "categorias"
 -- PAQUETERÍA (repartidores, paquetes y hojas de ruta)
 -- =============================================================
 
--- Montos por defecto del tenant; un paquete los copia al crearse.
+-- Precio de envío por defecto del tenant; un paquete lo copia al crearse. El pago al repartidor
+-- son las tarifas_pago de abajo.
 CREATE TABLE paquete_configuracion (
     paquete_configuracion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id               UUID NOT NULL REFERENCES tenants(tenant_id),
     precio_envio_defecto    NUMERIC(18,4) NOT NULL,
-    pago_repartidor_defecto NUMERIC(18,4) NOT NULL,
     creado_el               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     eliminado_el            TIMESTAMPTZ
@@ -3126,8 +3126,7 @@ CREATE TABLE paquetes (
     remitente_tercero_id  UUID REFERENCES terceros(tercero_id),
     cobro_en_destino      BOOLEAN NOT NULL DEFAULT false,
     precio_envio          NUMERIC(18,4) NOT NULL,
-    pago_repartidor       NUMERIC(18,4) NOT NULL,
-    tarifa_pago_id        UUID REFERENCES tarifas_pago(tarifa_pago_id),
+    tarifa_pago_id        UUID REFERENCES tarifas_pago(tarifa_pago_id),   -- tarifa especial; null = la del repartidor o la por defecto
     creado_el             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     eliminado_el          TIMESTAMPTZ
@@ -3149,6 +3148,8 @@ CREATE TABLE hojas_ruta (
     total_entregados      INTEGER,
     total_cobro_destino   INTEGER,
     monto_cobrado_destino NUMERIC(18,4),
+    monto_cobrado_efectivo NUMERIC(18,4),        -- efectivo + transferencia = monto_cobrado_destino
+    monto_cobrado_transferencia NUMERIC(18,4),
     monto_pago_repartidor NUMERIC(18,4),
     monto_total_general   NUMERIC(18,4),
     neto_a_rendir         NUMERIC(18,4),
@@ -3167,9 +3168,21 @@ CREATE TABLE hoja_ruta_paquetes (
     hoja_ruta_id         UUID NOT NULL REFERENCES hojas_ruta(hoja_ruta_id),
     paquete_id           UUID NOT NULL REFERENCES paquetes(paquete_id),
     estado               VARCHAR(20) NOT NULL DEFAULT 'en_ruta',   -- 'en_ruta' | 'entregado' | 'no_entregado'
+    -- Se fijan al marcar entregado (la tarifa y su monto de ese momento); null si no está entregada.
+    tarifa_pago_id       UUID REFERENCES tarifas_pago(tarifa_pago_id),
+    pago_repartidor      NUMERIC(18,4),
+    -- Cómo se pagó un cobro en destino; solo con 'entregado' y un paquete con cobro en destino
+    -- (esto último lo valida el service: el cobro vive en paquetes).
+    medio_cobro          VARCHAR(20),
     creado_el            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    eliminado_el         TIMESTAMPTZ
+    eliminado_el         TIMESTAMPTZ,
+    CONSTRAINT chk_hoja_ruta_paquetes_medio_cobro
+        CHECK (medio_cobro IN ('efectivo', 'transferencia')),
+    CONSTRAINT chk_hoja_ruta_paquetes_pago
+        CHECK ((estado = 'entregado') = (pago_repartidor IS NOT NULL)),
+    CONSTRAINT chk_hoja_ruta_paquetes_medio_entregado
+        CHECK (medio_cobro IS NULL OR estado = 'entregado')
 );
 CREATE UNIQUE INDEX uq_hoja_ruta_paquetes_en_ruta
     ON hoja_ruta_paquetes (paquete_id) WHERE estado = 'en_ruta' AND eliminado_el IS NULL;

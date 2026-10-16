@@ -181,6 +181,31 @@ export class TarifasPagoService {
     }
   }
 
+  /** ¿Hay una tarifa por defecto viva? Sin ella no hay con qué pagar una entrega que no trae la suya. */
+  async hayDefecto(tenantId: string): Promise<boolean> {
+    const rows: { hay: boolean }[] = await this.db.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM tarifas_pago
+          WHERE tenant_id = $1 AND es_defecto AND eliminado_el IS NULL
+       ) AS hay`,
+      [tenantId],
+    );
+    return rows[0].hay;
+  }
+
+  /**
+   * Para quien crea un paquete: sin ninguna tarifa cargada no se crean paquetes que se pagarían
+   * $0. La por defecto no se borra ni se desactiva (`actualizar`, `eliminar`), así que si hay
+   * alguna tarifa hay una por defecto y esta lectura sin cerrojo no se desactualiza.
+   */
+  async exigirDefecto(tenantId: string): Promise<void> {
+    if (!(await this.hayDefecto(tenantId))) {
+      throw new BadRequestException(
+        'Cargá al menos una tarifa de pago (la primera queda por defecto) antes de cargar paquetes.',
+      );
+    }
+  }
+
   /** Todas las escrituras del tenant en fila: el defecto único y la primera tarifa no admiten carrera. */
   private async serializar(tenantId: string): Promise<void> {
     await this.db.query(`SELECT pg_advisory_xact_lock(hashtext($1))`, [

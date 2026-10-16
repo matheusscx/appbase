@@ -61,10 +61,9 @@ export class CreatePaqueteDto {
   @EsMontoCobrado()
   precioEnvio?: string;
 
+  // Ausente = se paga con la tarifa del repartidor o la por defecto (docs/features/paqueteria.md,
+  // regla 10): la del paquete es el caso especial.
   @IsOptional()
-  @IsNumberString()
-  @IsDecimalNoNegativo()
-  @IsMontoPersistible()
-  @EsMontoCobrado()
-  pagoRepartidor?: string;
+  @IsUUID()
+  tarifaPagoId?: string | null;
 }

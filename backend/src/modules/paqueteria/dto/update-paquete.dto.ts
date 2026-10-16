@@ -64,10 +64,7 @@ export class UpdatePaqueteDto {
   @EsMontoCobrado()
   precioEnvio?: string;
 
-  @ValidateIf((_o, v) => v !== undefined)
-  @IsNumberString()
-  @IsDecimalNoNegativo()
-  @IsMontoPersistible()
-  @EsMontoCobrado()
-  pagoRepartidor?: string;
+  @IsOptional()
+  @IsUUID()
+  tarifaPagoId?: string | null;
 }

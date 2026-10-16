@@ -138,4 +138,20 @@ describe('TarifasPagoService', () => {
       service.exigirActivaDelTenant(TENANT, ID),
     ).resolves.toBeUndefined();
   });
+
+  it('hayDefecto / exigirDefecto: miran solo la por defecto viva del tenant; sin ninguna, 400', async () => {
+    db.query.mockResolvedValueOnce([{ hay: true }]);
+    await expect(service.exigirDefecto(TENANT)).resolves.toBeUndefined();
+    const sql = sqls()[0];
+    expect(sql).toMatch(
+      /tenant_id = \$1 AND es_defecto AND eliminado_el IS NULL/,
+    );
+
+    db.query.mockResolvedValueOnce([{ hay: false }]);
+    await expect(service.hayDefecto(TENANT)).resolves.toBe(false);
+    db.query.mockResolvedValueOnce([{ hay: false }]);
+    await expect(service.exigirDefecto(TENANT)).rejects.toThrow(
+      /al menos una tarifa de pago/,
+    );
+  });
 });

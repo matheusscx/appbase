@@ -57,9 +57,11 @@ Cada punto lo eligió el owner con su costo a la vista; esto es lo que quedó y 
 
 Las numeraciones (`regla 5b`, `3.1`) son las que citan los comentarios del código.
 
-1. **Defaults copiados, no referenciados.** El paquete nace con los montos de
-   `paquete_configuracion` (el cliente puede mandar otros). Cambiar el default no mueve los
-   paquetes existentes.
+1. **Defaults copiados, no referenciados.** El paquete nace con el precio de envío de
+   `paquete_configuracion` (el cliente puede mandar otro). Cambiar el default no mueve los
+   paquetes existentes. **El pago al repartidor ya no es un monto del paquete:** el paquete
+   puede llevar una *tarifa de pago* propia (`tarifa_pago_id`, un caso especial como "Colina") y
+   la regla 10 dice cuál se paga; el monto se copia a la línea al entregar.
 2. **El estado del paquete se deriva de sus líneas**, no se guarda: *entregado* si tiene una
    línea `entregado`; *en ruta* si tiene una `en_ruta`; *disponible* en cualquier otro caso
    (nunca salió, o todos sus intentos fueron `no_entregado`).
@@ -67,16 +69,18 @@ Las numeraciones (`regla 5b`, `3.1`) son las que citan los comentarios del códi
    paquete vuelve a quedar disponible para otra hoja sin borrar el intento anterior.
 4. **Totales de una hoja:** `asignados` (líneas), `entregados`, `cobro_destino` (cantidad de
    entregados con cobro en destino), `monto_cobrado_destino` (Σ `precio_envio` de esos),
-   `monto_pago_repartidor` (Σ `pago_repartidor` de los entregados), `monto_total_general`
-   (Σ `precio_envio` de todos los entregados) y `neto_a_rendir` = cobrado − pago. Un neto
-   negativo es que la empresa le debe al repartidor, y la pantalla lo dice así.
+   `monto_pago_repartidor` (Σ `pago_repartidor` **de la línea**, no del paquete, de los
+   entregados), `monto_total_general` (Σ `precio_envio` de todos los entregados) y
+   `neto_a_rendir` = cobrado − pago. El cobrado se parte por medio: `monto_cobrado_efectivo` +
+   `monto_cobrado_transferencia` = `monto_cobrado_destino` (las dos cuentan igual en el neto).
+   Un neto negativo es que la empresa le debe al repartidor, y la pantalla lo dice así.
 5. **Asignar** (`repartidorId`, `fecha`, `paqueteIds[]`) crea la hoja de ese repartidor ese día o
    suma a la existente. 400 si la hoja está rendida, si el repartidor está inactivo o si algún
    paquete no está disponible (todo o nada, con la lista de los que fallaron).
    **5b. Escanear** resuelve **un** código por llamada (cada escaneo es independiente) y
    devuelve `{ resultado, codigo, hoja }`:
-   - `asignado_nuevo`: el código no existía → se crea con solo el código, los dos defaults y el
-     `cobroEnDestino` del interruptor, y se asigna;
+   - `asignado_nuevo`: el código no existía → se crea con solo el código, el precio por defecto,
+     el `cobroEnDestino` del interruptor y, si llega, su `tarifaPagoId`, y se asigna;
    - `asignado`: existía y estaba disponible → se asigna **sin** pisar su `cobro_en_destino`
      (ya lo decidió quien lo cargó; se cambia en la fila);
    - `ya_escaneado`: ya está `en_ruta` en esta misma hoja → no hace nada y no es error;
@@ -96,19 +100,43 @@ Las numeraciones (`regla 5b`, `3.1`) son las que citan los comentarios del códi
    tenga paquetes, congela los totales y anota quién y cuándo. Una hoja rendida es de solo
    lectura: no admite asignar, marcar ni quitar.
 7. **Editar un paquete:** se puede mientras no esté *entregado en una hoja rendida*; desde ahí
-   montos y `cobro_en_destino` son de solo lectura (cambiarlos movería una rendición cerrada).
-   La dirección y el destinatario sí se pueden completar.
+   el precio, la tarifa de pago y `cobro_en_destino` son de solo lectura (cambiarlos movería una
+   rendición cerrada). La dirección y el destinatario sí se pueden completar. Con la hoja
+   **abierta**, cambiar la tarifa de un paquete ya entregado **vuelve a resolver** el pago de esa
+   línea (es la forma de corregir un error), y cambiar su `cobro_en_destino` ajusta el medio de
+   cobro de la línea (efectivo al activarlo, vacío al quitarlo).
 8. **Borrar un paquete** (soft) solo si **nunca salió** en una hoja (un `no_entregado` también es
    historia de una hoja). **Quitar de la hoja** (soft sobre la línea) solo con la línea
    `en_ruta` y la hoja abierta.
 9. **Desactivar un repartidor** no toca sus hojas: solo lo saca del selector. **Borrar** uno con
    hojas es 400 (se desactiva): así ninguna hoja apunta a un repartidor borrado y ninguna
    lectura necesita una excepción al filtro `eliminado_el IS NULL`.
-10. **Sin configuración guardada**, escanear un código nuevo o dar de alta un paquete sin montos
-    es 400: no se crean paquetes a $0.
+10. **Qué tarifa de pago se paga y cuándo se fija.** Al marcar una línea `entregado` se
+    resuelve **la del paquete; si no tiene, la del repartidor de esa hoja; si no tiene, la por
+    defecto** (la del paquete reemplaza, no se suma) y la línea guarda `tarifa_pago_id` y
+    `pago_repartidor`. Cambiar después el monto de la tarifa **no mueve** esa entrega; marcar
+    entregado otra vez una línea ya entregada tampoco la resuelve de nuevo. Volver a `en_ruta` o
+    `no_entregado` limpia tarifa, pago y medio de cobro. Un paquete `no_entregado` con un
+    repartidor y entregado al otro día por otro se paga con la tarifa del segundo (la resolución
+    usa el repartidor de la hoja que entrega). La resolución es SQL, en un solo lugar:
+    `tarifa-resuelta.ts` (`tarifaResueltaSql`); la usan el `UPDATE … FROM` de entregar y de
+    corregir la tarifa, y la lectura del pago **estimado** de una línea que aún no se entregó
+    (`pagoEstimado: true`). Nadie lee las tarifas en TypeScript para repetirla. Una tarifa
+    desactivada sigue valiendo para el paquete o repartidor que ya la tenían; una borrada no.
+    **Sin configuración guardada** (precio por defecto) **o sin ninguna tarifa de pago**,
+    escanear un código nuevo o dar de alta un paquete sin precio es 400: no se crean paquetes a
+    $0. `configurada` exige ambas cosas.
 11. **Plata que entra por la API:** validada en el DTO contra los decimales de la moneda oficial
     ([`patterns/backend.md`](../patterns/backend.md) § 3.1); lo que no cabe es 400. Montos ≥ 0.
     Plata en `numeric(18,4)` en la moneda oficial del tenant, con Decimal.js.
+12. **Medio de cobro.** Un cobro en destino se paga en `efectivo` o `transferencia` (a la cuenta
+    del repartidor): `medio_cobro` en la línea, **solo** en una línea `entregado` de un paquete
+    con cobro en destino. Al marcar entregado sin `medioCobro` queda `efectivo`; `entregar-todos`
+    los deja en efectivo y se cambian en la fila (marcar `entregado` otra vez con `medioCobro`,
+    mientras la hoja esté abierta). Mandar `medioCobro` con un paquete sin cobro en destino o con
+    `no_entregado` / `en_ruta` es 400. Lo valida el service (el cobro vive en `paquetes`; un
+    `CHECK` no lo ve); la base sostiene el resto con `CHECK`: el medio es uno de los dos, solo
+    hay medio si está entregada, y está entregada si y solo si tiene `pago_repartidor`.
 
 ### 3.1 Normalizar el código escaneado
 
@@ -132,7 +160,8 @@ El `id` viene **entre comillas**, así que no hay pérdida de precisión de `JSO
 | Paquetes entregados | líneas `entregado` (los asignados, al lado, de referencia) |
 | Cobro en destino | cantidad y Σ `precio_envio` de los entregados con cobro en destino |
 | Total general | Σ `precio_envio` de **todos** los entregados |
-| Total a pagar a repartidores | Σ `pago_repartidor` de los entregados |
+| Cobrado por transferencia | Σ `precio_envio` de los entregados con cobro en destino pagados por transferencia |
+| Total a pagar a repartidores | Σ `pago_repartidor` de las líneas entregadas |
 
 `fecha` es una columna `date` que se elige en pantalla (por defecto el día del negocio), así que
 el rango se compara directo, sin `rango-fecha.util.ts`.
@@ -176,6 +205,11 @@ ascendente)**.
 - Quién toma qué: **escanear** y **asignar** toman el repartidor (`FOR SHARE`), después la hoja y
   los paquetes; **marcar** toma la hoja y después el paquete; **entregar-todos**, **quitar** y
   **rendir** toman solo la hoja.
+- **La tarifa de pago es siempre el último cerrojo.** Crear, editar (`tarifaPagoId`) y escanear un
+  paquete la toman con `FOR SHARE` explícito (`exigirActivaDelTenant(..., { bloquear: true })`),
+  después de la hoja y del paquete; escribir `hoja_ruta_paquetes.tarifa_pago_id` toma además un
+  `KEY SHARE` implícito por la FK. `TarifasPagoService.eliminar` / `actualizar` la toman `FOR UPDATE`
+  y no toman nada después, así uno de los dos espera al otro y no hay ciclo.
 - Mientras todos respeten el orden no hay ciclo; quien lo rompa abre un deadlock.
 
 ---
@@ -198,12 +232,15 @@ ascendente)**.
 ## Tenant demo
 
 **Demo Gestión de Paquetes** (Chile, CLP), con `admin@paquetes.cl` (admin del tenant, no
-superadmin) y Paquetería como único módulo. Defaults $10.000 / $5.000, 3 repartidores, 30
-paquetes con códigos con forma de Mercado Libre (mezcla de pagados y con cobro en destino), dos
-hojas rendidas en días anteriores y una abierta hoy. Las rendidas se congelan con
+superadmin) y Paquetería como único módulo. Precio por defecto $10.000, cuatro tarifas de pago
+(Bicicleta $1.800, Moto $1.900, **Auto $1.900 por defecto**, Colina $4.000), 3 repartidores con la
+suya, 30 paquetes con códigos con forma de Mercado Libre (mezcla de pagados y con cobro en
+destino, cinco con Colina, algunos cobros por transferencia), dos hojas rendidas en días
+anteriores y una abierta hoy. Las rendidas se congelan con
 `congelarTotales(tenantId, hojaId, null)`, no con números escritos a mano. *Demo Restaurante*
 también contrata Paquetería (ahí corren los e2e); *Demo Bodega* no, a propósito: es el tenant
-donde el menú no la muestra. IDs en el bloque `PAQUETERIA` del seeder (502-589).
+donde el menú no la muestra. *Demo Restaurante* no trae tarifas de pago (los e2e las crean): ahí `configurada` es `false` hasta
+cargar una. IDs en el bloque `PAQUETERIA` del seeder (502-589; 580-583 las tarifas).
 
 ---
 
@@ -217,8 +254,10 @@ Tabla `tarifas_pago` por tenant (nombre, monto, `es_defecto`, `activa`); diseño
 - Nombre único por tenant sin distinguir mayúsculas (409). Monto con la escala de la moneda oficial (400).
 - Borrar es soft; una tarifa en uso por un repartidor o un paquete vivo no se borra (400): se desactiva.
 - `repartidores.tarifa_pago_id` y `paquetes.tarifa_pago_id` son opcionales. Asignarlas exige una
-  tarifa activa del tenant (`exigirActivaDelTenant`, 400). Hoy solo el repartidor la recibe por la
-  API; el paquete y el cálculo del pago llegan con la tarea siguiente (`pago_repartidor` sigue vigente).
+  tarifa activa del tenant (`exigirActivaDelTenant`, 400), tomada `FOR SHARE` dentro de la
+  transacción de quien escribe: `eliminar` la toma `FOR UPDATE` antes de mirar el uso, así uno de
+  los dos espera al otro. La reciben el repartidor y el paquete (alta, edición y escaneo).
+- Qué tarifa se paga y cómo se fija en la línea: regla 10.
 
 ## API
 
@@ -231,14 +270,15 @@ GET|PUT  /paquetes/configuracion
 GET|POST /tarifas-pago                     PATCH|DELETE /tarifas-pago/:id   (PATCH { esDefecto: true } pasa el defecto en una transacción)
 GET|POST /repartidores                     PATCH|DELETE /repartidores/:id   (acepta `tarifaPagoId`, `null` la saca)
 GET|POST /paquetes                         PATCH|DELETE /paquetes/:id
+         POST|PATCH /paquetes aceptan `tarifaPagoId` (`null` la saca en el PATCH); ya no existe `pagoRepartidor`
          GET /paquetes: paginado en el servidor; filtros de estado, cobroEnDestino, datos por completar y búsqueda (código / destinatario)
-POST     /hojas-ruta/escanear              { repartidorId, fecha, codigo, cobroEnDestino } → { resultado, codigo, hoja }
+POST     /hojas-ruta/escanear              { repartidorId, fecha, codigo, cobroEnDestino, tarifaPagoId? } → { resultado, codigo, hoja }
 POST     /hojas-ruta/asignar               { repartidorId, fecha, paqueteIds[] }
 GET      /hojas-ruta?desde&hasta[&repartidorId]   lista con totales (dos consultas, sin N+1: las cabeceras y `totales` de las abiertas juntas)
 GET      /hojas-ruta/resumen?desde&hasta   KPIs
 GET      /hojas-ruta/:id                   cabecera + líneas
-PATCH    /hojas-ruta/:id/paquetes/:paqueteId   { estado: 'entregado' | 'no_entregado' | 'en_ruta' }   (en_ruta = deshacer un marcado por error, con la hoja abierta; la pantalla de la hoja tiene el botón «En ruta»)
-POST     /hojas-ruta/:id/entregar-todos    pasa a entregado toda línea en_ruta
+PATCH    /hojas-ruta/:id/paquetes/:paqueteId   { estado: 'entregado' | 'no_entregado' | 'en_ruta', medioCobro?: 'efectivo' | 'transferencia' }   (medioCobro solo con entregado y un paquete con cobro en destino: regla 12; en_ruta = deshacer un marcado por error, con la hoja abierta; la pantalla de la hoja tiene el botón «En ruta»)
+POST     /hojas-ruta/:id/entregar-todos    pasa a entregado toda línea en_ruta (resuelve el pago de todas en una sentencia; cobros en efectivo)
 DELETE   /hojas-ruta/:id/paquetes/:paqueteId   quitar de la hoja
 POST     /hojas-ruta/:id/rendir
 ```
@@ -246,15 +286,15 @@ POST     /hojas-ruta/:id/rendir
 ## Backend
 
 Módulo `backend/src/modules/paqueteria/` (registrado en `app.module.ts`, también en `entities`;
-migración `1792108344263-Paqueteria.ts`).
+migraciones `1792108344263-Paqueteria.ts`, `…-TarifasPago.ts` y `…-PagoEnLaLinea.ts`).
 
 | Tabla | Para qué | Restricciones |
 |---|---|---|
-| `paquete_configuracion` | `precio_envio_defecto`, `pago_repartidor_defecto` | única por tenant |
+| `paquete_configuracion` | `precio_envio_defecto` | única por tenant |
 | `repartidores` | `nombre`, `telefono`, `activo` | — |
-| `paquetes` | `codigo`, `destinatario_nombre`, `destinatario_telefono`, `direccion`, `comuna`, `nota` (nullable: el escaneo crea con solo el código), `remitente_tercero_id` → `terceros`, `cobro_en_destino`, `precio_envio`, `pago_repartidor` | `codigo` único por tenant entre los vivos |
-| `hojas_ruta` | `repartidor_id`, `fecha` (`date`), `estado` (`abierta` \| `rendida`), `rendida_por`, `rendida_el`, totales congelados (nulos mientras está abierta) | única por `(tenant, repartidor, fecha)` entre las vivas |
-| `hoja_ruta_paquetes` | `hoja_ruta_id`, `paquete_id`, `estado` (`en_ruta` \| `entregado` \| `no_entregado`) | índice único parcial sobre `paquete_id` donde `estado = 'en_ruta'` y vivo: un paquete está en una sola ruta a la vez |
+| `paquetes` | `codigo`, `destinatario_nombre`, `destinatario_telefono`, `direccion`, `comuna`, `nota` (nullable: el escaneo crea con solo el código), `remitente_tercero_id` → `terceros`, `cobro_en_destino`, `precio_envio`, `tarifa_pago_id` (opcional) | `codigo` único por tenant entre los vivos |
+| `hojas_ruta` | `repartidor_id`, `fecha` (`date`), `estado` (`abierta` \| `rendida`), `rendida_por`, `rendida_el`, totales congelados, con el cobrado partido en `monto_cobrado_efectivo` y `monto_cobrado_transferencia` (nulos mientras está abierta) | única por `(tenant, repartidor, fecha)` entre las vivas |
+| `hoja_ruta_paquetes` | `hoja_ruta_id`, `paquete_id`, `estado` (`en_ruta` \| `entregado` \| `no_entregado`), `tarifa_pago_id`, `pago_repartidor` y `medio_cobro` (fijados al entregar; nulos si no está entregada) | `CHECK` de la regla 12; índice único parcial sobre `paquete_id` donde `estado = 'en_ruta'` y vivo: un paquete está en una sola ruta a la vez |
 
 Servicios: `HojasRutaService` (escanear, asignar, marcar, quitar, rendir, totales),
 `PaquetesService`, `RepartidoresService`, `PaqueteConfiguracionService`. Toda `SELECT`/`JOIN`

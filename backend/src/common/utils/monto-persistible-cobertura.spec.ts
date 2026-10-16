@@ -110,14 +110,9 @@ const COLUMNAS: Record<string, [Entidad, string][]> = {
   ],
   'pagos/PagoItemDto.monto': [[Pago, 'monto']],
   'paqueteria/CreatePaqueteDto.precioEnvio': [[Paquete, 'precioEnvio']],
-  'paqueteria/CreatePaqueteDto.pagoRepartidor': [[Paquete, 'pagoRepartidor']],
   'paqueteria/UpdatePaqueteDto.precioEnvio': [[Paquete, 'precioEnvio']],
-  'paqueteria/UpdatePaqueteDto.pagoRepartidor': [[Paquete, 'pagoRepartidor']],
   'paqueteria/PutPaqueteConfiguracionDto.precioEnvioDefecto': [
     [PaqueteConfiguracion, 'precioEnvioDefecto'],
-  ],
-  'paqueteria/PutPaqueteConfiguracionDto.pagoRepartidorDefecto': [
-    [PaqueteConfiguracion, 'pagoRepartidorDefecto'],
   ],
   'paqueteria/CreateTarifaPagoDto.monto': [[TarifaPago, 'monto']],
   'paqueteria/UpdateTarifaPagoDto.monto': [[TarifaPago, 'monto']],

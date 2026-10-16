@@ -28,14 +28,6 @@ export class PaqueteConfiguracion {
   })
   precioEnvioDefecto: string;
 
-  @Column({
-    name: 'pago_repartidor_defecto',
-    type: 'numeric',
-    precision: 18,
-    scale: 4,
-  })
-  pagoRepartidorDefecto: string;
-
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 

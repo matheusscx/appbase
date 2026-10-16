@@ -64,6 +64,25 @@ export class HojaRuta {
   })
   montoCobradoDestino: string | null;
 
+  // El cobrado en destino partido por medio (efectivo + transferencia = monto_cobrado_destino).
+  @Column({
+    name: 'monto_cobrado_efectivo',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  montoCobradoEfectivo: string | null;
+
+  @Column({
+    name: 'monto_cobrado_transferencia',
+    type: 'numeric',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  montoCobradoTransferencia: string | null;
+
   @Column({
     name: 'monto_pago_repartidor',
     type: 'numeric',

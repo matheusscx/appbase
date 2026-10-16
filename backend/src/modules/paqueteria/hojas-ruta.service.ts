@@ -11,12 +11,15 @@ import { normalizarCodigoPaquete } from './codigo-paquete';
 import { AsignarDto } from './dto/asignar.dto';
 import { EscanearDto } from './dto/escanear.dto';
 import { PaqueteConfiguracionService } from './paquete-configuracion.service';
+import { PAGO_RESUELTO_SQL, tarifaResueltaSql } from './tarifa-resuelta';
+import { TarifasPagoService } from './tarifas-pago.service';
 import type {
   EstadoHoja,
   EstadoLinea,
   HojaRutaDetalle,
   LineaHoja,
   HojaRutaFila,
+  MedioCobro,
   RespuestaEscaneo,
   ResultadoEscaneo,
   ResumenPaqueteria,
@@ -32,6 +35,8 @@ interface FilaTotales {
   entregados: number;
   cobro_destino: number;
   monto_cobrado_destino: string;
+  monto_cobrado_efectivo: string;
+  monto_cobrado_transferencia: string;
   monto_pago_repartidor: string;
   monto_total_general: string;
 }
@@ -47,6 +52,8 @@ interface FilaCabecera {
   total_entregados: number | null;
   total_cobro_destino: number | null;
   monto_cobrado_destino: string | null;
+  monto_cobrado_efectivo: string | null;
+  monto_cobrado_transferencia: string | null;
   monto_pago_repartidor: string | null;
   monto_total_general: string | null;
   neto_a_rendir: string | null;
@@ -60,7 +67,10 @@ interface FilaLinea {
   comuna: string | null;
   cobro_en_destino: boolean;
   precio_envio: string;
+  tarifa_pago_id: string | null;
+  tarifa_pago_nombre: string | null;
   pago_repartidor: string;
+  medio_cobro: MedioCobro | null;
   estado: EstadoLinea;
 }
 
@@ -91,6 +101,8 @@ const aTotales = (f: {
   entregados: number;
   cobro_destino: number;
   monto_cobrado_destino: string;
+  monto_cobrado_efectivo: string;
+  monto_cobrado_transferencia: string;
   monto_pago_repartidor: string;
   monto_total_general: string;
 }): TotalesHoja => ({
@@ -99,6 +111,8 @@ const aTotales = (f: {
   entregados: f.entregados,
   cobroDestino: f.cobro_destino,
   montoCobradoDestino: f.monto_cobrado_destino,
+  montoCobradoEfectivo: f.monto_cobrado_efectivo,
+  montoCobradoTransferencia: f.monto_cobrado_transferencia,
   montoPagoRepartidor: f.monto_pago_repartidor,
   montoTotalGeneral: f.monto_total_general,
   // Plata con Decimal sobre los strings de `numeric`, nunca con `number`.
@@ -115,6 +129,8 @@ const totalesCongelados = (c: FilaCabecera): TotalesHoja =>
     entregados: c.total_entregados ?? 0,
     cobro_destino: c.total_cobro_destino ?? 0,
     monto_cobrado_destino: c.monto_cobrado_destino ?? '0.0000',
+    monto_cobrado_efectivo: c.monto_cobrado_efectivo ?? '0.0000',
+    monto_cobrado_transferencia: c.monto_cobrado_transferencia ?? '0.0000',
     monto_pago_repartidor: c.monto_pago_repartidor ?? '0.0000',
     monto_total_general: c.monto_total_general ?? '0.0000',
   });
@@ -159,6 +175,7 @@ export class HojasRutaService {
     private readonly db: Db,
     private readonly repartidores: RepartidoresService,
     private readonly configuracion: PaqueteConfiguracionService,
+    private readonly tarifas: TarifasPagoService,
   ) {}
 
   /**
@@ -185,9 +202,18 @@ export class HojasRutaService {
       let paqueteId = await this.bloquearPaquete(tenantId, codigo);
       if (!paqueteId) {
         const defaults = await this.configuracion.exigirDefaults(tenantId);
+        // Último cerrojo, después de la hoja: `eliminar` toma la tarifa `FOR UPDATE` y no
+        // bloquea filas de ninguno de los otros, así que el orden no cierra ciclo.
+        if (dto.tarifaPagoId) {
+          await this.tarifas.exigirActivaDelTenant(tenantId, dto.tarifaPagoId, {
+            bloquear: true,
+          });
+        } else {
+          await this.tarifas.exigirDefecto(tenantId);
+        }
         const nuevo = unwrap<{ paquete_id: string }>(
           await this.db.query(
-            `INSERT INTO paquetes (tenant_id, codigo, cobro_en_destino, precio_envio, pago_repartidor)
+            `INSERT INTO paquetes (tenant_id, codigo, cobro_en_destino, precio_envio, tarifa_pago_id)
              VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (tenant_id, codigo) WHERE eliminado_el IS NULL DO NOTHING
              RETURNING paquete_id`,
@@ -196,7 +222,7 @@ export class HojasRutaService {
               codigo,
               dto.cobroEnDestino,
               defaults.precioEnvio,
-              defaults.pagoRepartidor,
+              dto.tarifaPagoId ?? null,
             ],
           ),
         );
@@ -237,6 +263,12 @@ export class HojasRutaService {
         hoja: await this.detalle(tenantId, hoja.id),
       };
     });
+  }
+
+  private sinTarifaQuePagar(): BadRequestException {
+    return new BadRequestException(
+      'No hay una tarifa de pago que aplicar a esta entrega: cargá una tarifa por defecto.',
+    );
   }
 
   /** Todo o nada: si un paquete no está disponible no se asigna ninguno y se nombran los códigos. */
@@ -315,35 +347,50 @@ export class HojasRutaService {
    * por error. Volver a `en_ruta` o pasar a `entregado` deja al paquete ocupando una ruta, así
    * que se toma su cerrojo ANTES de mirar sus otras líneas: sin él, dos hojas podrían marcarlo
    * a la vez.
+   *
+   * Pasar a `entregado` FIJA en la línea la tarifa y el pago que corresponden en ese momento
+   * (regla 10); volver a otro estado los limpia, y con ellos el medio de cobro. Marcar de nuevo
+   * una línea que ya estaba entregada NO la vuelve a resolver (cambiar el monto de la tarifa no
+   * mueve entregas hechas): solo cambia el medio de cobro si llegó uno.
    */
   async marcar(
     tenantId: string,
     hojaId: string,
     paqueteId: string,
     estado: EstadoLinea,
+    medioCobro?: MedioCobro,
   ): Promise<HojaRutaDetalle> {
+    if (medioCobro !== undefined && estado !== 'entregado') {
+      throw new BadRequestException(
+        'El medio de cobro solo se elige al marcar entregado un paquete con cobro en destino.',
+      );
+    }
     return this.db.transaccion(async () => {
       await this.exigirHojaAbierta(tenantId, hojaId);
-      const propias: { id: string }[] = await this.db.query(
-        `SELECT hoja_ruta_paquete_id AS id FROM hoja_ruta_paquetes
-          WHERE tenant_id = $1 AND hoja_ruta_id = $2 AND paquete_id = $3 AND eliminado_el IS NULL`,
-        [tenantId, hojaId, paqueteId],
-      );
+      const propias: { id: string; estado: EstadoLinea }[] =
+        await this.db.query(
+          `SELECT hoja_ruta_paquete_id AS id, estado FROM hoja_ruta_paquetes
+            WHERE tenant_id = $1 AND hoja_ruta_id = $2 AND paquete_id = $3 AND eliminado_el IS NULL`,
+          [tenantId, hojaId, paqueteId],
+        );
       if (!propias.length) {
         throw new NotFoundException('El paquete no está en esta hoja.');
       }
       const lineaId = propias[0].id;
 
+      let cobroEnDestino = false;
       if (estado !== 'no_entregado') {
-        const paquetes: { codigo: string }[] = await this.db.query(
-          `SELECT codigo FROM paquetes
-            WHERE tenant_id = $1 AND paquete_id = $2 AND eliminado_el IS NULL
-              FOR UPDATE`,
-          [tenantId, paqueteId],
-        );
+        const paquetes: { codigo: string; cobro_en_destino: boolean }[] =
+          await this.db.query(
+            `SELECT codigo, cobro_en_destino FROM paquetes
+              WHERE tenant_id = $1 AND paquete_id = $2 AND eliminado_el IS NULL
+                FOR UPDATE`,
+            [tenantId, paqueteId],
+          );
         if (!paquetes.length) {
           throw new NotFoundException('El paquete no existe.');
         }
+        cobroEnDestino = paquetes[0].cobro_en_destino;
         const lineas = await this.lineasVivas(tenantId, [paqueteId], hojaId);
         const ocupa = lineas.find(
           (l) =>
@@ -355,14 +402,49 @@ export class HojasRutaService {
             `El paquete ${paquetes[0].codigo} ya salió con ${ocupa.repartidor_nombre}: no se puede marcar acá.`,
           );
         }
+        if (medioCobro !== undefined && !cobroEnDestino) {
+          throw new BadRequestException(
+            `El paquete ${paquetes[0].codigo} no tiene cobro en destino: no lleva medio de cobro.`,
+          );
+        }
       }
 
       try {
-        await this.db.query(
-          `UPDATE hoja_ruta_paquetes SET estado = $3, actualizado_el = now()
-            WHERE tenant_id = $1 AND hoja_ruta_paquete_id = $2 AND eliminado_el IS NULL`,
-          [tenantId, lineaId, estado],
-        );
+        if (estado !== 'entregado') {
+          await this.db.query(
+            `UPDATE hoja_ruta_paquetes
+                SET estado = $3, tarifa_pago_id = NULL, pago_repartidor = NULL,
+                    medio_cobro = NULL, actualizado_el = now()
+              WHERE tenant_id = $1 AND hoja_ruta_paquete_id = $2 AND eliminado_el IS NULL`,
+            [tenantId, lineaId, estado],
+          );
+        } else if (propias[0].estado === 'entregado') {
+          if (medioCobro !== undefined) {
+            await this.db.query(
+              `UPDATE hoja_ruta_paquetes SET medio_cobro = $3, actualizado_el = now()
+                WHERE tenant_id = $1 AND hoja_ruta_paquete_id = $2 AND eliminado_el IS NULL`,
+              [tenantId, lineaId, medioCobro],
+            );
+          }
+        } else {
+          const filas = unwrap<{ id: string }>(
+            await this.db.query(
+              `UPDATE hoja_ruta_paquetes l
+                  SET estado = 'entregado', tarifa_pago_id = tr.tarifa_pago_id,
+                      pago_repartidor = tr.monto, medio_cobro = $3, actualizado_el = now()
+                 FROM ${PAGO_RESUELTO_SQL.from}
+                WHERE l.tenant_id = $1 AND l.hoja_ruta_paquete_id = $2 AND l.eliminado_el IS NULL
+                  AND ${PAGO_RESUELTO_SQL.donde}
+                RETURNING l.hoja_ruta_paquete_id AS id`,
+              [
+                tenantId,
+                lineaId,
+                cobroEnDestino ? (medioCobro ?? 'efectivo') : null,
+              ],
+            ),
+          );
+          if (!filas.length) throw this.sinTarifaQuePagar();
+        }
       } catch (e) {
         // El índice único de `en_ruta` es la última defensa si dos marcados llegaran juntos.
         if ((e as { code?: string }).code === '23505') {
@@ -376,18 +458,38 @@ export class HojasRutaService {
     });
   }
 
-  /** Solo pasa a `entregado` lo que sigue en ruta; un `no_entregado` ya marcado no se toca. */
+  /**
+   * Solo pasa a `entregado` lo que sigue en ruta; un `no_entregado` ya marcado no se toca. El pago
+   * de todas las líneas se resuelve en UNA sentencia, y los cobros en destino quedan en efectivo
+   * (el medio se cambia en la fila). Si alguna no tiene tarifa que pagar, no se entrega ninguna.
+   */
   async entregarTodos(
     tenantId: string,
     hojaId: string,
   ): Promise<HojaRutaDetalle> {
     return this.db.transaccion(async () => {
       await this.exigirHojaAbierta(tenantId, hojaId);
-      await this.db.query(
-        `UPDATE hoja_ruta_paquetes SET estado = 'entregado', actualizado_el = now()
+      const enRuta: { n: number }[] = await this.db.query(
+        `SELECT COUNT(*)::int AS n FROM hoja_ruta_paquetes
           WHERE tenant_id = $1 AND hoja_ruta_id = $2 AND estado = 'en_ruta' AND eliminado_el IS NULL`,
         [tenantId, hojaId],
       );
+      const filas = unwrap<{ id: string }>(
+        await this.db.query(
+          `UPDATE hoja_ruta_paquetes l
+              SET estado = 'entregado', tarifa_pago_id = tr.tarifa_pago_id,
+                  pago_repartidor = tr.monto,
+                  medio_cobro = CASE WHEN p.cobro_en_destino THEN 'efectivo' END,
+                  actualizado_el = now()
+             FROM ${PAGO_RESUELTO_SQL.from}
+            WHERE l.tenant_id = $1 AND l.hoja_ruta_id = $2 AND l.estado = 'en_ruta'
+              AND l.eliminado_el IS NULL
+              AND ${PAGO_RESUELTO_SQL.donde}
+            RETURNING l.hoja_ruta_paquete_id AS id`,
+          [tenantId, hojaId],
+        ),
+      );
+      if (filas.length !== enRuta[0].n) throw this.sinTarifaQuePagar();
       return this.detalle(tenantId, hojaId);
     });
   }
@@ -483,7 +585,9 @@ export class HojasRutaService {
             SET estado = 'rendida', rendida_por = $3, rendida_el = now(),
                 total_asignados = $4, total_entregados = $5, total_cobro_destino = $6,
                 monto_cobrado_destino = $7, monto_pago_repartidor = $8,
-                monto_total_general = $9, neto_a_rendir = $10, actualizado_el = now()
+                monto_total_general = $9, neto_a_rendir = $10,
+                monto_cobrado_efectivo = $11, monto_cobrado_transferencia = $12,
+                actualizado_el = now()
           WHERE tenant_id = $1 AND hoja_ruta_id = $2 AND estado = 'abierta' AND eliminado_el IS NULL
           RETURNING hoja_ruta_id`,
         [
@@ -497,6 +601,8 @@ export class HojasRutaService {
           t.montoPagoRepartidor,
           t.montoTotalGeneral,
           t.netoARendir,
+          t.montoCobradoEfectivo,
+          t.montoCobradoTransferencia,
         ],
       ),
     );
@@ -523,7 +629,8 @@ export class HojasRutaService {
       `SELECT h.hoja_ruta_id AS id, h.repartidor_id, r.nombre AS repartidor_nombre,
               h.fecha::text AS fecha, h.estado, h.rendida_el,
               h.total_asignados, h.total_entregados, h.total_cobro_destino,
-              h.monto_cobrado_destino, h.monto_pago_repartidor,
+              h.monto_cobrado_destino, h.monto_cobrado_efectivo, h.monto_cobrado_transferencia,
+              h.monto_pago_repartidor,
               h.monto_total_general, h.neto_a_rendir
          FROM hojas_ruta h
          JOIN repartidores r ON r.repartidor_id = h.repartidor_id
@@ -561,6 +668,7 @@ export class HojasRutaService {
     let entregados = 0;
     let cobroDestino = 0;
     let montoCobradoDestino = new Decimal(0);
+    let montoCobradoTransferencia = new Decimal(0);
     let montoTotalGeneral = new Decimal(0);
     let montoPagoRepartidor = new Decimal(0);
     for (const h of hojas) {
@@ -568,6 +676,9 @@ export class HojasRutaService {
       entregados += h.entregados;
       cobroDestino += h.cobroDestino;
       montoCobradoDestino = montoCobradoDestino.plus(h.montoCobradoDestino);
+      montoCobradoTransferencia = montoCobradoTransferencia.plus(
+        h.montoCobradoTransferencia,
+      );
       montoTotalGeneral = montoTotalGeneral.plus(h.montoTotalGeneral);
       montoPagoRepartidor = montoPagoRepartidor.plus(h.montoPagoRepartidor);
     }
@@ -576,6 +687,7 @@ export class HojasRutaService {
       entregados,
       cobroDestino,
       montoCobradoDestino: montoCobradoDestino.toFixed(4),
+      montoCobradoTransferencia: montoCobradoTransferencia.toFixed(4),
       montoTotalGeneral: montoTotalGeneral.toFixed(4),
       montoPagoRepartidor: montoPagoRepartidor.toFixed(4),
     };
@@ -587,7 +699,8 @@ export class HojasRutaService {
       `SELECT h.hoja_ruta_id AS id, h.repartidor_id, r.nombre AS repartidor_nombre,
               h.fecha::text AS fecha, h.estado, h.rendida_el,
               h.total_asignados, h.total_entregados, h.total_cobro_destino,
-              h.monto_cobrado_destino, h.monto_pago_repartidor,
+              h.monto_cobrado_destino, h.monto_cobrado_efectivo, h.monto_cobrado_transferencia,
+              h.monto_pago_repartidor,
               h.monto_total_general, h.neto_a_rendir
          FROM hojas_ruta h
          JOIN repartidores r ON r.repartidor_id = h.repartidor_id
@@ -600,12 +713,29 @@ export class HojasRutaService {
     }
     const c = cabeceras[0];
 
+    // Entregada: lo que fijó al entregar. Las demás: lo que se pagaría hoy (`tarifaResueltaSql`, la
+    // misma regla que fija el pago), para que la pantalla lo muestre como estimado. La tarifa se
+    // lee SIN filtro de borrado a propósito: una entrega conserva el nombre de su tarifa aunque se
+    // haya borrado después (la línea guarda su monto y no depende de ella).
     const lineas: FilaLinea[] = await this.db.query(
       `SELECT p.paquete_id, p.codigo, p.destinatario_nombre, p.direccion, p.comuna,
-              p.cobro_en_destino, p.precio_envio, p.pago_repartidor, l.estado
+              p.cobro_en_destino, p.precio_envio, l.estado, l.medio_cobro,
+              x.tarifa_pago_id, t.nombre AS tarifa_pago_nombre,
+              CASE WHEN l.estado = 'entregado' THEN l.pago_repartidor
+                   ELSE COALESCE(t.monto, 0::numeric(18,4)) END AS pago_repartidor
          FROM hoja_ruta_paquetes l
+         JOIN hojas_ruta h ON h.hoja_ruta_id = l.hoja_ruta_id
+                          AND h.tenant_id = l.tenant_id AND h.eliminado_el IS NULL
+         JOIN repartidores r ON r.repartidor_id = h.repartidor_id
+                            AND r.tenant_id = l.tenant_id AND r.eliminado_el IS NULL
          JOIN paquetes p ON p.paquete_id = l.paquete_id
                         AND p.tenant_id = l.tenant_id AND p.eliminado_el IS NULL
+         CROSS JOIN LATERAL (
+           SELECT CASE WHEN l.estado = 'entregado' THEN l.tarifa_pago_id
+                       ELSE ${tarifaResueltaSql({ paquete: 'p', repartidor: 'r' })} END AS tarifa_pago_id
+         ) x
+         LEFT JOIN tarifas_pago t ON t.tarifa_pago_id = x.tarifa_pago_id
+                                 AND t.tenant_id = l.tenant_id
         WHERE l.hoja_ruta_id = $1 AND l.tenant_id = $2 AND l.eliminado_el IS NULL
         ORDER BY l.creado_el DESC, l.hoja_ruta_paquete_id`,
       [hojaId, tenantId],
@@ -634,7 +764,11 @@ export class HojasRutaService {
           comuna: l.comuna,
           cobroEnDestino: l.cobro_en_destino,
           precioEnvio: l.precio_envio,
+          tarifaPagoId: l.tarifa_pago_id,
+          tarifaPagoNombre: l.tarifa_pago_nombre,
           pagoRepartidor: l.pago_repartidor,
+          pagoEstimado: l.estado !== 'entregado',
+          medioCobro: l.medio_cobro,
           estado: l.estado,
         }),
       ),
@@ -658,7 +792,9 @@ export class HojasRutaService {
               COUNT(*) FILTER (WHERE l.estado = 'entregado')::int                         AS entregados,
               COUNT(*) FILTER (WHERE l.estado = 'entregado' AND p.cobro_en_destino)::int  AS cobro_destino,
               COALESCE(SUM(p.precio_envio) FILTER (WHERE l.estado = 'entregado' AND p.cobro_en_destino), 0::numeric(18,4)) AS monto_cobrado_destino,
-              COALESCE(SUM(p.pago_repartidor) FILTER (WHERE l.estado = 'entregado'), 0::numeric(18,4))                     AS monto_pago_repartidor,
+              COALESCE(SUM(p.precio_envio) FILTER (WHERE l.estado = 'entregado' AND p.cobro_en_destino AND l.medio_cobro IS DISTINCT FROM 'transferencia'), 0::numeric(18,4)) AS monto_cobrado_efectivo,
+              COALESCE(SUM(p.precio_envio) FILTER (WHERE l.estado = 'entregado' AND p.cobro_en_destino AND l.medio_cobro = 'transferencia'), 0::numeric(18,4))        AS monto_cobrado_transferencia,
+              COALESCE(SUM(l.pago_repartidor) FILTER (WHERE l.estado = 'entregado'), 0::numeric(18,4))                     AS monto_pago_repartidor,
               COALESCE(SUM(p.precio_envio) FILTER (WHERE l.estado = 'entregado'), 0::numeric(18,4))                        AS monto_total_general
          FROM hojas_ruta h
          LEFT JOIN hoja_ruta_paquetes l ON l.hoja_ruta_id = h.hoja_ruta_id
