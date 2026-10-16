@@ -10,7 +10,7 @@ Las capturas citadas están en `frontend/e2e-auditoria/capturas/` (local, fuera 
 
 | Grupo | P0 | P1 | P2 | P3 | Total |
 |---|---|---|---|---|---|
-| [00 · Transversal](00-transversal.md) | 0 | 2 | 4 | 5 | 11 |
+| [00 · Transversal](00-transversal.md) | 0 | 2 | 5 | 5 | 12 |
 | [01 · POS y ventas](01-pos-y-ventas.md) | 0 | 2 | 17 | 12 | 31 |
 | [02 · Salones y mesas](02-salones-y-mesas.md) | 1 | 4 | 21 | 9 | 35 |
 | [03 · Caja](03-caja.md) | 0 | 3 | 15 | 11 | 29 |
@@ -20,7 +20,7 @@ Las capturas citadas están en `frontend/e2e-auditoria/capturas/` (local, fuera 
 | [07 · Configuración](07-configuracion.md) | 0 | 2 | 21 | 13 | 36 |
 | [08 · Ingreso y cuenta](08-ingreso-y-cuenta.md) | 0 | 1 | 11 | 14 | 26 |
 | [09 · Tienda y suscripciones](09-tienda-y-suscripciones.md) | 0 | 2 | 15 | 7 | 24 |
-| **Total** | **1** | **27** | **153** | **93** | **274** |
+| **Total** | **1** | **27** | **154** | **93** | **275** |
 
 Severidad: **P0** plata o datos en riesgo · **P1** frena la tarea principal · **P2** la hace lenta o confusa · **P3** pulido.
 
@@ -497,7 +497,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 ### 00 · Transversal
 
-4 P2 y 5 P3. Documento: [00-transversal.md](00-transversal.md).
+5 P2 y 5 P3. Documento: [00-transversal.md](00-transversal.md).
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
@@ -505,6 +505,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☐ | [00.7](00-transversal.md) | P2 | Las cifras de DM Sans no miden lo mismo: los montos no se alinean | owner |
 | ☐ | [00.8](00-transversal.md) | P2 | Verde, ámbar y rojo de los estados no tienen contraste suficiente sobre blanco *(ver 01.17, 02.17, 03.9, 03.10, 04.5, 04.6, 04.21, 05.17, 06.27, 07.16)* | agente + owner |
 | ☐ | [00.9](00-transversal.md) | P2 | En las tablas de lista, una columna puede no dibujarse y acciones queda fuera *(ver 06.26, 07.1)* | agente |
+| ☐ | [00.12](00-transversal.md) | P2 | Pantallas que no se ven de Venka: tarjetas verdes y ámbar, montos en letra de terminal, MAYÚSCULAS | agente |
 | ☐ | [00.2](00-transversal.md) | P3 | Los links se ven negros y no petróleo, y la guía dice otra cosa | owner |
 | ☐ | [00.3](00-transversal.md) | P3 | Hay textos con voseo mezclados con tuteo en 49 archivos *(ver 01.21, 02.27, 03.19, 04.23, 05.21, 06.24, 07.28, 08.17, 09.18)* | agente |
 | ☐ | [00.4](00-transversal.md) | P3 | Swagger y una variable todavía dicen "Prueba Técnica" | agente |
@@ -879,6 +880,14 @@ Hallazgos que se arreglan juntos, por componente o por causa común. Cada lote d
 - Vacíos que no distinguen "no hay" de "tu filtro no encontró": 01.11, 05.23, 06.17, 09.13, 09.23.
 
 **¿Toca plata?** No.
+
+### Lote 9 · Que todas las pantallas se vean de Venka
+
+**Qué cierra:** 00.12 (tarjetas de resumen de color, `font-mono` en 32 archivos, rótulos en mayúsculas) y, de paso, lo visual de 04.5.
+
+**Orden:** primero **00.7** (cifras de ancho fijo en DM Sans) y **00.8** (tonos de verde, ámbar y rojo); recién después se saca `font-mono`, porque sin 00.7 las columnas de montos se desalinean. Conviene hacerlo por grupo de pantallas, empezando por las que salen en un video: POS, historial de ventas, caja e inicio.
+
+**¿Toca plata?** No cambia ningún cálculo; solo cómo se ven los montos.
 
 ### Lote 8 · Cobro, propinas y cierre de caja (plata: cada frente va solo)
 
