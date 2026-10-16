@@ -122,22 +122,34 @@ export class RepartidoresService {
     });
   }
 
-  /** Para quien asigna un paquete a un repartidor: lee `activo` aparte del `WHERE`, así "no es de este tenant" y "está inactivo" son errores distintos. */
+  /**
+   * Para quien asigna un paquete a un repartidor: lee `activo` aparte del `WHERE`, así "no es de
+   * este tenant" y "está inactivo" son errores distintos. Con `bloquear` (dentro de la
+   * transacción de quien escribe una hoja) lee la fila `FOR SHARE`: `remove` la toma `FOR UPDATE`
+   * antes de preguntar por las hojas, así que uno de los dos espera al otro y no queda una hoja
+   * apuntando a un repartidor borrado.
+   */
   async exigirActivo(
     tenantId: string,
     repartidorId: string,
+    { bloquear = false }: { bloquear?: boolean } = {},
   ): Promise<RepartidorFila> {
-    const fila = await this.buscar(tenantId, repartidorId);
+    const fila = await this.buscar(tenantId, repartidorId, bloquear);
     if (!fila.activo) {
       throw new BadRequestException(`${fila.nombre} está inactivo`);
     }
     return fila;
   }
 
-  private async buscar(tenantId: string, id: string): Promise<RepartidorFila> {
+  private async buscar(
+    tenantId: string,
+    id: string,
+    bloquear = false,
+  ): Promise<RepartidorFila> {
     const rows: RepartidorRow[] = await this.db.query(
       `SELECT ${COLUMNAS} FROM repartidores
-        WHERE repartidor_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL`,
+        WHERE repartidor_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+        ${bloquear ? 'FOR SHARE' : ''}`,
       [id, tenantId],
     );
     if (!rows.length) throw new NotFoundException('Repartidor no encontrado');

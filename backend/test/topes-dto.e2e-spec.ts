@@ -681,6 +681,18 @@ const TOPES: FilaTope[] = [
         ],
       }),
   },
+  // paquetería
+  {
+    campo: 'paqueteIds',
+    tope: 200,
+    metodo: 'post',
+    ruta: 'hojas-ruta/asignar',
+    cuerpo: (n) => ({
+      repartidorId: ID,
+      fecha: '2026-10-15',
+      paqueteIds: uuids(n),
+    }),
+  },
 ];
 
 /** Lo que cabe en una columna `int` y `smallint` de Postgres. */

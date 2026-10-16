@@ -6,6 +6,8 @@ import { Repartidor } from './entities/repartidor.entity';
 import { Paquete } from './entities/paquete.entity';
 import { HojaRuta } from './entities/hoja-ruta.entity';
 import { HojaRutaPaquete } from './entities/hoja-ruta-paquete.entity';
+import { HojasRutaController } from './hojas-ruta.controller';
+import { HojasRutaService } from './hojas-ruta.service';
 import { PaqueteConfiguracionController } from './paquete-configuracion.controller';
 import { PaqueteConfiguracionService } from './paquete-configuracion.service';
 import { PaquetesController } from './paquetes.controller';
@@ -30,12 +32,19 @@ import { RepartidoresService } from './repartidores.service';
     PaqueteConfiguracionController,
     PaquetesController,
     RepartidoresController,
+    HojasRutaController,
   ],
   providers: [
     PaqueteConfiguracionService,
     PaquetesService,
     RepartidoresService,
+    HojasRutaService,
   ],
-  exports: [PaqueteConfiguracionService, PaquetesService, RepartidoresService],
+  exports: [
+    PaqueteConfiguracionService,
+    PaquetesService,
+    RepartidoresService,
+    HojasRutaService,
+  ],
 })
 export class PaqueteriaModule {}

@@ -3,13 +3,17 @@ import { type INestApplication } from '@nestjs/common';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
 import type { App } from 'supertest/types';
+import { DataSource } from 'typeorm';
 import { AppModule } from '../src/app.module';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import type {
+  HojaRutaDetalle,
   PaqueteConfiguracionRespuesta,
   PaqueteFila,
   RepartidorFila,
+  RespuestaEscaneo,
 } from '../src/modules/paqueteria/paqueteria.types';
+import { correrCarrera } from './helpers/carrera';
 import { loginSegundoTenant } from './helpers/segundo-tenant';
 
 const PARIS_TENANT_ID = '550e8400-e29b-41d4-a716-446655440007';
@@ -112,6 +116,8 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       ['post', '/api/repartidores'],
       ['get', '/api/paquetes'],
       ['post', '/api/paquetes'],
+      ['post', '/api/hojas-ruta/escanear'],
+      ['post', '/api/hojas-ruta/asignar'],
     ] as const) {
       const res = await llamar(metodo, ruta, tokenVendedor, {});
       expect(res.status).toBe(403);
@@ -761,6 +767,477 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       expect(
         (await crear({ codigo: '   ', cobroEnDestino: false })).status,
       ).toBe(400);
+    });
+  });
+  describe('escaneo y asignación', () => {
+    const marca = Date.now();
+    const FECHA = '2026-10-15';
+    let n = 0;
+    const codigoNuevo = () => `E2E-HR-${marca}-${++n}`;
+    // Repartidores con hojas: no se pueden borrar, se desactivan al terminar.
+    const propios: string[] = [];
+    const ajenos: string[] = [];
+    const paquetesAjenos: string[] = [];
+    const mensajeDe = (res: { body: unknown }) =>
+      (res.body as { message: string }).message;
+
+    const nuevoRepartidor = async (token = tokenAdmin) => {
+      const res = await llamar('post', '/api/repartidores', token, {
+        nombre: `E2E HR ${marca}-${++n}`,
+      });
+      expect(res.status).toBe(201);
+      const fila = res.body as RepartidorFila;
+      (token === tokenAdmin ? propios : ajenos).push(fila.id);
+      return fila;
+    };
+    const escanear = async (
+      repartidorId: string,
+      codigo: string,
+      extra: object = {},
+      token = tokenAdmin,
+    ) =>
+      llamar('post', '/api/hojas-ruta/escanear', token, {
+        repartidorId,
+        fecha: FECHA,
+        codigo,
+        cobroEnDestino: false,
+        ...extra,
+      });
+    const asignar = async (
+      repartidorId: string,
+      paqueteIds: string[],
+      extra: object = {},
+    ) =>
+      llamar('post', '/api/hojas-ruta/asignar', tokenAdmin, {
+        repartidorId,
+        fecha: FECHA,
+        paqueteIds,
+        ...extra,
+      });
+    const crearPaquete = async (cuerpo: object) => {
+      const res = await llamar('post', '/api/paquetes', tokenAdmin, {
+        codigo: codigoNuevo(),
+        cobroEnDestino: false,
+        ...cuerpo,
+      });
+      expect(res.status).toBe(201);
+      return res.body as PaqueteFila;
+    };
+    const paquetePorCodigo = async (codigo: string) => {
+      const res = await llamar(
+        'get',
+        `/api/paquetes?q=${encodeURIComponent(codigo)}`,
+      );
+      expect(res.status).toBe(200);
+      const [fila] = (res.body as { data: PaqueteFila[] }).data;
+      return fila;
+    };
+
+    let rep: RepartidorFila;
+    let otro: RepartidorFila;
+
+    // No depende de otro describe: deja la configuración en los valores del seed (10000 / 5000).
+    beforeAll(async () => {
+      const res = await llamar(
+        'put',
+        '/api/paquetes/configuracion',
+        tokenAdmin,
+        { precioEnvioDefecto: '10000', pagoRepartidorDefecto: '5000' },
+      );
+      expect(res.status).toBe(200);
+      rep = await nuevoRepartidor();
+      otro = await nuevoRepartidor();
+    });
+
+    afterAll(async () => {
+      const fallos: string[] = [];
+      for (const id of propios) {
+        const res = await llamar(
+          'patch',
+          `/api/repartidores/${id}`,
+          tokenAdmin,
+          {
+            activo: false,
+          },
+        );
+        if (![200, 404].includes(res.status)) {
+          fallos.push(`PATCH repartidor ${id} -> ${res.status}`);
+        }
+      }
+      for (const id of ajenos) {
+        const res = await llamar(
+          'delete',
+          `/api/repartidores/${id}`,
+          tokenSegundoTenant,
+        );
+        if (![200, 404].includes(res.status)) {
+          fallos.push(`DELETE repartidor ajeno ${id} -> ${res.status}`);
+        }
+      }
+      for (const id of paquetesAjenos) {
+        const res = await llamar(
+          'delete',
+          `/api/paquetes/${id}`,
+          tokenSegundoTenant,
+        );
+        if (![200, 404].includes(res.status)) {
+          fallos.push(`DELETE paquete ajeno ${id} -> ${res.status}`);
+        }
+      }
+      expect(fallos).toEqual([]);
+    });
+
+    it('código nuevo: asignado_nuevo, nace con el cobro en destino del interruptor y los montos de la configuración', async () => {
+      const codigo = codigoNuevo();
+      const res = await escanear(rep.id, codigo, { cobroEnDestino: true });
+      expect(res.status).toBe(200);
+      const cuerpo = res.body as RespuestaEscaneo;
+      expect(cuerpo).toMatchObject({ resultado: 'asignado_nuevo', codigo });
+      expect(cuerpo.hoja).toMatchObject({
+        repartidorId: rep.id,
+        repartidorNombre: rep.nombre,
+        fecha: FECHA,
+        estado: 'abierta',
+        rendidaEl: null,
+        enRuta: cuerpo.hoja.asignados,
+        entregados: 0,
+        netoARendir: '0.0000',
+      });
+      expect(cuerpo.hoja.lineas[0]).toMatchObject({
+        codigo,
+        cobroEnDestino: true,
+        precioEnvio: '10000.0000',
+        pagoRepartidor: '5000.0000',
+        estado: 'en_ruta',
+      });
+
+      const fila = await paquetePorCodigo(codigo);
+      expect(fila).toMatchObject({
+        estado: 'en_ruta',
+        hojaRutaId: cuerpo.hoja.id,
+        repartidorNombre: rep.nombre,
+        cobroEnDestino: true,
+      });
+    });
+
+    it('existente y disponible con cobro_en_destino=false, escaneado con el interruptor prendido: asignado, y sigue en false', async () => {
+      const paquete = await crearPaquete({ cobroEnDestino: false });
+      const res = await escanear(rep.id, paquete.codigo, {
+        cobroEnDestino: true,
+      });
+      expect(res.status).toBe(200);
+      const cuerpo = res.body as RespuestaEscaneo;
+      expect(cuerpo.resultado).toBe('asignado');
+      expect(
+        cuerpo.hoja.lineas.find((l) => l.paqueteId === paquete.id),
+      ).toMatchObject({ cobroEnDestino: false, estado: 'en_ruta' });
+      expect((await paquetePorCodigo(paquete.codigo)).cobroEnDestino).toBe(
+        false,
+      );
+    });
+
+    it('el mismo código otra vez en la misma hoja: ya_escaneado, sin línea nueva (asignados no cambia)', async () => {
+      const codigo = codigoNuevo();
+      const primero = await escanear(rep.id, codigo);
+      expect(primero.status).toBe(200);
+      const antes = (primero.body as RespuestaEscaneo).hoja;
+
+      const segundo = await escanear(rep.id, ` ${codigo} `);
+      expect(segundo.status).toBe(200);
+      const cuerpo = segundo.body as RespuestaEscaneo;
+      expect(cuerpo.resultado).toBe('ya_escaneado');
+      expect(cuerpo.hoja.asignados).toBe(antes.asignados);
+      expect(
+        cuerpo.hoja.lineas.filter((l) => l.codigo === codigo),
+      ).toHaveLength(1);
+    });
+
+    it('en ruta con otro repartidor: 409 que nombra al repartidor, y la hoja del segundo no queda con ese paquete', async () => {
+      const codigo = codigoNuevo();
+      expect((await escanear(rep.id, codigo)).status).toBe(200);
+
+      const res = await escanear(otro.id, codigo);
+      expect(res.status).toBe(409);
+      expect(mensajeDe(res)).toContain(`está con ${rep.nombre}`);
+
+      const fila = await paquetePorCodigo(codigo);
+      expect(fila.repartidorNombre).toBe(rep.nombre);
+    });
+
+    it('QR en JSON: el código guardado es el id', async () => {
+      const codigo = codigoNuevo();
+      const res = await escanear(rep.id, `{"id":"${codigo}","sender_id":7}`);
+      expect(res.status).toBe(200);
+      const cuerpo = res.body as RespuestaEscaneo;
+      expect(cuerpo.codigo).toBe(codigo);
+      expect(cuerpo.hoja.lineas[0].codigo).toBe(codigo);
+    });
+
+    it('asignar: varios disponibles entran juntos, de a una línea cada uno', async () => {
+      const dia = '2026-10-17';
+      const a = await crearPaquete({});
+      const b = await crearPaquete({});
+      const res = await asignar(rep.id, [a.id, b.id], { fecha: dia });
+      expect(res.status).toBe(200);
+      const hoja = res.body as HojaRutaDetalle;
+      expect(hoja).toMatchObject({ fecha: dia, asignados: 2, enRuta: 2 });
+      expect(hoja.lineas.map((l) => l.paqueteId).sort()).toEqual(
+        [a.id, b.id].sort(),
+      );
+
+      const otra = await asignar(rep.id, [a.id], { fecha: dia });
+      expect(otra.status).toBe(400);
+      expect(mensajeDe(otra)).toContain(`${a.codigo} ya está en esta hoja`);
+    });
+
+    it('asignar con uno no disponible: 400 que nombra el código y ninguno queda asignado', async () => {
+      const libre = await crearPaquete({});
+      const ocupado = await crearPaquete({});
+      expect((await escanear(rep.id, ocupado.codigo)).status).toBe(200);
+
+      const res = await asignar(otro.id, [libre.id, ocupado.id]);
+      expect(res.status).toBe(400);
+      expect(mensajeDe(res)).toContain(
+        `No se asignó ninguno: ${ocupado.codigo}`,
+      );
+      expect(mensajeDe(res)).toContain(`está con ${rep.nombre}`);
+      expect((await paquetePorCodigo(libre.codigo)).estado).toBe('disponible');
+    });
+
+    it('asignar con un paquete que no existe o es de otro tenant: 404, y ninguno queda asignado', async () => {
+      const mio = await crearPaquete({});
+      const ajeno = await llamar('post', '/api/paquetes', tokenSegundoTenant, {
+        codigo: codigoNuevo(),
+        cobroEnDestino: false,
+        precioEnvio: '1000',
+        pagoRepartidor: '500',
+      });
+      expect(ajeno.status).toBe(201);
+      const ajenoId = (ajeno.body as PaqueteFila).id;
+      paquetesAjenos.push(ajenoId);
+
+      const res = await asignar(otro.id, [mio.id, ajenoId]);
+      expect(res.status).toBe(404);
+      expect((await paquetePorCodigo(mio.codigo)).estado).toBe('disponible');
+    });
+
+    it('un repartidor de otro tenant, o inactivo, no recibe escaneos', async () => {
+      const ajeno = await nuevoRepartidor(tokenSegundoTenant);
+      expect((await escanear(ajeno.id, codigoNuevo())).status).toBe(404);
+
+      const inactivo = await nuevoRepartidor();
+      const off = await llamar(
+        'patch',
+        `/api/repartidores/${inactivo.id}`,
+        tokenAdmin,
+        { activo: false },
+      );
+      expect(off.status).toBe(200);
+      const res = await escanear(inactivo.id, codigoNuevo());
+      expect(res.status).toBe(400);
+      expect(mensajeDe(res)).toContain('inactivo');
+      const sinHoja = await asignar(inactivo.id, [(await crearPaquete({})).id]);
+      expect(sinHoja.status).toBe(400);
+    });
+
+    it('un escaneo rechazado no deja nada escrito: ni la hoja que iba a crear', async () => {
+      const nuevo = await nuevoRepartidor();
+      const codigo = codigoNuevo();
+      expect((await escanear(rep.id, codigo)).status).toBe(200);
+      expect((await escanear(nuevo.id, codigo)).status).toBe(409);
+      const ds = app.get(DataSource);
+      const [{ n: hojas }] = await ds.query<{ n: number }[]>(
+        `SELECT COUNT(*)::int AS n FROM hojas_ruta WHERE repartidor_id = $1`,
+        [nuevo.id],
+      );
+      expect(hojas).toBe(0);
+    });
+
+    it('DELETE /repartidores/:id de uno que tiene hojas: 400 (se desactiva)', async () => {
+      const conHoja = await nuevoRepartidor();
+      expect((await escanear(conHoja.id, codigoNuevo())).status).toBe(200);
+      const res = await llamar('delete', `/api/repartidores/${conHoja.id}`);
+      expect(res.status).toBe(400);
+      expect(mensajeDe(res)).toContain('tiene hojas de ruta');
+    });
+
+    it('entradas inválidas: 400, no 500', async () => {
+      const base = {
+        repartidorId: rep.id,
+        fecha: FECHA,
+        codigo: codigoNuevo(),
+        cobroEnDestino: false,
+      };
+      for (const malo of [
+        { fecha: '15-10-2026' },
+        { fecha: '2026-02-31' },
+        { repartidorId: 'no-es-uuid' },
+        { codigo: '   ' },
+        { codigo: 'x'.repeat(501) },
+        { cobroEnDestino: undefined },
+        { cobroEnDestino: 'si' },
+      ]) {
+        const res = await llamar(
+          'post',
+          '/api/hojas-ruta/escanear',
+          tokenAdmin,
+          {
+            ...base,
+            ...malo,
+          },
+        );
+        expect(res.status).toBe(400);
+      }
+      const uno = (await crearPaquete({})).id;
+      for (const paqueteIds of [
+        [],
+        'no-es-lista',
+        ['no-es-uuid'],
+        [uno, uno],
+        [uno, uno.toUpperCase()],
+      ]) {
+        const res = await asignar(rep.id, paqueteIds as string[], {
+          fecha: '2026-10-18',
+        });
+        expect(res.status).toBe(400);
+      }
+    });
+
+    describe('carreras', () => {
+      const ds = () => app.get(DataSource);
+
+      it('el mismo código nuevo escaneado dos veces a la vez a la misma hoja: un paquete, una línea, ningún 500', async () => {
+        const dia = '2026-10-19';
+        const sembrado = await escanear(rep.id, codigoNuevo(), { fecha: dia });
+        expect(sembrado.status).toBe(200);
+        const hojaId = (sembrado.body as RespuestaEscaneo).hoja.id;
+
+        const codigo = codigoNuevo();
+        // Compuerta: la fila de la hoja. Los dos escaneos llegan a ella con el mismo repartidor
+        // y la misma fecha, así que esperan ahí y se serializan.
+        const { respuestas, esperando } = await correrCarrera(
+          ds(),
+          [
+            'SELECT 1 FROM hojas_ruta WHERE hoja_ruta_id = $1 FOR UPDATE',
+            [hojaId],
+          ],
+          [
+            async () => escanear(rep.id, codigo, { fecha: dia }),
+            async () => escanear(rep.id, codigo, { fecha: dia }),
+          ],
+        );
+        expect(esperando).toBe(2);
+        expect(respuestas.map((r) => r.status)).toEqual([200, 200]);
+        expect(
+          respuestas.map((r) => (r.body as RespuestaEscaneo).resultado).sort(),
+        ).toEqual(['asignado_nuevo', 'ya_escaneado']);
+
+        const [{ paquetes, lineas }] = await ds().query<
+          { paquetes: number; lineas: number }[]
+        >(
+          `SELECT COUNT(DISTINCT p.paquete_id)::int AS paquetes,
+                  COUNT(l.hoja_ruta_paquete_id)::int AS lineas
+             FROM paquetes p
+             LEFT JOIN hoja_ruta_paquetes l ON l.paquete_id = p.paquete_id
+            WHERE p.codigo = $1 AND p.eliminado_el IS NULL`,
+          [codigo],
+        );
+        expect(paquetes).toBe(1);
+        expect(lineas).toBe(1);
+      });
+
+      it('el mismo código nuevo escaneado a la vez por dos repartidores: uno lo crea y se queda con él, el otro recibe 409 (nunca un 500) y hay un solo paquete', async () => {
+        const uno = await nuevoRepartidor();
+        const dos = await nuevoRepartidor();
+        const codigo = codigoNuevo();
+        // Compuerta: las filas de los dos repartidores. Cada escaneo toma su propia hoja, así que
+        // el cerrojo de la hoja no los serializa: el que decide es el índice único de `codigo`.
+        const { respuestas, esperando } = await correrCarrera(
+          ds(),
+          [
+            `SELECT 1 FROM repartidores WHERE repartidor_id = ANY($1::uuid[]) FOR UPDATE`,
+            [[uno.id, dos.id]],
+          ],
+          [
+            async () => escanear(uno.id, codigo),
+            async () => escanear(dos.id, codigo),
+          ],
+        );
+        expect(esperando).toBe(2);
+        expect(respuestas.map((r) => r.status).sort()).toEqual([200, 409]);
+        const perdedora = respuestas.find((r) => r.status === 409)!;
+        expect(mensajeDe(perdedora)).toMatch(/^El paquete .* está con /);
+        const ganadora = respuestas.find((r) => r.status === 200)!;
+        expect(ganadora.status).toBe(200);
+        expect((ganadora.body as RespuestaEscaneo).resultado).toBe(
+          'asignado_nuevo',
+        );
+
+        const [{ paquetes, lineas }] = await ds().query<
+          { paquetes: number; lineas: number }[]
+        >(
+          `SELECT COUNT(DISTINCT p.paquete_id)::int AS paquetes,
+                  COUNT(l.hoja_ruta_paquete_id)::int AS lineas
+             FROM paquetes p
+             LEFT JOIN hoja_ruta_paquetes l ON l.paquete_id = p.paquete_id
+            WHERE p.codigo = $1 AND p.eliminado_el IS NULL`,
+          [codigo],
+        );
+        expect(paquetes).toBe(1);
+        expect(lineas).toBe(1);
+      });
+
+      // Se prueban las dos llegadas, escalonadas para que el orden sea el que dice el nombre:
+      // sin el cerrojo del repartidor en el escaneo, el borrado que llega primero no espera al
+      // escaneo (el `SELECT` común no bloquea) y la hoja nace sobre un repartidor ya borrado.
+      it.each([
+        [
+          'el borrado llega primero: gana, y el escaneo ya no encuentra al repartidor',
+          'borrado',
+          404,
+          200,
+        ],
+        [
+          'el escaneo llega primero: gana, y el borrado ve la hoja y rebota',
+          'escaneo',
+          200,
+          400,
+        ],
+      ] as const)(
+        'borrar un repartidor a la vez que se le escanea (%s)',
+        async (_titulo, primero, esperadoEscaneo, esperadoBorrado) => {
+          const destino = await nuevoRepartidor();
+          const escaneo = async () => escanear(destino.id, codigoNuevo());
+          const borrado = async () =>
+            llamar('delete', `/api/repartidores/${destino.id}`, tokenAdmin);
+          const { respuestas, esperando } = await correrCarrera(
+            ds(),
+            [
+              `SELECT 1 FROM repartidores WHERE repartidor_id = $1 FOR UPDATE`,
+              [destino.id],
+            ],
+            primero === 'borrado' ? [borrado, escaneo] : [escaneo, borrado],
+            { escalonarMs: 300 },
+          );
+          expect(esperando).toBe(2);
+          const estados = respuestas.map((r) => r.status);
+          expect(
+            primero === 'borrado'
+              ? [estados[1], estados[0]]
+              : [estados[0], estados[1]],
+          ).toEqual([esperadoEscaneo, esperadoBorrado]);
+
+          const [{ huerfanas }] = await ds().query<{ huerfanas: number }[]>(
+            `SELECT COUNT(*)::int AS huerfanas
+               FROM hojas_ruta h
+               JOIN repartidores r ON r.repartidor_id = h.repartidor_id
+              WHERE r.repartidor_id = $1 AND r.eliminado_el IS NOT NULL
+                AND h.eliminado_el IS NULL`,
+            [destino.id],
+          );
+          expect(huerfanas).toBe(0);
+        },
+      );
     });
   });
 });

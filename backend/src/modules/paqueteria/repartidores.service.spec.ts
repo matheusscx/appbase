@@ -54,6 +54,20 @@ describe('RepartidoresService', () => {
     });
   });
 
+  it('exigirActivo: solo bloquea la fila (FOR SHARE) cuando se lo piden', async () => {
+    const fila = {
+      repartidor_id: ID,
+      nombre: 'Juan',
+      telefono: null,
+      activo: true,
+    };
+    db.query.mockResolvedValue([fila]);
+    await service.exigirActivo(TENANT, ID);
+    await service.exigirActivo(TENANT, ID, { bloquear: true });
+    expect(db.query.mock.calls[0][0] as string).not.toMatch(/FOR SHARE/);
+    expect(db.query.mock.calls[1][0] as string).toMatch(/FOR SHARE/);
+  });
+
   it('update: 404 si no existe en el tenant', async () => {
     db.query.mockResolvedValueOnce([[], 0]);
     await expect(service.update(TENANT, ID, { nombre: 'x' })).rejects.toThrow(
