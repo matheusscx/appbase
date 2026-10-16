@@ -41,7 +41,7 @@ interface Rechazo {
 
 const toast = useToast()
 const apiUrl = useRuntimeConfig().public.apiUrl
-const { textoNeto, lineasConCobro, rotuloEstadoLinea, colorEstadoLinea } = usePaqueteria()
+const { textoNeto, lineasConCobro, rotuloEstadoLinea, colorEstadoLinea, fechaCorta } = usePaqueteria()
 const { diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
 
 // ── Contexto: repartidor, fecha, cobro en destino ─────────────────────────
@@ -58,8 +58,6 @@ const repartidorOptions = computed(() =>
     .filter(r => r.activo)
     .map(r => ({ label: r.nombre, value: r.id })),
 )
-
-const fechaCorta = (f: string) => f.split('-').slice(1).reverse().join('-')
 
 function elegirFecha(valor: string) {
   // El calendario devuelve el eco de lo que se le puso: solo un valor distinto es una elección.

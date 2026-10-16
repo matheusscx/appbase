@@ -22,7 +22,7 @@ interface Tercero {
 const toast = useToast()
 const apiUrl = useRuntimeConfig().public.apiUrl
 const { formatOficial } = useCurrency()
-const { rotuloEstadoPaquete, colorEstadoPaquete } = usePaqueteria()
+const { rotuloEstadoPaquete, colorEstadoPaquete, fechaCorta } = usePaqueteria()
 const { pageSize } = useUserPreferences()
 const { diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
 
@@ -354,8 +354,6 @@ const repartidorOptions = computed(() =>
 const repartidorElegido = computed(() =>
   repartidorOptions.value.find(o => o.value === repartidorId.value) ?? null,
 )
-
-const fechaCorta = (fecha: string) => fecha.split('-').slice(1).reverse().join('-')
 
 const resumenAsignar = computed(() => {
   if (!repartidorElegido.value || !fechaAsignar.value) return null

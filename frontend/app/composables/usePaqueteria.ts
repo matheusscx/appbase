@@ -1,8 +1,9 @@
 import Decimal from 'decimal.js'
-import type { EstadoLinea, EstadoPaquete, LineaHoja } from '~/types/paqueteria'
+import type { EstadoHoja, EstadoLinea, EstadoPaquete, LineaHoja } from '~/types/paqueteria'
 
 type ColorEstadoPaquete = 'neutral' | 'info' | 'success'
 type ColorEstadoLinea = 'info' | 'success' | 'warning'
+type ColorEstadoHoja = 'info' | 'success'
 
 // `Record` completo: sumar un estado al tipo no compila hasta darle rótulo y color.
 const PAQUETE: Record<EstadoPaquete, { rotulo: string, color: ColorEstadoPaquete }> = {
@@ -15,6 +16,11 @@ const LINEA: Record<EstadoLinea, { rotulo: string, color: ColorEstadoLinea }> = 
   en_ruta: { rotulo: 'En ruta', color: 'info' },
   entregado: { rotulo: 'Entregado', color: 'success' },
   no_entregado: { rotulo: 'No entregado', color: 'warning' },
+}
+
+const HOJA: Record<EstadoHoja, { rotulo: string, color: ColorEstadoHoja }> = {
+  abierta: { rotulo: 'Abierta', color: 'info' },
+  rendida: { rotulo: 'Rendida', color: 'success' },
 }
 
 /**
@@ -40,6 +46,19 @@ export function usePaqueteria() {
   }
 
   /**
+   * El neto de una hoja para una celda o un cartel (sin el nombre del repartidor): positivo y cero
+   * se muestran como monto; negativo, como lo que el local le paga, con `negativo` para pintarlo
+   * de otro color. Misma comparación por `Decimal` que `textoNeto`.
+   */
+  function presentarNeto(neto: string): { texto: string, negativo: boolean } {
+    const monto = new Decimal(neto)
+    if (monto.isNegative() && !monto.isZero()) {
+      return { texto: `Se le pagan ${formatOficial(monto.abs().toFixed())}`, negativo: true }
+    }
+    return { texto: formatOficial(monto.toFixed()), negativo: false }
+  }
+
+  /**
    * Cuántas líneas de la hoja cobran en destino. Cuenta las `en_ruta` y las `entregado`: lo que el
    * repartidor cobra o ya cobró. Una `no_entregado` no cobra, así que no entra; por eso este número
    * puede ser menor que `asignados` aun si todas tienen el interruptor prendido (`asignados`
@@ -50,12 +69,21 @@ export function usePaqueteria() {
     return lineas.filter(l => l.estado !== 'no_entregado' && l.cobroEnDestino).length
   }
 
+  /** `YYYY-MM-DD` -> `DD-MM`, sobre el string: una fecha pura no pasa por `Date` (corre un día según la zona). */
+  function fechaCorta(fecha: string): string {
+    return fecha.split('-').slice(1).reverse().join('-')
+  }
+
   return {
+    fechaCorta,
     lineasConCobro,
     rotuloEstadoPaquete: (estado: EstadoPaquete) => PAQUETE[estado].rotulo,
     colorEstadoPaquete: (estado: EstadoPaquete) => PAQUETE[estado].color,
+    rotuloEstadoHoja: (estado: EstadoHoja) => HOJA[estado].rotulo,
+    colorEstadoHoja: (estado: EstadoHoja) => HOJA[estado].color,
     rotuloEstadoLinea: (estado: EstadoLinea) => LINEA[estado].rotulo,
     colorEstadoLinea: (estado: EstadoLinea) => LINEA[estado].color,
     textoNeto,
+    presentarNeto,
   }
 }

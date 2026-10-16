@@ -62,6 +62,32 @@ describe('usePaqueteria', () => {
     })
   })
 
+  describe('presentarNeto: el neto de una hoja en una celda', () => {
+    it('positivo: el monto, sin marca', () => {
+      expect(usePaqueteria().presentarNeto('50000')).toEqual({ texto: '$50.000', negativo: false })
+    })
+
+    it('negativo: lo que el local le paga, marcado como negativo', () => {
+      expect(usePaqueteria().presentarNeto('-5000')).toEqual({ texto: 'Se le pagan $5.000', negativo: true })
+    })
+
+    it('cero (también con decimales): monto cero, sin marca', () => {
+      expect(usePaqueteria().presentarNeto('0')).toEqual({ texto: '$0', negativo: false })
+      expect(usePaqueteria().presentarNeto('-0.00')).toEqual({ texto: '$0', negativo: false })
+    })
+  })
+
+  describe('fechaCorta: día-mes de una fecha pura', () => {
+    it('da día-mes sin año', () => {
+      expect(usePaqueteria().fechaCorta('2026-10-14')).toBe('14-10')
+    })
+
+    it('respeta el cero a la izquierda y no corre el día por zona horaria', () => {
+      expect(usePaqueteria().fechaCorta('2026-01-01')).toBe('01-01')
+      expect(usePaqueteria().fechaCorta('2026-12-31')).toBe('31-12')
+    })
+  })
+
   describe('lineasConCobro: las líneas que cobran en destino', () => {
     const linea = (estado: LineaHoja['estado'], cobroEnDestino: boolean): LineaHoja => ({
       paqueteId: `p-${estado}-${cobroEnDestino}`,
@@ -101,6 +127,15 @@ describe('usePaqueteria', () => {
       expect(colorEstadoPaquete('disponible')).toBe('neutral')
       expect(colorEstadoPaquete('en_ruta')).toBe('info')
       expect(colorEstadoPaquete('entregado')).toBe('success')
+    })
+
+    it('el estado de la hoja', () => {
+      const { rotuloEstadoHoja, colorEstadoHoja } = usePaqueteria()
+
+      expect(rotuloEstadoHoja('abierta')).toBe('Abierta')
+      expect(rotuloEstadoHoja('rendida')).toBe('Rendida')
+      expect(colorEstadoHoja('abierta')).toBe('info')
+      expect(colorEstadoHoja('rendida')).toBe('success')
     })
 
     it('el estado de la línea de una hoja', () => {
