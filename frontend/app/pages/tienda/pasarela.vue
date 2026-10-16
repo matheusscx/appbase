@@ -21,6 +21,8 @@ const lineasSnapshot = ref<{ itemId: string, cantidad: string }[]>([])
 
 const estado = ref<'revisando' | 'procesando' | 'aprobada' | 'rechazada'>('revisando')
 const ventaId = ref<string | null>(null)
+/** Por qué falló el último intento de aprobar: se muestra en la tarjeta, no solo en un toast que se va. */
+const motivoFallo = ref<string | null>(null)
 
 // Una clave por checkout: si aprobar falla por un corte, el reintento es el
 // mismo intento y no puede crear un segundo pedido. Muere con el éxito o al
@@ -31,6 +33,12 @@ onUnmounted(() => intentoCobro.terminar(AMBITO_COBRO))
 
 onMounted(async () => {
   if (!checkout.value || checkout.value.checkoutRef !== route.query.ref) {
+    // Recargar la pasarela o abrir una referencia vieja: la compra ya no está abierta, y callarlo parecía un fallo.
+    toast.add({
+      title: 'Esa compra ya no está abierta',
+      description: 'Arma el pago de nuevo desde tu carrito.',
+      color: 'warning',
+    })
     await navigateTo('/tienda')
     return
   }
@@ -61,6 +69,7 @@ async function aprobar() {
   const metodoPagoId = sinCobro.value ? null : resumen.value.metodoPagoId
 
   estado.value = 'procesando'
+  motivoFallo.value = null
   try {
     const venta = await useApiFetch<{ id: string, estado: string, repetida?: boolean }>(`${apiUrl}/ventas`, {
       method: 'POST',
@@ -90,6 +99,7 @@ async function aprobar() {
       return
     }
     const msg = apiErrorMsg(e, 'El pago fue rechazado')
+    motivoFallo.value = msg
     toast.add({ title: msg, color: 'error' })
     estado.value = 'rechazada'
   }
@@ -135,6 +145,9 @@ async function rechazar() {
             <p class="text-sm text-muted">
               Tu compra fue registrada correctamente.
             </p>
+            <p class="text-sm text-muted" data-qa="pasarela-monto">
+              Total pagado <span class="text-xl font-semibold text-default">{{ formatMonto(resumen.resultado.totales.totalFinal) }}</span>
+            </p>
             <UButton
               v-if="ventaId"
               :to="`/ventas/${ventaId}`"
@@ -146,6 +159,15 @@ async function rechazar() {
           </div>
 
           <div v-else class="space-y-4">
+            <UAlert
+              v-if="motivoFallo"
+              data-qa="pasarela-motivo"
+              icon="i-lucide-circle-x"
+              color="error"
+              variant="soft"
+              title="No se pudo registrar el pago"
+              :description="motivoFallo"
+            />
             <div class="text-sm space-y-1">
               <div class="flex justify-between text-muted">
                 <span>Subtotal</span><span>{{ formatMonto(resumen.resultado.totales.subtotalNeto) }}</span>

@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import type { CarritoLinea } from '~/composables/useVenta'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
+import Decimal from 'decimal.js'
 import { unidadBaseItem } from '~/utils/cantidad-presentacion'
 
 const props = defineProps<{
@@ -10,6 +11,8 @@ const props = defineProps<{
   vigente: boolean
   loadingCalculo?: boolean
   pagando?: boolean
+  /** Sin `Tienda Online:Crear` el backend contesta 403 al pagar: se dice antes de armar el carrito. */
+  sinPermiso?: boolean
 }>()
 const emit = defineEmits<{
   'cambiar-cantidad': [
@@ -33,7 +36,11 @@ const monedaIdsEnCarrito = computed(() => props.lineas.map((l) => l.item.monedaI
 // además reintenta si el cálculo había fallado. Gatear el botón dejaba la pantalla
 // trabada tras un fallo de red —botón gris, sin mensaje, y la única salida era
 // adivinar que había que mover una cantidad—. Misma decisión que el POS.
-const habilitarPago = computed(() => props.lineas.length > 0 && !props.loadingCalculo)
+const habilitarPago = computed(() => props.lineas.length > 0 && !props.loadingCalculo && !props.sinPermiso)
+
+// Una fila en $0 no informa y agranda el panel (09.17): solo se dibuja lo que mueve el total.
+const hayDescuentos = computed(() => !!props.resultado && !new Decimal(props.resultado.totales.totalDescuentos).isZero())
+const hayRecargos = computed(() => !!props.resultado && !new Decimal(props.resultado.totales.totalRecargos).isZero())
 
 function unidadPresLinea(linea: CarritoLinea): string {
   return linea.unidadCodigoPresentacion ?? unidadBaseItem(linea.item)
@@ -65,7 +72,7 @@ function presentacionLinea(linea: CarritoLinea): string {
       <ul v-else class="divide-y divide-default">
         <li v-for="(linea, index) in lineas" :key="`${linea.item.id}-${index}`" class="py-2 flex items-center gap-2">
           <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-default truncate">{{ linea.item.nombre }}</p>
+            <p class="text-sm font-medium text-default break-words">{{ linea.item.nombre }}</p>
             <p class="text-xs text-muted">
               {{ formatMonto(convertirAMonedaOficial(linea.item.precioBase, linea.item.monedaId)) }} c/u · {{ unidadBaseItem(linea.item) }}
             </p>
@@ -97,17 +104,21 @@ function presentacionLinea(linea: CarritoLinea): string {
           <div class="flex justify-between text-muted">
             <span>Neto</span><span>{{ formatMonto(resultado.totales.subtotalNeto) }}</span>
           </div>
-          <div class="flex justify-between text-muted">
+          <div v-if="hayDescuentos" class="flex justify-between text-muted">
             <span>Descuentos</span><span>-{{ formatMonto(resultado.totales.totalDescuentos) }}</span>
           </div>
-          <div class="flex justify-between text-muted">
+          <div v-if="hayRecargos" class="flex justify-between text-muted">
             <span>Recargos</span><span>+{{ formatMonto(resultado.totales.totalRecargos) }}</span>
           </div>
           <div class="flex justify-between text-muted">
             <span>Impuestos</span><span>+{{ formatMonto(resultado.totales.totalImpuestos) }}</span>
           </div>
           <AdvertenciasPrecio :advertencias="calculoVigente?.advertenciasVenta ?? []" class="mb-1" />
-          <div class="flex justify-between items-center font-semibold text-default text-base pt-1 border-t border-default">
+          <div
+            data-qa="carrito-total"
+            class="flex justify-between items-center font-semibold text-default text-xl pt-2 border-t border-default transition-opacity"
+            :class="{ 'opacity-50': loadingCalculo }"
+          >
             <span class="flex items-center gap-1">
               Total
               <VentasMonedaTasasInfo :moneda-ids="monedaIdsEnCarrito" />
@@ -120,11 +131,15 @@ function presentacionLinea(linea: CarritoLinea): string {
           icon="i-lucide-credit-card"
           color="primary"
           block
-          size="lg"
+          size="xl"
+          class="min-h-11"
           :loading="pagando"
           :disabled="!habilitarPago"
           @click="emit('pagar')"
         />
+        <p v-if="sinPermiso" class="text-sm text-muted text-center">
+          Tu rol no puede comprar en la tienda. Pídele el permiso a quien administra el local.
+        </p>
       </div>
     </template>
   </UCard>

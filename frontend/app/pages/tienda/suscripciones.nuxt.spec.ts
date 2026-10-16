@@ -35,6 +35,19 @@ const TIENDA_ONLINE_COMPLETO = ['Tienda Online:Crear', 'Tienda Online:Leer']
 let esAdmin = true
 let permisos: string[] = TIENDA_ONLINE_COMPLETO
 
+// Con un usuario en el store, `useUserPreferences` mueve el tema y el módulo color-mode (sin su
+// helper en este entorno) deja un error sin atrapar en el worker: el tema se simula.
+let usuarioActivo = 'u1'
+mockNuxtImport('useAuthStore', () => () => ({
+  user: { id: usuarioActivo, nombre: 'Ana' },
+  activeTenantId: 't1',
+  isSuperadmin: false,
+}))
+mockNuxtImport('useColorMode', () => () => ({ preference: 'light', value: 'light' }))
+
+let consulta: Record<string, string> = {}
+mockNuxtImport('useRoute', () => () => ({ path: '/tienda/suscripciones', fullPath: '/tienda/suscripciones', query: consulta, params: {}, meta: {} }))
+
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
     get esAdmin() { return esAdmin },
@@ -76,6 +89,8 @@ let cargasLista = 0
 /** Si está puesto, el próximo `POST /suscripciones` queda colgado hasta que se llame. */
 let soltarAlta: (() => void) | null = null
 let retenerAlta = false
+/** Lo que devuelve `GET /suscripciones` (las del usuario). */
+let listaSuscripciones: unknown[] = []
 /** Tarjetas que devuelve `GET /online/medios-pago`. */
 let medios: unknown[] = []
 
@@ -123,7 +138,7 @@ mockNuxtImport('useApiFetch', () => {
         return Promise.resolve(respuesta)
       }
       cargasLista++
-      return Promise.resolve([])
+      return Promise.resolve(listaSuscripciones)
     }
     if (ruta.endsWith('/online/medios-pago')) {
       return Promise.resolve({ oneclickDisponible: true, medios })
@@ -185,6 +200,10 @@ beforeEach(() => {
   retenerAlta = false
   proximaAlta = null
   cargasLista = 0
+  listaSuscripciones = []
+  consulta = {}
+  usuarioActivo = 'u1'
+  localStorage.clear()
 })
 
 /**
@@ -260,18 +279,19 @@ describe('tienda/suscripciones — el selector de ítem suscribible busca en el 
     expect(params.has('search')).toBe(false)
   })
 
-  it('el rótulo de cada opción lleva el nombre y " / " + la frecuencia; sin frecuencia, solo nombre y monto', async () => {
+  it('el rótulo de cada opción lleva el nombre y " / " + la frecuencia, sin el neto', async () => {
     const wrapper = await montar()
     await abrirDrawer(wrapper)
     const menu = menuItems(wrapper)
     menu.vm.$emit('update:open', true)
     await new Promise(r => setTimeout(r, 20))
 
-    // No se afirma el monto: `formatMonto` da '—' con monedas no sembradas en el test.
+    // Sin monto (09.9): el selector mostraba el neto ($30.000) y el total a cobrar era otro ($35.700).
+    // El total con impuestos aparece debajo, ya calculado por el motor.
     const labels = (menu.props('items') as { label: string }[]).map(o => o.label)
-    expect(labels.find(l => l.startsWith(SEMANAL.nombre))).toContain(' / Semanal')
-    expect(labels.find(l => l.startsWith(QUINCENAL.nombre))).toContain(' / Quincenal')
-    expect(labels.find(l => l.startsWith(SIN_FRECUENCIA.nombre))).not.toContain(' / ')
+    expect(labels).toContain('Café semanal / Semanal')
+    expect(labels).toContain('Pan quincenal / Quincenal')
+    expect(labels).toContain('Sin frecuencia')
   })
 
   it('tipear manda `search` con el término, tras la espera', async () => {
@@ -514,5 +534,104 @@ describe('tienda/suscripciones — una Idempotency-Key por intento de alta (ADR-
     await elegir(wrapper, SEMANAL.id)
     await confirmar()
     expect(claveDe(altas[1])).not.toBe(claveDe(altas[0]))
+  })
+})
+
+const hijosDe = (w: Awaited<ReturnType<typeof montar>>, texto: string) =>
+  w.findAll('button').find(b => b.text().trim() === texto)
+
+describe('tienda/suscripciones — el drawer dice cuándo se cobra (09.9)', () => {
+  it('avisa que el primer cobro es hoy', async () => {
+    medios = [TARJETA]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, SEMANAL.id)
+    expect(textoDrawer()).toContain('Se cobra hoy')
+  })
+})
+
+describe('tienda/suscripciones — la fila separa lo destructivo de lo frecuente (09.7)', () => {
+  const ACTIVA = {
+    id: 's1', itemId: 'i1', itemNombre: 'Café semanal', precio: '10000', monedaId: null, frecuencia: 'semanal',
+    diaMes: null, diaSemana: 1, estado: 'activa', proximoCobro: '2026-11-01', activaHasta: null,
+    inscripcionId: 'insc-1', tarjetaMarca: 'Visa', tarjetaLast4: '4242', ventaInicialId: null,
+  }
+
+  it('"Cancelar" va en su propio grupo, apartado de "Pausar" y "Cambiar tarjeta"', async () => {
+    listaSuscripciones = [ACTIVA]
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 30))
+    const cancelar = wrapper.find('[data-qa="accion-cancelar"]')
+    expect(cancelar.exists()).toBe(true)
+    expect(cancelar.classes().join(' ')).toMatch(/border-s/)
+    for (const frecuente of ['Pausar', 'Cambiar tarjeta']) {
+      const b = hijosDe(wrapper, frecuente)!
+      expect(cancelar.element.contains(b.element), frecuente).toBe(false)
+    }
+  })
+})
+
+describe('tienda/suscripciones — el vacío dice qué hacer (09.21)', () => {
+  it('sin suscripciones invita a crear la primera, con el botón adentro', async () => {
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 30))
+    const vacio = wrapper.find('[data-qa="suscripciones-vacio"]')
+    expect(vacio.text()).toContain('Aún no tienes suscripciones')
+    expect(vacio.text()).toContain('Nueva suscripción')
+  })
+
+  it('sin permiso de crear, el vacío no ofrece el botón', async () => {
+    permisos = ['Tienda Online:Leer']
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 30))
+    const vacio = wrapper.find('[data-qa="suscripciones-vacio"]')
+    expect(vacio.text()).toContain('Aún no tienes suscripciones')
+    expect(vacio.text()).not.toContain('Nueva suscripción')
+  })
+})
+
+describe('tienda/suscripciones — el alta a medias caduca y es de quien la empezó (09.22)', () => {
+  const CLAVE = 'suscripcion-pendiente'
+  const intencion = (over: Record<string, unknown> = {}) => JSON.stringify({
+    itemId: SEMANAL.id, diaMes: null, diaSemana: 1, usuarioId: 'u1', tenantId: 't1', creadaEl: Date.now(), ...over,
+  })
+
+  async function volverDeWebpay() {
+    consulta = { estado: 'activa', inscripcionId: 'insc-1' }
+    await montar()
+    await new Promise(r => setTimeout(r, 50))
+  }
+
+  it('una intención vencida no cobra nada y avisa', async () => {
+    localStorage.setItem(CLAVE, intencion({ creadaEl: Date.now() - 2 * 60 * 60 * 1000 }))
+    await volverDeWebpay()
+    expect(altas).toHaveLength(0)
+    expect(toasts.map(t => t.title)).toContain('La suscripción que dejaste a medias venció. Empieza de nuevo.')
+    expect(localStorage.getItem(CLAVE)).toBeNull()
+  })
+
+  it('la intención de otro usuario no se cobra', async () => {
+    localStorage.setItem(CLAVE, intencion({ usuarioId: 'otro' }))
+    await volverDeWebpay()
+    expect(altas).toHaveLength(0)
+    expect(localStorage.getItem(CLAVE)).toBeNull()
+  })
+
+  it('la de otro local tampoco', async () => {
+    localStorage.setItem(CLAVE, intencion({ tenantId: 'otro-local' }))
+    await volverDeWebpay()
+    expect(altas).toHaveLength(0)
+  })
+
+  it('una intención de formato viejo (sin dueño ni hora) se descarta', async () => {
+    localStorage.setItem(CLAVE, JSON.stringify({ itemId: SEMANAL.id, diaMes: null, diaSemana: 1 }))
+    await volverDeWebpay()
+    expect(altas).toHaveLength(0)
+  })
+
+  it('una intención reciente y propia sigue su camino (el cobro sin clic lo decide 09.1)', async () => {
+    localStorage.setItem(CLAVE, intencion())
+    await volverDeWebpay()
+    expect(altas).toHaveLength(1)
   })
 })

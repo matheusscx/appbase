@@ -254,6 +254,7 @@ export class OnlineService {
     return {
       estado: r.estado,
       ventaId: r.ventaId,
+      monto: r.monto,
       tipoPago: r.tipoPago,
       numeroCuotas: r.numeroCuotas,
       tarjetaUltimos4: r.tarjetaUltimos4,

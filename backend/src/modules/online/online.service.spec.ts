@@ -812,6 +812,7 @@ describe('OnlineService', () => {
       ordenId: 'orden-1',
       estado: 'conciliada',
       ventaId: 'venta-9',
+      monto: '9520.000000',
       tipoPago: 'VD',
       numeroCuotas: 0,
       tarjetaUltimos4: '6623',
@@ -821,6 +822,7 @@ describe('OnlineService', () => {
     expect(res).toEqual({
       estado: 'conciliada',
       ventaId: 'venta-9',
+      monto: '9520.000000',
       tipoPago: 'VD',
       numeroCuotas: 0,
       tarjetaUltimos4: '6623',

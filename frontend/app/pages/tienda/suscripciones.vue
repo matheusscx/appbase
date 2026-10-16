@@ -17,6 +17,7 @@ const {
   agregar: agregarTarjeta,
 } = useTarjetas()
 const { formatMonto, formatFecha } = useFormatters()
+const authStore = useAuthStore()
 
 const { puedeCrear } = usePermisosCrud('Tienda Online')
 
@@ -24,10 +25,39 @@ const { puedeCrear } = usePermisosCrud('Tienda Online')
 // cuando el usuario inscribe una tarjeta nueva desde el drawer (useState no
 // sobrevive un full-page redirect; localStorage sí).
 const INTENT_KEY = 'suscripcion-pendiente'
+/** Pasada una hora, la intención de alta ya no se retoma (09.22). */
+const VIGENCIA_ALTA_MS = 60 * 60 * 1000
 interface AltaPendiente {
   itemId: string
   diaMes: number | null
   diaSemana: number | null
+  /** Quién y dónde la empezó: el storage es del navegador, no de la cuenta. */
+  usuarioId: string
+  tenantId: string
+  creadaEl: number
+}
+
+/** La intención guardada si es de ESTA persona, de ESTE local y de la última hora; si no, `null`
+ *  (y `vencida` dice si era propia pero ya caducó, para avisarlo). Siempre la borra: se usa una vez. */
+function tomarIntencion(): { intent: AltaPendiente | null, vencida: boolean } {
+  let raw: string | null = null
+  try {
+    raw = localStorage.getItem(INTENT_KEY)
+    localStorage.removeItem(INTENT_KEY)
+  }
+  catch { /* sin storage no hay intención que retomar */ }
+  if (!raw) return { intent: null, vencida: false }
+  try {
+    const i = JSON.parse(raw) as Partial<AltaPendiente>
+    const propia = !!i.usuarioId && i.usuarioId === authStore.user?.id
+      && !!i.tenantId && i.tenantId === authStore.activeTenantId
+    if (!propia || typeof i.itemId !== 'string' || typeof i.creadaEl !== 'number') return { intent: null, vencida: false }
+    if (Date.now() - i.creadaEl > VIGENCIA_ALTA_MS) return { intent: null, vencida: true }
+    return { intent: i as AltaPendiente, vencida: false }
+  }
+  catch {
+    return { intent: null, vencida: false }
+  }
 }
 
 const tarjetaOpts = computed(() =>
@@ -181,8 +211,8 @@ const totalACobrar = computed(() =>
 )
 
 function etiquetaSuscribible(i: ItemSuscribible): string {
-  const base = `${i.nombre} — ${formatMonto(i.precioBase, i.monedaId)}`
-  return i.frecuencia ? `${base} / ${frecuenciaLabel[i.frecuencia]}` : base
+  // Sin monto: `precioBase` es el neto y lo que se cobra lleva impuestos (09.9). El total vigente va debajo.
+  return i.frecuencia ? `${i.nombre} / ${frecuenciaLabel[i.frecuencia]}` : i.nombre
 }
 
 // Opciones de día según la frecuencia del item elegido
@@ -231,12 +261,22 @@ async function agregarTarjetaDesdeAlta() {
   const item = itemSeleccionado.value
   if (!item) return
   const { diaMes, diaSemana } = diasDePayload(item)
-  const intent: AltaPendiente = { itemId: item.id, diaMes, diaSemana }
-  localStorage.setItem(INTENT_KEY, JSON.stringify(intent))
+  const intent: AltaPendiente = {
+    itemId: item.id,
+    diaMes,
+    diaSemana,
+    usuarioId: authStore.user?.id ?? '',
+    tenantId: authStore.activeTenantId ?? '',
+    creadaEl: Date.now(),
+  }
+  try {
+    localStorage.setItem(INTENT_KEY, JSON.stringify(intent))
+  }
+  catch { /* sin storage el alta se retoma a mano al volver */ }
   try {
     await agregarTarjeta('suscripciones') // full-page redirect a Webpay
   } catch (e: unknown) {
-    localStorage.removeItem(INTENT_KEY)
+    try { localStorage.removeItem(INTENT_KEY) } catch { /* nada que limpiar */ }
     toast.add({ title: apiErrorMsg(e, 'No se pudo iniciar la inscripción'), color: 'error' })
   }
 }
@@ -304,15 +344,9 @@ function avisarAltaFallida(e: unknown) {
 const procesandoAlta = ref(false)
 
 async function reanudarAltaPendiente(inscripcionId: string) {
-  const raw = localStorage.getItem(INTENT_KEY)
-  localStorage.removeItem(INTENT_KEY)
-  if (!raw) return
-  let intent: AltaPendiente
-  try {
-    intent = JSON.parse(raw) as AltaPendiente
-  } catch {
-    return
-  }
+  const { intent, vencida } = tomarIntencion()
+  if (vencida) toast.add({ title: 'La suscripción que dejaste a medias venció. Empieza de nuevo.', color: 'warning' })
+  if (!intent) return
   procesandoAlta.value = true
   try {
     const { advertencias, repetida } = await crear({
@@ -345,7 +379,7 @@ onMounted(async () => {
     if (estado === 'activa') {
       await reanudarAltaPendiente(inscripcionId)
     } else {
-      localStorage.removeItem(INTENT_KEY)
+      try { localStorage.removeItem(INTENT_KEY) } catch { /* nada que limpiar */ }
       toast.add({ title: 'La inscripción de la tarjeta fue rechazada', color: 'error' })
     }
     await router.replace({ query: {} })
@@ -404,7 +438,7 @@ onMounted(async () => {
           </template>
 
           <template #acciones-cell="{ row }">
-            <div class="flex justify-end gap-2">
+            <div class="flex justify-end items-center gap-2">
               <UButton
                 v-if="row.original.estado !== 'cancelada'"
                 label="Cambiar tarjeta"
@@ -432,21 +466,32 @@ onMounted(async () => {
                 size="sm"
                 @click="reanudar(row.original.id)"
               />
-              <UButton
+              <!-- Lo destructivo va aparte de lo frecuente: a 8 px de "Pausar" un toque corrido cancelaba (09.7). -->
+              <div
                 v-if="row.original.estado !== 'cancelada'"
-                label="Cancelar"
-                icon="i-lucide-x"
-                color="error"
-                variant="soft"
-                size="sm"
-                @click="abrirCancelar(row.original)"
-              />
+                data-qa="accion-cancelar"
+                class="ms-4 ps-4 border-s border-default"
+              >
+                <UButton
+                  label="Cancelar"
+                  icon="i-lucide-x"
+                  color="error"
+                  variant="soft"
+                  size="sm"
+                  @click="abrirCancelar(row.original)"
+                />
+              </div>
             </div>
           </template>
 
           <template #empty>
-            <div class="py-8 text-center text-sm text-muted">
-              No tienes suscripciones activas.
+            <div class="py-8 text-center space-y-3" data-qa="suscripciones-vacio">
+              <p class="text-sm text-muted">
+                Aún no tienes suscripciones. Crea la primera para recibir y pagar un producto cada período.
+              </p>
+              <UButton v-if="puedeCrear" icon="i-lucide-plus" :loading="procesandoAlta" @click="abrirCrear">
+                Nueva suscripción
+              </UButton>
             </div>
           </template>
         </CrudTable>
@@ -595,6 +640,9 @@ onMounted(async () => {
                       {{ calculando ? 'Calculando…' : '—' }}
                     </span>
                   </div>
+                  <p class="text-muted">
+                    Se cobra hoy, al confirmar. Después se repite cada período.
+                  </p>
                   <div v-if="calculo && calculoVigente" class="flex justify-between text-muted">
                     <span>Neto</span>
                     <span>{{ formatMonto(calculo.totales.subtotalNeto, itemSeleccionado.monedaId) }}</span>

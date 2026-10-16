@@ -8,33 +8,37 @@ const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 
 const { limpiar } = useTiendaCarrito()
-const { formatTipoPago } = useFormatters()
+const { formatTipoPago, formatMonto } = useFormatters()
 const { resolverRetorno } = useRetornoTienda()
 
 const ordenId = computed(() => String(route.query.ordenId ?? ''))
 
-type Vista = 'cargando' | VistaRetorno
+/** `no_encontrada`: la orden no existe para este local (404 o URL sin orden); no se arregla reintentando. */
+type Vista = 'cargando' | 'no_encontrada' | VistaRetorno
 const vista = ref<Vista>('cargando')
 const ventaId = ref<string | null>(null)
 const tipoPago = ref<string | null>(null)
 const numeroCuotas = ref<number | null>(null)
 const tarjetaUltimos4 = ref<string | null>(null)
 const motivoRechazo = ref<string | null>(null)
+const monto = ref<string | null>(null)
 
 interface OrdenResultado {
   estado: string
   ventaId: string | null
+  monto: string | null
   tipoPago: string | null
   numeroCuotas: number | null
   tarjetaUltimos4: string | null
   motivoRechazo: string | null
 }
 
-onMounted(async () => {
+async function consultar() {
   if (!ordenId.value) {
-    vista.value = 'error'
+    vista.value = 'no_encontrada'
     return
   }
+  vista.value = 'cargando'
   try {
     // La venta ya fue creada por el callback in-process antes del redirect;
     // esta lectura resuelve el resultado real de la orden (no confía en el query).
@@ -42,6 +46,7 @@ onMounted(async () => {
       `${apiUrl}/online/orden/${ordenId.value}`,
     )
     ventaId.value = res.ventaId
+    monto.value = res.monto ?? null
     tipoPago.value = res.tipoPago
     numeroCuotas.value = res.numeroCuotas
     tarjetaUltimos4.value = res.tarjetaUltimos4
@@ -49,10 +54,14 @@ onMounted(async () => {
     const resultado = resolverRetorno(res.estado)
     vista.value = resultado.vista
     if (resultado.limpiaCarrito) limpiar()
-  } catch {
-    vista.value = 'error'
+  } catch (e: unknown) {
+    // Un 404 no se arregla volviendo a preguntar; un corte de red sí.
+    const err = e as { status?: number, response?: { status?: number } } | null
+    vista.value = (err?.status ?? err?.response?.status) === 404 ? 'no_encontrada' : 'error'
   }
-})
+}
+
+onMounted(consultar)
 </script>
 
 <template>
@@ -84,6 +93,9 @@ onMounted(async () => {
             <UIcon name="i-lucide-circle-check-big" class="text-success size-12 mx-auto" />
             <p class="font-medium">Pago aprobado</p>
             <p class="text-sm text-muted">Tu compra fue registrada correctamente.</p>
+            <p v-if="monto" class="text-sm text-muted" data-qa="retorno-monto">
+              Total pagado <span class="text-xl font-semibold text-default">{{ formatMonto(monto) }}</span>
+            </p>
             <div v-if="tipoPago" class="text-sm text-muted">
               <span>{{ formatTipoPago(tipoPago) }}</span>
               <span v-if="tarjetaUltimos4"> ····{{ tarjetaUltimos4 }}</span>
@@ -121,8 +133,19 @@ onMounted(async () => {
             <UIcon name="i-lucide-clock" class="text-warning size-12 mx-auto" />
             <p class="font-medium">Pago pendiente</p>
             <p class="text-sm text-muted">
-              Tu pago está en proceso de confirmación. Te avisaremos cuando se acredite.
+              Tu pago está en proceso de confirmación. No te avisamos por correo: toca Actualizar en unos minutos.
             </p>
+            <UButton label="Actualizar" icon="i-lucide-refresh-cw" variant="soft" block @click="consultar" />
+            <UButton to="/tienda" label="Volver a la tienda" variant="ghost" block />
+          </div>
+
+          <div v-else-if="vista === 'no_encontrada'" class="text-center py-6 space-y-3" data-qa="retorno-no-encontrada">
+            <UIcon name="i-lucide-search-x" class="text-warning size-12 mx-auto" />
+            <p class="font-medium">No encontramos esta orden</p>
+            <p class="text-sm text-muted">
+              El enlace no corresponde a ninguna compra de tu local. Si pagaste, revisa tus compras.
+            </p>
+            <UButton to="/ventas" label="Ver mis compras" variant="soft" block />
             <UButton to="/tienda" label="Volver a la tienda" variant="ghost" block />
           </div>
 
@@ -133,10 +156,14 @@ onMounted(async () => {
             </p>
             <p class="text-sm text-muted">
               {{ vista === 'error'
-                ? 'Ocurrió un problema al consultar el resultado. Revisa tus compras o reintenta.'
+                ? 'No pudimos consultar el resultado, por ejemplo por un corte de conexión. Tu pago no se repite al consultar de nuevo.'
                 : (motivoRechazo ?? 'El pago no se completó. Tu carrito sigue disponible para reintentar.') }}
             </p>
-            <UButton to="/tienda" label="Volver a la tienda" variant="soft" block />
+            <template v-if="vista === 'error'">
+              <UButton label="Consultar de nuevo" icon="i-lucide-refresh-cw" variant="soft" block @click="consultar" />
+              <UButton to="/ventas" label="Ver mis compras" variant="ghost" block />
+            </template>
+            <UButton v-else to="/tienda" label="Volver al carrito" variant="soft" block />
           </div>
         </UCard>
       </div>

@@ -402,6 +402,8 @@ export class PagosRedirectService {
       // El motivo de la pagada sin venta NO va: es del admin (`/ordenes`).
       estado: this.estadoParaLaApp(orden),
       ventaId: orden.ventaId,
+      // Lo que se cobró, para la pantalla de resultado: solo se lee, no decide nada.
+      monto: orden.monto,
       // Comprobante (éxito) y motivo de rechazo (nivel 2) para la página de retorno.
       tipoPago: rp.tipoPago ?? null,
       numeroCuotas: rp.numeroCuotas ?? null,

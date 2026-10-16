@@ -95,3 +95,15 @@ describe('suscripciones (admin) — vacío, filtro y búsqueda', () => {
     w.unmount()
   })
 })
+
+describe('suscripciones (admin) — lo destructivo va aparte de lo frecuente (09.7)', () => {
+  it('"Cancelar" va en su propio grupo, apartado de "Pausar"', async () => {
+    const w = await montar()
+    const cancelar = w.find('[data-qa="accion-cancelar"]')
+    expect(cancelar.exists()).toBe(true)
+    expect(cancelar.classes().join(' ')).toMatch(/border-s/)
+    const pausar = w.findAll('button').find(b => b.text().trim() === 'Pausar')!
+    expect(cancelar.element.contains(pausar.element)).toBe(false)
+    w.unmount()
+  })
+})

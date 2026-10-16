@@ -14,6 +14,9 @@ const {
   agregar, eliminar, marcarPreferida,
 } = useTarjetas()
 
+// Agregar, quitar y marcar preferida exigen `Tienda Online:Crear` en el backend: sin él se ve la lista, no los botones (09.14).
+const { puedeCrear } = usePermisosCrud('Tienda Online')
+
 const agregando = ref(false)
 const working = reactive(new Set<string>())
 const confirmDelete = ref<Tarjeta | null>(null)
@@ -110,8 +113,10 @@ const columns: TableColumn<Tarjeta>[] = [
         >
           <template #actions>
             <UButton
+              v-if="tarjetas.length"
               icon="i-lucide-plus"
-              :disabled="oneclickDisponible !== true"
+              class="whitespace-nowrap"
+              :disabled="oneclickDisponible !== true || !puedeCrear"
               :loading="agregando"
               @click="abrirInscripcion"
             >
@@ -119,6 +124,15 @@ const columns: TableColumn<Tarjeta>[] = [
             </UButton>
           </template>
         </CrudPageHeader>
+
+        <UAlert
+          v-if="!puedeCrear"
+          icon="i-lucide-lock"
+          color="neutral"
+          variant="soft"
+          title="Tu rol puede ver las tarjetas, pero no agregarlas ni quitarlas"
+          description="Pídele el permiso de Tienda Online a quien administra el local."
+        />
 
         <UAlert
           v-if="!loading && oneclickDisponible === false"
@@ -157,6 +171,7 @@ const columns: TableColumn<Tarjeta>[] = [
                 class="inline-flex size-11 items-center justify-center rounded transition-colors hover:bg-muted"
                 :aria-label="`Tarjeta preferida: ${row.original.marca ?? 'Tarjeta'} ${row.original.last4 ?? ''}`.trim()"
                 :aria-pressed="!!row.original.preferida"
+                :disabled="!puedeCrear"
                 @click="preferir(row.original)"
               >
                 <UIcon
@@ -174,13 +189,24 @@ const columns: TableColumn<Tarjeta>[] = [
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
+              :disabled="!puedeCrear"
               @click="() => { confirmDelete = row.original; confirmModalOpen = true }"
             />
           </template>
 
           <template #empty>
-            <div class="py-8 text-center text-sm text-muted">
-              No tienes tarjetas inscritas.
+            <div class="py-8 text-center space-y-3" data-qa="tarjetas-vacio">
+              <p class="text-sm text-muted">
+                Aún no tienes tarjetas. Agrega una para suscribirte; saldrás a Webpay y volverás aquí.
+              </p>
+              <UButton
+                icon="i-lucide-plus"
+                :disabled="oneclickDisponible !== true || !puedeCrear"
+                :loading="agregando"
+                @click="abrirInscripcion"
+              >
+                Agregar tarjeta
+              </UButton>
             </div>
           </template>
         </CrudTable>

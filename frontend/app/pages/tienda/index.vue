@@ -8,7 +8,10 @@ const apiUrl = config.public.apiUrl
 const toast = useToast()
 const unidadesStore = useUnidadesMedidaStore()
 
-const { lineas, resultado, loadingCalculo, vigente, errorCalculo, asegurarVigente, add, quitar, cambiarCantidadPresentacion, pagar } = useTiendaCarrito()
+const { lineas, resultado, loadingCalculo, vigente, errorCalculo, asegurarVigente, recalcular, add, quitar, restaurar, cambiarCantidadPresentacion, pagar } = useTiendaCarrito()
+const { formatMonto } = useFormatters()
+// Sin `Tienda Online:Crear` el backend contesta 403 al pagar: se avisa antes de armar el carrito entero (09.14).
+const { puedeCrear } = usePermisosCrud('Tienda Online')
 
 const catalogo = useCatalogoVenta({
   tipos: ['producto'],
@@ -25,9 +28,25 @@ const pagando = ref(false)
 /** Catálogo restando lo ya en el carrito (stock), reactivo al agregar/quitar. */
 const itemsVisibles = computed(() => descontarStockCatalogo(items.value, lineas.value))
 
+/** A menos de 1024 px el carrito completo vive en un panel que sube desde la barra inferior (09.16). */
+const carritoAbierto = ref(false)
+
 onMounted(async () => {
+  // Un carrito recuperado del storage (volver de Webpay) llega sin su cálculo: se rehace sin esperar un toque.
+  if (lineas.value.length && !vigente.value) void recalcular()
   await Promise.all([catalogo.cargar(), unidadesStore.ensureLoaded()])
 })
+
+/** Quitar es un toque y el basurero queda cerca de la cantidad: se puede deshacer (09.10). */
+function onQuitar(index: number) {
+  const linea = lineas.value[index]
+  if (!linea) return
+  quitar(index)
+  toast.add({
+    title: `Quitamos ${linea.item.nombre} del carrito`,
+    actions: [{ label: 'Deshacer', color: 'neutral', variant: 'outline', onClick: () => restaurar(linea, index) }],
+  })
+}
 
 function onCambiarCantidadPresentacion(
   index: number,
@@ -42,6 +61,8 @@ function onCambiarCantidadPresentacion(
 }
 
 async function irAPagar() {
+  if (!puedeCrear.value) return
+  carritoAbierto.value = false
   pagando.value = true
   try {
     // El comprador aprieta Pagar sobre el total que está viendo: se espera a que
@@ -78,7 +99,7 @@ async function irAPagar() {
     </template>
 
     <template #body>
-      <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start p-4">
+      <div class="grid grid-cols-1 lg:grid-cols-5 gap-4 items-start p-4 pb-24 lg:pb-4">
         <div class="lg:col-span-3">
           <VentasCatalogoGrid
             v-model:busqueda="catalogo.busqueda.value"
@@ -94,19 +115,66 @@ async function irAPagar() {
             @add="add"
           />
         </div>
-        <div class="lg:col-span-2 lg:sticky lg:top-4">
+        <div class="hidden lg:block lg:col-span-2 lg:sticky lg:top-4">
           <TiendaCarritoOnline
             :lineas="lineas"
             :resultado="resultado"
             :vigente="vigente"
             :loading-calculo="loadingCalculo"
             :pagando="pagando"
+            :sin-permiso="!puedeCrear"
             @cambiar-cantidad="onCambiarCantidadPresentacion"
-            @quitar="quitar"
+            @quitar="onQuitar"
             @pagar="irAPagar"
           />
         </div>
       </div>
+
+      <!-- Bajo el punto `lg` el carrito iba debajo de 48 ítems: el total y "Pagar" quedaban lejos de
+           lo que se agrega. Acá quedan siempre a la vista; el detalle abre en un panel. -->
+      <div
+        v-if="lineas.length"
+        data-qa="barra-pagar"
+        class="lg:hidden fixed inset-x-0 bottom-0 z-20 flex items-center gap-2 border-t border-default bg-default p-3"
+      >
+        <UButton
+          :label="`Ver carrito (${lineas.length})`"
+          icon="i-lucide-shopping-cart"
+          color="neutral"
+          variant="outline"
+          size="xl"
+          class="min-h-11"
+          @click="() => { carritoAbierto = true }"
+        />
+        <span class="ms-auto text-lg font-semibold text-default tabular-nums" :class="{ 'opacity-50': loadingCalculo || !vigente }">
+          {{ resultado ? formatMonto(resultado.totales.totalFinal) : '' }}
+        </span>
+        <UButton
+          label="Pagar"
+          icon="i-lucide-credit-card"
+          size="xl"
+          class="min-h-11"
+          :loading="pagando"
+          :disabled="loadingCalculo || !puedeCrear"
+          @click="irAPagar"
+        />
+      </div>
+
+      <USlideover v-model:open="carritoAbierto" side="bottom" title="Tu carrito" description="Revisa las cantidades antes de pagar.">
+        <template #body>
+          <TiendaCarritoOnline
+            :lineas="lineas"
+            :resultado="resultado"
+            :vigente="vigente"
+            :loading-calculo="loadingCalculo"
+            :pagando="pagando"
+            :sin-permiso="!puedeCrear"
+            @cambiar-cantidad="onCambiarCantidadPresentacion"
+            @quitar="onQuitar"
+            @pagar="irAPagar"
+          />
+        </template>
+      </USlideover>
     </template>
   </UDashboardPanel>
 </template>

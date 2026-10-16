@@ -165,7 +165,11 @@ El owner decidió ese mismo día dos cosas más, construidas el 2026-10-10:
   `/tienda/retorno` dice *"Recibimos tu pago pero no pudimos registrar la compra; el local se
   comunicará contigo"* y vacía el carrito, porque el cargo existe. El motivo no se le muestra al
   comprador. El admin lo ve en Órdenes y en la tarjeta "Pagos sin venta" del inicio
-  ([pasarela-pagos.md](pasarela-pagos.md)). La plata se devuelve con el reembolso manual, y nada
+  ([pasarela-pagos.md](pasarela-pagos.md)). `GET /online/orden/:id` devuelve también `monto`
+  (lo cobrado, solo lectura) y el éxito muestra *"Total pagado"*; el error distingue una orden que
+  no existe (404 o URL sin `ordenId`: *"No encontramos esta orden"*, sin reintento) de un corte de
+  red (*"Consultar de nuevo"*), y el pendiente trae "Actualizar" y ya no promete un aviso que
+  no se envía (09.5, 09.6). La plata se devuelve con el reembolso manual, y nada
   crea la venta "después", solo.
 - **La venta online no lleva vuelto (E).** Lo pagado tiene que ser igual al total. De más es 400:
   *"Las ventas online no admiten vuelto: lo pagado supera el total"*. Antes, con `permite_vuelto`
@@ -404,11 +408,14 @@ La pantalla manda la cabecera con `useIntentoCobro` (ámbito `suscripcion`, por
 pestaña). El drawer y el retorno de inscribir una tarjeta comparten el ámbito.
 
 **Reanudar el alta tras inscribir una tarjeta:** si el usuario no tiene tarjetas,
-el drawer guarda la intención de alta en `localStorage` y redirige a Transbank
+el drawer guarda la intención de alta en `localStorage` —con el usuario, el local y la hora— y redirige a Transbank
 (`POST /online/medios-pago { retornoPath: 'suscripciones' }`). Al volver a
 `/tienda/suscripciones?inscripcionId=...&estado=activa`, la página dispara el
 `POST /suscripciones` automáticamente con esa inscripción (cobro del primer
-período sin clic extra).
+período sin clic extra). La intención **caduca a la hora** y es de quien la empezó: la de otro
+usuario u otro local, la de formato viejo y la vencida se descartan sin cobrar (la vencida avisa
+*"La suscripción que dejaste a medias venció"*; auditoría UX 09.22). Que el cobro espere un clic
+al volver es el hallazgo 09.1, frente de plata propio y todavía abierto.
 
 **Cascada al eliminar una tarjeta:** `DELETE /online/medios-pago/:id` cancela
 primero las suscripciones vigentes amarradas a esa inscripción
@@ -560,7 +567,12 @@ del mismo permiso `Tienda Online:Leer`; las otras dos dicen abajo cómo se llega
 ### Components
 
 - `components/tienda/CarritoOnline.vue` — carrito con `AppCantidadInput` (± y
-  selector de unidad de la misma magnitud).
+  selector de unidad de la misma magnitud). Controles de 44 px; no dibuja "Descuentos" ni
+  "Recargos" en $0; el total es lo más grande del panel y se atenúa mientras se recalcula.
+  Sin `Tienda Online:Crear` deja "Pagar" inactivo y lo dice (09.14). Bajo `lg` (768 px) el panel
+  no va debajo del catálogo: `pages/tienda/index.vue` pone una barra inferior fija con el total y
+  "Pagar", y el detalle abre en un panel que sube desde ahí (09.16). Quitar una línea avisa con
+  "Deshacer" (09.10).
 - Reutiliza `VentasCatalogoGrid`, paginada y buscada en el servidor con `useCatalogoVenta`
   ([catalogo-paginado.md](./catalogo-paginado.md)).
 
@@ -568,7 +580,10 @@ del mismo permiso `Tienda Online:Leer`; las otras dos dicen abajo cómo se llega
 
 - `composables/useTiendaCarrito.ts` — carrito de la tienda. Usa `useState`
   (no un `ref` local) para sobrevivir la navegación `/tienda` →
-  `/tienda/pasarela`. Reutiliza los helpers puros de `useVenta.ts`
+  `/tienda/pasarela`. **Además guarda las líneas en `sessionStorage`, por tenant y usuario** (09.2): Webpay
+  sale de la app con una redirección completa, así que volver equivale a recargar, y el retorno
+  dice "Tu carrito sigue disponible para reintentar". Solo `limpiar()` lo vacía (orden cobrada,
+  devuelta o sin venta); con el storage bloqueado la tienda anda igual, sin persistir. Reutiliza los helpers puros de `useVenta.ts`
   (`agregarLinea`, `quitarLinea`, `setCantidadPresentacion`, `toCalcularInput`).
   `POST /online/pagar` envía `cantidadPresentacion` / `unidadCodigoPresentacion`
   cuando el comprador eligió otra unidad (ej. gramos sobre ítem en kg).

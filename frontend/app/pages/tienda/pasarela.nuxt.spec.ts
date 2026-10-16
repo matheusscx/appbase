@@ -27,14 +27,32 @@ let urlsPedidas: string[] = []
 let ventas: PostVenta[] = []
 /** Lo que contesta cada `POST /ventas`: un `Error` lo rechaza; vacía = éxito. */
 let respuestasVenta: (Error | Record<string, unknown>)[] = []
-let toasts: { title?: string }[] = []
+let toasts: { title?: string, description?: string }[] = []
 
 mockNuxtImport('useToast', () => {
   return () => ({ add: (t: { title?: string }) => { toasts.push(t) } })
 })
 
+let refEnLaUrl = REF
 mockNuxtImport('useRoute', () => {
-  return () => ({ query: { ref: REF } })
+  return () => ({ query: { ref: refEnLaUrl } })
+})
+
+let navegaciones: string[] = []
+mockNuxtImport('navigateTo', () => {
+  return (to: string) => {
+    navegaciones.push(to)
+    return Promise.resolve()
+  }
+})
+
+// Sin tienda de monedas cargada `formatOficial` devuelve "—": el monto se formatea en claro.
+mockNuxtImport('useCurrency', () => {
+  return () => ({
+    format: (v: string) => `$${v}`,
+    formatCosto: (v: string) => `$${v}`,
+    formatOficial: (v: string) => `$${v}`,
+  })
 })
 
 mockNuxtImport('useApiFetch', () => {
@@ -95,6 +113,8 @@ beforeEach(() => {
   ventas = []
   respuestasVenta = []
   toasts = []
+  navegaciones = []
+  refEnLaUrl = REF
   useIntentoCobro().terminar('tienda')
 })
 
@@ -229,5 +249,42 @@ describe('tienda/pasarela — un pedido que se reintenta no se registra dos vece
 
     expect(ventas).toHaveLength(2)
     expect(ventas[1]!.clave).not.toBe(ventas[0]!.clave)
+  })
+})
+
+describe('tienda/pasarela — lo que se paga y lo que sale mal se dice en la pantalla', () => {
+  type Vm = { aprobar: () => Promise<void> }
+
+  // 09.5: el resumen con el total desaparecía justo al aprobar.
+  it('el pago aprobado conserva el total pagado', async () => {
+    const wrapper = await montarCon('9520', METODO_DEL_BACKEND)
+    await (wrapper.vm as unknown as Vm).aprobar()
+    expect(wrapper.text()).toContain('Pago aprobado')
+    expect(wrapper.text()).toContain('Total pagado')
+    expect(wrapper.text()).toContain('$9520')
+  })
+
+  // 09.20: si aprobar falla, `estado` volvía a "rechazada" y la tarjeta repetía el formulario mudo.
+  it('si aprobar falla, el motivo queda dentro de la tarjeta y no solo en un toast', async () => {
+    respuestasVenta = [Object.assign(new Error('400'), { status: 400, data: { statusCode: 400, message: 'No hay stock suficiente de Café' } })]
+    const wrapper = await montarCon('9520', METODO_DEL_BACKEND)
+    await (wrapper.vm as unknown as Vm).aprobar()
+    expect(wrapper.find('[data-qa="pasarela-motivo"]').text()).toContain('No hay stock suficiente de Café')
+  })
+
+  it('al reintentar, el motivo anterior se va', async () => {
+    respuestasVenta = [Object.assign(new Error('400'), { status: 400, data: { statusCode: 400, message: 'No hay stock suficiente de Café' } })]
+    const wrapper = await montarCon('9520', METODO_DEL_BACKEND)
+    await (wrapper.vm as unknown as Vm).aprobar()
+    await (wrapper.vm as unknown as Vm).aprobar()
+    expect(wrapper.find('[data-qa="pasarela-motivo"]').exists()).toBe(false)
+  })
+
+  // 09.20: con una `ref` inventada, o al recargar, redirigía a /tienda sin decir por qué.
+  it('una referencia que ya no es la del carrito vuelve a la tienda y lo dice', async () => {
+    refEnLaUrl = 'inventada'
+    await montarCon('9520', METODO_DEL_BACKEND)
+    expect(navegaciones).toEqual(['/tienda'])
+    expect(toasts.map(t => t.title)).toContain('Esa compra ya no está abierta')
   })
 })

@@ -193,7 +193,7 @@ function confirmarEliminar() {
           </template>
 
           <template #acciones-cell="{ row }">
-            <div class="flex justify-end gap-2">
+            <div class="flex justify-end items-center gap-2">
               <template v-if="puedeActualizar">
                 <UButton
                   v-if="row.original.estado === 'activa'"
@@ -213,15 +213,21 @@ function confirmarEliminar() {
                   size="sm"
                   @click="reanudar(row.original.id)"
                 />
-                <UButton
+                <!-- Lo destructivo va aparte de lo frecuente: a 8 px de "Pausar" un toque corrido cancelaba (09.7). -->
+                <div
                   v-if="row.original.estado !== 'cancelada'"
-                  label="Cancelar"
-                  icon="i-lucide-x"
-                  color="error"
-                  variant="soft"
-                  size="sm"
-                  @click="abrirCancelar(row.original)"
-                />
+                  data-qa="accion-cancelar"
+                  class="ms-4 ps-4 border-s border-default"
+                >
+                  <UButton
+                    label="Cancelar"
+                    icon="i-lucide-x"
+                    color="error"
+                    variant="soft"
+                    size="sm"
+                    @click="abrirCancelar(row.original)"
+                  />
+                </div>
               </template>
               <UButton
                 v-if="puedeEliminar && row.original.estado === 'cancelada'"

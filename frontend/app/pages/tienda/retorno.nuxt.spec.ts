@@ -12,15 +12,29 @@ import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { flushPromises } from '@vue/test-utils'
 import Retorno from './retorno.vue'
 
-let respuesta: Record<string, unknown> = {}
+let respuesta: Record<string, unknown> | Error = {}
 let limpiezas = 0
+let consultas = 0
+let query: Record<string, string> = { ordenId: 'orden-1' }
 
 mockNuxtImport('useRoute', () => {
-  return () => ({ query: { ordenId: 'orden-1' } })
+  return () => ({ query })
 })
 
 mockNuxtImport('useApiFetch', () => {
-  return () => Promise.resolve(respuesta)
+  return () => {
+    consultas++
+    return respuesta instanceof Error ? Promise.reject(respuesta) : Promise.resolve(respuesta)
+  }
+})
+
+// Sin tienda de monedas cargada `formatOficial` devuelve "—": el monto se formatea en claro.
+mockNuxtImport('useCurrency', () => {
+  return () => ({
+    format: (v: string) => `$${v}`,
+    formatCosto: (v: string) => `$${v}`,
+    formatOficial: (v: string) => `$${v}`,
+  })
 })
 
 mockNuxtImport('useTiendaCarrito', () => {
@@ -31,6 +45,7 @@ function orden(estado: string, ventaId: string | null) {
   return {
     estado,
     ventaId,
+    monto: '9520.000000',
     tipoPago: 'VN',
     numeroCuotas: 0,
     tarjetaUltimos4: '6623',
@@ -40,6 +55,8 @@ function orden(estado: string, ventaId: string | null) {
 
 beforeEach(() => {
   limpiezas = 0
+  consultas = 0
+  query = { ordenId: 'orden-1' }
 })
 
 describe('tienda/retorno', () => {
@@ -91,7 +108,7 @@ describe('tienda/retorno', () => {
 
     const vista = wrapper.find('[data-qa="retorno-pendiente"]')
     expect(vista.exists()).toBe(true)
-    expect(vista.text()).toContain('Tu pago está en proceso de confirmación. Te avisaremos cuando se acredite.')
+    expect(vista.text()).toContain('Tu pago está en proceso de confirmación. No te avisamos por correo: toca Actualizar en unos minutos.')
     expect(wrapper.text()).not.toContain('Pago rechazado')
     expect(wrapper.text()).not.toContain('Tu carrito sigue disponible para reintentar')
     // Lo mismo que hace hoy `pendiente` con el carrito: no lo toca.
@@ -115,6 +132,62 @@ describe('tienda/retorno', () => {
 
     expect(wrapper.find('[data-qa="retorno-sin-venta"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('Tu compra fue registrada correctamente.')
+    expect(limpiezas).toBe(1)
+  })
+})
+
+describe('tienda/retorno — cuánto se pagó y qué hacer cuando algo falla', () => {
+  const botones = (w: Awaited<ReturnType<typeof mountSuspended>>) => w.findAll('button, a').map((b: { text: () => string }) => b.text())
+
+  // 09.5: el dueño que acaba de pagar $9.520 no veía $9.520.
+  it('el pago aprobado muestra cuánto se pagó', async () => {
+    respuesta = orden('conciliada', 'venta-1')
+    const wrapper = await mountSuspended(Retorno)
+    await flushPromises()
+    expect(wrapper.text()).toContain('Total pagado')
+    expect(wrapper.text()).toContain('$9520.000000')
+  })
+
+  // 09.6: la misma pantalla servía para un 404, un corte de red y una URL sin orden.
+  it('una orden que no existe (404) lo dice y no ofrece reintentar', async () => {
+    respuesta = Object.assign(new Error('404'), { status: 404 })
+    const wrapper = await mountSuspended(Retorno)
+    await flushPromises()
+    expect(wrapper.text()).toContain('No encontramos esta orden')
+    expect(botones(wrapper)).not.toContain('Consultar de nuevo')
+    expect(botones(wrapper)).toContain('Ver mis compras')
+  })
+
+  it('una URL sin orden dice lo mismo que un 404 y no consulta nada', async () => {
+    query = {}
+    const wrapper = await mountSuspended(Retorno)
+    await flushPromises()
+    expect(wrapper.text()).toContain('No encontramos esta orden')
+    expect(consultas).toBe(0)
+  })
+
+  it('un corte de red ofrece "Consultar de nuevo", que vuelve a preguntar', async () => {
+    respuesta = new Error('fetch failed')
+    const wrapper = await mountSuspended(Retorno)
+    await flushPromises()
+    expect(wrapper.text()).toContain('No pudimos verificar el pago')
+    expect(consultas).toBe(1)
+    respuesta = orden('conciliada', 'venta-1')
+    await wrapper.findAll('button').find(b => b.text() === 'Consultar de nuevo')!.trigger('click')
+    await flushPromises()
+    expect(consultas).toBe(2)
+    expect(wrapper.text()).toContain('Pago aprobado')
+  })
+
+  it('el pago pendiente ofrece "Actualizar" y no promete un aviso que no existe', async () => {
+    respuesta = orden('pendiente', null)
+    const wrapper = await mountSuspended(Retorno)
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('Te avisaremos')
+    respuesta = orden('conciliada', 'venta-1')
+    await wrapper.findAll('button').find(b => b.text() === 'Actualizar')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('Pago aprobado')
     expect(limpiezas).toBe(1)
   })
 })

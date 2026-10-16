@@ -63,7 +63,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☐ | [07.2](07-configuracion.md) | P1 | Los formularios de Configuración rechazan con avisos en inglés, sin marcar el campo *(es 00.11)* — *parcial 2026-10-16: traducción global y campos en Ítems, Impresoras, Descuentos, Recargos; faltan Salones/mesa e Impuestos (fiscal, frente aparte)* | medido | agente |
 | ☑ | [08.1](08-ingreso-y-cuenta.md) | P1 | Equivocarse en la "contraseña actual" cierra la sesión y manda al login — **hecho 2026-10-16** (el servidor contesta 400 y no 401 a una contraseña actual equivocada; el token no se tocó) | medido | agente |
 | ☐ | [09.1](09-tienda-y-suscripciones.md) | P1 | Al volver de Webpay, "Agregar tarjeta" cobra el primer período sin confirmar | código | owner |
-| ☐ | [09.2](09-tienda-y-suscripciones.md) | P1 | Al volver de Webpay el carrito se vacía, aunque el aviso dice lo contrario | medido + código | agente |
+| ☑ | [09.2](09-tienda-y-suscripciones.md) | P1 | Al volver de Webpay el carrito se vacía, aunque el aviso dice lo contrario — **hecho 2026-10-16** | medido + código | agente |
 
 Dos de estos pueden subir a P0 si los miras como plata en riesgo: 04.4 (aplicar costos a todas las recetas de un toque) y 09.1 (cobro sin clic al volver de Webpay). Están en "Preguntas para ti".
 
@@ -793,26 +793,26 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 |---|---|---|---|---|
 | ☑ | [09.3](09-tienda-y-suscripciones.md) | P2 | Recargar Suscripciones manda a Inicio sin decir nada — **hecho 2026-10-16** | agente |
 | ☑ | [09.4](09-tienda-y-suscripciones.md) | P2 | Si una lectura falla, la tienda muestra "no hay nada" o una alerta falsa — **hecho 2026-10-16** | agente |
-| ☐ | [09.5](09-tienda-y-suscripciones.md) | P2 | La pantalla de pago aprobado no muestra monto ni número de venta | agente |
-| ☐ | [09.6](09-tienda-y-suscripciones.md) | P2 | La pantalla de resultado del pago deja callejones sin salida, sin reintento ni enlace | agente |
-| ☐ | [09.7](09-tienda-y-suscripciones.md) | P2 | Al cancelar una suscripción, dos botones dicen "Cancelar" en el mismo modal | agente |
+| ☑ | [09.5](09-tienda-y-suscripciones.md) | P2 | La pantalla de pago aprobado no muestra monto ni número de venta — **hecho 2026-10-16** (el monto sí; la venta no tiene un número propio, el botón lleva a su detalle) | agente |
+| ☑ | [09.6](09-tienda-y-suscripciones.md) | P2 | La pantalla de resultado del pago deja callejones sin salida, sin reintento ni enlace — **hecho 2026-10-16** | agente |
+| ☑ | [09.7](09-tienda-y-suscripciones.md) | P2 | Al cancelar una suscripción, dos botones dicen "Cancelar" en el mismo modal — **hecho 2026-10-16** | agente |
 | ☐ | [09.8](09-tienda-y-suscripciones.md) | P2 | "Pausar" y "Reanudar" actúan al instante sin decir qué pasa con el cobro | owner |
-| ☐ | [09.9](09-tienda-y-suscripciones.md) | P2 | El selector muestra el neto ($30.000) y el total a cobrar es otro ($35.700) | agente |
-| ☐ | [09.10](09-tienda-y-suscripciones.md) | P2 | Los controles del carrito online miden 24 a 28 px y quitar es inmediato — **parcial 2026-10-16** (basurero y ± a 44 px y el basurero apartado; queda "Pagar" (36 px, botón de cobrar) y el "Deshacer") | agente |
+| ☐ | [09.9](09-tienda-y-suscripciones.md) | P2 | El selector muestra el neto ($30.000) y el total a cobrar es otro ($35.700) — **parcial 2026-10-16** (el selector ya no muestra el neto y el drawer dice "Se cobra hoy"; queda "el siguiente cobro es el …", que sale de la regla de ciclo del backend) | agente |
+| ☑ | [09.10](09-tienda-y-suscripciones.md) | P2 | Los controles del carrito online miden 24 a 28 px y quitar es inmediato — **hecho 2026-10-16** | agente |
 | ☑ | [09.11](09-tienda-y-suscripciones.md) | P2 | Botones de ícono de la tienda sin nombre; la estrella solo cambia de color — **hecho 2026-10-16** | agente |
 | ☑ | [09.12](09-tienda-y-suscripciones.md) | P2 | Las tarjetas del catálogo de la tienda no se pueden usar con teclado — **hecho 2026-10-16** | agente |
 | ☑ | [09.13](09-tienda-y-suscripciones.md) | P2 | El catálogo de la tienda dice lo mismo vacío que sin resultados — **hecho 2026-10-16** | agente |
-| ☐ | [09.14](09-tienda-y-suscripciones.md) | P2 | Sin permiso, la tienda deja armar un carrito entero y falla recién al pagar | agente |
+| ☑ | [09.14](09-tienda-y-suscripciones.md) | P2 | Sin permiso, la tienda deja armar un carrito entero y falla recién al pagar — **hecho 2026-10-16** (Pagar, Agregar tarjeta, quitar y marcar preferida; Pausar, Cancelar y Cambiar tarjeta no exigen permiso en el backend, así que no hay 403 que anticipar) | agente |
 | ☑ | [09.15](09-tienda-y-suscripciones.md) | P2 | Jerga en tienda y suscripciones: "tenant", "pasarela con tokenización (Oneclick)" — **hecho 2026-10-16** | agente |
-| ☐ | [09.16](09-tienda-y-suscripciones.md) | P2 | A 768 el carrito de la tienda queda bajo el catálogo, lejos de "Pagar" | agente |
-| ☐ | [09.22](09-tienda-y-suscripciones.md) | P2 | La suscripción a medias queda guardada en el navegador sin caducidad ni usuario | agente |
-| ☐ | [09.17](09-tienda-y-suscripciones.md) | P3 | El carrito online muestra "Descuentos -$0" y el total no destaca | agente |
+| ☑ | [09.16](09-tienda-y-suscripciones.md) | P2 | A 768 el carrito de la tienda queda bajo el catálogo, lejos de "Pagar" — **hecho 2026-10-16** | agente |
+| ☐ | [09.22](09-tienda-y-suscripciones.md) | P2 | La suscripción a medias queda guardada en el navegador sin caducidad ni usuario — **parcial 2026-10-16** (la intención lleva usuario, local y hora y caduca a la hora; queda "no cobrar sin el clic", que es 09.1) | agente |
+| ☑ | [09.17](09-tienda-y-suscripciones.md) | P3 | El carrito online muestra "Descuentos -$0" y el total no destaca — **hecho 2026-10-16** | agente |
 | ☑ | [09.18](09-tienda-y-suscripciones.md) | P3 | Voseo en tienda y suscripciones *(lote 00.3)* — **hecho 2026-10-16** | agente |
 | ☑ | [09.19](09-tienda-y-suscripciones.md) | P3 | El menú de Tienda Online corta los nombres y tiene dos "Suscripciones" casi iguales — **hecho 2026-10-16** | owner |
-| ☐ | [09.20](09-tienda-y-suscripciones.md) | P3 | La pasarela simulada redirige a /tienda sin decir por qué si la referencia es inválida | agente |
-| ☐ | [09.21](09-tienda-y-suscripciones.md) | P3 | Los vacíos de tarjetas y suscripciones no dicen qué hacer | agente |
+| ☑ | [09.20](09-tienda-y-suscripciones.md) | P3 | La pasarela simulada redirige a /tienda sin decir por qué si la referencia es inválida — **hecho 2026-10-16** | agente |
+| ☑ | [09.21](09-tienda-y-suscripciones.md) | P3 | Los vacíos de tarjetas y suscripciones no dicen qué hacer — **hecho 2026-10-16** | agente |
 | ☑ | [09.23](09-tienda-y-suscripciones.md) | P3 | Suscripciones no busca por cliente y un filtro vacío dice "no hay suscripciones" — **hecho 2026-10-16** | agente |
-| ☐ | [09.24](09-tienda-y-suscripciones.md) | P3 | La pantalla del superadmin no muestra "cargando", ni reintento, ni menú de usuario | agente |
+| ☐ | [09.24](09-tienda-y-suscripciones.md) | P3 | La pantalla del superadmin no muestra "cargando", ni reintento, ni menú de usuario — **parcial 2026-10-16** (cargando, "Volver a leer", menú de usuario y aria-expanded; quedan las nueve columnas a 768 px, sin superadmin para medir, y el aviso en Inicio al entrar sin permiso, que vive en el middleware de todos) | agente |
 
 ## Lotes sugeridos
 

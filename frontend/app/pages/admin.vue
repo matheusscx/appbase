@@ -20,6 +20,8 @@ const errorLectura = ref(false)
 const expandido = ref<Record<string, boolean>>({})
 
 async function cargar() {
+  cargando.value = true
+  errorLectura.value = false
   try {
     filas.value = await useApiFetch<BoletaConProblemaSoporte[]>(`${apiUrl}/admin/dte/boletas-con-problemas`)
     errorLectura.value = false
@@ -55,7 +57,11 @@ const textoDetalle = (detalle: unknown) => JSON.stringify(detalle, null, 2)
 <template>
   <UDashboardPanel>
     <template #header>
-      <AppNavbar title="Administración" />
+      <AppNavbar title="Administración">
+        <template #right>
+          <UserMenu />
+        </template>
+      </AppNavbar>
     </template>
 
     <template #body>
@@ -76,7 +82,8 @@ const textoDetalle = (detalle: unknown) => JSON.stringify(detalle, null, 2)
               variant="ghost"
               size="sm"
               square
-              aria-label="Ver detalle"
+              :aria-label="row.getIsExpanded() ? 'Ocultar detalle' : 'Ver detalle'"
+              :aria-expanded="row.getIsExpanded()"
               data-qa="soporte-desplegar"
               icon="i-lucide-chevron-down"
               :ui="{ leadingIcon: ['transition-transform', row.getIsExpanded() ? 'duration-200 rotate-180' : ''] }"
@@ -138,14 +145,28 @@ const textoDetalle = (detalle: unknown) => JSON.stringify(detalle, null, 2)
         </UTable>
 
         <p
-          v-else-if="errorLectura"
+          v-else-if="cargando"
           class="py-6 text-center text-sm text-muted"
-          data-qa="soporte-error"
+          data-qa="soporte-cargando"
+          role="status"
         >
-          No se pudo leer el estado de las boletas en el SII.
+          Cargando las boletas…
         </p>
+        <div v-else-if="errorLectura" class="py-6 text-center space-y-3">
+          <p class="text-sm text-muted" data-qa="soporte-error">
+            No se pudo leer el estado de las boletas en el SII.
+          </p>
+          <UButton
+            label="Volver a leer"
+            icon="i-lucide-refresh-cw"
+            color="neutral"
+            variant="soft"
+            data-qa="soporte-reintentar"
+            @click="cargar"
+          />
+        </div>
         <p
-          v-else-if="!cargando"
+          v-else
           class="py-6 text-center text-sm text-muted"
           data-qa="soporte-sin-problemas"
         >

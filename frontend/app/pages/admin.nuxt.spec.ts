@@ -12,6 +12,9 @@ let filas: BoletaConProblemaSoporte[] = []
 /** Si es `true`, `GET /admin/dte/boletas-con-problemas` falla. */
 let falla = false
 let llamadas: string[] = []
+/** Si está puesto, la lectura queda colgada hasta que se llame: para ver el "Cargando". */
+let soltarLectura: (() => void) | null = null
+let retenerLectura = false
 let toasts: { title: string, color?: string }[] = []
 
 function fila(over: Partial<BoletaConProblemaSoporte> = {}): BoletaConProblemaSoporte {
@@ -43,6 +46,10 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     llamadas.push(url)
     if (url.endsWith('/admin/dte/boletas-con-problemas')) {
+      if (retenerLectura) {
+        retenerLectura = false
+        return new Promise((resolve) => { soltarLectura = () => resolve(structuredClone(filas)) })
+      }
       return falla
         ? Promise.reject(Object.assign(new Error('500'), { data: { message: 'No se pudo leer' } }))
         : Promise.resolve(structuredClone(filas))
@@ -62,6 +69,8 @@ beforeEach(() => {
   falla = false
   llamadas = []
   toasts = []
+  soltarLectura = null
+  retenerLectura = false
 })
 
 describe('pages/admin — panel de soporte', () => {
@@ -212,6 +221,53 @@ describe('pages/admin — panel de soporte', () => {
     expect(wrapper.find('[data-qa="soporte-error"]').text()).toBe('No se pudo leer el estado de las boletas en el SII.')
     expect(wrapper.find('[data-qa="soporte-sin-problemas"]').exists()).toBe(false)
     expect(wrapper.text()).not.toContain('Ningún local tiene boletas con problemas.')
+    wrapper.unmount()
+  })
+
+  // 09.24
+  it('mientras lee dice "Cargando" y no deja la tarjeta en blanco', async () => {
+    retenerLectura = true
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="soporte-cargando"]').text()).toContain('Cargando')
+    expect(wrapper.find('[data-qa="soporte-sin-problemas"]').exists()).toBe(false)
+    soltarLectura!()
+    await new Promise(r => setTimeout(r, 0))
+    expect(wrapper.find('[data-qa="soporte-cargando"]').exists()).toBe(false)
+    expect(wrapper.find('[data-qa="soporte-sin-problemas"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('si la lectura falla ofrece "Volver a leer", que pregunta de nuevo y solo al tocarlo', async () => {
+    falla = true
+    const wrapper = await montar()
+    expect(llamadas).toHaveLength(1)
+
+    falla = false
+    filas = [fila()]
+    await wrapper.find('[data-qa="soporte-reintentar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    expect(llamadas).toHaveLength(2)
+    expect(wrapper.find('[data-qa="soporte-error"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('Almacén Paris')
+    wrapper.unmount()
+  })
+
+  it('el botón de desplegar dice si está abierto y qué hace', async () => {
+    filas = [fila()]
+    const wrapper = await montar()
+    const boton = () => wrapper.find('[data-qa="soporte-desplegar"]')
+    expect(boton().attributes('aria-expanded')).toBe('false')
+    expect(boton().attributes('aria-label')).toBe('Ver detalle')
+    await boton().trigger('click')
+    await new Promise(r => setTimeout(r, 0))
+    expect(boton().attributes('aria-expanded')).toBe('true')
+    expect(boton().attributes('aria-label')).toBe('Ocultar detalle')
+    wrapper.unmount()
+  })
+
+  it('el encabezado trae el menú de usuario, como el resto de las pantallas', async () => {
+    const wrapper = await montar()
+    expect(wrapper.findComponent({ name: 'UserMenu' }).exists()).toBe(true)
     wrapper.unmount()
   })
 })
