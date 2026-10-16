@@ -96,13 +96,28 @@ interface LineaConCausa extends LineaConDiferencia {
  * aplicar (ni override de línea ni default de la sesión). Aviso previo en
  * cliente; el backend igual lo rechaza si se intenta aplicar así.
  */
-export function contarLineasSinCausa(
-  lineas: LineaConCausa[],
+export function lineasSinCausa<T extends LineaConCausa>(
+  lineas: T[],
   motivoDefaultId: string | null,
-): number {
+): T[] {
   return lineas.filter((l) => {
     if (l.cantidadContada === null || l.diferencia === null) return false
     if (new Decimal(l.diferencia).isZero()) return false
     return !l.motivoDiferenciaId && !motivoDefaultId
-  }).length
+  })
+}
+
+/** Cuántas son: ver `lineasSinCausa`. */
+export function contarLineasSinCausa(
+  lineas: LineaConCausa[],
+  motivoDefaultId: string | null,
+): number {
+  return lineasSinCausa(lineas, motivoDefaultId).length
+}
+
+/** Líneas contadas cuyo conteo coincide con el sistema: aplicar no las mueve. */
+export function contarLineasSinDiferencia(lineas: LineaConDiferencia[]): number {
+  return lineas.filter(l =>
+    l.cantidadContada !== null && l.diferencia !== null && new Decimal(l.diferencia).isZero(),
+  ).length
 }

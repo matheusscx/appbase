@@ -22,7 +22,7 @@ avisa en dos lugares con trabajos distintos:
 - **El bloque "Stock bajo" del inicio** contesta *"¿tengo que hacer algo antes de abrir?"*: un
   número y las hasta 4 ubicaciones más afectadas. **No es una lista y no crece**: 40 productos
   abajo ocupan lo mismo que 6.
-- **La pantalla `Inventario → Stock mínimo`** es la lista completa —el usuario vino a buscarla—
+- **La pantalla `Inventario → Stock`** (`/inventario/stock`; antes «Stock mínimo», 05.14) es la lista completa —el usuario vino a buscarla—
   con la marca por fila, y es donde se carga el mínimo.
 
 Cuando hay stock del mismo producto en otra ubicación, la fila ofrece el **traslado precargado** a
@@ -139,7 +139,7 @@ GET /api/inventario/stock-bajo/resumen
 
 ## Frontend
 
-- **`pages/inventario/stock-minimo.vue`** + `composables/useStockMinimo.ts` (guardar, detectar "sin
+- **`pages/inventario/stock.vue`** (`/inventario/stock-minimo` redirige acá, con su query, para el bloque del inicio y los enlaces viejos) + `composables/useStockMinimo.ts` (guardar, detectar "sin
   cambio" con `Decimal`, y armar la ruta del traslado). El mínimo se edita en la fila y se guarda
   al salir del campo o con Enter; la fila se reemplaza por la que devuelve el `PUT`, sin recargar
   la página ni derivar la marca en el cliente. Si el guardado falla, el campo vuelve al valor
@@ -161,7 +161,7 @@ GET /api/inventario/stock-bajo/resumen
 - `backend/test/stock-bajo-resumen.e2e-spec.ts` — corre en el **segundo tenant sembrado**, porque
   el resumen cuenta todo el tenant y la suite del listado deja pares abajo en Paris. Incluye la
   prueba del ruido: 6 ubicaciones afectadas → 4 filas, total 21 contra 18 detallados.
-- `frontend/app/pages/inventario/stock-minimo.nuxt.spec.ts`,
+- `frontend/app/pages/inventario/stock.nuxt.spec.ts`,
   `components/inicio/InicioStockBajo.nuxt.spec.ts`, `pages/inventario/traslados.nuxt.spec.ts`.
 - `frontend/e2e/inventario/stock-minimo.spec.ts` — navegador, con `aprobador` y `contador`.
 

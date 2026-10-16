@@ -4,6 +4,8 @@ import {
   claseDiferenciaRecuento,
   contarLineasAMover,
   contarLineasSinCausa,
+  contarLineasSinDiferencia,
+  lineasSinCausa,
   estadoRecuentoColor,
   estadoRecuentoLabel,
 } from './useRecuentoInventario'
@@ -86,5 +88,24 @@ describe('estadoRecuentoLabel / estadoRecuentoColor', () => {
     expect(estadoRecuentoColor('borrador')).toBe('neutral')
     expect(estadoRecuentoColor('aplicado')).toBe('success')
     expect(estadoRecuentoColor('cancelado')).toBe('error')
+  })
+})
+
+describe('lineasSinCausa y contarLineasSinDiferencia (auditoría UX 05.1 y 05.7)', () => {
+  const l = (diferencia: string | null, motivo: string | null = null, contada: string | null = '1') => ({
+    cantidadContada: diferencia === null ? null : contada,
+    diferencia,
+    motivoDiferenciaId: motivo,
+    itemNombre: `p-${diferencia}-${motivo}`,
+  })
+
+  it('devuelve las líneas, no solo cuántas', () => {
+    const lineas = [l('-2'), l('0'), l(null), l('3', 'm1'), l('1')]
+    expect(lineasSinCausa(lineas, null).map(x => x.itemNombre)).toEqual(['p--2-null', 'p-1-null'])
+    expect(lineasSinCausa(lineas, 'default')).toEqual([])
+  })
+
+  it('cuenta las contadas sin diferencia, no las sin contar', () => {
+    expect(contarLineasSinDiferencia([l('0'), l('0.0000'), l('2'), l(null)])).toBe(2)
   })
 })

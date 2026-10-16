@@ -193,8 +193,9 @@ admin-only con lectura abierta; las features operativas usan `@RequiresPermiso`.
 | Endpoint | Qué hace | Permiso |
 |---|---|---|
 | `POST /api/recuentos` | Crea la sesión en `borrador` con sus líneas; congela `stock_sistema` de cada una | `Inventario/Crear` |
-| `GET /api/recuentos` | Lista sesiones (paginado) con estado, fecha y diferencia neta | `Inventario/Leer` |
-| `GET /api/recuentos/:id` | Detalle con líneas: stock del sistema, contado y diferencia. Incluye las de productos eliminados con la sesión abierta, marcadas con `itemEliminado` — el detalle y `cantidadLineas` del listado cuentan lo mismo | `Inventario/Leer` |
+| `GET /api/recuentos` | Lista sesiones (paginado) con estado, fecha, `cantidadLineas`, `lineasConDiferencia` (contadas cuyo conteo difiere del sistema) y diferencia neta | `Inventario/Leer` |
+| `GET /api/recuentos/productos-con-stock?ubicacionId=` | Solo lectura. Los productos por cantidad con stock en esa ubicación (`itemIds`, listos para `POST /api/recuentos`), cuántos se apartan por estar ya en un recuento en borrador de esa ubicación (`enOtroRecuento`) y si el tope de 2000 los cortó (`truncado`). No escribe stock ni sesiones | `Inventario/Crear` |
+| `GET /api/recuentos/:id` | Detalle con `usuarioAplicadorNombre` y líneas: stock del sistema, contado y diferencia. Incluye las de productos eliminados con la sesión abierta, marcadas con `itemEliminado` — el detalle y `cantidadLineas` del listado cuentan lo mismo | `Inventario/Leer` |
 | `PATCH /api/recuentos/:id/lineas/:lineaId` | Carga `cantidadContada` y/o override `motivoDiferenciaId` de una línea | `Inventario/Crear` |
 | `PATCH /api/recuentos/:id` | Cambia `motivoDiferenciaDefaultId` y/o `comentario` de la sesión | `Inventario/Crear` |
 | `POST /api/recuentos/:id/cancelar` | Pasa a `cancelado` sin tocar stock | `Inventario/Crear` |
@@ -375,11 +376,18 @@ completo de la regla del kardex: [`inventario-kardex.md`](./inventario-kardex.md
 ### Pages
 
 - `pages/inventario/recuentos/index.vue` — listado de sesiones: estado, fecha, cantidad
-  de líneas y diferencia neta.
+  de líneas y cuántas tienen diferencia (la suma neta mezclaba unidades distintas y ya no se
+  muestra). Al crear, la casilla **«Todos los productos con stock en esta ubicación»** (auditoría
+  UX 05.5, decidido por el owner) reemplaza el selector: pide `productos-con-stock`, dice
+  cuántos se cuentan y cuántos quedan afuera por estar en otro recuento en borrador.
 - `pages/inventario/recuentos/[id].vue` — detalle: selector de causa por defecto, tabla
   con una fila por producto (stock del sistema, input de contado, diferencia calculada en
   vivo con Decimal.js, selector de causa para override), y el botón de aplicar con un
-  resumen de cuántas líneas se van a mover.
+  resumen de cuántas líneas se van a mover. **Aplicar queda apagado mientras falte una causa**
+  (05.1, decidido): el aviso nombra los productos y dice quién la pone —quien contó; contar y
+  aprobar siguen separados—. Los campos de conteo no se deshabilitan al guardar (Tab no pierde el
+  foco; Enter pasa al siguiente) y un segundo guardado de la misma línea espera al primero. Un
+  recuento aplicado dice cuándo, quién y cuántas líneas movió y cuántas no tenían diferencia (05.7).
 
 Tokens semánticos de Nuxt UI. La diferencia se muestra con color semántico
 (`text-error` faltante / `text-success` sobrante), no con Tailwind hardcodeado.

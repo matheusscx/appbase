@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import { unirResumen } from '~/utils/stock-format'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -33,6 +34,7 @@ interface RecuentoDetalleApi {
   comentario: string | null
   creadoEl: string
   aplicadoEl: string | null
+  usuarioAplicadorNombre: string | null
   lineas: RecuentoLineaApi[]
 }
 
@@ -42,6 +44,8 @@ interface LineaRow extends RecuentoLineaApi {
   /** Sentinel SIN_CAUSA = "usar la causa por defecto de la sesión". */
   motivoInput: string
   guardando: boolean
+  /** El PATCH del conteo en vuelo: un segundo blur espera al primero para que no lleguen cruzados. */
+  pendiente: Promise<void> | null
 }
 
 interface Opt { label: string; value: string }
@@ -120,6 +124,7 @@ function lineaAFila(l: RecuentoLineaApi): LineaRow {
     cantidadInput: cantidadParaCampo(l.cantidadContada),
     motivoInput: l.motivoDiferenciaId ?? SIN_CAUSA,
     guardando: false,
+    pendiente: null,
   }
 }
 
@@ -169,10 +174,21 @@ function diferenciaLinea(row: LineaRow): string | null {
 
 async function guardarCantidad(row: LineaRow) {
   if (readOnly.value) return
+  // El campo no se deshabilita mientras guarda (05.3: el foco caía en <body>); si todavía hay un
+  // guardado de esta línea en vuelo, se espera a que termine antes de mandar el siguiente.
+  if (row.pendiente) await row.pendiente
   const nuevo = row.cantidadInput.trim()
   const actual = cantidadParaCampo(row.cantidadContada)
   if (nuevo === actual) return
   row.guardando = true
+  row.pendiente = enviarCantidad(row, nuevo).finally(() => {
+    row.guardando = false
+    row.pendiente = null
+  })
+  await row.pendiente
+}
+
+async function enviarCantidad(row: LineaRow, nuevo: string) {
   try {
     const res = await useApiFetch<RecuentoLineaApi>(
       `${apiUrl}/recuentos/${recuentoId.value}/lineas/${row.lineaId}`,
@@ -180,15 +196,20 @@ async function guardarCantidad(row: LineaRow) {
     )
     row.cantidadContada = res.cantidadContada
     row.diferencia = res.diferencia
-    row.cantidadInput = cantidadParaCampo(res.cantidadContada)
+    // Si mientras guardaba la persona siguió escribiendo, no se le pisa lo tipeado.
+    if (row.cantidadInput.trim() === nuevo) row.cantidadInput = cantidadParaCampo(res.cantidadContada)
   }
   catch (e: unknown) {
     row.cantidadInput = cantidadParaCampo(row.cantidadContada)
     toast.add({ title: apiErrorMsg(e, 'Error al guardar el conteo'), color: 'error' })
   }
-  finally {
-    row.guardando = false
-  }
+}
+
+/** Enter en "Contado" pasa al de la fila siguiente (el blur del actual lo guarda). */
+function irAlSiguienteConteo(e: KeyboardEvent) {
+  const input = e.target as HTMLElement | null
+  const siguiente = input?.closest('tr')?.nextElementSibling?.querySelector<HTMLInputElement>('input[inputmode="decimal"]')
+  siguiente?.focus()
 }
 
 async function guardarMotivoLinea(row: LineaRow, valor: string) {
@@ -258,9 +279,30 @@ async function guardarComentario() {
 // ── Aplicar / cancelar ───────────────────────────────────────────────────────
 
 const lineasAMoverCount = computed(() => contarLineasAMover(lineas.value))
-const lineasSinCausaCount = computed(() =>
-  contarLineasSinCausa(lineas.value, detalle.value?.motivoDiferenciaDefaultId ?? null),
+const lineasSinDiferenciaCount = computed(() => contarLineasSinDiferencia(lineas.value))
+
+// Aplicar se apaga mientras falte una causa (05.1): el servidor lo rechazaría y quien aprueba, que
+// no cuenta, no tenía salida. Contar y aprobar siguen separados: la causa la pone quien cuenta.
+const lineasFaltaCausa = computed(() =>
+  lineasSinCausa(lineas.value, detalle.value?.motivoDiferenciaDefaultId ?? null),
 )
+const avisoFaltaCausa = computed(() => {
+  if (!lineasFaltaCausa.value.length) return ''
+  const nombres = unirResumen(lineasFaltaCausa.value.map(l => l.itemNombre ?? 'un producto eliminado'))
+  return puedeContar.value
+    ? `Falta la causa en ${nombres}. Elígela en la tabla y vuelve a aplicar.`
+    : `Falta la causa en ${nombres}. La pone quien contó, y después vuelves a aplicar.`
+})
+
+const resumenAplicado = computed(() => {
+  const d = detalle.value
+  if (!d || d.estado !== 'aplicado') return ''
+  const movidas = lineasAMoverCount.value
+  const iguales = lineasSinDiferenciaCount.value
+  const cuando = d.aplicadoEl ? ` el ${formatFecha(d.aplicadoEl)}` : ''
+  const quien = d.usuarioAplicadorNombre ? ` por ${d.usuarioAplicadorNombre}` : ''
+  return `Aplicado${cuando}${quien}: ${movidas} ${movidas === 1 ? 'línea movida' : 'líneas movidas'}, ${iguales} sin diferencia.`
+})
 
 const aplicarModalOpen = ref(false)
 const aplicando = ref(false)
@@ -406,6 +448,7 @@ const columns: TableColumn<LineaRow>[] = [
               <UButton
                 v-if="puedeAplicar"
                 icon="i-lucide-check"
+                :disabled="lineasFaltaCausa.length > 0"
                 @click="() => { aplicarModalOpen = true }"
               >
                 Aplicar
@@ -413,7 +456,17 @@ const columns: TableColumn<LineaRow>[] = [
             </div>
           </div>
 
-          <UCard>
+          <p v-if="esBorrador && puedeAplicar && avisoFaltaCausa" data-qa="aplicar-falta" class="text-sm text-warning">
+            {{ avisoFaltaCausa }}
+          </p>
+          <p v-if="resumenAplicado" data-qa="recuento-resumen-aplicado" class="text-sm text-default">
+            {{ resumenAplicado }}
+          </p>
+          <p v-if="esBorrador && !puedeContar" data-qa="recuento-solo-lectura" class="text-sm text-muted">
+            Los conteos y las causas los carga quien cuenta.
+          </p>
+
+          <UCard v-if="esBorrador || detalle.motivoDiferenciaDefaultId || detalle.comentario">
             <div class="grid gap-4 sm:grid-cols-2">
               <UFormField
                 label="Causa por defecto"
@@ -473,9 +526,11 @@ const columns: TableColumn<LineaRow>[] = [
                   v-model="row.original.cantidadInput"
                   inputmode="decimal"
                   placeholder="Sin contar"
-                  :disabled="readOnly || row.original.guardando"
+                  :disabled="readOnly"
+                  :loading="row.original.guardando"
                   class="w-32"
                   @blur="guardarCantidad(row.original)"
+                  @keydown.enter.prevent="irAlSiguienteConteo"
                 />
                 <span v-if="row.original.unidadMedida" class="text-xs text-muted">{{ row.original.unidadMedida }}</span>
               </div>
@@ -495,7 +550,7 @@ const columns: TableColumn<LineaRow>[] = [
                 :model-value="row.original.motivoInput"
                 :items="motivoOverrideOpts(row.original.motivoDiferenciaId)"
                 value-key="value"
-                :disabled="readOnly || row.original.guardando"
+                :disabled="readOnly"
                 class="w-48"
                 @update:model-value="(v: string) => guardarMotivoLinea(row.original, v)"
               />
@@ -518,10 +573,6 @@ const columns: TableColumn<LineaRow>[] = [
               <p>
                 Se van a mover <strong>{{ lineasAMoverCount }}</strong> {{ lineasAMoverCount === 1 ? 'línea' : 'líneas' }} al historial de movimientos.
                 Las líneas sin contar o con diferencia cero no generan movimiento.
-              </p>
-              <p v-if="lineasSinCausaCount > 0" class="text-warning">
-                {{ lineasSinCausaCount }} {{ lineasSinCausaCount === 1 ? 'línea con diferencia no tiene' : 'líneas con diferencia no tienen' }} causa asignada
-                ni causa por defecto — la aplicación se rechazará hasta indicarla.
               </p>
             </div>
           </template>

@@ -20,6 +20,7 @@ import { CreateRecuentoDto } from './dto/create-recuento.dto';
 import { UpdateRecuentoDto } from './dto/update-recuento.dto';
 import { UpdateRecuentoLineaDto } from './dto/update-recuento-linea.dto';
 import { FindRecuentosDto } from './dto/find-recuentos.dto';
+import { ProductosConStockDto } from './dto/productos-con-stock.dto';
 import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
@@ -42,6 +43,14 @@ export class RecuentosController {
   findAll(@Req() req: Request, @Query() query: FindRecuentosDto) {
     const { tenantId } = req.user as { tenantId: string };
     return this.recuentosService.findAll(tenantId, query);
+  }
+
+  // Antes de `:id`: si no, `productos-con-stock` se leería como un id y `ParseUUIDPipe` lo rechazaría.
+  @Get('productos-con-stock')
+  @RequiresPermiso('Inventario', 'Crear')
+  productosConStock(@Req() req: Request, @Query() query: ProductosConStockDto) {
+    const { tenantId } = req.user as { tenantId: string };
+    return this.recuentosService.productosConStock(tenantId, query.ubicacionId);
   }
 
   @Get(':id')

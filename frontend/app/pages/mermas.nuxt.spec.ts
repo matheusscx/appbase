@@ -55,10 +55,21 @@ let mermasUrls: string[] = []
 /** Cada `GET /items?...` (búsqueda del selector). */
 let busquedasItems: string[] = []
 
+// 05.24: un rol sin Inventario:Crear (el aprobador) ve la lista y ninguna acción.
+let permitido = true
+/** Lo que `GET /items/:id` dice que hay en cada ubicación (05.8). */
+const DETALLE_HARINA = {
+  id: HARINA.id,
+  desglosePorUbicacion: [
+    { ubicacionId: LOCAL.id, nombre: LOCAL.nombre, stock: '12.0000' },
+    { ubicacionId: BODEGA.id, nombre: BODEGA.nombre, stock: '30.0000' },
+  ],
+}
+
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
-    get esAdmin() { return true },
-    can: () => true,
+    get esAdmin() { return permitido },
+    can: () => permitido,
   })
 })
 
@@ -66,6 +77,7 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string') return Promise.resolve({ data: [], meta: {} })
     if (url.includes('/ubicaciones')) return Promise.resolve(ubicacionesBackend)
+    if (url.endsWith(`/items/${HARINA.id}`)) return Promise.resolve(DETALLE_HARINA)
     if (url.includes('/tenants/me')) {
       return Promise.resolve({ horaCorte: horaCorteBackend, diaNegocioHoy: '2026-09-18' })
     }
@@ -118,6 +130,7 @@ async function montar() {
             <div v-if="open" role="dialog">
               <slot name="header" />
               <slot name="body" />
+              <slot name="ayuda" />
               <slot name="actions" />
             </div>
           `,
@@ -614,5 +627,92 @@ describe('mermas — los filtros de fecha dicen cuál es cuál', () => {
     expect(wrapper.find('[data-qa="mermas-hasta"] label').text()).toBe('Hasta')
     expect(wrapper.find('[data-qa="mermas-desde"] button[aria-label="Seleccionar la fecha Desde"]').exists()).toBe(true)
     expect(wrapper.find('[data-qa="mermas-hasta"] button[aria-label="Seleccionar la fecha Hasta"]').exists()).toBe(true)
+  })
+})
+
+// Auditoría UX 05.8: en mermas ni siquiera se mostraba cuánto hay en la ubicación elegida.
+describe('mermas — cuánto hay en la ubicación elegida (05.8)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+    permitido = true
+  })
+
+  it('al elegir producto dice cuánto hay en esa ubicación, y cambia con la ubicación', async () => {
+    ubicacionesBackend = [LOCAL, BODEGA]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+    expect(wrapper.find('[data-qa="merma-hay"]').exists()).toBe(false)
+    await elegirProducto(wrapper, HARINA.id)
+    await new Promise(r => setTimeout(r, 30))
+    expect(wrapper.find('[data-qa="merma-hay"]').text()).toBe('En Bodega centro hay 30 kg')
+
+    await emitir(selectConOpcion(wrapper, LOCAL.id), LOCAL.id)
+    await new Promise(r => setTimeout(r, 30))
+    expect(wrapper.find('[data-qa="merma-hay"]').text()).toBe('En Local hay 12 kg')
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 05.11: antes de registrar, una línea que dice qué se va a dar de baja.
+describe('mermas — resumen antes de registrar (05.11)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+    permitido = true
+    ubicacionesBackend = [LOCAL]
+  })
+
+  it('con producto, cantidad y motivo dice qué sale y de dónde; sin ellos, no', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegirProducto(wrapper, HARINA.id)
+    await wrapper.find('input[inputmode="decimal"]').setValue('2')
+    expect(wrapper.find('[data-qa="merma-resumen"]').exists()).toBe(false)
+
+    await emitir(selectMotivo(wrapper), MOTIVO.id)
+    expect(wrapper.find('[data-qa="merma-resumen"]').text()).toBe('Vas a dar de baja 2 kg de Harina en Local por Vencimiento')
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 05.25: Cantidad y Comentario eran angostos mientras los demás campos ocupaban el ancho.
+describe('mermas — anchos del formulario (05.25)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+    permitido = true
+    ubicacionesBackend = [LOCAL]
+  })
+
+  it('Cantidad y Comentario ocupan el ancho completo', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    const cantidad = wrapper.findAllComponents({ name: 'UInput' }).find(c => c.find('input[inputmode="decimal"]').exists())
+    expect(cantidad!.classes()).toContain('w-full')
+    const comentario = wrapper.findComponent({ name: 'UTextarea' })
+    expect(comentario.classes()).toContain('w-full')
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 05.24: el aprobador entra a Mermas y ve una lista sin acción y sin decir por qué.
+describe('mermas — por qué no hay botón (05.24)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+    ubicacionesBackend = [LOCAL]
+  })
+
+  it('sin permiso de registrar, dice que solo puede mirar', async () => {
+    permitido = false
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="mermas-sin-accion"]').text()).toBe('Solo puedes ver las mermas; las registra quien cuenta.')
+    wrapper.unmount()
+    permitido = true
+  })
+
+  it('con permiso no dice nada', async () => {
+    permitido = true
+    const wrapper = await montar()
+    expect(wrapper.find('[data-qa="mermas-sin-accion"]').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

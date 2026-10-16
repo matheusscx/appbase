@@ -347,10 +347,10 @@ reseteó la base.
 |---|---|
 | `configuracion/ubicaciones.vue` | Nueva. Admin-only, calcada de `configuracion/motivos-baja.vue`: el local arriba (no editable de tipo, no borrable), las bodegas abajo |
 | `configuracion/motivos-traslado.vue` | Nueva. Mismo patrón |
-| `inventario/traslados.vue` | Nueva. Formulario *de dónde → a dónde → qué → por qué*, más el histórico con el documento navegable |
+| `inventario/traslados.vue` | Nueva. Formulario *de dónde → a dónde → qué → por qué*, más el histórico con el documento navegable. Antes de confirmar, una línea de resumen («Vas a mover 2 kg de Harina de Bodega a Local»; anular no existe, 05.11); la cantidad que pasa del disponible del servidor se **marca**, no se bloquea (05.8); sin permiso o sin bodegas lo dice en pantalla (05.24) |
 | `configuracion/items.vue` (lista) | La columna Stock pasa a decir el **total**; el detalle desglosa por ubicación |
 | `inventario/index.vue` (kardex) | Columna Ubicación, filtro por ubicación, y el ajuste pide dónde |
-| `mermas.vue` | Selector de ubicación — se merma lo que se pudrió ahí |
+| `mermas.vue` | Selector de ubicación — se merma lo que se pudrió ahí. Dice cuánto hay del producto en esa ubicación (`GET /items/:id`) y, antes de registrar, un resumen («Vas a dar de baja 2 kg de Harina en Local por Vencimiento») |
 | `inventario/recuentos/` | La sesión nace atada a una ubicación, elegida al crearla |
 | `salones/` y el POS | **Nada.** El salón y el POS ya leían `stockDisponible`, que viene angostado al local desde el backend — donde trabaja el garzón no se enteran de que existen las bodegas |
 

@@ -76,6 +76,7 @@ const urlsItems: string[] = []
 // Los POST /traslados que salieron (05.2: una línea incompleta no debe viajar ni descartarse).
 let enviados: { url: string, body: { lineas: Record<string, unknown>[] } }[] = []
 let avisos: { title: string, color?: string }[] = []
+let bodegasBackend: typeof BODEGA[] = [BODEGA, BODEGA_BARRA]
 
 mockNuxtImport('useToast', () => {
   return () => ({ add: (t: { title: string, color?: string }) => avisos.push(t) })
@@ -85,10 +86,12 @@ mockNuxtImport('useRoute', () => {
   return () => ({ query: routeQuery })
 })
 
+// 05.24: un rol sin Inventario:Crear (el aprobador) entra a la lista y no ve ninguna acción.
+let permitido = true
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
-    get esAdmin() { return true },
-    can: () => true,
+    get esAdmin() { return permitido },
+    can: () => permitido,
   })
 })
 
@@ -99,7 +102,7 @@ mockNuxtImport('useApiFetch', () => {
       enviados.push({ url, body: opts.body as { lineas: Record<string, unknown>[] } })
       return Promise.resolve({ id: 't-1', detalle: [] })
     }
-    if (url.includes('/ubicaciones')) return Promise.resolve([LOCAL, BODEGA, BODEGA_BARRA])
+    if (url.includes('/ubicaciones')) return Promise.resolve([LOCAL, ...bodegasBackend])
     if (url.includes('/motivos-traslado')) return Promise.resolve([MOTIVO])
     // `GET /items?ids=` — el caché por id (`resolver`): solo conoce lo que se pide.
     if (url.includes('/items?ids=')) {
@@ -612,5 +615,126 @@ describe('traslados — tamaño táctil de las líneas', () => {
     expect(quitar.exists()).toBe(true)
     expect(quitar.classes().join(' ')).toMatch(M44)
     expect(quitar.classes().join(' ')).toMatch(/(^|\s)ms-[2-9](\s|$)/)
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 05.8: con "Disponible: 20" a la vista se podía escribir 999 sin ninguna marca; el
+// servidor contestaba en un toast. La marca NO bloquea: el tope lo sigue calculando el servidor.
+describe('traslados — la cantidad que no alcanza se marca junto al campo (05.8)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+    routeQuery = {}
+    enviados = []
+    avisos = []
+  })
+
+  async function conProducto(wrapper: Wrapper) {
+    const [origenSelect, destinoSelect] = selectsConOpcion(wrapper, LOCAL.id)
+    await emitir(origenSelect!, BODEGA.id)
+    await emitir(destinoSelect!, LOCAL.id)
+    await emitir(selectConOpcion(wrapper, MOTIVO.id), MOTIVO.id)
+    await elegirProducto(wrapper, PRODUCTO.id)
+    await new Promise(r => setTimeout(r, 30))
+  }
+
+  it('si la cantidad supera lo disponible, lo dice con el número y no apaga el botón', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await conProducto(wrapper)
+    const disponible = wrapper.find('[data-qa="linea-disponible"]')
+    expect(wrapper.find('[data-qa="linea-excede"]').exists()).toBe(false)
+
+    await wrapper.find('input[inputmode="decimal"]').setValue('999')
+    const excede = wrapper.find('[data-qa="linea-excede"]')
+    expect(excede.exists()).toBe(true)
+    expect(excede.text()).toContain('20')
+    expect(disponible.exists()).toBe(true)
+    expect(botonConfirmar(wrapper).attributes('disabled')).toBeUndefined()
+
+    await wrapper.find('input[inputmode="decimal"]').setValue('20')
+    expect(wrapper.find('[data-qa="linea-excede"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 05.11: antes de confirmar, una línea que dice qué se va a mover.
+describe('traslados — resumen antes de confirmar (05.11)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+    routeQuery = {}
+  })
+
+  it('con todo completo dice qué se mueve, de dónde y a dónde; incompleto, no lo dice', async () => {
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    const [origenSelect, destinoSelect] = selectsConOpcion(wrapper, LOCAL.id)
+    await emitir(origenSelect!, BODEGA.id)
+    await emitir(destinoSelect!, LOCAL.id)
+    await emitir(selectConOpcion(wrapper, MOTIVO.id), MOTIVO.id)
+    await elegirProducto(wrapper, PRODUCTO.id)
+    expect(wrapper.find('[data-qa="traslado-resumen"]').exists()).toBe(false)
+
+    await wrapper.find('input[inputmode="decimal"]').setValue('2')
+    const resumen = wrapper.find('[data-qa="traslado-resumen"]')
+    expect(resumen.text()).toBe('Vas a mover 2 kg de Harina de Bodega centro a Local')
+    expect(wrapper.find('[data-qa="traslado-falta"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 05.19: la casilla de cada serie medía 16 px y no estaba unida a su texto.
+describe('traslados — la casilla de cada serie (05.19)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('el nombre de la serie es la etiqueta de su casilla, y tocarla marca la unidad', async () => {
+    routeQuery = { itemId: PRODUCTO_SERIE.id, origenId: BODEGA.id }
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 60))
+    const casilla = wrapper.find('[role="checkbox"]')
+    expect(casilla.exists()).toBe(true)
+    const etiqueta = wrapper.find(`label[for="${casilla.attributes('id')}"]`)
+    expect(etiqueta.text()).toContain('SN-0001')
+    await casilla.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(wrapper.text()).toContain('1 seleccionadas')
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 05.24: sin permiso o sin bodegas, el botón falta o se apaga sin motivo visible.
+describe('traslados — por qué no hay botón o está apagado (05.24)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+    routeQuery = {}
+    permitido = true
+    bodegasBackend = [BODEGA, BODEGA_BARRA]
+  })
+
+  const aviso = (w: Wrapper) => w.find('[data-qa="traslados-sin-accion"]')
+
+  it('con permiso y con bodegas no dice nada', async () => {
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 60))
+    expect(aviso(wrapper).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('sin permiso de trasladar, dice que solo puede mirar y quién los registra', async () => {
+    permitido = false
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 60))
+    expect(aviso(wrapper).text()).toBe('Solo puedes ver los traslados; los registra quien cuenta.')
+    wrapper.unmount()
+  })
+
+  it('sin bodegas, el botón apagado se explica en pantalla y no solo en un title', async () => {
+    bodegasBackend = []
+    const wrapper = await montar()
+    await new Promise(r => setTimeout(r, 60))
+    expect(aviso(wrapper).text()).toBe('Para trasladar necesitas al menos una bodega.')
+    wrapper.unmount()
   })
 })

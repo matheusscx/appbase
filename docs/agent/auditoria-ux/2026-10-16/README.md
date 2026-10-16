@@ -52,7 +52,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☑ | [04.2](04-inicio-y-reportes.md) | P1 | En Inicio, "Vendido" queda pegado al borde y lo demás bajo el pliegue — **hecho 2026-10-16** (medido en navegador: las cifras de Vendido, Cobrado y Por cobrar terminan en 774/774/676 px de 800 a 1280×800 y en 961/961/862 de 1024 a 768×1024; el resto de la tarjeta de Ventas queda bajo el pliegue) | medido | agente + owner |
 | ☑ | [04.3](04-inicio-y-reportes.md) | P1 | "Hoy" no dice de qué hora son sus números y se queda viejo — **hecho 2026-10-16** | medido | agente + owner |
 | ☑ | [04.4](04-inicio-y-reportes.md) | P1 | "Costos desfasados" abre todo marcado y aplica a todas las recetas de un toque — **hecho 2026-10-16** | medido | owner |
-| ☐ | [05.1](05-inventario.md) | P1 | El aprobador de un recuento sin causas puede apretar "Aplicar" y queda sin salida | medido | agente + owner |
+| ☑ | [05.1](05-inventario.md) | P1 | El aprobador de un recuento sin causas puede apretar "Aplicar" y queda sin salida — **hecho 2026-10-16** (Aplicar apagado en la cabecera, con el aviso que nombra los productos y quién la pone; contar y aprobar siguen separados) | medido | agente + owner |
 | ☑ | [05.2](05-inventario.md) | P1 | Un traslado con una línea incompleta guarda solo las otras y avisa "Traslado registrado" *(es 00.10)* — **hecho 2026-10-16** | medido | agente |
 | ☑ | [06.1](06-compras-y-terceros.md) | P1 | Guardar o confirmar una compra descarta en silencio las líneas sin cantidad *(es 00.10)* — **hecho 2026-10-16** | medido | agente |
 | ☐ | [06.2](06-compras-y-terceros.md) | P1 | La cantidad de una compra acepta texto, cero y negativos, y falla en inglés *(parte en 00.11)* — *parcial 2026-10-16: mensaje y campo marcado tras el rechazo; cero, texto y negativos bloquean Guardar y Confirmar con su motivo junto al campo (lote 1); la coma decimal se avisa pero NO se normaliza a punto: aceptarla cambiaría qué se guarda y espera decisión del owner* | medido | agente |
@@ -655,29 +655,29 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
-| ☐ | [05.3](05-inventario.md) | P2 | Al contar con teclado, Tab pierde el foco cuando el campo se guarda | agente |
-| ☐ | [05.4](05-inventario.md) | P2 | Los conteos salen con cuatro decimales ("49.0000") mientras el stock dice "51" | agente |
-| ☐ | [05.5](05-inventario.md) | P2 | Para contar toda la bodega hay que marcar producto por producto | owner |
+| ☑ | [05.3](05-inventario.md) | P2 | Al contar con teclado, Tab pierde el foco cuando el campo se guarda — **hecho 2026-10-16** (el campo no se apaga al guardar y Enter pasa al siguiente) | agente |
+| ☑ | [05.4](05-inventario.md) | P2 | Los conteos salen con cuatro decimales ("49.0000") mientras el stock dice "51" — **hecho 2026-10-16** (conteo, diferencia y la lista con «Con diferencia» en vez de la suma neta; el campo del mínimo en Stock sigue sin la unidad al lado) | agente |
+| ☑ | [05.5](05-inventario.md) | P2 | Para contar toda la bodega hay que marcar producto por producto — **hecho 2026-10-16** (casilla «Todos los productos con stock en esta ubicación»; endpoint de lectura `GET /recuentos/productos-con-stock`) | owner |
 | ☑ | [05.6](05-inventario.md) | P2 | En "Cancelar recuento", los botones "Cancelar" y "Cancelar recuento" se confunden — **hecho 2026-10-16** | agente |
-| ☐ | [05.7](05-inventario.md) | P2 | Un recuento aplicado se ve igual que uno abierto y no dice quién lo aplicó | agente |
-| ☐ | [05.8](05-inventario.md) | P2 | El traslado deja escribir más que el stock disponible; recién el servidor lo rechaza | agente |
+| ☑ | [05.7](05-inventario.md) | P2 | Un recuento aplicado se ve igual que uno abierto y no dice quién lo aplicó — **hecho 2026-10-16** | agente |
+| ☑ | [05.8](05-inventario.md) | P2 | El traslado deja escribir más que el stock disponible; recién el servidor lo rechaza — **hecho 2026-10-16** (marca, no bloqueo: en traslados avisa «Pasa de lo que hay»; en mermas dice cuánto hay en la ubicación) | agente |
 | ☑ | [05.9](05-inventario.md) | P2 | Una merma incompleta avisa siempre "Completa producto, cantidad y motivo", sin marcar cuál — **hecho 2026-10-16** | agente |
 | ☑ | [05.10](05-inventario.md) | P2 | "Confirmar traslado" queda apagado sin decir qué falta — **hecho 2026-10-16** | agente |
-| ☐ | [05.11](05-inventario.md) | P2 | Un traslado o merma mal tipeado no tiene resumen previo ni deshacer | agente + owner |
+| ☑ | [05.11](05-inventario.md) | P2 | Un traslado o merma mal tipeado no tiene resumen previo ni deshacer — **hecho 2026-10-16** (resumen en traslados y mermas; anular no entra, decidido) | agente + owner |
 | ☑ | [05.12](05-inventario.md) | P2 | El kardex tiene 10 columnas y deja Resultante, Costo y Usuario fuera de vista — **hecho 2026-10-16** (una sola columna de costo; a 768 el kardex sigue con scroll interno: 1077 de 672 px, antes 1221) | agente + owner |
 | ☑ | [05.13](05-inventario.md) | P2 | A 768 faltan columnas en traslados y mermas y el selector de causa se corta — **hecho 2026-10-16** (medido a 768: traslados y mermas entran, 672 de 672 px) | agente |
-| ☐ | [05.14](05-inventario.md) | P2 | El menú dice "Stock" pero la pantalla es una lista de movimientos, no el saldo | agente + owner |
+| ☑ | [05.14](05-inventario.md) | P2 | El menú dice "Stock" pero la pantalla es una lista de movimientos, no el saldo — **hecho 2026-10-16** (Stock = saldo por producto y ubicación, reutiliza el listado de Stock mínimo; `/inventario/stock-minimo` redirige) | agente + owner |
 | ☑ | [05.15](05-inventario.md) | P2 | Un stock mínimo inválido muestra un aviso técnico a medias en inglés — **hecho 2026-10-16** | agente |
 | ☑ | [05.16](05-inventario.md) | P2 | Los dos campos de fecha de Mermas no dicen "Desde" ni "Hasta" — **hecho 2026-10-16** | agente |
 | ☑ | [05.17](05-inventario.md) | P2 | En el kardex y Mermas, cantidades e insignias verde, ámbar y rojo se leen mal — **hecho 2026-10-16** (colores e insignias; el placeholder no) *(ver 00.8)* | owner |
 | ☑ | [05.18](05-inventario.md) | P2 | Los botones de Inventario miden 20 a 28 px en la tablet — **hecho 2026-10-16** | agente |
-| ☐ | [05.19](05-inventario.md) | P2 | Los selectores de Inventario se anuncian "Show popup" y el tacho no tiene nombre — **parcial 2026-10-16** (el tacho de quitar línea y los selectores de Inventario y Mermas tienen nombre; queda la casilla de cada serie en traslados, que sigue sin atarse a su texto) | agente |
+| ☑ | [05.19](05-inventario.md) | P2 | Los selectores de Inventario se anuncian "Show popup" y el tacho no tiene nombre — **hecho 2026-10-16** (la casilla de cada serie va atada a su texto y mide 44 px) | agente |
 | ☑ | [05.20](05-inventario.md) | P2 | Si falla cargar una lista de inventario, la tabla dice "no hay nada" — **hecho 2026-10-16** | agente |
 | ☑ | [05.21](05-inventario.md) | P3 | Voseo en Inventario *(lote 00.3)* — **hecho 2026-10-16** | agente |
 | ☑ | [05.22](05-inventario.md) | P3 | Jerga y códigos internos en pantalla: "tenant", "kardex" y el id de cada movimiento — **hecho 2026-10-16** | agente |
 | ☑ | [05.23](05-inventario.md) | P3 | Un filtro sin resultados dice "No hay movimientos registrados" como si no hubiera nada — **hecho 2026-10-16** | agente |
-| ☐ | [05.24](05-inventario.md) | P3 | Sin permiso o sin bodegas, el botón falta o se apaga sin explicar | agente |
-| ☐ | [05.25](05-inventario.md) | P3 | El formulario de merma tiene campos de anchos distintos y un aviso tapa el título | agente |
+| ☑ | [05.24](05-inventario.md) | P3 | Sin permiso o sin bodegas, el botón falta o se apaga sin explicar — **hecho 2026-10-16** (traslados y mermas) | agente |
+| ☑ | [05.25](05-inventario.md) | P3 | El formulario de merma tiene campos de anchos distintos y un aviso tapa el título — **hecho 2026-10-16** (anchos; el toast que tapaba el título del drawer no se tocó) | agente |
 
 ### 06 · Compras y terceros
 

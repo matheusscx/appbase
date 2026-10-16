@@ -37,6 +37,7 @@ interface RecuentoListRow {
   creado_el: Date;
   aplicado_el: Date | null;
   cantidad_lineas: number;
+  lineas_con_diferencia: number;
   diferencia_neta: string;
   usuario_creador_nombre: string | null;
 }
@@ -50,6 +51,7 @@ interface RecuentoRow {
   comentario: string | null;
   creado_el: Date;
   aplicado_el: Date | null;
+  usuario_aplicador_nombre: string | null;
 }
 
 interface RecuentoLineaRow {
@@ -101,6 +103,8 @@ export interface RecuentoListItem {
   creadoEl: Date;
   aplicadoEl: Date | null;
   cantidadLineas: number;
+  /** Líneas contadas cuyo conteo difiere del stock del sistema: las que aplicar movería. */
+  lineasConDiferencia: number;
   diferenciaNeta: string;
   usuarioCreadorNombre: string | null;
 }
@@ -132,8 +136,22 @@ export interface RecuentoDetalle {
   comentario: string | null;
   creadoEl: Date;
   aplicadoEl: Date | null;
+  /** Quién aplicó la sesión; `null` si aún no se aplicó o el usuario se eliminó. */
+  usuarioAplicadorNombre: string | null;
   lineas: RecuentoLinea[];
 }
+
+export interface RecuentoProductosConStock {
+  /** Productos por cantidad con stock en la ubicación, listos para `POST /recuentos`. */
+  itemIds: string[];
+  /** Con stock ahí pero ya en un recuento en borrador de esa ubicación: no se incluyen. */
+  enOtroRecuento: number;
+  /** Había más que el tope de una sesión: `itemIds` trae los primeros. */
+  truncado: boolean;
+}
+
+/** Cabe en un solo INSERT y en el body: el mismo tope que `CreateRecuentoDto.itemIds`. */
+const MAX_ITEMS_RECUENTO = 2000;
 
 export interface RecuentoLineaActualizada {
   lineaId: string;
@@ -355,6 +373,9 @@ export class RecuentosService {
       `SELECT r.recuento_id, r.estado, r.comentario, r.creado_el, r.aplicado_el,
               u.nombre AS usuario_creador_nombre,
               COUNT(l.linea_id)::int AS cantidad_lineas,
+              (COUNT(l.linea_id) FILTER (WHERE l.cantidad_contada IS NOT NULL
+                                           AND l.cantidad_contada <> l.stock_sistema))::int
+                AS lineas_con_diferencia,
               COALESCE(SUM(
                 CASE WHEN l.cantidad_contada IS NOT NULL
                      THEN l.cantidad_contada - l.stock_sistema
@@ -381,10 +402,61 @@ export class RecuentosService {
         creadoEl: r.creado_el,
         aplicadoEl: r.aplicado_el,
         cantidadLineas: r.cantidad_lineas,
+        lineasConDiferencia: r.lineas_con_diferencia,
         diferenciaNeta: new Decimal(r.diferencia_neta).toFixed(4),
         usuarioCreadorNombre: r.usuario_creador_nombre,
       })),
       meta: buildPaginationMeta(page, pageSize, total),
+    };
+  }
+
+  /**
+   * Los productos que "Todos los productos con stock en esta ubicación" cuenta
+   * (auditoría UX 05.5). Solo lectura: no escribe stock ni sesiones; el cliente
+   * manda el resultado a `POST /recuentos` como cualquier otra selección.
+   *
+   * Mismo corte que `create`: producto o ingrediente con control por cantidad
+   * (series y lotes no admiten recuento). Los que ya están en un recuento en
+   * borrador de esta ubicación se apartan y se cuentan aparte: `create` los
+   * rechazaría a todos juntos, y el que arma la sesión debe saber por qué faltan.
+   */
+  async productosConStock(
+    tenantId: string,
+    ubicacionId: string,
+  ): Promise<RecuentoProductosConStock> {
+    const rows: { item_id: string; en_borrador: boolean }[] =
+      await this.db.query(
+        `SELECT i.item_id,
+                EXISTS (
+                  SELECT 1
+                    FROM recuento_inventario_linea l
+                    JOIN recuento_inventario r
+                      ON r.recuento_id = l.recuento_id
+                     AND r.tenant_id = l.tenant_id
+                     AND r.estado = 'borrador'
+                     AND r.eliminado_el IS NULL
+                     AND r.ubicacion_id = su.ubicacion_id
+                   WHERE l.item_id = i.item_id AND l.tenant_id = $1
+                     AND l.eliminado_el IS NULL
+                ) AS en_borrador
+           FROM items i
+           JOIN item_producto p ON p.item_id = i.item_id
+           JOIN stock_ubicacion su ON su.item_id = i.item_id
+                                  AND su.ubicacion_id = $2
+           JOIN ubicaciones u ON u.ubicacion_id = su.ubicacion_id
+                             AND u.tenant_id = $1
+                             AND u.eliminado_el IS NULL
+          WHERE i.tenant_id = $1 AND i.eliminado_el IS NULL
+            AND p.modo_inventario = 'cantidad'
+            AND su.stock > 0
+          ORDER BY i.nombre ASC, i.item_id`,
+        [tenantId, ubicacionId],
+      );
+    const libres = rows.filter((r) => !r.en_borrador).map((r) => r.item_id);
+    return {
+      itemIds: libres.slice(0, MAX_ITEMS_RECUENTO),
+      enOtroRecuento: rows.length - libres.length,
+      truncado: libres.length > MAX_ITEMS_RECUENTO,
     };
   }
 
@@ -399,9 +471,11 @@ export class RecuentosService {
     const sesionRows: RecuentoRow[] = await this.db.query(
       `SELECT r.recuento_id, r.ubicacion_id, u.nombre AS ubicacion_nombre,
               r.estado, r.motivo_diferencia_default_id, r.comentario,
-              r.creado_el, r.aplicado_el
+              r.creado_el, r.aplicado_el, ua.nombre AS usuario_aplicador_nombre
          FROM recuento_inventario r
          LEFT JOIN ubicaciones u ON u.ubicacion_id = r.ubicacion_id
+         LEFT JOIN usuarios ua ON ua.usuario_id = r.usuario_aplicador_id
+                              AND ua.eliminado_el IS NULL
         WHERE r.recuento_id = $1 AND r.tenant_id = $2 AND r.eliminado_el IS NULL`,
       [recuentoId, tenantId],
     );
@@ -437,6 +511,7 @@ export class RecuentosService {
       comentario: sesion.comentario,
       creadoEl: sesion.creado_el,
       aplicadoEl: sesion.aplicado_el,
+      usuarioAplicadorNombre: sesion.usuario_aplicador_nombre,
       lineas: lineaRows.map((l) => ({
         lineaId: l.linea_id,
         itemId: l.item_id,

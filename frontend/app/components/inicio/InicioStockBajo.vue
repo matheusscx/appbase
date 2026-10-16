@@ -3,7 +3,7 @@
 // Contesta "¿tengo que hacer algo antes de abrir?", así que NO es una lista:
 // un número y hasta 4 ubicaciones, las más afectadas. La propiedad a sostener
 // es que no crezca — si hay 40 productos abajo, el bloque ocupa lo mismo; la
-// lista completa vive en `/inventario/stock-minimo`. El permiso
+// lista completa vive en `/inventario/stock` (el enlace pasa por el redirect de `stock-minimo`). El permiso
 // (`Inventario:Leer`) lo decide `index.vue`, que solo monta este componente si
 // corresponde. Lo que ya tiene una compra en borrador no cuenta: el backend lo
 // saca del número.

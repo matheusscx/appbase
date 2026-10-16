@@ -100,11 +100,11 @@ export function useMenuLateral() {
     // Costos desfasados es del módulo Items, pero el aviso nace donde cambia el
     // costo (owner, 2026-10-02).
     menu.push(...grupo('inventario', 'Inventario', 'i-lucide-clipboard-list', [
+      puede('Inventario', 'Leer') && { label: 'Stock', icon: 'i-lucide-package', to: '/inventario/stock' },
       puede('Inventario', 'Leer') && { label: 'Movimientos', icon: 'i-lucide-boxes', to: '/inventario' },
       puede('Inventario', 'Leer') && { label: 'Recuentos', icon: 'i-lucide-clipboard-check', to: '/inventario/recuentos' },
       puede('Inventario', 'Leer') && { label: 'Traslados', icon: 'i-lucide-arrow-left-right', to: '/inventario/traslados' },
       puede('Inventario', 'Leer') && { label: 'Mermas', icon: 'i-lucide-trash-2', to: '/mermas' },
-      puede('Inventario', 'Leer') && { label: 'Stock mínimo', icon: 'i-lucide-package-minus', to: '/inventario/stock-minimo' },
       puede('Items', 'Leer') && { label: 'Costos desfasados', icon: 'i-lucide-scale', to: '/desfases' },
     ]))
     menu.push(...grupo('compras', 'Compras', 'i-lucide-truck', [

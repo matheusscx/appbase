@@ -251,6 +251,132 @@ describe('RecuentosService', () => {
     });
   });
 
+  describe('RecuentosService — qué dice el listado y el detalle (auditoría UX 05.4 y 05.7)', () => {
+    it('el listado trae cuántas líneas tienen diferencia, no solo la suma neta', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([{ total: 1 }])
+        .mockResolvedValueOnce([
+          {
+            recuento_id: 'recuento-1',
+            estado: 'borrador',
+            comentario: null,
+            creado_el: new Date('2026-07-26T10:00:00Z'),
+            aplicado_el: null,
+            cantidad_lineas: 5,
+            lineas_con_diferencia: 2,
+            diferencia_neta: '0',
+            usuario_creador_nombre: 'Ana Admin',
+          },
+        ]);
+
+      const res = await service.findAll(TENANT_ID, {});
+
+      expect(res.data[0].lineasConDiferencia).toBe(2);
+      const sql = dataSource.query.mock.calls[1][0] as string;
+      expect(sql).toMatch(
+        /FILTER \(WHERE l\.cantidad_contada IS NOT NULL\s+AND l\.cantidad_contada <> l\.stock_sistema\)/,
+      );
+    });
+
+    it('el detalle trae quién aplicó la sesión', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
+            ubicacion_nombre: 'Local',
+            estado: 'aplicado',
+            motivo_diferencia_default_id: null,
+            comentario: null,
+            creado_el: new Date('2026-07-26T10:00:00Z'),
+            aplicado_el: new Date('2026-07-26T12:00:00Z'),
+            usuario_aplicador_nombre: 'Aprobador Paris',
+          },
+        ])
+        .mockResolvedValueOnce([]);
+
+      const res = await service.findOne(TENANT_ID, RECUENTO_ID);
+
+      expect(res.usuarioAplicadorNombre).toBe('Aprobador Paris');
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      expect(sql).toMatch(
+        /usuarios ua ON ua\.usuario_id = r\.usuario_aplicador_id\s+AND ua\.eliminado_el IS NULL/,
+      );
+    });
+
+    it('un recuento sin aplicar no trae aplicador', async () => {
+      dataSource.query
+        .mockResolvedValueOnce([
+          {
+            recuento_id: RECUENTO_ID,
+            ubicacion_id: UBICACION_LOCAL_ID,
+            ubicacion_nombre: 'Local',
+            estado: 'borrador',
+            motivo_diferencia_default_id: null,
+            comentario: null,
+            creado_el: new Date('2026-07-26T10:00:00Z'),
+            aplicado_el: null,
+            usuario_aplicador_nombre: null,
+          },
+        ])
+        .mockResolvedValueOnce([]);
+
+      const res = await service.findOne(TENANT_ID, RECUENTO_ID);
+
+      expect(res.usuarioAplicadorNombre).toBeNull();
+    });
+  });
+
+  describe('RecuentosService — productos con stock en una ubicación (auditoría UX 05.5)', () => {
+    it('devuelve los productos por cantidad con stock ahí y aparta los que ya están en un recuento en borrador', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        { item_id: 'item-a', en_borrador: false },
+        { item_id: 'item-b', en_borrador: true },
+        { item_id: 'item-c', en_borrador: false },
+      ]);
+
+      const res = await service.productosConStock(
+        TENANT_ID,
+        UBICACION_BODEGA_ID,
+      );
+
+      expect(res).toEqual({
+        itemIds: ['item-a', 'item-c'],
+        enOtroRecuento: 1,
+        truncado: false,
+      });
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        unknown[],
+      ];
+      expect(params).toEqual([TENANT_ID, UBICACION_BODEGA_ID]);
+      // Solo lectura, del tenant del token, sin borrados, y solo lo que el recuento admite.
+      expect(sql).toMatch(/i\.tenant_id = \$1 AND i\.eliminado_el IS NULL/);
+      expect(sql).toMatch(/u\.tenant_id = \$1\s+AND u\.eliminado_el IS NULL/);
+      expect(sql).toContain("p.modo_inventario = 'cantidad'");
+      expect(sql).toMatch(/su\.stock > 0/);
+      expect(sql).toMatch(/r\.estado = 'borrador'/);
+      expect(sql).not.toMatch(/INSERT|UPDATE|DELETE/i);
+    });
+
+    it('corta en 2000, el tope de un recuento, y lo avisa', async () => {
+      dataSource.query.mockResolvedValueOnce(
+        Array.from({ length: 2005 }, (_, n) => ({
+          item_id: `i-${n}`,
+          en_borrador: false,
+        })),
+      );
+
+      const res = await service.productosConStock(
+        TENANT_ID,
+        UBICACION_BODEGA_ID,
+      );
+
+      expect(res.itemIds).toHaveLength(2000);
+      expect(res.truncado).toBe(true);
+    });
+  });
+
   describe('RecuentosService — cargar conteos', () => {
     it('guarda la cantidad contada de una línea', async () => {
       manager.query

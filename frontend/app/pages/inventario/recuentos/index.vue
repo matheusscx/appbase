@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
-import { formatStockCantidad } from '~/utils/stock-format'
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
 interface RecuentoListItem {
@@ -11,7 +10,7 @@ interface RecuentoListItem {
   creadoEl: string
   aplicadoEl: string | null
   cantidadLineas: number
-  diferenciaNeta: string
+  lineasConDiferencia: number
   usuarioCreadorNombre: string | null
 }
 
@@ -73,11 +72,49 @@ const drawerOpen = ref(false)
 const creando = ref(false)
 
 function emptyForm() {
-  return { ubicacionId: '', itemIds: [] as string[], comentario: '' }
+  return { ubicacionId: '', itemIds: [] as string[], comentario: '', todos: false }
 }
 const form = ref(emptyForm())
 
 const { errores, marcar, limpiar } = useErroresCampo()
+
+// "Todos los productos con stock en esta ubicación" (05.5): el servidor dice cuáles son (lectura),
+// y se mandan a crear la sesión como cualquier otra selección.
+interface ProductosConStock { itemIds: string[], enOtroRecuento: number, truncado: boolean }
+const conStock = ref<ProductosConStock | null>(null)
+const cargandoConStock = ref(false)
+
+watch([() => form.value.todos, () => form.value.ubicacionId], async ([todos, ubicacionId]) => {
+  conStock.value = null
+  if (!todos || !ubicacionId) return
+  cargandoConStock.value = true
+  try {
+    const res = await useApiFetch<ProductosConStock>(`${apiUrl}/recuentos/productos-con-stock?ubicacionId=${ubicacionId}`)
+    // Cambió la ubicación o desmarcó mientras viajaba: esta respuesta ya no corresponde.
+    if (form.value.todos && form.value.ubicacionId === ubicacionId) conStock.value = res
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudieron buscar los productos con stock'), color: 'error' })
+    form.value.todos = false
+  }
+  finally {
+    cargandoConStock.value = false
+  }
+})
+
+const avisoConStock = computed(() => {
+  const r = conStock.value
+  if (!r) return ''
+  const n = r.itemIds.length
+  const partes = [n === 1 ? 'Se va a contar 1 producto.' : `Se van a contar ${n} productos.`]
+  if (r.enOtroRecuento > 0) {
+    partes.push(r.enOtroRecuento === 1
+      ? '1 ya está en otro recuento en borrador y no se incluye.'
+      : `${r.enOtroRecuento} ya están en otro recuento en borrador y no se incluyen.`)
+  }
+  if (r.truncado) partes.push('Hay más de los que caben en un recuento: se cuentan los primeros 2000.')
+  return partes.join(' ')
+})
 
 function abrirCrear() {
   form.value = emptyForm()
@@ -93,13 +130,18 @@ function abrirCrear() {
 async function crear() {
   const faltan: Record<string, string> = {}
   if (!form.value.ubicacionId) faltan.ubicacionId = 'Elige la ubicación'
-  if (!form.value.itemIds.length) faltan.itemIds = 'Elige al menos un producto'
+  const itemIds = form.value.todos ? (conStock.value?.itemIds ?? []) : form.value.itemIds
+  if (!itemIds.length) {
+    faltan.itemIds = form.value.todos && conStock.value
+      ? 'No hay productos con stock para contar en esta ubicación'
+      : 'Elige al menos un producto'
+  }
   if (marcar(faltan)) return
   creando.value = true
   try {
     const body: Record<string, unknown> = {
       ubicacionId: form.value.ubicacionId,
-      itemIds: form.value.itemIds,
+      itemIds,
     }
     if (form.value.comentario.trim()) body.comentario = form.value.comentario.trim()
 
@@ -122,7 +164,7 @@ const columns: TableColumn<RecuentoListItem>[] = [
   { accessorKey: 'creadoEl', header: 'Fecha' },
   { id: 'estado', header: 'Estado' },
   { accessorKey: 'cantidadLineas', header: 'Líneas', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'diferenciaNeta', header: 'Diferencia neta', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { accessorKey: 'lineasConDiferencia', header: 'Con diferencia', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { accessorKey: 'usuarioCreadorNombre', header: 'Creado por' },
   { accessorKey: 'comentario', header: 'Comentario' },
 ]
@@ -188,14 +230,6 @@ const columns: TableColumn<RecuentoListItem>[] = [
               size="sm"
             />
           </template>
-          <template #diferenciaNeta-cell="{ row }">
-            <span
-              class="font-medium"
-              :class="claseDiferenciaRecuento(row.original.diferenciaNeta)"
-            >
-              {{ formatStockCantidad(row.original.diferenciaNeta, true) }}
-            </span>
-          </template>
           <template #usuarioCreadorNombre-cell="{ row }">
             <span class="text-sm text-muted">{{ row.original.usuarioCreadorNombre || '—' }}</span>
           </template>
@@ -248,7 +282,24 @@ const columns: TableColumn<RecuentoListItem>[] = [
                 />
               </UFormField>
 
+              <div data-qa="recuento-todos">
+                <UCheckbox
+                  v-model="form.todos"
+                  :disabled="!form.ubicacionId"
+                  label="Todos los productos con stock en esta ubicación"
+                  :description="form.ubicacionId ? undefined : 'Elige primero la ubicación.'"
+                  :ui="{ root: 'min-h-11 items-center' }"
+                  @update:model-value="limpiar('itemIds')"
+                />
+                <p v-if="cargandoConStock" class="mt-1 text-sm text-muted">Buscando los productos…</p>
+                <p v-else-if="avisoConStock" data-qa="recuento-todos-cuenta" class="mt-1 text-sm text-muted">
+                  {{ avisoConStock }}
+                </p>
+                <p v-if="form.todos && errores.itemIds" class="mt-1 text-sm text-error">{{ errores.itemIds }}</p>
+              </div>
+
               <UFormField
+                v-if="!form.todos"
                 label="Productos"
                 required
                 :error="errores.itemIds"

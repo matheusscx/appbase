@@ -60,6 +60,7 @@ interface UbicacionListada {
 interface RecuentoListItem {
   id: string;
   cantidadLineas: number;
+  lineasConDiferencia: number;
   diferenciaNeta: string;
 }
 interface RecuentoAplicarResponse {
@@ -422,6 +423,7 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     expect(filaCero).toBeDefined();
     expect(filaCero.cantidadLineas).toBe(2);
     expect(filaCero.diferenciaNeta).toBe('0.0000');
+    expect(filaCero.lineasConDiferencia).toBe(0);
 
     // 4. Cargar los conteos por la API: itemA contado en 15 (+5), itemB en 6 (0).
     const resDetalle = await request(app.getHttpServer())
@@ -452,6 +454,82 @@ describe('Recuentos — crear, listar y ver una sesión (e2e)', () => {
     ).data.find((r) => r.id === recuentoId)!;
     expect(filaConConteo.cantidadLineas).toBe(2);
     expect(filaConConteo.diferenciaNeta).toBe('5.0000');
+    // Solo itemA difiere (+5); itemB se contó igual al sistema. Auditoría UX 05.4.
+    expect(filaConConteo.lineasConDiferencia).toBe(1);
+  });
+
+  // Auditoría UX 05.5: "Todos los productos con stock en esta ubicación". Solo lectura.
+  it('GET /recuentos/productos-con-stock lista lo que tiene stock ahí y aparta lo que ya está en un borrador', async () => {
+    const crear = async (stock: string) => {
+      const res = await request(app.getHttpServer())
+        .post('/api/items')
+        .set('Authorization', `Bearer ${token}`)
+        .send({
+          nombre: `Con stock E2E ${Date.now()}-${stock}`,
+          precioBase: '10000',
+          monedaId: CLP_MONEDA_ID,
+          tipo: 'producto',
+        });
+      expect(res.status).toBe(201);
+      const id = (res.body as ItemResponse).id;
+      if (stock !== '0') {
+        const entrada = await request(app.getHttpServer())
+          .patch(`/api/items/${id}/stock`)
+          .set('Authorization', `Bearer ${token}`)
+          .send({
+            tipo: 'entrada',
+            motivo: 'compra',
+            ubicacionId: localId,
+            cantidad: stock,
+            costoUnitario: '1000',
+          });
+        expect(entrada.status).toBe(200);
+      }
+      return id;
+    };
+    const conStock = await crear('4');
+    const yaContado = await crear('7');
+    const sinStock = await crear('0');
+
+    const enBorrador = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ubicacionId: localId, itemIds: [yaContado] });
+    expect(enBorrador.status).toBe(201);
+
+    const res = await request(app.getHttpServer())
+      .get(`/api/recuentos/productos-con-stock?ubicacionId=${localId}`)
+      .set('Authorization', `Bearer ${token}`);
+    expect(res.status).toBe(200);
+    const cuerpo = res.body as {
+      itemIds: string[];
+      enOtroRecuento: number;
+      truncado: boolean;
+    };
+    expect(cuerpo.itemIds).toContain(conStock);
+    expect(cuerpo.itemIds).not.toContain(yaContado);
+    expect(cuerpo.itemIds).not.toContain(sinStock);
+    expect(cuerpo.enOtroRecuento).toBeGreaterThanOrEqual(1);
+    expect(cuerpo.truncado).toBe(false);
+
+    // Lo que devuelve se puede mandar tal cual a crear la sesión.
+    const crearSesion = await request(app.getHttpServer())
+      .post('/api/recuentos')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ ubicacionId: localId, itemIds: cuerpo.itemIds });
+    expect(crearSesion.status).toBe(201);
+    // Se cancela: una sesión abierta con todo el stock del local frenaría a los demás specs.
+    const cancelada = await request(app.getHttpServer())
+      .post(
+        `/api/recuentos/${(crearSesion.body as RecuentoCreateResponse).id}/cancelar`,
+      )
+      .set('Authorization', `Bearer ${token}`);
+    expect(cancelada.status).toBeLessThan(300);
+
+    const sinUbicacion = await request(app.getHttpServer())
+      .get('/api/recuentos/productos-con-stock')
+      .set('Authorization', `Bearer ${token}`);
+    expect(sinUbicacion.status).toBe(400);
   });
 
   /**

@@ -18,6 +18,8 @@ const HARINA = { id: 'item-harina', nombre: 'Harina', modoInventario: 'cantidad'
 let ubicacionesBackend: typeof LOCAL[] = [LOCAL]
 let recuentosEnviados: Record<string, unknown>[] = []
 let busquedasItems: string[] = []
+let urlsConStock: string[] = []
+let filasLista: Record<string, unknown>[] = []
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -30,6 +32,13 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     if (typeof url !== 'string') return Promise.resolve({ data: [], meta: {} })
     if (url.includes('/ubicaciones')) return Promise.resolve(ubicacionesBackend)
+    if (url.includes('/recuentos/productos-con-stock')) {
+      urlsConStock.push(url)
+      return Promise.resolve({ itemIds: ['item-a', 'item-b'], enOtroRecuento: 1, truncado: false })
+    }
+    if (opts?.method !== 'POST' && /\/recuentos(\?|$)/.test(url)) {
+      return Promise.resolve({ data: filasLista, meta: { page: 1, pageSize: 15, total: filasLista.length, totalPages: 1 } })
+    }
     if (opts?.method === 'POST' && url.includes('/recuentos')) {
       recuentosEnviados.push({ ...(opts.body ?? {}) })
       return Promise.resolve({ id: 'recuento-1' })
@@ -182,6 +191,78 @@ describe('inventario/recuentos — selector de ubicación al crear', () => {
     const params = new URL(busquedasItems[0]!, 'http://x').searchParams
     expect(params.get('modoInventario')).toBe('cantidad')
     expect(params.get('tipo')).toBe('producto,ingrediente')
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 05.5: para contar toda la bodega había que marcar producto por producto.
+describe('inventario/recuentos — "Todos los productos con stock en esta ubicación" (05.5)', () => {
+  beforeEach(() => {
+    recuentosEnviados = []
+    urlsConStock = []
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  const marcar = async (w: Wrapper) => {
+    const casilla = w.find('[data-qa="recuento-todos"] [role="checkbox"]')
+    expect(casilla.exists(), 'casilla "Todos los productos"').toBe(true)
+    await casilla.trigger('click')
+    await new Promise(r => setTimeout(r, 40))
+  }
+
+  it('al marcarla pide los de ESA ubicación, dice cuántos se cuentan y cuántos quedan afuera, y oculta el selector', async () => {
+    ubicacionesBackend = [LOCAL, BODEGA]
+    const wrapper = await montar()
+    await abrirCrear(wrapper)
+    await emitir(selectConOpcion(wrapper, BODEGA.id), BODEGA.id)
+    await marcar(wrapper)
+
+    expect(urlsConStock).toHaveLength(1)
+    expect(urlsConStock[0]).toContain(`ubicacionId=${BODEGA.id}`)
+    const aviso = wrapper.find('[data-qa="recuento-todos-cuenta"]').text()
+    expect(aviso).toContain('2 productos')
+    expect(aviso).toContain('1 ya está en otro recuento')
+    expect(wrapper.findComponent({ name: 'AppItemSelect' }).exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('crear manda esos productos, sin pedirle al usuario que los marque', async () => {
+    ubicacionesBackend = [LOCAL]
+    const wrapper = await montar()
+    await abrirCrear(wrapper)
+    await marcar(wrapper)
+    await crear(wrapper)
+
+    expect(recuentosEnviados).toHaveLength(1)
+    expect(recuentosEnviados[0]).toMatchObject({ ubicacionId: LOCAL.id, itemIds: ['item-a', 'item-b'] })
+    wrapper.unmount()
+  })
+
+  it('sin ubicación elegida no se puede marcar: no sabría de dónde', async () => {
+    ubicacionesBackend = [LOCAL, BODEGA]
+    const wrapper = await montar()
+    await abrirCrear(wrapper)
+    expect(wrapper.find('[data-qa="recuento-todos"] [role="checkbox"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 05.4: "Diferencia neta" sumaba productos de unidades distintas y no significa nada.
+describe('inventario/recuentos — la lista dice cuántas líneas difieren (05.4)', () => {
+  beforeEach(() => {
+    document.body.querySelectorAll('[role="dialog"]').forEach(n => n.remove())
+  })
+
+  it('muestra "Con diferencia" y no la suma neta', async () => {
+    ubicacionesBackend = [LOCAL]
+    filasLista = [{ id: 'r1', estado: 'borrador', comentario: null, creadoEl: '2026-10-16T10:00:00Z', aplicadoEl: null, cantidadLineas: 5, lineasConDiferencia: 2, diferenciaNeta: '0.0000', usuarioCreadorNombre: 'Ana' }]
+    const wrapper = await montar()
+    const encabezados = wrapper.findAll('th').map(t => t.text())
+    expect(encabezados).toContain('Con diferencia')
+    expect(encabezados).not.toContain('Diferencia neta')
+    expect(wrapper.find('tbody').text()).toContain('2')
+    expect(wrapper.find('tbody').text()).not.toContain('0.0000')
+    filasLista = []
     wrapper.unmount()
   })
 })

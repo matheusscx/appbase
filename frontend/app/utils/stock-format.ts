@@ -33,3 +33,18 @@ export function formatStock(
   if (fraccionaria && unidadMedida) return `${cantidad} ${unidadMedida}`
   return cantidad
 }
+
+/**
+ * La cantidad de un producto dicha en una frase: "1 Pan de hamburguesa" (unidad de conteo,
+ * `formatStock` la da sin unidad) o "2 kg de Harina". Para los resúmenes previos a confirmar.
+ */
+export function cantidadDeProducto(cantidadFormateada: string, nombre: string): string {
+  return cantidadFormateada.includes(' ') ? `${cantidadFormateada} de ${nombre}` : `${cantidadFormateada} ${nombre}`
+}
+
+/** "Pan, Harina y Sal"; pasadas las tres, "Pan, Harina, Sal y 2 más". */
+export function unirResumen(partes: string[]): string {
+  if (partes.length <= 3) return new Intl.ListFormat('es', { style: 'long', type: 'conjunction' }).format(partes)
+  const resto = partes.length - 3
+  return `${partes.slice(0, 3).join(', ')} y ${resto} más`
+}

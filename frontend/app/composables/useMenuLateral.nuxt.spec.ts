@@ -60,7 +60,7 @@ const GATE_POR_RUTA: Record<string, string> = {
   '/mermas': 'Inventario:Leer',
   '/inventario/recuentos': 'Inventario:Leer',
   '/inventario/traslados': 'Inventario:Leer',
-  '/inventario/stock-minimo': 'Inventario:Leer',
+  '/inventario/stock': 'Inventario:Leer',
   '/compras': 'Compras:Leer',
   '/compras/por-pagar': 'Compras:Pagar',
   '/desfases': 'Items:Leer',
@@ -99,11 +99,11 @@ const ARBOL_DEL_ADMIN = [
   ['Suscripciones de clientes', '/suscripciones'],
   ['Proveedores', '/terceros'],
   ['Inventario', [
+    ['Stock', '/inventario/stock'],
     ['Movimientos', '/inventario'],
     ['Recuentos', '/inventario/recuentos'],
     ['Traslados', '/inventario/traslados'],
     ['Mermas', '/mermas'],
-    ['Stock mínimo', '/inventario/stock-minimo'],
     ['Costos desfasados', '/desfases'],
   ]],
   ['Compras', [

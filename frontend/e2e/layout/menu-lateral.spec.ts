@@ -23,7 +23,7 @@ const PANTALLAS = [
   '/tienda', '/tienda/suscripciones', '/tienda/medios-pago',
   '/suscripciones', '/terceros',
   '/inventario', '/inventario/recuentos', '/inventario/traslados', '/mermas',
-  '/inventario/stock-minimo', '/desfases',
+  '/inventario/stock', '/desfases',
   '/compras', '/compras/por-pagar',
   '/paquetes/escanear', '/paquetes', '/paquetes/rutas',
   '/reportes', '/admin',
@@ -124,7 +124,8 @@ test('con el lateral colapsado, el ícono del grupo muestra sus pantallas', asyn
 
   // Colapsado, el grupo es un link a su primera pantalla (sin nombre visible); al pasar el
   // mouse, el popover lista el resto.
-  await menuLateral(page).locator('a[href="/inventario"]').hover()
+  // Inventario abre en Stock, su primera pantalla (05.14).
+  await menuLateral(page).locator('a[href="/inventario/stock"]').hover()
   const recuentos = page.getByRole('link', { name: 'Recuentos', exact: true })
   await expect(recuentos).toBeVisible()
   await recuentos.click()

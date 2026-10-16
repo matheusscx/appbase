@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import { cantidadDeProducto } from '~/utils/stock-format'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -185,6 +186,37 @@ watch(() => form.value.ubicacionId, (_nueva, anterior) => {
   form.value.cantidad = ''
 })
 
+// Cuánto hay del producto en la ubicación elegida (05.8). Sale de `GET /items/:id` (el servidor), y es
+// solo información: quien rechaza una merma que no alcanza sigue siendo el backend.
+const hayEnUbicacion = ref<string | null>(null)
+watch([() => form.value.itemId, () => form.value.ubicacionId], async ([itemId, ubicacionId]) => {
+  hayEnUbicacion.value = null
+  if (!itemId || !ubicacionId) return
+  try {
+    const detalle = await useApiFetch<{ desglosePorUbicacion: { ubicacionId: string, stock: string }[] }>(`${apiUrl}/items/${itemId}`)
+    // Eligió otro producto o ubicación mientras viajaba: esta respuesta ya no corresponde.
+    if (form.value.itemId !== itemId || form.value.ubicacionId !== ubicacionId) return
+    hayEnUbicacion.value = detalle.desglosePorUbicacion.find(d => d.ubicacionId === ubicacionId)?.stock ?? '0'
+  }
+  catch {
+    // Es un dato de ayuda: si no llega, el formulario sigue igual y el servidor decide al registrar.
+  }
+})
+
+const ubicacionNombre = computed(() =>
+  ubicaciones.value.find(u => u.id === form.value.ubicacionId)?.nombre ?? '',
+)
+
+/** Resumen previo a registrar (05.11): aparece cuando ya están producto, cantidad y motivo. */
+const resumenMerma = computed(() => {
+  const prod = productoSeleccionado.value
+  const motivo = motivosFormOpts.value.find(m => m.value === form.value.motivoBajaId)
+  if (!prod || !form.value.cantidad || !motivo || !ubicacionNombre.value || productoConSerie.value) return ''
+  const unidad = form.value.unidadCodigo || prod.unidadMedida
+  const cantidad = cantidadDeProducto(formatStock(form.value.cantidad, unidad), prod.nombre)
+  return `Vas a ${esPersonal.value ? 'descontar' : 'dar de baja'} ${cantidad} en ${ubicacionNombre.value} por ${motivo.label}`
+})
+
 // El servidor filtra por el tipo de la vista: la cortesía y el "no se llegó a
 // hacer" son de la mesa y nunca se ofrecen acá.
 async function cargarMotivos() {
@@ -329,6 +361,10 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
         </UButton>
       </template>
     </CrudPageHeader>
+
+    <p v-if="!puedeRegistrar" data-qa="mermas-sin-accion" class="text-sm text-muted">
+      Solo puedes ver {{ esPersonal ? 'la comida del personal; la registra' : 'las mermas; las registra' }} quien cuenta.
+    </p>
 
     <UTabs v-model="vista" :items="vistas" :content="false" />
 
@@ -482,6 +518,9 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
               placeholder="Selecciona un producto"
               class="w-full"
             />
+            <p v-if="hayEnUbicacion !== null && !productoConSerie" data-qa="merma-hay" class="mt-1 text-xs text-muted">
+              En {{ ubicacionNombre }} hay {{ formatStock(hayEnUbicacion, productoSeleccionado?.unidadMedida) }}
+            </p>
           </UFormField>
 
           <UFormField
@@ -494,6 +533,7 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
               inputmode="decimal"
               @update:model-value="limpiar('cantidad')"
               placeholder="0"
+              class="w-full"
             />
           </UFormField>
 
@@ -556,9 +596,14 @@ const columns = computed<TableColumn<MermaListItem>[]>(() => [
               v-model="form.comentario"
               :rows="2"
               placeholder="Opcional"
+              class="w-full"
             />
           </UFormField>
         </UForm>
+      </template>
+
+      <template v-if="resumenMerma" #ayuda>
+        <span data-qa="merma-resumen">{{ resumenMerma }}</span>
       </template>
 
       <template #actions>

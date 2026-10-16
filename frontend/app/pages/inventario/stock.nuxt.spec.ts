@@ -16,7 +16,7 @@
 // Las filas simuladas tienen la forma real de `InventarioService.StockMinimoFila`.
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
-import StockMinimo from './stock-minimo.vue'
+import StockMinimo from './stock.vue'
 
 let permisos: string[] = []
 let llamadas: { url: string, method?: string, body?: unknown }[] = []
@@ -295,6 +295,20 @@ describe('stock mínimo — tamaño táctil', () => {
     // El área tocable del interruptor es su fila entera (control + rótulo).
     const fila = wrapper.find('[data-qa="filtro-bajo-minimo"]').element.closest('[data-slot="root"]')
     expect(fila?.className).toMatch(M44)
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 05.14: el menú «Stock» abría una lista de movimientos; el saldo por producto y
+// ubicación vivía en «Stock mínimo». Ahora esta pantalla es «Stock».
+describe('stock — la pantalla del saldo por producto y ubicación (05.14)', () => {
+  it('se llama Stock y dice que muestra cuánto hay de cada producto en cada ubicación', async () => {
+    permisos = ['Inventario:Leer']
+    const wrapper = await montar()
+
+    expect(wrapper.find('h1').text()).toBe('Stock')
+    expect(wrapper.text()).toContain('Cuánto hay de cada producto en cada ubicación')
+    expect(wrapper.text()).not.toContain('Stock mínimo')
     wrapper.unmount()
   })
 })

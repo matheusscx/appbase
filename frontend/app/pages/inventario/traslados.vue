@@ -1,6 +1,8 @@
 <script setup lang="ts">
+import Decimal from 'decimal.js'
 import type { Row } from '@tanstack/vue-table'
 import type { TableColumn } from '@nuxt/ui'
+import { cantidadDeProducto, unirResumen } from '~/utils/stock-format'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -105,6 +107,14 @@ const { puedeCrear: puedeTrasladar } = usePermisosCrud('Inventario')
 
 const { items: traslados, meta, page, loading, error, sinPermiso, fetch: fetchTraslados } =
   usePaginatedList<TrasladoListItem>({ path: '/traslados', pageSize })
+
+// El botón que falta o está apagado se explica en pantalla, no en un `title` que la tablet no muestra (05.24).
+// Las ubicaciones llegan después de montar: sin ninguna cargada no se afirma que falten bodegas.
+const avisoSinAccion = computed(() => {
+  if (!puedeTrasladar.value) return 'Solo puedes ver los traslados; los registra quien cuenta.'
+  if (ubicaciones.value.length > 0 && !hayBodegas.value) return 'Para trasladar necesitas al menos una bodega.'
+  return ''
+})
 
 const origenOpts = computed<Opt[]>(() =>
   ubicaciones.value.map(u => ({ label: u.nombre, value: u.id })),
@@ -227,6 +237,33 @@ const faltaTexto = computed(() => {
   const incompleta = lineasIncompletas.value[0]
   return incompleta ? faltaDeLinea(incompleta)!.texto : ''
 })
+
+/** Resumen previo a confirmar (05.11): solo cuando no falta nada. Anular no existe: es lo último que se ve. */
+const resumenTraslado = computed(() => {
+  if (faltaTexto.value || !puedeConfirmar.value) return ''
+  const partes = lineasEmpezadas.value.map(l =>
+    cantidadDeProducto(
+      formatStock(l.cantidad, l.unidadMedida),
+      catalogoItems.porId.get(l.itemId)?.nombre ?? 'producto',
+    ),
+  )
+  const destino = ubicaciones.value.find(u => u.id === form.value.destinoId)?.nombre ?? ''
+  return `Vas a mover ${unirResumen(partes)} de ${origenNombre.value} a ${destino}`
+})
+
+/**
+ * La cantidad tipeada pasa de lo que el servidor dice que hay (05.8). Es una marca, no un tope: el
+ * `disponible` es el del backend y quien rechaza sigue siendo el backend.
+ */
+function superaDisponible(l: LineaForm): boolean {
+  if (l.disponible === null || !l.cantidad) return false
+  try {
+    return new Decimal(l.cantidad.replace(',', '.')).greaterThan(l.disponible)
+  }
+  catch {
+    return false
+  }
+}
 
 // Cambiar el origen limpia las líneas ya cargadas: las cantidades, las
 // unidades y los lotes elegidos se resolvieron contra el disponible del
@@ -523,13 +560,16 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
               v-if="puedeTrasladar"
               icon="i-lucide-plus"
               :disabled="!hayBodegas"
-              :title="!hayBodegas ? 'Hace falta al menos una bodega para trasladar' : undefined"
               @click="abrirCrear"
             >
               Nuevo traslado
             </UButton>
           </template>
         </CrudPageHeader>
+
+        <p v-if="avisoSinAccion" data-qa="traslados-sin-accion" class="text-sm text-muted">
+          {{ avisoSinAccion }}
+        </p>
 
         <CrudTable
           :data="traslados"
@@ -701,6 +741,9 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                         <p v-if="linea.disponible !== null" data-qa="linea-disponible" class="text-xs text-muted">
                           Disponible en {{ origenNombre }}: {{ formatStock(linea.disponible, linea.unidadMedida) }}
                         </p>
+                        <p v-if="superaDisponible(linea)" data-qa="linea-excede" class="text-sm text-warning">
+                          Pasa de lo que hay: en {{ origenNombre }} hay {{ formatStock(linea.disponible, linea.unidadMedida) }}.
+                        </p>
                       </template>
 
                       <!-- Modo serie: elegir unidades concretas -->
@@ -719,14 +762,12 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                           :key="u.id"
                           class="flex items-center gap-3 py-1.5 border-b border-default"
                         >
-                          <input
-                            type="checkbox"
-                            :value="u.id"
-                            :checked="linea.unidadIds.includes(u.id)"
-                            class="w-4 h-4"
-                            @change="toggleUnidad(linea, u.id)"
-                          >
-                          <span class="font-mono text-sm flex-1">{{ u.serie }}</span>
+                          <UCheckbox
+                            :model-value="linea.unidadIds.includes(u.id)"
+                            :label="u.serie"
+                            :ui="{ root: 'flex-1 min-h-11 items-center', label: 'font-mono text-sm' }"
+                            @update:model-value="toggleUnidad(linea, u.id)"
+                          />
                           <UBadge :label="u.condicion" variant="subtle" size="sm" />
                         </div>
                       </template>
@@ -758,6 +799,9 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
                         <p v-if="linea.disponible !== null" data-qa="linea-disponible" class="text-xs text-muted">
                           Disponible en {{ origenNombre }}: {{ formatStock(linea.disponible, linea.unidadMedida) }}
                         </p>
+                        <p v-if="superaDisponible(linea)" data-qa="linea-excede" class="text-sm text-warning">
+                          Pasa de lo que hay: en {{ origenNombre }} hay {{ formatStock(linea.disponible, linea.unidadMedida) }}.
+                        </p>
                       </template>
                     </template>
                   </div>
@@ -766,8 +810,9 @@ const columnsDetalle: TableColumn<TrasladoLineaDetalle>[] = [
             </UForm>
           </template>
 
-          <template v-if="faltaTexto" #ayuda>
-            <span data-qa="traslado-falta">{{ faltaTexto }}</span>
+          <template v-if="faltaTexto || resumenTraslado" #ayuda>
+            <span v-if="faltaTexto" data-qa="traslado-falta">{{ faltaTexto }}</span>
+            <span v-else data-qa="traslado-resumen">{{ resumenTraslado }}</span>
           </template>
 
           <template #actions>

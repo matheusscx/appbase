@@ -55,7 +55,7 @@ async function setActivo(request: APIRequestContext, activo: boolean) {
 
 /** La fila del producto en la bodega, filtrando la tabla por el sello de la corrida. */
 async function filaEnLaBodega(page: Page, nombreBodega: string) {
-  await page.goto(`/inventario/stock-minimo`, { waitUntil: 'networkidle' })
+  await page.goto(`/inventario/stock`, { waitUntil: 'networkidle' })
   await page.getByPlaceholder('Buscar producto').fill(SELLO)
   const fila = page.locator('tr').filter({ hasText: SELLO }).filter({ hasText: nombreBodega })
   await expect(fila).toHaveCount(1)
