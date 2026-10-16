@@ -44,7 +44,10 @@ withDefaults(defineProps<{
         class="w-full"
         :class="ancho === 'lg' ? 'max-w-lg' : 'max-w-sm'"
       >
-        <header class="mb-6 text-center">
+        <header
+          class="mb-6 text-center"
+          :class="{ 'lg:text-left': $slots.lateral }"
+        >
           <img
             src="/marca/venka-positivo.svg"
             alt="Venka"

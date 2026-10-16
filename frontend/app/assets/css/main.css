@@ -28,6 +28,8 @@
 
   /* Token suelto de marca: sello, marca de la sección activa, acentos sobre petróleo. */
   --color-menta: #7FD8C3;
+  /* Punto de «Venka Almacén» en el panel de ingreso. */
+  --color-lima: #C9E77E;
 
   /* Petróleo de marca. Nuxt UI resuelve `--ui-primary` en claro al tono 500, así que
      el 500 es exactamente #0E4D57. Mismo matiz (OKLCH) en todos los tonos. */

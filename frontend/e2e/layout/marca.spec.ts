@@ -22,14 +22,12 @@ test.describe('marca Venka', () => {
       if (hostname === 'fonts.googleapis.com' || hostname === 'fonts.gstatic.com') externos.push(req.url())
     })
     await page.goto('/login')
-    // El navegador baja una cara solo cuando algo la usa, y el login todavía no usa
-    // Bricolage (`font-display`): se la pide explícita para probar que el archivo que
-    // sirve la app existe y parsea, no que alguna pantalla la use.
-    await page.evaluate(async () => {
-      await document.fonts.load('16px "DM Sans"')
-      await document.fonts.load('16px "Bricolage Grotesque"')
-      await document.fonts.ready
-    })
+    // La SPA dibuja después del `goto`: hasta que algo usa cada cara el navegador no la
+    // baja, y `document.fonts.ready` resolvería con la lista vacía. El título usa Bricolage
+    // (`font-display`) y el rótulo del campo, DM Sans.
+    await expect(page.getByRole('heading', { name: 'Ingresa a tu caja' })).toBeVisible()
+    await expect(page.getByText('Contraseña', { exact: true })).toBeVisible()
+    await page.evaluate(() => document.fonts.ready)
 
     // `document.fonts.check` devuelve true aunque la fuente no exista: se mira el estado de cada cara.
     const cargadas = await page.evaluate(() =>
@@ -37,5 +35,33 @@ test.describe('marca Venka', () => {
     expect(cargadas).toContain('DM Sans')
     expect(cargadas).toContain('Bricolage Grotesque')
     expect(externos).toEqual([])
+  })
+
+  test('a 1280 se ve el panel de marca', async ({ page }) => {
+    await page.setViewportSize({ width: 1280, height: 800 })
+    await page.goto('/login')
+    const panel = page.locator('[data-qa="marco-lateral"]')
+    await expect(panel).toBeVisible()
+    await expect(panel.getByText('Tu caja,')).toBeVisible()
+    await expect(panel.getByText('a la vista.')).toBeVisible()
+    await expect(panel.locator('img[alt="Venka"]')).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Ingresa a tu caja' })).toBeVisible()
+  })
+
+  test('a 768 solo el formulario', async ({ page }) => {
+    await page.setViewportSize({ width: 768, height: 1024 })
+    await page.goto('/login')
+    await expect(page.locator('[data-qa="marco-lateral"]')).toBeHidden()
+    await expect(page.locator('main img[alt="Venka"]')).toBeVisible()
+    await expect(page.getByPlaceholder('tu@email.com')).toBeVisible()
+    await expect(page.locator('input[type="password"]')).toBeVisible()
+    await expect(page.locator('button[type="submit"]')).toBeVisible()
+  })
+
+  test('el link de contraseña va junto al rótulo', async ({ page }) => {
+    await page.goto('/login')
+    const link = page.getByRole('link', { name: '¿Olvidaste tu contraseña?' })
+    await expect(link).toBeVisible()
+    await expect(link).toHaveAttribute('href', '/forgot-password')
   })
 })
