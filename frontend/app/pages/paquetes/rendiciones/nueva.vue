@@ -46,8 +46,8 @@ const repartidorNombre = computed(() =>
 // Cada carga o cambio de repartidor invalida a las anteriores que sigan en vuelo.
 let secuenciaCarga = 0
 
-/** Una hoja con paquetes en ruta no entra (el servidor la rechazaría): primero se marca. */
-const sePuedeRendir = (h: HojaRutaFila) => h.enRuta === 0
+/** Una hoja con paquetes en ruta, o sin ninguno, no entra (el servidor la rechazaría con 400). */
+const sePuedeRendir = (h: HojaRutaFila) => h.enRuta === 0 && h.asignados > 0
 
 async function cargarEntregas(mia: number) {
   const filas = await useApiFetch<EntregaRepartidorFila[]>(
@@ -361,7 +361,12 @@ onMounted(async () => {
                   class="text-sm text-warning"
                   :data-qa="`nueva-hoja-bloqueo-${h.id}`"
                 >
-                  Tiene {{ h.enRuta }} en ruta: marcalos para poder incluirla.
+                  <template v-if="h.asignados === 0">
+                    No tiene paquetes: no hay nada que rendir.
+                  </template>
+                  <template v-else>
+                    Tiene {{ h.enRuta }} en ruta: marcalos para poder incluirla.
+                  </template>
                 </p>
               </li>
             </ul>

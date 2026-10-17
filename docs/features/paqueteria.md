@@ -13,8 +13,9 @@
 Un módulo para una empresa de reparto (mayormente paquetes de Mercado Libre). La oficina da de
 alta a sus **repartidores** (una ficha, sin login), **escanea con pistola** los paquetes que cada
 uno se lleva en el día —eso arma su **hoja de ruta**—, marca cada uno como entregado o no
-entregado, y al final del día **rinde** la hoja: el sistema congela cuánta plata cobró el
-repartidor en destino, cuánto se le paga y cuánto debe entregar (o se le debe).
+entregado, y al cerrar el período (un día, una semana) **rinde al repartidor**: el sistema congela, sobre las
+hojas que se elijan, cuánta plata cobró en destino, cuánto se le paga y cuánto debe entregar (o se
+le debe).
 
 ### ¿Por qué existe?
 
@@ -43,7 +44,7 @@ Cada punto lo eligió el owner con su costo a la vista; esto es lo que quedó y 
 | Repartidor | Ficha que maneja la oficina, sin login | Usuario propio con pantalla móvil: suma rol, permisos y UI |
 | Paquete no entregado | `en_ruta → entregado \| no_entregado`; solo lo entregado suma | Asignar = pagar (un rechazo descuadra la rendición); pagar la visita igual |
 | Qué cobra en destino | Solo el envío | Envío + valor del producto (contrarreembolso con plata de un tercero) |
-| Valores por defecto | Uno por empresa, override por paquete | Tarifa por repartidor; precio por comuna (fase 2) |
+| Valores por defecto | Uno por empresa, override por paquete | Precio por comuna (fase 2). *Tarifa por repartidor*: descartada al inicio y **superada** el 2026-10-16 (ver Tarifas de pago) |
 | Rendición | "Rendir" cierra la hoja y congela los totales; no pasa por Caja | Solo mirar el cálculo; entrar a una Caja (toca cajas: frente aparte) |
 | Datos del paquete | Código obligatorio; destinatario, dirección y remitente opcionales | Dirección obligatoria: frena el escaneo, que crea el paquete con solo el código |
 | Carga | Escaneo que crea y asigna; además alta uno a uno y asignación masiva | Importar CSV/Excel |
@@ -152,7 +153,7 @@ Las numeraciones (`regla 5b`, `3.1`) son las que citan los comentarios del códi
     usa el repartidor de la hoja que entrega). La resolución es SQL, en un solo lugar:
     `tarifa-resuelta.ts` (`tarifaResueltaSql`); la usan el `UPDATE … FROM` de entregar y de
     corregir la tarifa, y la lectura del pago **estimado** de una línea que aún no se entregó
-    (`pagoEstimado: true`). Nadie lee las tarifas en TypeScript para repetirla. Una tarifa
+    (`pagoEstimado: true`, solo en una hoja abierta: en una rendida es siempre `false`). Nadie lee las tarifas en TypeScript para repetirla. Una tarifa
     desactivada sigue valiendo para el paquete o repartidor que ya la tenían; una borrada no.
     **Sin configuración guardada** (precio por defecto) **o sin ninguna tarifa de pago**,
     escanear un código nuevo o dar de alta un paquete sin precio es 400: no se crean paquetes a
@@ -251,13 +252,22 @@ ascendente)**.
   para la siguiente, nunca contada dos veces ni perdida. Crear una entrega toma al repartidor `FOR
   SHARE` (`remove` lo toma `FOR UPDATE` y mira también las entregas). Ninguna toma hojas después de
   una entrega, así que no hay ciclo.
-- **La tarifa de pago se toma después de la hoja y, en `PaquetesService.update`, antes que el
-  paquete.** `PaquetesService.update` toma la hoja `FOR SHARE`, después la tarifa `FOR SHARE` y por
-  último el paquete; crear y escanear un paquete toman la tarifa `FOR SHARE` explícito
-  (`exigirActivaDelTenant(..., { bloquear: true })`) después de la hoja. Escribir
+- **La tarifa de pago se toma después del repartidor y de la hoja cuando hay hoja, y en
+  `PaquetesService.update`, antes que el paquete.** `PaquetesService.create` y `update` sobre un
+  paquete sin línea viva la toman sin repartidor ni hoja delante (no hay ninguna que tomar). `PaquetesService.update` toma la hoja `FOR SHARE`, después la tarifa
+  `FOR SHARE` y por último el paquete; crear y escanear un paquete toman la tarifa `FOR SHARE`
+  explícito (`exigirActivaDelTenant(..., { bloquear: true })`) después de la hoja.
+  `RepartidoresService.update` toma al repartidor `FOR UPDATE` (como `remove`) y recién después la
+  tarifa `FOR SHARE`: si fuera al revés, `escanear` (repartidor `FOR SHARE`, esperando la tarifa)
+  y una edición de tarifa (esperando el defecto) lo cerraban en ciclo. Escribir
   `hoja_ruta_paquetes.tarifa_pago_id` toma además un `KEY SHARE` implícito por la FK.
-  `TarifasPagoService.eliminar` / `actualizar` la toman `FOR UPDATE` y no toman nada después (ni
-  hoja ni paquete), así uno de los dos espera al otro y no hay ciclo.
+- **Las escrituras de `tarifas_pago` (`crear`, `actualizar`, `eliminar`) van en fila y van al final
+  del orden.** Las tres toman primero un lock de aviso por tenant (`pg_advisory_xact_lock`), así que
+  dos de ellas nunca se esperan entre sí; después `actualizar` / `eliminar` toman `FOR UPDATE` la
+  fila de la tarifa y `crear` / `actualizar` suman la fila del defecto (`soltarDefecto`, que es un
+  segundo cerrojo sobre otra fila). No toman repartidor, hoja ni paquete después. Por eso esperan
+  como mucho a quien tiene una tarifa `FOR SHARE`, y ese nunca espera a una escritura de tarifas
+  sin haber pasado antes por su repartidor y su hoja.
 - Mientras todos respeten el orden no hay ciclo; quien lo rompa abre un deadlock.
 
 ---
@@ -290,14 +300,14 @@ destino, cinco con Colina, algunos cobros por transferencia) y 8 hojas: la **sem
 *Demo Restaurante*
 también contrata Paquetería (ahí corren los e2e); *Demo Bodega* no, a propósito: es el tenant
 donde el menú no la muestra. *Demo Restaurante* no trae tarifas de pago (los e2e las crean): ahí `configurada` es `false` hasta
-cargar una. IDs en el bloque `PAQUETERIA` del seeder (502-589; 580-583 las tarifas).
+cargar una. IDs en el bloque `PAQUETERIA` del seeder (502-599; 580-583 las tarifas, 590-594 las hojas, 595 la entrega de plata).
 
 ---
 
 ## Tarifas de pago
 
-Tabla `tarifas_pago` por tenant (nombre, monto, `es_defecto`, `activa`); diseño en
-el diseño original se borró al cerrarse el frente (queda en git). Reglas vigentes:
+Tabla `tarifas_pago` por tenant (nombre, monto, `es_defecto`, `activa`); el diseño
+original se borró al cerrarse el frente (queda en git). Reglas vigentes:
 
 - Exactamente una por defecto y viva (índice único parcial); la **primera** que se crea lo es
   aunque no se pida. La por defecto no se desactiva ni se borra: se marca otra antes (400).
@@ -411,15 +421,15 @@ presentación en `composables/usePaqueteria.ts` y `useColaEscaneo.ts`.
   → *Asignar a repartidor*. El selector de *Remitente* solo aparece (y `GET /terceros` solo se
   pide) si el usuario tiene `Terceros:Leer`: en un tenant que solo contrató Paquetería sería un
   403 en cada carga.
-- **Rutas** (`/paquetes/rutas`): `AppRangoFechas`, las cuatro tarjetas de KPI del rango y una fila
+- **Rutas** (`/paquetes/rutas`): `AppRangoFechas`, las cinco tarjetas de KPI del rango y una fila
   por hoja. **Detalle** (`/paquetes/rutas/:id`): totales con el neto destacado; cada paquete con
   *Entregado* (en un paquete con cobro: *Entregado en efectivo* y *Entregado por transferencia*) /
   *No entregado* / *En ruta* (deshace un marcado por error) / *Quitar*; *Marcar todos entregados*
-  (en efectivo); *Rendir a <repartidor>* es un enlace a la pantalla de rendición, bloqueado en la
-  hoja mientras quede algo en ruta.
+  (en efectivo); *Rendir a <repartidor>* es un enlace a la pantalla de rendición y nunca se
+  deshabilita: ahí, la hoja que todavía tiene algo en ruta (o ningún paquete) no se puede tildar.
 - **Rendiciones** (`/paquetes/rendiciones`): las ya cerradas por rango de fechas. **Nueva**
   (`/paquetes/rendiciones/nueva?repartidorId=…`): las hojas sin rendir del repartidor (marcadas
-  las que se pueden; una con paquetes en ruta no entra), sus entregas de plata (*Anotar*,
+  las que se pueden; una con paquetes en ruta, o sin ninguno, no entra), sus entregas de plata (*Anotar*,
   *Corregir*, *Anular*) y la **cuenta como quedaría**, que se vuelve a pedir (`/rendiciones/previa`)
   en cada cambio; *Rendir* pide confirmación con el saldo. La pantalla que sigue muestra lo que
   devolvió el POST, no la previa: si alguien anotó una entrega en el medio, el monto final es

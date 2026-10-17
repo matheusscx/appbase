@@ -1,6 +1,6 @@
 // @vitest-environment nuxt
 //
-// Rutas: el rango por defecto, las cuatro tarjetas (salen de `/resumen`, la página no suma nada),
+// Rutas: el rango por defecto, las cinco tarjetas (salen de `/resumen`, la página no suma nada),
 // una fila por hoja con su link al detalle, y que cambiar el rango recargue las dos consultas.
 // El mock de `useApiFetch` contesta lo que se le pida, así que cada caso afirma la URL de las
 // llamadas: un test que solo mira la pantalla pasaría aunque la página no pidiera nada.
@@ -155,7 +155,7 @@ describe('rutas: el rango por defecto', () => {
   })
 })
 
-describe('rutas: las cuatro tarjetas', () => {
+describe('rutas: las cinco tarjetas', () => {
   it('muestran lo que dice /resumen: entregados con asignados, cobro en destino, total general y total a pagar', async () => {
     await montar()
 
@@ -163,6 +163,7 @@ describe('rutas: las cuatro tarjetas', () => {
     expect(texto('rutas-kpi-asignados')).toBe('de 25 asignados')
     expect(texto('rutas-kpi-cobro-monto')).toBe('$70.000')
     expect(texto('rutas-kpi-cobro-cantidad')).toBe('7 paquetes')
+    expect(texto('rutas-kpi-transferencia')).toBe('$25.000')
     expect(texto('rutas-kpi-total-general')).toBe('$52.500')
     expect(texto('rutas-kpi-total-pagar')).toBe('$21.000')
   })

@@ -94,13 +94,21 @@ export class RepartidoresService {
     if (sets.length === 0) return this.buscar(tenantId, id);
 
     return this.db.transaccion(async () => {
+      // Primero el repartidor `FOR UPDATE` (como `remove`) y después la tarifa: el orden del módulo
+      // es repartidor → hoja → tarifa → paquete; tomar la tarifa antes abría un ciclo con
+      // `escanear` (tiene al repartidor `FOR SHARE` y espera la tarifa).
+      const actual: { tarifa_pago_id: string | null }[] = await this.db.query(
+        `SELECT tarifa_pago_id FROM repartidores
+          WHERE repartidor_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
+          FOR UPDATE`,
+        [id, tenantId],
+      );
+      if (!actual.length)
+        throw new NotFoundException('Repartidor no encontrado');
       // Sacarle la tarifa (`null`) no pide nada; ponerla exige una activa de este tenant. Si es la
       // misma que ya tiene tampoco: una tarifa desactivada después no puede hacer fallar la
       // edición de otro campo (el formulario reenvía todo).
-      if (
-        dto.tarifaPagoId &&
-        dto.tarifaPagoId !== (await this.buscar(tenantId, id)).tarifaPagoId
-      ) {
+      if (dto.tarifaPagoId && dto.tarifaPagoId !== actual[0].tarifa_pago_id) {
         await this.tarifas.exigirActivaDelTenant(tenantId, dto.tarifaPagoId, {
           bloquear: true,
         });

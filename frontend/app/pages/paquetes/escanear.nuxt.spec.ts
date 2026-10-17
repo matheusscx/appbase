@@ -684,6 +684,21 @@ describe('escanear: montos de cada paquete', () => {
     if (tarifaPagoId !== undefined) await emitir(selectorTarifa(w), tarifaPagoId)
   }
 
+  it('un no entregado de una hoja rendida no muestra pago ni tarifa', async () => {
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-8', codigo: 'ENTREGADO', estado: 'entregado', pagoEstimado: false, pagoRepartidor: '1000.0000' }),
+      linea({ paqueteId: 'p-9', codigo: 'FALLIDO', estado: 'no_entregado', pagoEstimado: false, pagoRepartidor: '0.0000', tarifaPagoId: null, tarifaPagoNombre: null }),
+    ], { estado: 'rendida', rendidaEl: '2026-10-14T20:00:00.000Z' })
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+
+    expect(texto('escanear-linea-pago-ENTREGADO')).toBe('$1.000')
+    expect(texto('escanear-linea-tarifa-ENTREGADO')).toBe('Moto')
+    expect(texto('escanear-linea-envio-FALLIDO')).toBe('$2.500')
+    expect(document.body.querySelector('[data-qa="escanear-linea-pago-FALLIDO"]')).toBeNull()
+    expect(document.body.querySelector('[data-qa="escanear-linea-tarifa-FALLIDO"]')).toBeNull()
+  })
+
   it('cada fila muestra el precio del envío, la tarifa y el pago estimado', async () => {
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
       linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', precioEnvio: '2500.0000', pagoRepartidor: '1000.0000' }),

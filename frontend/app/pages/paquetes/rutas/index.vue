@@ -11,7 +11,7 @@ const DIAS_POR_DEFECTO = 7
 const toast = useToast()
 const apiUrl = useRuntimeConfig().public.apiUrl
 const { formatOficial } = useCurrency()
-const { rotuloEstadoHoja, colorEstadoHoja, presentarNeto, fechaCorta } = usePaqueteria()
+const { rotuloEstadoHoja, colorEstadoHoja, presentarNeto, fechaCorta, diasAntes } = usePaqueteria()
 const { diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
 
 const desde = ref<string | null>(null)
@@ -21,15 +21,6 @@ const resumen = ref<ResumenPaqueteria | null>(null)
 const cargando = ref(false)
 // Cada carga invalida a las anteriores que sigan en vuelo: cambiar el rango rápido no pisa con el viejo.
 let secuencia = 0
-
-/** `fecha` menos `dias`, armado por componentes locales: `toISOString` daría el día en UTC. */
-function diasAntes(fecha: string, dias: number): string {
-  const [anio, mes, dia] = fecha.split('-').map(Number) as [number, number, number]
-  const d = new Date(anio, mes - 1, dia - dias)
-  const dd = String(d.getDate()).padStart(2, '0')
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  return `${d.getFullYear()}-${mm}-${dd}`
-}
 
 async function cargar() {
   const mia = ++secuencia
@@ -102,7 +93,7 @@ const columns: TableColumn<HojaRutaFila>[] = [
 
         <AppRangoFechas v-model:desde="desde" v-model:hasta="hasta" qa="rutas-rango" />
 
-        <div class="grid grid-cols-2 gap-4 lg:grid-cols-4" data-qa="rutas-kpis">
+        <div class="grid grid-cols-2 gap-4 lg:grid-cols-5" data-qa="rutas-kpis">
           <UCard>
             <p class="text-sm text-muted">
               Entregados
@@ -133,6 +124,17 @@ const columns: TableColumn<HojaRutaFila>[] = [
               <template v-else>
                 &nbsp;
               </template>
+            </p>
+          </UCard>
+          <UCard>
+            <p class="text-sm text-muted">
+              Cobrado por transferencia
+            </p>
+            <p class="text-2xl font-semibold tabular-nums text-highlighted" data-qa="rutas-kpi-transferencia">
+              {{ resumen ? formatOficial(resumen.montoCobradoTransferencia) : '—' }}
+            </p>
+            <p class="text-sm text-muted">
+              Del cobro en destino
             </p>
           </UCard>
           <UCard>

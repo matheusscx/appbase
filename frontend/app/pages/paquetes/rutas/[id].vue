@@ -285,10 +285,13 @@ async function entregarTodos() {
                   {{ linea.direccion }}<template v-if="linea.comuna">, {{ linea.comuna }}</template>
                 </p>
                 <p class="text-xs tabular-nums text-muted">
-                  Envío {{ formatOficial(linea.precioEnvio) }} · {{ linea.pagoEstimado ? 'Pago estimado' : 'Pago' }}
-                  <span :data-qa="`hoja-linea-pago-${linea.codigo}`">{{ formatOficial(linea.pagoRepartidor) }}</span>
-                  <template v-if="linea.tarifaPagoNombre">
-                    · Tarifa <span :data-qa="`hoja-linea-tarifa-${linea.codigo}`">{{ linea.tarifaPagoNombre }}</span>
+                  Envío {{ formatOficial(linea.precioEnvio) }}
+                  <template v-if="linea.estado === 'entregado' || linea.pagoEstimado">
+                    · {{ linea.pagoEstimado ? 'Pago estimado' : 'Pago' }}
+                    <span :data-qa="`hoja-linea-pago-${linea.codigo}`">{{ formatOficial(linea.pagoRepartidor) }}</span>
+                    <template v-if="linea.tarifaPagoNombre">
+                      · Tarifa <span :data-qa="`hoja-linea-tarifa-${linea.codigo}`">{{ linea.tarifaPagoNombre }}</span>
+                    </template>
                   </template>
                 </p>
                 <UBadge

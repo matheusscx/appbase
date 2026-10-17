@@ -2116,7 +2116,21 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           netoARendir: '47000.0000',
         });
         expect(rendida.rendidaEl).not.toBeNull();
-        expect(rendida.lineas).toEqual(final.lineas);
+        // Al rendir nada se estima: lo único que cambia respecto de la hoja abierta es esa marca.
+        // Y un no entregado de una hoja rendida no paga nada: monto 0, sin tarifa.
+        expect(rendida.lineas).toEqual(
+          final.lineas.map((l) =>
+            l.estado === 'entregado'
+              ? { ...l, pagoEstimado: false }
+              : {
+                  ...l,
+                  pagoEstimado: false,
+                  pagoRepartidor: '0.0000',
+                  tarifaPagoId: null,
+                  tarifaPagoNombre: null,
+                },
+          ),
+        );
 
         const [fila] = await ds().query<{ email: string }[]>(
           `SELECT u.correo AS email FROM hojas_ruta h JOIN usuarios u ON u.usuario_id = h.rendida_por
@@ -2664,6 +2678,40 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           expect(await detalle(hoja.id)).toMatchObject({
             montoPagoRepartidor: '4400.0000',
           });
+        });
+
+        it('un no entregado marca pagoEstimado en una hoja abierta y deja de marcarlo al rendirla', async () => {
+          const moto = await tarifaPropia('estimado moto', '1900');
+          const repartidor = await nuevoRepartidor(tokenAdmin, {
+            tarifaPagoId: moto.id,
+          });
+          const [entregado, fallido] = [
+            await crearPaquete({}),
+            await crearPaquete({}),
+          ];
+          const hoja = (
+            await asignar(repartidor.id, [entregado.id, fallido.id])
+          ).body as HojaRutaDetalle;
+          expect(
+            (await marcar(hoja.id, entregado.id, 'entregado')).status,
+          ).toBe(200);
+          expect(
+            (await marcar(hoja.id, fallido.id, 'no_entregado')).status,
+          ).toBe(200);
+          expect(lineaDe(await detalle(hoja.id), fallido.id)).toMatchObject({
+            estado: 'no_entregado',
+            pagoEstimado: true,
+          });
+          expect((await rendir(hoja.id)).status).toBe(201);
+          const cerrada = await detalle(hoja.id);
+          expect(lineaDe(cerrada, fallido.id)).toMatchObject({
+            estado: 'no_entregado',
+            pagoEstimado: false,
+            pagoRepartidor: '0.0000',
+            tarifaPagoId: null,
+            tarifaPagoNombre: null,
+          });
+          expect(lineaDe(cerrada, entregado.id).pagoEstimado).toBe(false);
         });
 
         it('cambiar la tarifa del paquete con la línea entregada y la hoja abierta la vuelve a resolver; rendida, no', async () => {

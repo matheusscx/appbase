@@ -86,6 +86,8 @@ export interface LineaHoja {
   // por defecto. Es lo que el selector del paquete preselecciona.
   tarifaPaqueteId: string | null;
   pagoRepartidor: string;
+  // true solo en una línea no entregada de una hoja ABIERTA. En una hoja rendida, una línea no
+  // entregada viene con pagoRepartidor '0.0000', sin tarifa y pagoEstimado false.
   pagoEstimado: boolean;
   medioCobro: MedioCobro | null; // solo en una entregada con cobro en destino
   estado: EstadoLinea;

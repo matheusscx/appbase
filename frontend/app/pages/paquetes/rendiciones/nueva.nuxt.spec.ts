@@ -171,6 +171,18 @@ describe('nueva rendición: las hojas', () => {
     expect(texto('nueva-hoja-bloqueo-h-3')).toContain('Tiene 2 en ruta')
   })
 
+  it('una hoja abierta sin paquetes no se preselecciona y dice por qué', async () => {
+    hojas = [hoja('h-1', '2026-10-13'), hoja('h-4', '2026-10-16', { asignados: 0, entregados: 0 })]
+    await montar()
+
+    expect(casilla('h-1').getAttribute('aria-checked')).toBe('true')
+    expect(casilla('h-4').getAttribute('aria-checked')).toBe('false')
+    expect(casilla('h-4').hasAttribute('disabled')).toBe(true)
+    expect(texto('nueva-hoja-bloqueo-h-4')).toContain('No tiene paquetes')
+    const previa = llamadas.map(l => l.url).filter(u => u.includes('/rendiciones/previa'))
+    expect(previa.every(u => !u.includes('h-4'))).toBe(true)
+  })
+
   it('pide la previa con la forma de comas y los ids de las hojas elegidas', async () => {
     await montar()
 

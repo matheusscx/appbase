@@ -828,8 +828,11 @@ export class HojasRutaService {
       estado: c.estado,
       rendidaEl: c.rendida_el ? c.rendida_el.toISOString() : null,
       ...totales,
-      lineas: lineas.map(
-        (l): LineaHoja => ({
+      lineas: lineas.map((l): LineaHoja => {
+        // En una hoja rendida, lo que no se entregó no se paga: ni monto, ni tarifa, ni estimación
+        // (la resuelta en vivo no es de nadie). Lo entregado y lo de una hoja abierta no cambian.
+        const sinPago = c.estado === 'rendida' && l.estado !== 'entregado';
+        return {
           paqueteId: l.paquete_id,
           codigo: l.codigo,
           destinatarioNombre: l.destinatario_nombre,
@@ -837,15 +840,15 @@ export class HojasRutaService {
           comuna: l.comuna,
           cobroEnDestino: l.cobro_en_destino,
           precioEnvio: l.precio_envio,
-          tarifaPagoId: l.tarifa_pago_id,
-          tarifaPagoNombre: l.tarifa_pago_nombre,
+          tarifaPagoId: sinPago ? null : l.tarifa_pago_id,
+          tarifaPagoNombre: sinPago ? null : l.tarifa_pago_nombre,
           tarifaPaqueteId: l.tarifa_paquete_id,
-          pagoRepartidor: l.pago_repartidor,
-          pagoEstimado: l.estado !== 'entregado',
+          pagoRepartidor: sinPago ? '0.0000' : l.pago_repartidor,
+          pagoEstimado: l.estado !== 'entregado' && c.estado !== 'rendida',
           medioCobro: l.medio_cobro,
           estado: l.estado,
-        }),
-      ),
+        };
+      }),
     };
   }
 

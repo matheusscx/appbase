@@ -85,24 +85,46 @@ describe('RepartidoresService', () => {
   });
 
   it('update: 404 si no existe en el tenant', async () => {
-    db.query.mockResolvedValueOnce([[], 0]);
+    db.query.mockResolvedValueOnce([]); // el FOR UPDATE no encuentra la fila
     await expect(service.update(TENANT, ID, { nombre: 'x' })).rejects.toThrow(
       NotFoundException,
     );
   });
 
   it('update: solo toca los campos enviados, y null borra el teléfono', async () => {
-    db.query.mockResolvedValueOnce([
-      [{ repartidor_id: ID, nombre: 'Juan', telefono: null, activo: true }],
-      1,
-    ]);
+    db.query
+      .mockResolvedValueOnce([{ tarifa_pago_id: null }]) // el repartidor, FOR UPDATE
+      .mockResolvedValueOnce([
+        [{ repartidor_id: ID, nombre: 'Juan', telefono: null, activo: true }],
+        1,
+      ]);
     await service.update(TENANT, ID, { telefono: null });
-    const [sql, params] = db.query.mock.calls[0] as [string, unknown[]];
+    const [sql, params] = db.query.mock.calls[1] as [string, unknown[]];
     expect(sql).toMatch(/telefono = \$3/);
     expect(sql).not.toMatch(/nombre = /);
     expect(sql).not.toMatch(/activo = /);
     expect(sql).toMatch(/tenant_id = \$2/);
     expect(params).toEqual([ID, TENANT, null]);
+  });
+
+  it('update: toma al repartidor FOR UPDATE antes que la tarifa (orden del módulo)', async () => {
+    const orden: string[] = [];
+    db.query.mockImplementation((sql: string) => {
+      if (/FOR UPDATE/.test(sql)) {
+        orden.push('repartidor');
+        return Promise.resolve([{ tarifa_pago_id: null }]);
+      }
+      return Promise.resolve([
+        [{ repartidor_id: ID, nombre: 'Juan', telefono: null, activo: true }],
+        1,
+      ]);
+    });
+    tarifas.exigirActivaDelTenant.mockImplementation(() => {
+      orden.push('tarifa');
+      return Promise.resolve();
+    });
+    await service.update(TENANT, ID, { tarifaPagoId: 'tarifa-1' });
+    expect(orden).toEqual(['repartidor', 'tarifa']);
   });
 
   it('remove: 404 si no existe', async () => {

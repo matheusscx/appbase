@@ -657,24 +657,26 @@ const iconoResultado = {
                     >
                       {{ formatOficial(linea.precioEnvio) }}
                     </dd>
-                    <dt class="text-muted">
-                      {{ linea.pagoEstimado ? 'Pago estimado' : 'Pago' }}
-                    </dt>
-                    <dd
-                      class="text-right font-medium tabular-nums text-highlighted"
-                      :data-qa="`escanear-linea-pago-${linea.codigo}`"
-                    >
-                      {{ formatOficial(linea.pagoRepartidor) }}
-                    </dd>
-                    <dt class="text-muted">
-                      Tarifa
-                    </dt>
-                    <dd
-                      class="text-right text-default"
-                      :data-qa="`escanear-linea-tarifa-${linea.codigo}`"
-                    >
-                      {{ linea.tarifaPagoNombre ?? 'Sin tarifa' }}
-                    </dd>
+                    <template v-if="linea.estado === 'entregado' || linea.pagoEstimado">
+                      <dt class="text-muted">
+                        {{ linea.pagoEstimado ? 'Pago estimado' : 'Pago' }}
+                      </dt>
+                      <dd
+                        class="text-right font-medium tabular-nums text-highlighted"
+                        :data-qa="`escanear-linea-pago-${linea.codigo}`"
+                      >
+                        {{ formatOficial(linea.pagoRepartidor) }}
+                      </dd>
+                      <dt class="text-muted">
+                        Tarifa
+                      </dt>
+                      <dd
+                        class="text-right text-default"
+                        :data-qa="`escanear-linea-tarifa-${linea.codigo}`"
+                      >
+                        {{ linea.tarifaPagoNombre ?? 'Sin tarifa' }}
+                      </dd>
+                    </template>
                   </dl>
                   <UButton
                     v-if="montosEditables"

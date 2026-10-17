@@ -180,6 +180,18 @@ describe('detalle: carga y totales', () => {
     expect(texto('hoja-linea-ML-2')).not.toContain('Pago estimado')
   })
 
+  it('un no entregado de una hoja rendida no muestra "Pago estimado" ni pago alguno', async () => {
+    servidor = hojaCon([
+      linea('ML-1', 'entregado', { pagoRepartidor: '1000' }),
+      linea('ML-2', 'no_entregado', { pagoRepartidor: '1000', pagoEstimado: false }),
+    ], { estado: 'rendida', rendidaEl: '2026-10-14T20:00:00.000Z' })
+    await montar()
+
+    expect(texto('hoja-linea-pago-ML-1')).toBe('$1.000')
+    expect(texto('hoja-linea-ML-2')).not.toContain('Pago')
+    expect(qa('hoja-linea-pago-ML-2')).toBeNull()
+  })
+
   it('si la hoja no carga, muestra el motivo y ninguna acción', async () => {
     fallos['GET h-1'] = { message: 'No existe esa hoja' }
     await montar()
