@@ -1473,3 +1473,11 @@ externo y el lector de pantalla existen. Lo que sigue lo hace cumplir `invariant
 - **Campos**: dentro de un `UFormField` el control llena el ancho (`app.config.ts`, `formField`). Interruptores y casillas llevan un área táctil de 44 px (pseudo-elemento) sin agrandar el dibujo.
 - **Menú de Configuración**: grupos y gates en `useMenuConfiguracion`; el índice `/configuracion` y el menú lo comparten.
 
+
+## 22. Íconos: el nombre entero, en el código de `app/`
+
+Los íconos van en el bundle del cliente: `nuxt.config.ts` (`icon.clientBundle.scan`) escanea `app/**/*.{vue,ts,tsx}` y empaqueta cada `i-lucide-…` que encuentra escrito. Un ícono que no está en el bundle se pide en runtime al API público de Iconify, y con `ssr: false` el CSS que `@nuxt/icon` arma con esa respuesta salió corrido: "Productos" dibujaba el ícono de "Pasarelas de pago" (auditoría UX 07.23). Lo cuida `e2e/layout/iconos-en-bundle.spec.ts`.
+
+- ❌ `icon: \`i-lucide-${nombre}\`` — el escáner no puede ver un nombre armado en runtime.
+- ✅ `icon: 'i-lucide-archive'` — literal, en un `.vue` o `.ts` de `app/`.
+- Un ícono que usa Nuxt UI por dentro y no aparece en `app/` va a mano en `icon.clientBundle.icons`.

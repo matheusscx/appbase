@@ -25,6 +25,21 @@ export default defineNuxtConfig({
     },
   },
   modules: ['@nuxt/ui', '@pinia/nuxt', ...(process.env.NODE_ENV !== 'production' ? ['@nuxt/test-utils/module'] : [])],
+  // Íconos en el bundle del cliente (auditoría UX 07.23). Con `ssr: false`, `@nuxt/icon` pide en
+  // runtime al API público de Iconify los que no encontró al escanear, y el CSS que arma con esa
+  // respuesta salía corrido: "Productos" dibujaba el ícono de "Pasarelas de pago". El escaneo por
+  // defecto no mira los `.ts`, y ahí viven los íconos del menú de Configuración y de los
+  // composables: se suman, y así ningún ícono depende de un pedido en runtime.
+  icon: {
+    clientBundle: {
+      scan: {
+        globInclude: ['app/**/*.{vue,ts,tsx}'],
+        globExclude: ['node_modules', 'dist', '.*', '**/*.spec.ts', 'e2e'],
+      },
+      // Los que usa Nuxt UI por dentro (abrir y colapsar el menú lateral): no están en `app/`.
+      icons: ['lucide:menu', 'lucide:panel-left-close', 'lucide:panel-left-open'],
+    },
+  },
   colorMode: {
     preference: 'light',
     fallback: 'light',
