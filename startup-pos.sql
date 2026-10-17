@@ -2974,6 +2974,11 @@ CREATE INDEX idx_cuenta_lineas_item ON cuenta_lineas (item_id);
 ALTER TABLE cuenta_lineas
     ADD COLUMN cantidad_enviada NUMERIC(18,4) NOT NULL DEFAULT 0;
 
+-- cuenta_lineas.enviada_el: cuándo salió por última vez la línea a cocina (la escribe el claim).
+-- Solo la lee "Reimprimir comanda" para decir "Ya salió a las 21:14"; NULL = sin hora conocida.
+ALTER TABLE cuenta_lineas
+    ADD COLUMN enviada_el TIMESTAMPTZ;
+
 -- Anulación de un plato ya despachado. Una fila por anulación, varias por
 -- línea. Sobrevive al borrado de la línea: cuando queda en cero, cuenta_lineas
 -- la borra con soft delete (manager.softDelete(CuentaLinea, …) en

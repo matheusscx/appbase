@@ -246,6 +246,16 @@ export class CuentasController {
     return this.salonesService.previewComanda(u.tenantId ?? '', id);
   }
 
+  @Get(':id/comanda/enviada')
+  @RequiresPermiso('Salones', 'Operar')
+  reimprimirComanda(
+    @Req() req: Request,
+    @Param('id', ParseUUIDPipe) id: string,
+  ) {
+    const u = req.user as JwtUser;
+    return this.salonesService.reimprimirComanda(u.tenantId ?? '', id);
+  }
+
   @Post(':id/comanda/reclamar')
   @RequiresPermiso('Salones', 'Operar')
   reclamarComanda(@Req() req: Request, @Param('id', ParseUUIDPipe) id: string) {

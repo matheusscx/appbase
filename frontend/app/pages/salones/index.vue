@@ -3,7 +3,7 @@ import Decimal from 'decimal.js'
 import { tipoDocumentoPorDefecto, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import type { EmisorMedio } from '~/composables/useDocumentosVenta'
 import { sobreUmbralIdentidad } from '~/composables/useReceptor'
-import { sugerirPropina, fetchPorcentajeSugerido, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
+import { sugerirPropina, fetchPorcentajeSugerido, porcentajeDecimalAHumano, PROPINA_PORCENTAJE_DEFAULT } from '~/composables/usePropina'
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import {
   cuentaToCalcularInput,
@@ -23,8 +23,9 @@ import type { EventoPin, Garzon, MiPinEstado } from '~/composables/useGarzones'
 import { etiquetaCuentaPendiente, useTransferenciaPendientes } from '~/composables/useSesionesGarzon'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { UnidadElegida } from '~/composables/useUnidadesSerie'
-import type { Turno } from '~/composables/useTurnos'
-import type { SolicitudTestigo } from '~/composables/useSalones'
+import { turnoDeLaHora, type Turno } from '~/composables/useTurnos'
+import type { ComandaEnviadaResponse } from '~/composables/useImpresoras'
+import type { PrecuentaVista, SolicitudTestigo } from '~/composables/useSalones'
 import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
 import { conTimeout } from '~/utils/con-timeout'
 import { agregarImpuestosVenta, agregarPromocionesVenta, itemsParaBoletaImpresion, type TicketAnulada } from '~/utils/ticket-builder'
@@ -83,7 +84,7 @@ const garzonesApi = useGarzones()
 const turnosApi = useTurnos()
 const sesionesApi = useSesionesGarzon()
 const unidadesStore = useUnidadesMedidaStore()
-const { formatMonto, formatFecha, formatHace, formatHora } = useFormatters()
+const { formatMonto, formatFecha, formatHace, formatHora, formatHora24 } = useFormatters()
 const impresorasApi = useImpresoras()
 const calculoApi = useCalculoPrecios()
 const { paraTicket, avisoSinEmitir } = useBoletaElectronica()
@@ -655,6 +656,8 @@ const turnoModalOpen = ref(false)
 const turnosActivos = ref<Turno[]>([])
 const turnoSeleccionadoId = ref<string | undefined>(undefined)
 const cargandoTurnos = ref(false)
+/** `true` = el turno viene elegido por la hora (02.16): el modal lo dice y deja cambiarlo. */
+const turnoPreseleccionado = ref(false)
 const turnoItems = computed(() =>
   turnosActivos.value.map(t => ({
     label: `${t.nombre} (${t.horaInicio}–${t.horaFin})`,
@@ -675,7 +678,11 @@ async function abrirEntrarTurno() {
       toast.add({ title: 'No hay turnos activos configurados', color: 'warning' })
       return
     }
-    turnoSeleccionadoId.value = turnosActivos.value[0]?.id
+    // El turno de la hora actual (02.16), no el primero de la lista: quien entra a las 20:00 y toca
+    // "Continuar" como siempre no queda en la "Mañana", que es el que después liquida sus propinas.
+    // Sin coincidencia queda sin elegir y "Continuar" espera a que lo elija.
+    turnoSeleccionadoId.value = turnoDeLaHora(turnosActivos.value)?.id
+    turnoPreseleccionado.value = turnoSeleccionadoId.value !== undefined
     turnoModalOpen.value = true
   }
   catch (e: unknown) {
@@ -2821,6 +2828,145 @@ function anuladasParaTicket(cuenta: CuentaDetalle): TicketAnulada[] {
 }
 
 /**
+ * La propina sugerida de la precuenta —la del papel y la de la pantalla, por la misma cuenta—:
+ * `null` si la propina está apagada o sin porcentaje. Misma función que la sugerencia del cobro,
+ * a la escala de la moneda.
+ */
+function propinaSugeridaDe(totalFinal: string): { porcentaje: string, monto: string } | null {
+  if (!propinaHabilitada.value || !new Decimal(propinaPorcentaje.value || '0').gt(0)) return null
+  return {
+    porcentaje: propinaPorcentaje.value,
+    monto: sugerirPropina(totalFinal, decimalesPropina.value, propinaPorcentaje.value),
+  }
+}
+
+/**
+ * "Ver precuenta" (02.7): la precuenta en pantalla, con la propina sugerida y el total con y sin
+ * ella. El total es el del cálculo del servidor, esperado al día igual que para imprimir; la
+ * propina sale de `propinaSugeridaDe` y el total con propina se suma con Decimal.
+ *
+ * Mismo guard por identidad que `imprimirPrecuenta`: si la garzona se fue de la cuenta durante el
+ * cálculo no se abre nada ni se avisa. Y si el cálculo falla no se abre un panel con montos viejos.
+ */
+async function verPrecuenta() {
+  const cuenta = activeCuenta.value
+  const mesa = selectedMesa.value
+  if (!cuenta || !mesa) return
+  abriendoPrecuenta.value = true
+  try {
+    const res = await asegurarVigente()
+    if (activeCuenta.value?.id !== cuenta.id) return
+    if (!res) {
+      toast.add({ ...avisoCalculoFallido(errorCalculo.value, 'No se pudo calcular el total de la cuenta'), color: 'error' })
+      return
+    }
+    const cuentaDeAhora = activeCuenta.value
+    const total = res.totales.totalFinal
+    const propina = propinaSugeridaDe(total)
+    precuentaVista.value = {
+      mesaNombre: mesa.nombre,
+      cuentaNumero: cuentaDeAhora.numero,
+      items: itemsParaTicket(cuentaDeAhora, res).map(i => ({
+        nombre: i.nombre,
+        cantidad: i.cantidad,
+        totalLinea: i.totalLinea,
+      })),
+      total,
+      propina: propina
+        ? {
+            porcentaje: porcentajeDecimalAHumano(propina.porcentaje),
+            monto: propina.monto,
+            totalConPropina: new Decimal(total).plus(propina.monto).toFixed(decimalesPropina.value),
+          }
+        : null,
+    }
+    precuentaOpen.value = true
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudo calcular el total de la cuenta'), color: 'error' })
+  }
+  finally {
+    abriendoPrecuenta.value = false
+  }
+}
+
+const precuentaOpen = ref(false)
+const precuentaVista = ref<PrecuentaVista | null>(null)
+const abriendoPrecuenta = ref(false)
+
+/**
+ * "Reimprimir comanda" (02.5): una copia de lo que YA salió a cocina, a pedido de la persona.
+ * Primero se lee lo enviado y se pregunta con la hora ("Ya salió a las 21:14"); recién al
+ * confirmar sale el papel, marcado COPIA. **No reclama ni avanza `cantidad_enviada`**: reimprimir
+ * no es mandar, y reclamar de nuevo dejaría la cuenta lista para cocinar dos veces lo mismo.
+ * Sin reintento automático.
+ */
+const reimprimirOpen = ref(false)
+const reimprimirCopia = ref<ComandaEnviadaResponse | null>(null)
+const reimprimirContexto = ref<{ mesaNombre: string, cuentaNumero: number, garzonNombre: string | null } | null>(null)
+const consultandoReimpresion = ref(false)
+const reimprimiendoComanda = ref(false)
+
+const reimprimirMensaje = computed(() => {
+  const iso = reimprimirCopia.value?.enviadaEl
+  return iso
+    ? `Ya salió a las ${formatHora24(new Date(iso))}. ¿Imprimirla de nuevo?`
+    : 'Ya salió. ¿Imprimirla de nuevo?'
+})
+
+async function pedirReimpresion() {
+  const cuenta = activeCuenta.value
+  const mesa = selectedMesa.value
+  if (!cuenta || !mesa) return
+  consultandoReimpresion.value = true
+  try {
+    const copia = await impresorasApi.consultarComandaEnviada(cuenta.id)
+    if (activeCuenta.value?.id !== cuenta.id) return
+    if (copia.estaciones.length === 0) {
+      toast.add({
+        title: 'No hay nada que reimprimir',
+        description: 'Lo enviado no tiene una estación de cocina que imprima.',
+        color: 'warning',
+      })
+      return
+    }
+    reimprimirCopia.value = copia
+    reimprimirContexto.value = {
+      mesaNombre: mesa.nombre,
+      cuentaNumero: cuenta.numero,
+      garzonNombre: cuenta.garzonResponsableNombre,
+    }
+    reimprimirOpen.value = true
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudo leer lo que salió a cocina'), color: 'error' })
+  }
+  finally {
+    consultandoReimpresion.value = false
+  }
+}
+
+async function confirmarReimpresion() {
+  const copia = reimprimirCopia.value
+  const contexto = reimprimirContexto.value
+  if (!copia || !contexto) return
+  reimprimiendoComanda.value = true
+  try {
+    const impreso = await impresorasApi.reimprimirComanda(copia, contexto)
+    reimprimirOpen.value = false
+    toast.add(impreso
+      ? { title: 'Comanda reimpresa', color: 'success' }
+      : { title: 'No hay impresoras de comanda activas', color: 'warning' })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudo imprimir. Revisa la impresora'), color: 'error' })
+  }
+  finally {
+    reimprimiendoComanda.value = false
+  }
+}
+
+/**
  * La precuenta es de la familia de *"lo que se lee después del `await`"*, y la
  * menos grave: lo que sale mal es papel.
  *
@@ -2880,17 +3026,8 @@ async function imprimirPrecuenta() {
       totales: res.totales,
       impuestos: agregarImpuestosVenta(res.lineas),
       promociones: agregarPromocionesVenta(res.lineas),
-      ...(propinaHabilitada.value && new Decimal(propinaPorcentaje.value || '0').gt(0)
-        ? { propinaSugerida: {
-            porcentaje: propinaPorcentaje.value,
-            // Misma cuenta que la sugerencia del cobro, por la misma función: acá
-            // estaba repetida a mano y con los 0 decimales hardcodeados.
-            monto: sugerirPropina(
-              res.totales.totalFinal,
-              decimalesPropina.value,
-              propinaPorcentaje.value,
-            ),
-          } }
+      ...(propinaSugeridaDe(res.totales.totalFinal)
+        ? { propinaSugerida: propinaSugeridaDe(res.totales.totalFinal)! }
         : {}),
       formatMonto: (v: string) => formatMonto(v),
     })
@@ -3794,6 +3931,32 @@ async function cerrarCuentaConPin(
                     Imprimir precuenta
                   </UButton>
                 </div>
+                <div class="mb-2 flex gap-2">
+                  <UButton
+                    color="neutral"
+                    variant="ghost"
+                    size="xl"
+                    class="min-h-11 flex-1 justify-center"
+                    icon="i-lucide-eye"
+                    :loading="abriendoPrecuenta"
+                    :disabled="activeCuenta.lineas.length === 0 || cuentaConItemEliminado"
+                    @click="verPrecuenta"
+                  >
+                    Ver precuenta
+                  </UButton>
+                  <UButton
+                    v-if="tieneAlgoDespachado(activeCuenta)"
+                    color="neutral"
+                    variant="ghost"
+                    size="xl"
+                    class="min-h-11 flex-1 justify-center"
+                    icon="i-lucide-printer"
+                    :loading="consultandoReimpresion"
+                    @click="pedirReimpresion"
+                  >
+                    Reimprimir comanda
+                  </UButton>
+                </div>
                 <div class="flex gap-2">
                   <UButton
                     color="error"
@@ -3842,6 +4005,24 @@ async function cerrarCuentaConPin(
         :sobre-umbral-identidad="pedirPagador"
         :rut-chileno="boletaDelPais?.rutChileno ?? false"
         @confirmar="confirmarCobro"
+      />
+
+      <SalonesPrecuentaModal
+        v-model:open="precuentaOpen"
+        :vista="precuentaVista"
+        :imprimiendo="imprimiendoPrecuenta"
+        @imprimir="imprimirPrecuenta"
+      />
+
+      <CrudModal
+        v-model:open="reimprimirOpen"
+        title="Reimprimir comanda"
+        :message="reimprimirMensaje"
+        confirm-label="Sí, reimprimir"
+        cancel-label="Volver"
+        confirm-color="primary"
+        :loading="reimprimiendoComanda"
+        @confirm="confirmarReimpresion"
       />
 
       <CrudModal
@@ -3932,7 +4113,9 @@ async function cerrarCuentaConPin(
       <UModal
         v-model:open="turnoModalOpen"
         title="Entrar a turno"
-        description="Selecciona el turno en el que vas a trabajar."
+        :description="turnoPreseleccionado
+          ? 'Te dejamos el turno de esta hora. Cámbialo si vas a trabajar en otro.'
+          : 'Selecciona el turno en el que vas a trabajar.'"
         :ui="shellUi.modal"
       >
         <template #body>

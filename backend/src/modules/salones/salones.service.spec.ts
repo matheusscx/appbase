@@ -6341,6 +6341,178 @@ describe('SalonesService', () => {
     });
   });
 
+  describe('reclamarComanda — hora de salida', () => {
+    it('el claim deja la hora en que salió cada línea (enviada_el)', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+      manager.query
+        .mockResolvedValueOnce([
+          {
+            cuenta_linea_id: 'linea-1',
+            cantidad: '3',
+            cantidad_enviada: '1',
+            nombre: 'Lomo',
+            impresora_id: 'impresora-cocina',
+            impresora_nombre: 'Cocina',
+          },
+        ])
+        .mockResolvedValueOnce(undefined);
+
+      await service.reclamarComanda(TENANT, CUENTA);
+
+      const sqlUpdate = manager.query.mock.calls[1][0] as string;
+      expect(sqlUpdate).toMatch(/enviada_el\s*=\s*NOW\(\)/);
+    });
+  });
+
+  describe('reimprimirComanda', () => {
+    const SALIO = new Date('2026-10-16T21:14:00.000Z');
+
+    it('devuelve lo ya enviado por estación (cantidad_enviada), con la hora de la última salida, y no escribe nada', async () => {
+      cuentaRepo.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+      dataSource.query.mockImplementation((sql: string) => {
+        if (sql.includes('SELECT item_id, nombre FROM items'))
+          return Promise.resolve([]);
+        return Promise.resolve([
+          {
+            cuenta_linea_id: 'linea-1',
+            cantidad: '3',
+            cantidad_enviada: '2',
+            enviada_el: new Date('2026-10-16T21:00:00.000Z'),
+            nombre: 'Lomo',
+            impresora_id: 'impresora-cocina',
+            impresora_nombre: 'Cocina',
+            personalizacion: null,
+          },
+          {
+            cuenta_linea_id: 'linea-2',
+            cantidad: '1',
+            cantidad_enviada: '1',
+            enviada_el: SALIO,
+            nombre: 'Agua',
+            impresora_id: 'impresora-barra',
+            impresora_nombre: 'Barra',
+            personalizacion: null,
+          },
+          {
+            cuenta_linea_id: 'linea-3',
+            cantidad: '1',
+            cantidad_enviada: '0',
+            enviada_el: null,
+            nombre: 'Postre pendiente',
+            impresora_id: 'impresora-cocina',
+            impresora_nombre: 'Cocina',
+            personalizacion: null,
+          },
+        ]);
+      });
+
+      const res = await service.reimprimirComanda(TENANT, CUENTA);
+
+      expect(res.enviadaEl).toBe(SALIO.toISOString());
+      expect(res.estaciones).toEqual([
+        {
+          impresoraId: 'impresora-cocina',
+          nombre: 'Cocina',
+          items: [
+            {
+              cuentaLineaId: 'linea-1',
+              nombre: 'Lomo',
+              cantidad: '2',
+              cantidadEnviada: '2',
+            },
+          ],
+        },
+        {
+          impresoraId: 'impresora-barra',
+          nombre: 'Barra',
+          items: [
+            {
+              cuentaLineaId: 'linea-2',
+              nombre: 'Agua',
+              cantidad: '1',
+              cantidadEnviada: '1',
+            },
+          ],
+        },
+      ]);
+      // Copia de lo ya despachado: no reclama ni avanza nada.
+      expect(manager.query).not.toHaveBeenCalled();
+      expect(manager.update).not.toHaveBeenCalled();
+      const escrituras = dataSource.query.mock.calls.filter(([sql]) =>
+        /UPDATE|INSERT/i.test(sql as string),
+      );
+      expect(escrituras).toEqual([]);
+    });
+
+    it('sin nada enviado: estaciones vacías y enviadaEl null', async () => {
+      cuentaRepo.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+      dataSource.query.mockResolvedValue([
+        {
+          cuenta_linea_id: 'linea-1',
+          cantidad: '1',
+          cantidad_enviada: '0',
+          enviada_el: null,
+          nombre: 'Lomo',
+          impresora_id: 'impresora-cocina',
+          impresora_nombre: 'Cocina',
+          personalizacion: null,
+        },
+      ]);
+      const res = await service.reimprimirComanda(TENANT, CUENTA);
+      expect(res).toEqual({ estaciones: [], enviadaEl: null });
+    });
+
+    it('lo enviado antes de existir la hora devuelve enviadaEl null, pero igual se puede reimprimir', async () => {
+      cuentaRepo.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+      });
+      dataSource.query.mockResolvedValue([
+        {
+          cuenta_linea_id: 'linea-1',
+          cantidad: '1',
+          cantidad_enviada: '1',
+          enviada_el: null,
+          nombre: 'Lomo',
+          impresora_id: 'impresora-cocina',
+          impresora_nombre: 'Cocina',
+          personalizacion: null,
+        },
+      ]);
+      const res = await service.reimprimirComanda(TENANT, CUENTA);
+      expect(res.estaciones).toHaveLength(1);
+      expect(res.enviadaEl).toBeNull();
+    });
+
+    it('lanza BadRequest si la cuenta no está abierta y NotFound si no es del tenant', async () => {
+      cuentaRepo.findOne.mockResolvedValueOnce({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.CERRADA,
+      });
+      await expect(service.reimprimirComanda(TENANT, CUENTA)).rejects.toThrow(
+        BadRequestException,
+      );
+      cuentaRepo.findOne.mockResolvedValueOnce(null);
+      await expect(service.reimprimirComanda(TENANT, CUENTA)).rejects.toThrow(
+        NotFoundException,
+      );
+    });
+  });
+
   describe('transferirCuentaPorPin', () => {
     it('delega en CuentaAsignacionesService y devuelve CuentaDetalle con responsable', async () => {
       const cuentaTransferida = {

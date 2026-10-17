@@ -1593,3 +1593,13 @@ Lo que cambia en la pantalla del garzón y en las de gestión, sin tocar plata n
 - [turnos-garzones.md](./turnos-garzones.md) — sesión obligatoria para operar cuentas.
 - [inventario-kardex.md](./inventario-kardex.md) — por qué lo apartado al pedir **no**
   aparece en el kardex, y quién sí escribe movimientos.
+
+---
+
+## Reimprimir comanda, precuenta en pantalla y turno de la hora (2026-10-16)
+
+Auditoría UX 02.5, 02.7 y 02.16, decididas por el owner. El detalle de cada una vive donde se
+opera: reimpresión y precuenta en [`impresion-termica.md`](./impresion-termica.md), turno en
+[`turnos-garzones.md`](./turnos-garzones.md). En el drawer de la cuenta hay una fila nueva con
+"Ver precuenta" y "Reimprimir comanda" (esta última solo si algo se envió a cocina). Lo único que
+toca el esquema es `cuenta_lineas.enviada_el` (hora de la última salida a cocina, la escribe el claim).

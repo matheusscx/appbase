@@ -311,6 +311,49 @@ describe('Salones — comanda a cocina (e2e)', () => {
     expect(todos.some((n) => n.startsWith('Sin ruta'))).toBe(false);
   });
 
+  it('reimprimir devuelve lo ya enviado con su hora, sin reclamar ni avanzar nada (02.5)', async () => {
+    const cuenta = await abrirCuentaCon([
+      { itemId: platoId, cantidad: '2' },
+      { itemId: tragoId, cantidad: '1' },
+    ]);
+    const copia = async (): Promise<{
+      estaciones: ComandaEstacion[];
+      enviadaEl: string | null;
+    }> => {
+      const res = await request(app.getHttpServer())
+        .get(`/api/cuentas/${cuenta.id}/comanda/enviada`)
+        .set('Authorization', `Bearer ${token}`);
+      expect(res.status).toBe(200);
+      return res.body as {
+        estaciones: ComandaEstacion[];
+        enviadaEl: string | null;
+      };
+    };
+
+    // Antes de enviar no hay nada que copiar.
+    expect(await copia()).toEqual({ estaciones: [], enviadaEl: null });
+
+    const antes = Date.now();
+    await post<ComandaResponse>(
+      `/api/cuentas/${cuenta.id}/comanda/reclamar`,
+      {},
+    );
+
+    const primera = await copia();
+    expect(primera.estaciones).toHaveLength(2);
+    const cocina = primera.estaciones.find((e) => e.impresoraId === cocinaId);
+    expect(cocina!.items[0].cantidad).toBe('2');
+    expect(primera.enviadaEl).not.toBeNull();
+    expect(new Date(primera.enviadaEl!).getTime()).toBeGreaterThanOrEqual(
+      antes - 2000,
+    );
+
+    // Pedir la copia dos veces da lo mismo y no deja nada pendiente ni nada
+    // reclamado: el próximo claim sigue viendo la cuenta al día.
+    expect((await copia()).estaciones).toEqual(primera.estaciones);
+    expect(await comandaPendiente(cuenta.id)).toEqual([]);
+  });
+
   it('reclamar avanza lo enviado: el segundo claim no vuelve a mandar lo mismo, y lo agregado después sale solo por la diferencia', async () => {
     const cuenta = await abrirCuentaCon([{ itemId: platoId, cantidad: '2' }]);
 

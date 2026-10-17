@@ -200,6 +200,20 @@ export interface CuentaAnulacionDetalle {
   creadoEl: string
 }
 
+/**
+ * La precuenta en pantalla (auditoría UX 02.7): lo que la garzona le muestra al cliente que
+ * pidió la cuenta. Los montos llegan ya calculados (el total sale del motor de precios del
+ * servidor y la propina de `sugerirPropina`, la misma función que arma el papel y el cobro).
+ */
+export interface PrecuentaVista {
+  mesaNombre: string
+  cuentaNumero: number
+  items: { nombre: string, cantidad: string, totalLinea: string }[]
+  total: string
+  /** `null` = propina apagada o sin porcentaje: la precuenta muestra solo el total. */
+  propina: { porcentaje: string, monto: string, totalConPropina: string } | null
+}
+
 export interface CuentaDetalle {
   id: string
   numero: number

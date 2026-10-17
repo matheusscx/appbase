@@ -401,9 +401,20 @@ export function buildComandaTicket(input: {
   garzonNombre: string | null
   items: TicketItem[]
   fecha: Date
+  /**
+   * "Reimprimir comanda" (auditoría UX 02.5): una copia de lo que YA salió. Se marca en el papel
+   * para que cocina no lo cocine dos veces. `enviadaEl` es cuándo salió el original (`null` =
+   * se envió antes de que se guardara la hora: no se inventa una).
+   */
+  copia?: { enviadaEl: Date | null }
 }): string[] {
   const out: string[] = []
   out.push(`*** ${input.estacionNombre.toUpperCase()} ***`)
+  if (input.copia) {
+    out.push('*** COPIA ***')
+    out.push('Ya salió antes. No repetir.')
+    if (input.copia.enviadaEl) out.push(`Salió: ${input.copia.enviadaEl.toLocaleString('es-CL')}`)
+  }
   out.push(`Mesa: ${input.mesaNombre}   Cuenta: ${input.cuentaNumero}`)
   if (input.garzonNombre) out.push(`Garzón: ${input.garzonNombre}`)
   out.push(input.fecha.toLocaleString('es-CL'))

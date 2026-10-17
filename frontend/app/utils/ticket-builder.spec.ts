@@ -13,6 +13,51 @@ const formatMonto = (v: string) => `$${v}`
 const FECHA = new Date('2026-07-13T20:30:00')
 
 describe('buildComandaTicket', () => {
+  it('la copia dice COPIA arriba y cuándo salió, para que cocina no la cocine otra vez', () => {
+    const lines = buildComandaTicket({
+      estacionNombre: 'Cocina',
+      mesaNombre: 'Mesa 1',
+      cuentaNumero: 2,
+      garzonNombre: null,
+      items: [{ nombre: 'Lomo', cantidad: '2' }],
+      fecha: FECHA,
+      copia: { enviadaEl: new Date('2026-07-13T20:14:00') },
+    })
+
+    expect(lines[0]).toBe('*** COCINA ***')
+    expect(lines[1]).toBe('*** COPIA ***')
+    expect(lines[2]).toBe('Ya salió antes. No repetir.')
+    expect(lines).toContain(`Salió: ${new Date('2026-07-13T20:14:00').toLocaleString('es-CL')}`)
+    expect(lines).toContain('2 x Lomo')
+  })
+
+  it('la copia sin hora conocida igual se marca COPIA y no inventa una hora', () => {
+    const lines = buildComandaTicket({
+      estacionNombre: 'Cocina',
+      mesaNombre: 'Mesa 1',
+      cuentaNumero: 2,
+      garzonNombre: null,
+      items: [{ nombre: 'Lomo', cantidad: '2' }],
+      fecha: FECHA,
+      copia: { enviadaEl: null },
+    })
+
+    expect(lines[1]).toContain('COPIA')
+    expect(lines.some(l => l.startsWith('Salió: '))).toBe(false)
+  })
+
+  it('sin `copia` el ticket no cambia', () => {
+    const lines = buildComandaTicket({
+      estacionNombre: 'Cocina',
+      mesaNombre: 'Mesa 1',
+      cuentaNumero: 2,
+      garzonNombre: null,
+      items: [{ nombre: 'Lomo', cantidad: '2' }],
+      fecha: FECHA,
+    })
+    expect(lines.some(l => l.includes('COPIA'))).toBe(false)
+  })
+
   it('incluye la estación, la mesa, el garzón y los ítems con cantidad', () => {
     const lines = buildComandaTicket({
       estacionNombre: 'Cocina',

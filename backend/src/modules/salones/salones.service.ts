@@ -2952,6 +2952,51 @@ export class SalonesService {
   }
 
   /**
+   * "Reimprimir comanda" (auditoría UX 02.5): lo que YA salió a cada estación, para
+   * volver a imprimirlo a pedido de la persona. Es una copia de solo lectura: no
+   * reclama, no avanza `cantidad_enviada` ni escribe nada. `enviadaEl` es la última
+   * salida (para "Ya salió a las 21:14"); `null` si lo enviado es anterior a la columna.
+   */
+  async reimprimirComanda(
+    tenantId: string,
+    cuentaId: string,
+  ): Promise<{ estaciones: ComandaEstacion[]; enviadaEl: string | null }> {
+    const cuenta = await this.cuentaRepo.findOne({
+      where: { id: cuentaId, tenantId },
+    });
+    if (!cuenta) {
+      throw new NotFoundException(`Cuenta ${cuentaId} no encontrada`);
+    }
+    if (cuenta.estado !== EstadoCuenta.ABIERTA) {
+      throw new BadRequestException('La cuenta no está abierta');
+    }
+    const rows: {
+      cuenta_linea_id: string;
+      cantidad: string;
+      cantidad_enviada: string;
+      enviada_el: Date | null;
+      nombre: string;
+      impresora_id: string | null;
+      impresora_nombre: string | null;
+      personalizacion: PersonalizacionRecetaSnapshot | null;
+    }[] = await this.db.query(this.sqlLineasComanda(), [cuentaId, tenantId]);
+    const nombres = await this.nombresIngredientesPersonalizacion(
+      tenantId,
+      rows,
+    );
+    const estaciones = this.agruparEstacionesComanda(rows, nombres, true);
+    let ultima: Date | null = null;
+    if (estaciones.length > 0) {
+      for (const row of rows) {
+        if (!row.enviada_el || new Decimal(row.cantidad_enviada).lte(0))
+          continue;
+        if (!ultima || row.enviada_el > ultima) ultima = row.enviada_el;
+      }
+    }
+    return { estaciones, enviadaEl: ultima ? ultima.toISOString() : null };
+  }
+
+  /**
    * Claim atómico: bajo FOR UPDATE calcula diffs, avanza cantidad_enviada y
    * devuelve lo a imprimir. Dos reclamaciones concurrentes no duplican cocina:
    * la segunda ve diffs vacíos. El FE imprime después del claim.
@@ -3003,7 +3048,8 @@ export class SalonesService {
         for (const item of estacion.items) {
           await manager.query(
             `UPDATE cuenta_lineas
-                SET cantidad_enviada = $1, actualizado_el = NOW()
+                SET cantidad_enviada = $1, enviada_el = NOW(),
+                    actualizado_el = NOW()
               WHERE cuenta_linea_id = $2 AND tenant_id = $3`,
             [item.cantidadEnviada, item.cuentaLineaId, tenantId],
           );
@@ -3026,7 +3072,7 @@ export class SalonesService {
     // el agrupado la salteaba en silencio, indistinguible de "categoría sin
     // impresora". La categoría acá es ruteo, no un recurso que pueda faltar.
     // `impresoras` sí filtra: a una impresora borrada o apagada no se imprime.
-    return `SELECT cl.cuenta_linea_id, cl.cantidad, cl.cantidad_enviada,
+    return `SELECT cl.cuenta_linea_id, cl.cantidad, cl.cantidad_enviada, cl.enviada_el,
               cl.personalizacion, i.nombre, imp.impresora_id, imp.nombre AS impresora_nombre
          FROM cuenta_lineas cl
          JOIN items i ON i.item_id = cl.item_id AND i.tenant_id = $2
@@ -3049,10 +3095,15 @@ export class SalonesService {
       personalizacion?: PersonalizacionRecetaSnapshot | null;
     }[],
     nombres: Map<string, string> = new Map(),
+    soloEnviado = false,
   ): ComandaEstacion[] {
     const estacionesMap = new Map<string, ComandaEstacion>();
     for (const row of rows) {
-      const diff = new Decimal(row.cantidad).minus(row.cantidad_enviada);
+      // Normal: lo que falta mandar (`cantidad - cantidad_enviada`). Copia
+      // (`soloEnviado`): lo que ya salió, sin tocar nada.
+      const diff = soloEnviado
+        ? new Decimal(row.cantidad_enviada)
+        : new Decimal(row.cantidad).minus(row.cantidad_enviada);
       if (diff.lte(0) || !row.impresora_id) continue;
 
       const nota = textoComandaPersonalizacion(row.personalizacion, nombres);
@@ -3065,7 +3116,7 @@ export class SalonesService {
         cuentaLineaId: row.cuenta_linea_id,
         nombre: row.nombre,
         cantidad: diff.toString(),
-        cantidadEnviada: row.cantidad,
+        cantidadEnviada: soloEnviado ? row.cantidad_enviada : row.cantidad,
         ...(nota ? { nota } : {}),
       });
       estacionesMap.set(row.impresora_id, estacion);

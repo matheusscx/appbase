@@ -40,6 +40,12 @@ sesiones abiertas, forzar cierres y consultar historial.
   tres rutas de sesión no piden PIN.
 - `hora_inicio` / `hora_fin` del turno son **referenciales**; no bloquean
   iniciar sesión fuera de esa ventana. La hora real trabajada sale de la sesión.
+  Sí deciden **qué turno viene elegido** en "Entrar a turno" (2026-10-16, owner, auditoría UX 02.16):
+  `turnoDeLaHora` (`useTurnos.ts`) preselecciona el turno activo cuya ventana contiene la hora del
+  dispositivo —el inicio entra y el fin no; `hora_fin < hora_inicio` cruza la medianoche; inicio = fin
+  no contiene ninguna hora; si se pisan, gana el primero de la lista—. Sin coincidencia no hay nada
+  elegido y "Continuar" espera. La garzona puede cambiarlo; el turno elegido es el que después liquida
+  sus propinas. El front no conoce la zona del tenant, así que usa el reloj del dispositivo.
 - Máximo **una sesión abierta** por garzón y tenant.
 - Errores de PIN o sesión son **`400 Bad Request`**, nunca `401`, para no
   gatillar refresh/logout del dispositivo compartido.

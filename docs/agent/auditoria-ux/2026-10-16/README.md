@@ -44,7 +44,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☐ | [02.2](02-salones-y-mesas.md) | P1 | Garzón y encargado no pueden cobrar mesas y el aviso pide abrir caja | medido | owner |
 | ☑ | [02.3](02-salones-y-mesas.md) | P1 | En tablet, los botones de la cuenta son chicos y quitan productos sin querer — **hecho 2026-10-16** | medido | agente |
 | ☑ | [02.4](02-salones-y-mesas.md) | P1 | La cuenta no muestra qué líneas salieron a cocina y cuáles no — **hecho 2026-10-16** | medido | agente |
-| ☐ | [02.5](02-salones-y-mesas.md) | P1 | Si la comanda no se imprime, la línea queda "enviada" y no se reimprime | medido en parte | owner |
+| ☑ | [02.5](02-salones-y-mesas.md) | P1 | Si la comanda no se imprime, la línea queda "enviada" y no se reimprime — **hecho 2026-10-16** (botón "Reimprimir comanda" con confirmación y hora; copia marcada COPIA, sin reclamar) | medido en parte | owner |
 | ☑ | [03.1](03-caja.md) | P1 | En la tablet, "Ver cierre" y "Marcar visto" de Pendientes quedan fuera de vista — **hecho 2026-10-16** (la forma cambió; a 768 no se pudo medir: la base sembrada no tiene cierres pendientes) | medido | agente |
 | ☑ | [03.2](03-caja.md) | P1 | En el historial de cajas a 768, la columna "Diferencia" queda fuera de vista — **hecho 2026-10-16** (la forma cambió; a 768 no se pudo medir: la base sembrada no tiene historial) | medido | agente |
 | ☑ | [03.3](03-caja.md) | P1 | "Enviar conteo" congela el conteo sin pedir confirmar el número tecleado — **hecho 2026-10-16** | medido | agente + owner |
@@ -557,7 +557,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
 | ☑ | [02.6](02-salones-y-mesas.md) | P2 | Quitar una línea de la cuenta es inmediato, sin confirmar ni deshacer — **hecho 2026-10-16** (aviso con "Deshacer", sin confirmar cada línea) | agente |
-| ☐ | [02.7](02-salones-y-mesas.md) | P2 | La precuenta solo existe en papel; si la impresora falla, no se ve el total | owner |
+| ☑ | [02.7](02-salones-y-mesas.md) | P2 | La precuenta solo existe en papel; si la impresora falla, no se ve el total — **hecho 2026-10-16** ("Ver precuenta": total, propina sugerida y total con propina; el IVA va con 02.10, fiscal) | owner |
 | ☐ | [02.8](02-salones-y-mesas.md) | P2 | En el cobro de una mesa, el vuelto va en la letra más chica | agente |
 | ☐ | [02.9](02-salones-y-mesas.md) | P2 | La propina del 10% viene sumada al cobrar y no hay atajos para sacarla | owner |
 | ☐ | [02.10](02-salones-y-mesas.md) | P2 | La cuenta suma sin IVA, el total lleva IVA y nadie explica la diferencia | owner |
@@ -566,7 +566,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [02.13](02-salones-y-mesas.md) | P2 | El panel de la mesa no tiene botón de cerrar — **hecho 2026-10-16** | agente |
 | ☑ | [02.14](02-salones-y-mesas.md) | P2 | A 768 la cuenta queda abajo y caben solo 4 líneas — **hecho 2026-10-16** | agente |
 | ☑ | [02.15](02-salones-y-mesas.md) | P2 | "Entrar a turno" no muestra quién está y "Salir de turno" cierra sin confirmar — **hecho 2026-10-16** (la barra dice en qué turno está; "Salir de turno" confirma y, en la tablet personal, dice cuántas cuentas quedan abiertas) | agente |
-| ☐ | [02.16](02-salones-y-mesas.md) | P2 | El modal de turno preselecciona el primero de la lista, no el de la hora | owner |
+| ☑ | [02.16](02-salones-y-mesas.md) | P2 | El modal de turno preselecciona el primero de la lista, no el de la hora — **hecho 2026-10-16** | owner |
 | ☑ | [02.17](02-salones-y-mesas.md) | P2 | Al entrar al salón sale siempre una alerta de PIN ámbar de contraste bajo *(ver 00.8)* — **hecho 2026-10-16** | agente |
 | ☑ | [02.18](02-salones-y-mesas.md) | P2 | Los avisos ámbar y el "Cancelar cuenta" rojo no tienen contraste suficiente — **resuelto por el lote 00.8** (tonos propios: ámbar 4,52:1 y rojo 5,35:1 sobre su fondo teñido) | agente |
 | ☑ | [02.19](02-salones-y-mesas.md) | P2 | En "Cancelar cuenta", los botones "Cancelar" y "Cancelar cuenta" se confunden — **hecho 2026-10-16** | agente |

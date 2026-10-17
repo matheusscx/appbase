@@ -16,6 +16,8 @@ import { useImpresoras } from './useImpresoras'
 let calls: string[] = []
 let impresorasComanda: unknown[] = []
 let impresorasBoleta: unknown[] = []
+let comandaEnviada: unknown = { estaciones: [], enviadaEl: null }
+let reclamos = 0
 
 /**
  * `qz-tray` es solo-navegador; `imprimirEn()` (interno de `useImpresoras`) lo
@@ -60,7 +62,14 @@ vi.mock('qz-tray', () => ({ default: qzMock }))
 mockNuxtImport('useApiFetch', () => {
   return (url: string) => {
     if (url.includes('/impresoras/qz/certificado')) return Promise.resolve({ certificado: null })
-    if (url.includes('/comanda/reclamar')) return Promise.resolve({ estaciones: [] })
+    if (url.includes('/comanda/reclamar')) {
+      reclamos++
+      return Promise.resolve({ estaciones: [] })
+    }
+    if (url.includes('/comanda/enviada')) {
+      calls.push(url)
+      return Promise.resolve(comandaEnviada)
+    }
     calls.push(url)
     if (url.includes('/impresoras/operacion')) {
       return Promise.resolve(url.includes('rol=comanda') ? impresorasComanda : impresorasBoleta)
@@ -292,5 +301,63 @@ describe('useImpresoras — imprimirPrueba()', () => {
     await expect(useImpresoras().imprimirPrueba({
       nombre: 'Cocina', tipoConexion: 'red', host: '10.0.0.1', puerto: 9100, nombreCola: null,
     })).rejects.toThrow('No se pudo imprimir. Revisa la impresora.')
+  })
+})
+
+// 02.5: "Reimprimir comanda" es una copia de lo ya despachado. Nunca reclama.
+describe('useImpresoras — reimprimir la comanda', () => {
+  const copia = {
+    estaciones: [{
+      impresoraId: 'imp-c1',
+      nombre: 'Cocina',
+      items: [{ cuentaLineaId: 'l1', nombre: 'Lomo', cantidad: '2', cantidadEnviada: '2' }],
+    }],
+    enviadaEl: '2026-10-16T21:14:00.000Z',
+  }
+  const contexto = { mesaNombre: 'Mesa 1', cuentaNumero: 4, garzonNombre: 'Ana' }
+
+  beforeEach(() => {
+    calls = []
+    reclamos = 0
+    impresorasComanda = [
+      { id: 'imp-c1', tipoConexion: 'red', host: '10.0.0.8', puerto: 9100, nombreCola: null, activo: true },
+    ]
+    qzState.activo = true
+    qzMock.print.mockClear()
+    qzMock.print.mockImplementation(() => Promise.resolve())
+  })
+
+  it('consultarComandaEnviada() lee GET /cuentas/:id/comanda/enviada', async () => {
+    comandaEnviada = copia
+    const res = await useImpresoras().consultarComandaEnviada('cuenta-1')
+
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toContain('/cuentas/cuenta-1/comanda/enviada')
+    expect(res).toEqual(copia)
+  })
+
+  it('imprime la copia marcada COPIA y no reclama nada', async () => {
+    const impreso = await useImpresoras().reimprimirComanda(copia, contexto)
+
+    expect(impreso).toBe(true)
+    expect(reclamos).toBe(0)
+    expect(qzMock.print).toHaveBeenCalledTimes(1)
+    const datos = ((qzMock.print.mock.calls[0] as unknown[])[1] as string[]).join('')
+    expect(datos).toContain('COPIA')
+    expect(datos).toContain('2 x Lomo')
+  })
+
+  it('sin impresoras de comanda activas devuelve false y no toca QZ', async () => {
+    impresorasComanda = []
+    const impreso = await useImpresoras().reimprimirComanda(copia, contexto)
+
+    expect(impreso).toBe(false)
+    expect(qzMock.print).not.toHaveBeenCalled()
+  })
+
+  it('si la impresora no responde, el error es el mismo mensaje en castellano', async () => {
+    qzMock.print.mockImplementation(() => Promise.reject(new Error('boom')))
+    await expect(useImpresoras().reimprimirComanda(copia, contexto))
+      .rejects.toThrow('No se pudo imprimir. Revisa la impresora.')
   })
 })

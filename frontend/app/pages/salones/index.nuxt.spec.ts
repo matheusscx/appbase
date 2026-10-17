@@ -327,6 +327,18 @@ let reclamosDeComanda: string[] = []
  */
 let estacionesReclamadas: unknown[] = []
 /**
+ * Lo que contesta `GET /cuentas/:id/comanda/enviada` (la copia de "Reimprimir comanda", 02.5) y
+ * cada lectura que se hizo, con el id de la cuenta.
+ */
+let comandaEnviadaMock: unknown = { estaciones: [], enviadaEl: null }
+let lecturasDeComandaEnviada: string[] = []
+/** Los turnos que lista `GET /turnos` (02.16). */
+let turnosMock: unknown[] = [{ id: 'turno-1', nombre: 'Mañana', horaInicio: '00:00', horaFin: '23:59', activo: true }]
+/** Los bodies de `POST /sesiones-garzon/iniciar`. */
+let bodiesIniciarSesion: Record<string, unknown>[] = []
+/** Lo que contesta `GET /propinas/porcentaje-sugerido`. */
+let propinaMock = { porcentajeSugerido: '0.1', habilitado: true }
+/**
  * Cada `POST /cuentas/:id/cerrar`, con el id que viajó en la URL.
  *
  * Es la prueba de que el cobro que el garzón ya confirmó **con su PIN** salió, y
@@ -695,9 +707,7 @@ mockNuxtImport('useApiFetch', () => {
     // El teclado de PIN resuelve al garzón contra el backend ANTES de emitir
     // `confirm`: sin esto el flujo nunca llega a abrir la cuenta.
     if (ruta.endsWith('/turnos')) {
-      return Promise.resolve([
-        { id: 'turno-1', nombre: 'Mañana', activo: true },
-      ])
+      return Promise.resolve(turnosMock)
     }
     if (ruta.endsWith('/sesiones-garzon/activa')) {
       bodiesSesionActiva.push((opts?.body ?? {}) as Record<string, unknown>)
@@ -708,6 +718,7 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve({ id: 'sesion-1', garzonNombre: 'Ana', turnoNombre: 'Mañana', cuentasPendientes: [] })
     }
     if (ruta.endsWith('/sesiones-garzon/iniciar')) {
+      bodiesIniciarSesion.push((opts?.body ?? {}) as Record<string, unknown>)
       const sesion = { id: 'sesion-1', garzonNombre: 'Ana', turnoNombre: 'Mañana' }
       return Promise.resolve(sesion)
     }
@@ -795,7 +806,7 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve(salonesMock)
     }
     if (ruta.endsWith('/propinas/porcentaje-sugerido')) {
-      return Promise.resolve({ porcentajeSugerido: '0.1', habilitado: true })
+      return Promise.resolve(propinaMock)
     }
     // El detalle que pide el panel de personalización al abrirse. Solo para `item-receta`: sin esto
     // la carga falla y el panel se cierra solo, y el resto de las lecturas de `/items` siguen
@@ -945,6 +956,11 @@ mockNuxtImport('useApiFetch', () => {
       // impresora de comanda por impresora de boleta.
       return Promise.resolve(url.includes('rol=comanda') ? impresorasComanda : impresorasBoleta)
     }
+    const enviadaMatch = ruta.match(/\/cuentas\/([^/]+)\/comanda\/enviada$/)
+    if (enviadaMatch) {
+      lecturasDeComandaEnviada.push(enviadaMatch[1] ?? '')
+      return Promise.resolve(comandaEnviadaMock)
+    }
     const reclamarMatch = ruta.match(/\/cuentas\/([^/]+)\/comanda\/reclamar$/)
     if (reclamarMatch) {
       reclamosDeComanda.push(reclamarMatch[1] ?? '')
@@ -1023,6 +1039,11 @@ function reiniciarMock() {
   qzFalla.activa = false
   reclamosDeComanda = []
   estacionesReclamadas = []
+  comandaEnviadaMock = { estaciones: [], enviadaEl: null }
+  lecturasDeComandaEnviada = []
+  turnosMock = [{ id: 'turno-1', nombre: 'Mañana', horaInicio: '00:00', horaFin: '23:59', activo: true }]
+  bodiesIniciarSesion = []
+  propinaMock = { porcentajeSugerido: '0.1', habilitado: true }
   cierresDeCuenta = []
   bodiesDeCierre = []
   clavesDeCierre = []
@@ -8666,9 +8687,271 @@ describe('salones — auditoría UX grupo 02', () => {
       expect(wrapper.text()).not.toContain('En turno:')
       wrapper.findAll('button').find(b => b.text() === 'Entrar a turno')!.trigger('click')
       await esperar(60)
-      botonEn(dialogos().find(d => d.textContent?.includes('Selecciona el turno')), 'Continuar')!.click()
+      botonEn(dialogos().find(d => d.textContent?.includes('Entrar a turno')), 'Continuar')!.click()
       await esperar(80)
       expect(wrapper.text()).toContain('En turno: Mañana')
+    })
+  })
+
+  // ── 02.5 ──
+  describe('02.5: Reimprimir comanda', () => {
+    const SALIO = new Date(2026, 9, 16, 21, 14)
+    const copia = () => ({
+      estaciones: [{
+        impresoraId: 'imp-1',
+        nombre: 'Cocina',
+        items: [{ cuentaLineaId: 'linea-2', nombre: 'Hamburguesa', cantidad: '1', cantidadEnviada: '1' }],
+      }],
+      enviadaEl: SALIO.toISOString(),
+    })
+    const lineas = () => [
+      { ...LINEA, id: 'linea-1', nombre: 'Papas fritas', cantidadEnviada: '0' },
+      { ...LINEA, id: 'linea-2', nombre: 'Hamburguesa', cantidadEnviada: '1' },
+    ]
+    const impresora = () => ({
+      id: 'imp-1', nombre: 'Cocina', rol: 'comanda', activo: true, tipoConexion: 'red', host: '10.0.0.9', puerto: 9100, nombreCola: null,
+    })
+    const confirmacion = () => dialogos().find(d => d.textContent?.includes('Reimprimir comanda') && botonEn(d, 'Sí, reimprimir'))
+
+    it('con algo enviado ofrece el botón, y pregunta con la hora de salida antes de imprimir', async () => {
+      cuentasDeLaMesa = [cuentaCon(lineas())]
+      impresorasComanda = [impresora()]
+      comandaEnviadaMock = copia()
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+
+      const boton = botonEn(drawerMesa(), 'Reimprimir comanda')
+      expect(boton, 'botón').toBeTruthy()
+      expect(clases(boton), 'táctil de 44 px').toMatch(M44)
+      boton!.click()
+      await esperar(80)
+
+      expect(lecturasDeComandaEnviada).toEqual(['cuenta-9'])
+      expect(confirmacion()?.textContent).toContain('Ya salió a las 21:14. ¿Imprimirla de nuevo?')
+      expect(impresionesQz, 'preguntar no imprime').toEqual([])
+    })
+
+    it('al confirmar sale la copia marcada COPIA, y no se reclama nada', async () => {
+      cuentasDeLaMesa = [cuentaCon(lineas())]
+      impresorasComanda = [impresora()]
+      comandaEnviadaMock = copia()
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Reimprimir comanda')!.click()
+      await esperar(80)
+
+      botonEn(confirmacion(), 'Sí, reimprimir')!.click()
+      await esperar(120)
+
+      expect(impresionesQz).toHaveLength(1)
+      const papel = impresionesQz[0]!.join('\n')
+      expect(papel).toContain('COPIA')
+      expect(papel).toContain('1 x Hamburguesa')
+      expect(papel).not.toContain('Papas fritas')
+      expect(reclamosDeComanda, 'reimprimir no es mandar').toEqual([])
+      expect(toasts.filter(t => t.color === 'error')).toEqual([])
+    })
+
+    it('cancelar la pregunta no imprime nada', async () => {
+      cuentasDeLaMesa = [cuentaCon(lineas())]
+      impresorasComanda = [impresora()]
+      comandaEnviadaMock = copia()
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Reimprimir comanda')!.click()
+      await esperar(80)
+
+      botonEn(confirmacion(), 'Volver')!.click()
+      await esperar(80)
+
+      expect(impresionesQz).toEqual([])
+      expect(reclamosDeComanda).toEqual([])
+    })
+
+    it('si la impresora no responde, avisa en rojo y la cuenta no cambia', async () => {
+      cuentasDeLaMesa = [cuentaCon(lineas())]
+      impresorasComanda = [impresora()]
+      comandaEnviadaMock = copia()
+      qzFalla.activa = true
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Reimprimir comanda')!.click()
+      await esperar(80)
+      botonEn(confirmacion(), 'Sí, reimprimir')!.click()
+      await esperar(120)
+
+      expect(toasts.some(t => t.color === 'error')).toBe(true)
+      expect(reclamosDeComanda).toEqual([])
+    })
+
+    it('sin nada enviado no hay qué reimprimir: el botón no se ofrece', async () => {
+      cuentasDeLaMesa = [cuentaCon([{ ...LINEA, cantidadEnviada: '0' }])]
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      expect(botonEn(drawerMesa(), 'Reimprimir comanda')).toBeUndefined()
+    })
+
+    it('si lo enviado no tiene estación que imprima, lo dice en vez de abrir una pregunta vacía', async () => {
+      cuentasDeLaMesa = [cuentaCon(lineas())]
+      impresorasComanda = [impresora()]
+      comandaEnviadaMock = { estaciones: [], enviadaEl: null }
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Reimprimir comanda')!.click()
+      await esperar(80)
+
+      expect(confirmacion()).toBeUndefined()
+      expect(toasts.at(-1)?.title).toBe('No hay nada que reimprimir')
+    })
+
+    it('sin hora guardada pregunta igual, sin inventar una', async () => {
+      cuentasDeLaMesa = [cuentaCon(lineas())]
+      impresorasComanda = [impresora()]
+      comandaEnviadaMock = { ...copia(), enviadaEl: null }
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Reimprimir comanda')!.click()
+      await esperar(80)
+
+      const texto = confirmacion()?.textContent ?? ''
+      expect(texto).toContain('Ya salió. ¿Imprimirla de nuevo?')
+      expect(texto).not.toMatch(/a las \d/)
+    })
+  })
+
+  // ── 02.7 ──
+  describe('02.7: precuenta en pantalla', () => {
+    const panel = () => dialogos().find(d => d.textContent?.includes('Propina sugerida') || d.getAttribute('data-qa') === 'precuenta')
+    const sinEspacios = (el: HTMLElement | undefined) => (el?.textContent ?? '').replace(/\s/g, '')
+
+    it('"Ver precuenta" muestra el total, la propina sugerida con su monto y el total con propina', async () => {
+      totalDelCalculo = '5000'
+      cuentasDeLaMesa = [cuentaCon([LINEA])]
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+
+      botonEn(drawerMesa(), 'Ver precuenta')!.click()
+      await esperar(120)
+
+      const texto = sinEspacios(panel())
+      expect(texto).toContain('Cuenta9')
+      expect(texto).toContain('Totalsinpropina$5.000')
+      expect(texto).toContain('Propinasugerida10%$500')
+      expect(texto).toContain('Totalconpropina$5.500')
+      expect(impresionesQz, 'verla no imprime').toEqual([])
+    })
+
+    it('el monto de la propina respeta el redondeo a la escala de la moneda', async () => {
+      totalDelCalculo = '3333'
+      cuentasDeLaMesa = [cuentaCon([LINEA])]
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Ver precuenta')!.click()
+      await esperar(120)
+
+      const texto = sinEspacios(panel())
+      expect(texto).toContain('Propinasugerida10%$333')
+      expect(texto).toContain('Totalconpropina$3.666')
+    })
+
+    it('con la propina apagada, la precuenta muestra solo el total', async () => {
+      propinaMock = { porcentajeSugerido: '0.1', habilitado: false }
+      cuentasDeLaMesa = [cuentaCon([LINEA])]
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Ver precuenta')!.click()
+      await esperar(120)
+
+      const texto = sinEspacios(dialogos().find(d => d.textContent?.includes('Precuenta') && botonEn(d, 'Imprimir')))
+      expect(texto).toContain('Total$5.000')
+      expect(texto).not.toContain('Propina')
+    })
+
+    it('"Imprimir" del panel manda la misma precuenta al papel', async () => {
+      cuentasDeLaMesa = [cuentaCon([LINEA])]
+      impresorasBoleta = [{
+        id: 'imp-b1', nombre: 'Caja', rol: 'boleta', activo: true, tipoConexion: 'red', host: '10.0.0.8', puerto: 9100, nombreCola: null,
+      }]
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Ver precuenta')!.click()
+      await esperar(120)
+
+      const modal = dialogos().find(d => d.textContent?.includes('Propina sugerida'))
+      botonEn(modal, 'Imprimir')!.click()
+      await esperar(200)
+
+      expect(impresionesQz).toHaveLength(1)
+      expect(impresionesQz[0]!.join('\n')).toContain('Cuenta: 9')
+    })
+
+    it('si el cálculo falla no abre un panel con montos inventados', async () => {
+      calculoFalla = true
+      cuentasDeLaMesa = [cuentaCon([LINEA])]
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      botonEn(drawerMesa(), 'Ver precuenta')!.click()
+      await esperar(120)
+
+      expect(dialogos().some(d => d.textContent?.includes('Propina sugerida'))).toBe(false)
+      expect(toasts.some(t => t.color === 'error')).toBe(true)
+    })
+  })
+
+  // ── 02.16 ──
+  describe('02.16: el turno de la hora', () => {
+    const dosTurnos = () => [
+      { id: 'turno-m', nombre: 'Mañana', horaInicio: '08:00', horaFin: '15:00', activo: true },
+      { id: 'turno-t', nombre: 'Tarde', horaInicio: '15:00', horaFin: '23:00', activo: true },
+    ]
+    const modalTurno = () => dialogos().find(d => d.textContent?.includes('Selecciona el turno') || d.textContent?.includes('Entrar a turno'))
+
+    afterEach(() => {
+      vi.useRealTimers()
+    })
+
+    it('a las 20:00 entra preseleccionado el turno de la tarde, no el primero de la lista', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(2026, 9, 16, 20, 0))
+      vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+      turnosMock = dosTurnos()
+      const wrapper = await montar()
+      await esperar(30)
+      wrapper.findAll('button').find(b => b.text() === 'Entrar a turno')!.trigger('click')
+      await esperar(80)
+
+      expect(modalTurno()?.textContent).toContain('Tarde (15:00–23:00)')
+      botonEn(modalTurno(), 'Continuar')!.click()
+      await esperar(100)
+      expect(bodiesIniciarSesion.at(-1)?.turnoId).toBe('turno-t')
+    })
+
+    it('la garzona puede cambiarlo antes de continuar', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(2026, 9, 16, 20, 0))
+      vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+      turnosMock = dosTurnos()
+      const wrapper = await montar()
+      await esperar(30)
+      wrapper.findAll('button').find(b => b.text() === 'Entrar a turno')!.trigger('click')
+      await esperar(80)
+
+      const selector = modalTurno()!.querySelector<HTMLElement>('[role="combobox"], button[aria-haspopup="listbox"]')
+      expect(selector, 'el selector sigue siendo editable').toBeTruthy()
+      expect((selector as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    it('si ningún turno contiene la hora, no hay nada elegido y "Continuar" espera', async () => {
+      vi.useFakeTimers({ toFake: ['Date'] })
+      vi.setSystemTime(new Date(2026, 9, 16, 5, 0))
+      vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+      turnosMock = dosTurnos()
+      const wrapper = await montar()
+      await esperar(30)
+      wrapper.findAll('button').find(b => b.text() === 'Entrar a turno')!.trigger('click')
+      await esperar(80)
+
+      expect(botonEn(modalTurno(), 'Continuar')?.disabled).toBe(true)
     })
   })
 

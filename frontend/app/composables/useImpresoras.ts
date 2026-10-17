@@ -118,6 +118,11 @@ interface ComandaPreviewResponse {
   estaciones: ComandaEstacion[]
 }
 
+export interface ComandaEnviadaResponse {
+  estaciones: ComandaEstacion[]
+  enviadaEl: string | null
+}
+
 // qz-tray es solo-navegador (usa WebSocket/window). Cargarlo de forma perezosa
 // evita que se evalúe durante el SSR (habilitado por defecto) y rompa el render.
 let qzPromise: Promise<(typeof import('qz-tray'))['default']> | null = null
@@ -316,6 +321,42 @@ export function useImpresoras() {
   }
 
   /**
+   * Lo que YA salió a cocina, para "Reimprimir comanda" (auditoría UX 02.5). Solo lee: no reclama
+   * ni avanza `cantidad_enviada`. `enviadaEl` es la última salida (`null` si no se guardó la hora).
+   */
+  const consultarComandaEnviada = (cuentaId: string) =>
+    useApiFetch<ComandaEnviadaResponse>(`${apiUrl}/cuentas/${cuentaId}/comanda/enviada`)
+
+  /**
+   * Imprime una copia de lo ya despachado, marcada COPIA. **No reclama**: reimprimir no es mandar,
+   * y reclamar de nuevo dejaría la cuenta lista para cocinar dos veces lo mismo. La pide la persona;
+   * no hay reintento automático. `false` = no hay impresoras de comanda activas (no se imprimió).
+   */
+  async function reimprimirComanda(
+    copia: ComandaEnviadaResponse,
+    contexto: { mesaNombre: string, cuentaNumero: number, garzonNombre: string | null },
+  ): Promise<boolean> {
+    const impresoras = await listarOperativas('comanda')
+    if (impresoras.length === 0) return false
+    const enviadaEl = copia.enviadaEl ? new Date(copia.enviadaEl) : null
+    for (const estacion of copia.estaciones) {
+      const impresora = impresoras.find(i => i.id === estacion.impresoraId)
+      if (!impresora) continue
+      const lineas = buildComandaTicket({
+        estacionNombre: estacion.nombre,
+        mesaNombre: contexto.mesaNombre,
+        cuentaNumero: contexto.cuentaNumero,
+        garzonNombre: contexto.garzonNombre,
+        items: estacion.items,
+        fecha: new Date(),
+        copia: { enviadaEl },
+      })
+      await imprimirEn(impresora, lineas, apiUrl)
+    }
+    return true
+  }
+
+  /**
    * "Imprimir prueba" (auditoría UX 07.17): una hoja corta a un destino que todavía puede no estar
    * guardado (el formulario abierto). No reclama comandas ni toca el estado del local; si la
    * impresora no responde, falla con el mismo mensaje que cualquier impresión.
@@ -400,6 +441,8 @@ export function useImpresoras() {
     eliminar,
     imprimirPrueba,
     imprimirComanda,
+    consultarComandaEnviada,
+    reimprimirComanda,
     imprimirPrecuenta,
     imprimirBoleta,
   }

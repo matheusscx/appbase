@@ -8,6 +8,8 @@ const dateFmt = new Intl.DateTimeFormat('es-CL', {
 
 const dateOnlyFmt = new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium' })
 const horaFmt = new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit' })
+/** `21:14` siempre en 24 h, sin depender de cómo el motor de `es-CL` resuelva el ciclo de horas. */
+const hora24Fmt = new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit', hourCycle: 'h23' })
 const diaSemanaFmt = new Intl.DateTimeFormat('es-CL', { weekday: 'long' })
 
 /**
@@ -43,6 +45,11 @@ export function useFormatters() {
   function formatHora(fecha: Date | null | undefined): string {
     if (!fecha) return '—'
     return horaFmt.format(fecha)
+  }
+
+  /** `HH:MM` en 24 h — para decir cuándo pasó algo ("Ya salió a las 21:14"). */
+  function formatHora24(fecha: Date): string {
+    return hora24Fmt.format(fecha)
   }
 
   function formatFecha(iso: string | null | undefined): string {
@@ -164,7 +171,7 @@ export function useFormatters() {
   // su propia regla (los decimales de la moneda son el piso, ver `useCurrency`).
   // Va por acá y no importando `useCurrency` en la página porque las pantallas
   // formatean por `useFormatters` — una sola puerta, no dos.
-  return { formatMonto, formatCosto, formatFecha, formatHora, formatHace: textoHace, formatDiaSemana, formatStock, formatCantidadConUnidad, formatTipoPago, formatPorcentaje, formatPorcentajeCorto, formatCostoPorMoneda, esAjusteDeValor }
+  return { formatMonto, formatCosto, formatFecha, formatHora, formatHora24, formatHace: textoHace, formatDiaSemana, formatStock, formatCantidadConUnidad, formatTipoPago, formatPorcentaje, formatPorcentajeCorto, formatCostoPorMoneda, esAjusteDeValor }
 }
 
 /**

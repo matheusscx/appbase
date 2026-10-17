@@ -30,7 +30,8 @@ imprimiendo directo desde el dispositivo del garzón/cajero, que sí está en es
   desde el POS de mostrador; **nota de personalización** (omitidos, extras,
   comentario) en comanda/precuenta/boleta vía `TicketItem.nota`; **reimpresión de
   boleta** de una venta pagada o anulada, marcada `COPIA` (2026-09-17; `ANULADA` la anulada, 2026-09-18).
-- NO incluido (futuro): reimpresión de comandas, impresoras de rol dual.
+- **Reimpresión de comanda (2026-10-16, auditoría UX 02.5)**: copia de lo ya despachado, a pedido de la persona.
+- NO incluido (futuro): impresoras de rol dual.
 
 ---
 
@@ -56,10 +57,28 @@ La comanda usa **claim atómico** (permiso `Salones:Operar`, ver
 - `POST /cuentas/:id/comanda/reclamar` bajo `FOR UPDATE` calcula el diff pendiente,
   avanza `cantidad_enviada` y devuelve `{ estaciones: [...] }` a imprimir. Dos
   clients concurrentes no duplican cocina (el segundo recibe vacío).
+- `GET /cuentas/:id/comanda/enviada` (`Salones:Operar`) es la **copia para reimprimir**
+  (2026-10-16, owner, auditoría UX 02.5): devuelve lo que YA salió por estación (`cantidad_enviada`)
+  y `enviadaEl`, la última salida. Solo lee: **no reclama ni avanza `cantidad_enviada`**, porque
+  reimprimir no es mandar y reclamar de nuevo dejaría la cuenta lista para cocinar dos veces lo mismo.
+  La hora sale de `cuenta_lineas.enviada_el`, que escribe el claim junto con `cantidad_enviada`
+  (`NULL` = lo enviado antes de la columna, sin backfill: la pantalla pregunta sin hora). La pantalla
+  (botón "Reimprimir comanda", visible solo con algo enviado) lee, pregunta "Ya salió a las 21:14.
+  ¿Imprimirla de nuevo?" y recién al confirmar imprime; el papel lleva `*** COPIA ***` y "Ya salió
+  antes. No repetir." para que cocina no lo cocine otra vez. Sin reintento automático: si la impresora
+  no responde, avisa y la persona decide.
 - `GET /cuentas/:id/comanda/pendiente` queda como preview de solo lectura (no muta).
 - El confirm legado `POST /cuentas/:id/comanda` se retiró el 2026-10-08 (owner): el FE ya no lo
   usaba tras el claim, y escribía lo despachado con el número que mandara el cliente (ver
   [`salones-mesas.md`](./salones-mesas.md) § Concurrencia).
+
+**Precuenta en pantalla (2026-10-16, auditoría UX 02.7)**: "Ver precuenta" en el drawer de la
+cuenta abre un panel con las líneas, el total del cálculo del servidor y, si la propina está
+encendida, la **propina sugerida (10 % por defecto) con su monto** y el **total con y sin propina**,
+como en el papel. Papel y pantalla comparten `propinaSugeridaDe` (misma función que la sugerencia del
+cobro, a la escala de la moneda); el total con propina se suma con Decimal. "Imprimir" del panel usa
+el mismo camino que el botón "Imprimir precuenta". El desglose de IVA no está en pantalla: va con
+02.10 (fiscal, frente propio).
 
 **Precuenta**: no tiene endpoint propio. Es del carrito vivo, todavía sin venta —el
 frontend arma el ticket con el resultado del motor de precios y lo imprime en la

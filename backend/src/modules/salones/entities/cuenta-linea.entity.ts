@@ -127,6 +127,15 @@ export class CuentaLinea {
   })
   cantidadEnviada: string;
 
+  /**
+   * Cuándo salió por última vez esta línea a cocina/barra: la escribe el claim junto con
+   * `cantidad_enviada`. Solo la lee "Reimprimir comanda" (auditoría UX 02.5) para decir
+   * "Ya salió a las 21:14". `null` = lo enviado antes de que existiera la columna (sin
+   * backfill: el proyecto no tiene datos productivos) o nunca enviada.
+   */
+  @Column({ name: 'enviada_el', type: 'timestamptz', nullable: true })
+  enviadaEl: Date | null;
+
   @Column({ type: 'jsonb', nullable: true })
   personalizacion: PersonalizacionRecetaSnapshot | null;
 
