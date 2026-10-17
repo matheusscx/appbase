@@ -1187,6 +1187,11 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
     repartidor entra con su usuario, escanea y marca la entrega con foto o el motivo de no
     entregado, con la ficha que la oficina ve en la hoja; su spec:
     [`2026-10-16-repartidor-entrega-desde-el-telefono-design.md`](../superpowers/specs/2026-10-16-repartidor-entrega-desde-el-telefono-design.md).
+    **En pausa por decisión del owner (2026-10-17)**, con el diseño escrito y sin plan. Antes de
+    planificar, el owner aprueba dos dependencias nuevas: la librería que lee QR en iPhone (el
+    respaldo de `BarcodeDetector`) y el almacenamiento de las fotos (bucket de Railway + cliente
+    S3). El spec es anterior a las tarifas de envío: el monto a cobrar que muestra el teléfono es
+    el precio de la línea (fijo o estimado), no un monto del paquete.
   - **Permisos propios por rol** — hoy todo es `TenantAdminGuard`: un cajero no puede rendir
     ni escanear, aunque la oficina quiera delegarlo.
   - **Que el backend exija el contrato del módulo** — `Paquetería:Leer` solo lo lee el menú: un
