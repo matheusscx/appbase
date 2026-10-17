@@ -1,8 +1,8 @@
 # Feature: Paquetería (repartidores, hojas de ruta y rendición)
 
-**Status**: Complete (MVP)
+**Status**: Complete (MVP + cuenta del repartidor: tarifas de pago, entregas de plata y rendición por repartidor; el frente del teléfono sigue pendiente)
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-10-16
+**Last Updated**: 2026-10-17
 
 ---
 
@@ -24,9 +24,13 @@ envío no emite documento tributario.
 
 ### Alcance
 
-- Esta versión: los dos valores por defecto, CRUD de repartidores y de paquetes, escaneo que
-  crea y asigna, asignación masiva, marcar entregado / no entregado, rendir la hoja, KPIs por
-  rango de fechas y un tenant demo.
+- MVP (2026-10-15): el precio de envío por defecto, CRUD de repartidores y de paquetes, escaneo
+  que crea y asigna, asignación masiva, marcar entregado / no entregado, KPIs por rango de
+  fechas y un tenant demo.
+- Cuenta del repartidor (2026-10-16/17): tarifas de pago con una por defecto (reemplazan al pago
+  por defecto), el pago que queda fijo en la línea al entregar, cobro en efectivo o
+  transferencia, entregas de plata a cuenta y **rendición por repartidor** sobre las hojas que se
+  elijan, con su planilla imprimible.
 - Fase 2 (no existe): [`desarrollo-nuevo.md`](../agent/desarrollo-nuevo.md) § *Paquetería — fase 2*.
 
 ### Decisiones de diseño (owner, 2026-10-15)
@@ -50,6 +54,12 @@ Cada punto lo eligió el owner con su costo a la vista; esto es lo que quedó y 
 | Acceso | Todo con `TenantAdminGuard` | Sin guard: viola la invariante 6 (un cajero rendiría hojas por API) |
 | Tenant demo | "Demo Gestión de Paquetes" con su admin propio y Paquetería como único módulo; el menú del admin muestra solo lo contratado | Sembrar en Demo Restaurante (el cliente vería un POS de restaurante); tenant propio con el menú de hoy (vería módulos que le dan 403) |
 | Total general | Σ `precio_envio` de todos los entregados, con o sin cobro en destino | — |
+| Cuánto se le paga al repartidor (owner, 2026-10-16) | **Tarifas de pago** con nombre (Bicicleta, Moto, Auto, Colina…), una por defecto; el repartidor o el paquete llevan la suya y el monto se copia a la línea al entregar | Un monto por defecto por empresa y override a mano por paquete: no cubre pagar distinto por vehículo ni por zona, y cambiarlo movía lo ya entregado |
+| Quién rinde (owner, 2026-10-16) | Por **repartidor**, sobre las hojas que la oficina elija (un día, una semana): una rendición con totales congelados | Rendir hoja por hoja: el repartidor cobra por semana y había que sumar a mano |
+| Plata que el repartidor deja antes de rendir | **Entregas de plata** (monto, medio, nota) que no pertenecen a un día; entran todas las pendientes en la próxima rendición | Atarlas a una hoja: la plata no se entrega el día que se cobra |
+| Cómo se cobra en destino | Efectivo o transferencia a la cuenta del repartidor; las dos cuentan igual en lo que debe | Solo efectivo: la oficina no distinguía qué plata tenía el repartidor en la mano |
+| Saldo de una rendición | cobrado − pago − entregado a cuenta; positivo lo debe el repartidor, negativo la empresa le paga; se arregla al rendir y no se arrastra | Arrastrar el saldo a la rendición siguiente |
+| Una rendición cerrada | Solo lectura, no se anula | Anular: movería totales que la oficina ya usó para pagar |
 
 ---
 
@@ -287,7 +297,7 @@ cargar una. IDs en el bloque `PAQUETERIA` del seeder (502-589; 580-583 las tarif
 ## Tarifas de pago
 
 Tabla `tarifas_pago` por tenant (nombre, monto, `es_defecto`, `activa`); diseño en
-`docs/superpowers/specs/2026-10-16-cuenta-del-repartidor-design.md` § 1. Reglas ya vigentes:
+el diseño original se borró al cerrarse el frente (queda en git). Reglas vigentes:
 
 - Exactamente una por defecto y viva (índice único parcial); la **primera** que se crea lo es
   aunque no se pida. La por defecto no se desactiva ni se borra: se marca otra antes (400).
@@ -358,7 +368,8 @@ filtra `tenant_id` y `eliminado_el IS NULL` **en cada tabla unida**.
 ## Frontend
 
 Páginas en `frontend/app/pages/paquetes/` (`escanear.vue`, `index.vue`, `rutas/index.vue`,
-`rutas/[id].vue`) y `pages/configuracion/` (`repartidores.vue`, `paqueteria.vue`); lógica de
+`rutas/[id].vue`, `rendiciones/index.vue`, `rendiciones/nueva.vue`, `rendiciones/[id].vue`) y
+`pages/configuracion/` (`repartidores.vue`, `paqueteria.vue`); lógica de
 presentación en `composables/usePaqueteria.ts` y `useColaEscaneo.ts`.
 
 - **Escanear** (`/paquetes/escanear`), la pantalla principal del día: repartidor y fecha arriba,
@@ -373,8 +384,10 @@ presentación en `composables/usePaqueteria.ts` y `useColaEscaneo.ts`.
   cobrar en destino"*, y una fila por paquete (código, destinatario y
   dirección si los tiene) con su interruptor *Cobra en destino* (cambia el paquete al instante,
   con rollback si el servidor lo rechaza) y *Quitar* mientras la línea sigue en ruta y la hoja
-  está abierta. Cada fila muestra además el **precio del envío y el pago al repartidor** del
-  paquete, con un lápiz que abre un modal para cambiarlos solo para ese paquete (`PATCH
+  está abierta. Cada fila muestra además el **precio del envío, el pago al repartidor** (estimado
+  mientras la línea no se entrega) **y la tarifa** del paquete, con un lápiz que abre un modal
+  para cambiar el precio y elegir otra tarifa (un `USelect`; *Según repartidor* la quita) solo
+  para ese paquete (`PATCH
   /paquetes/:id`; la regla 7 sigue valiendo en el backend). Lo pidió el owner el 2026-10-16, solo
   para esta pantalla (en el detalle de la hoja no se editan montos). El modal con botón —y Enter
   que no guarda— es decisión de diseño: un campo de monto con el foco recibiría lo que tipee la
@@ -400,9 +413,22 @@ presentación en `composables/usePaqueteria.ts` y `useColaEscaneo.ts`.
   403 en cada carga.
 - **Rutas** (`/paquetes/rutas`): `AppRangoFechas`, las cuatro tarjetas de KPI del rango y una fila
   por hoja. **Detalle** (`/paquetes/rutas/:id`): totales con el neto destacado; cada paquete con
-  *Entregado* / *No entregado* / *En ruta* (deshace un marcado por error) / *Quitar*; *Marcar todos entregados*; **Rendir** con un modal que
-  dice *"Juan entrega $50.000"* o *"Se le pagan $X"*, bloqueado mientras quede algo en ruta.
-- **Configuración → Paquetería:** Repartidores (CRUD, activo/inactivo) y Valores por defecto.
+  *Entregado* (en un paquete con cobro: *Entregado en efectivo* y *Entregado por transferencia*) /
+  *No entregado* / *En ruta* (deshace un marcado por error) / *Quitar*; *Marcar todos entregados*
+  (en efectivo); *Rendir a <repartidor>* es un enlace a la pantalla de rendición, bloqueado en la
+  hoja mientras quede algo en ruta.
+- **Rendiciones** (`/paquetes/rendiciones`): las ya cerradas por rango de fechas. **Nueva**
+  (`/paquetes/rendiciones/nueva?repartidorId=…`): las hojas sin rendir del repartidor (marcadas
+  las que se pueden; una con paquetes en ruta no entra), sus entregas de plata (*Anotar*,
+  *Corregir*, *Anular*) y la **cuenta como quedaría**, que se vuelve a pedir (`/rendiciones/previa`)
+  en cada cambio; *Rendir* pide confirmación con el saldo. La pantalla que sigue muestra lo que
+  devolvió el POST, no la previa: si alguien anotó una entrega en el medio, el monto final es
+  el del servidor. **Planilla** (`/paquetes/rendiciones/:id`, sin layout para imprimir): una fila
+  por día con el conteo por tarifa, el pago y el cobrado por medio, las entregas a cuenta y el
+  saldo en grande.
+- **Configuración → Paquetería:** Repartidores (CRUD, activo/inactivo, tarifa propia) y Valores
+  por defecto (el precio de envío y, en la misma pantalla, las tarifas de pago: alta, edición y
+  cuál es la por defecto).
 
 ## Testing
 
@@ -410,10 +436,13 @@ presentación en `composables/usePaqueteria.ts` y `useColaEscaneo.ts`.
 cd backend && npm test -- modules/paqueteria
 cd backend && npm run test:e2e -- paqueteria.e2e-spec     # totales, escaneo, flujo, bloqueos, 403, aislamiento
 cd frontend && npm test
-cd frontend && npm run e2e -- paqueteria                  # escanear → marcar → rendir (Playwright, stack propio)
+cd frontend && npm run e2e -- paqueteria                  # escanear → marcar → entrega de plata → rendir (Playwright, stack propio)
 ```
 
-El Playwright simula la pistola tipeando el código + Enter en el campo.
+El Playwright simula la pistola tipeando el código + Enter en el campo. Como *Demo Restaurante*
+no trae tarifas, cada test crea las suyas con nombre propio y un repartidor propio, y lee la
+planilla anclada a su `data-qa`; además compara el saldo de la pantalla con el que quedó
+congelado en `GET /rendiciones/:id`.
 
 ## Risks & Mitigations
 

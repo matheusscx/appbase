@@ -14,7 +14,7 @@ import { entrarComo } from '../support/ui'
  */
 
 /** Las 26 pantallas del menú plano anterior —agrupar no puede perder ni duplicar ninguna— más las
- * 3 de Paquetería, que Paris (el tenant del e2e) contrata. */
+ * 4 de Paquetería, que Paris (el tenant del e2e) contrata. */
 const PANTALLAS = [
   '/', '/mi-caja', '/cajas',
   '/ventas/pos', '/ventas', '/pagos', '/ordenes',
@@ -25,7 +25,7 @@ const PANTALLAS = [
   '/inventario', '/inventario/recuentos', '/inventario/traslados', '/mermas',
   '/inventario/stock', '/desfases',
   '/compras', '/compras/por-pagar',
-  '/paquetes/escanear', '/paquetes', '/paquetes/rutas',
+  '/paquetes/escanear', '/paquetes', '/paquetes/rutas', '/paquetes/rendiciones',
   '/reportes', '/admin',
 ]
 

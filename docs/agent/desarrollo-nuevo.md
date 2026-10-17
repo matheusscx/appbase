@@ -1180,14 +1180,19 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
 - [ ] **Paquetería — fase 2** (producto + backend + frontend; el MVP se construyó el 2026-10-15,
   [`features/paqueteria.md`](../features/paqueteria.md), y dejó esto afuera a propósito). Cada
   punto abre su frente con spec; el documento tributario es **fiscal: frente propio**.
-  - **Login del repartidor** — hoy es una ficha que maneja la oficina; un usuario propio con
-    pantalla móvil suma rol, permisos y UI.
+  - ✅ **Hecho el 2026-10-17: tarifas de pago al repartidor y rendición por repartidor**
+    (tarifas con una por defecto, pago fijo en la línea, efectivo o transferencia, entregas de
+    plata a cuenta, rendición sobre las hojas que se elijan y su planilla): vive en
+    [`features/paqueteria.md`](../features/paqueteria.md). **Queda el frente del teléfono** — el
+    repartidor entra con su usuario, escanea y marca la entrega con foto o el motivo de no
+    entregado, con la ficha que la oficina ve en la hoja; su spec:
+    [`2026-10-16-repartidor-entrega-desde-el-telefono-design.md`](../superpowers/specs/2026-10-16-repartidor-entrega-desde-el-telefono-design.md).
   - **Permisos propios por rol** — hoy todo es `TenantAdminGuard`: un cajero no puede rendir
     ni escanear, aunque la oficina quiera delegarlo.
   - **Que el backend exija el contrato del módulo** — `Paquetería:Leer` solo lo lee el menú: un
     admin de un tenant que no la contrató usa la API igual (borde comercial, no de aislamiento).
-  - **Precio por comuna o por repartidor** — hoy es un default por empresa con override por
-    paquete.
+  - **Precio de envío por comuna** — hoy es un default por empresa con override por paquete (el
+    pago al repartidor, por su parte, ya sale de las tarifas).
   - **Importar CSV/Excel** — hoy se carga escaneando, uno a uno o por asignación masiva.
   - **API de Mercado Libre** — traer dirección y destinatario con el id del envío (el QR real
     trae solo `id`, `sender_id`, `hash_code` y `security_digit`, confirmado el 2026-10-16). Sin

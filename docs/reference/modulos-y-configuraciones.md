@@ -83,13 +83,14 @@ un grupo, si le queda al menos una pantalla visible (en orden de aparición):
 | Paquetería | Escanear | `/paquetes/escanear` | Paquetería · Leer |
 | Paquetería | Paquetes | `/paquetes` | Paquetería · Leer |
 | Paquetería | Rutas | `/paquetes/rutas` | Paquetería · Leer |
+| Paquetería | Rendiciones | `/paquetes/rendiciones` | Paquetería · Leer |
 | — | Reportes | `/reportes` | Algún reporte visible (hoy solo *Varianza* · Leer) |
 | — | Administración | `/admin` | Solo superadmin |
 | *(abajo)* | Configuración | `/configuracion/perfil` | Siempre visible (abre el menú de §3) |
 | *(abajo)* | Cerrar sesión | — | Siempre visible |
 
 Suma: 8 sueltas + Ventas 4 + Salones 3 + Tienda Online 3 + Inventario 6 + Compras 2 = las 26
-pantallas que el menú plano tenía, cada una una vez; más las 3 de Paquetería y las 2 de abajo.
+pantallas que el menú plano tenía, cada una una vez; más las 4 de Paquetería y las 2 de abajo.
 
 **Quién ve cada entrada:** el gate es el permiso de la columna *Permiso* y nada más. El admin
 del tenant no tiene atajo (owner, 2026-10-15): ve los módulos que su tenant contrató —los
@@ -232,8 +233,8 @@ Los criterios de reparto de propinas son `PARTES_IGUALES`, `VENTAS_NETAS`,
 
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
-| **Repartidores** | Admin del tenant que contrató Paquetería | Nombre, teléfono y activo; no se puede eliminar uno con hojas de ruta: se desactiva |
-| **Valores por defecto** | Admin del tenant que contrató Paquetería | Precio de envío y pago al repartidor con que nace cada paquete; hasta guardarlos no se pueden escanear paquetes nuevos |
+| **Repartidores** | Admin del tenant que contrató Paquetería | Nombre, teléfono, tarifa de pago propia (opcional) y activo; no se puede eliminar uno con hojas de ruta: se desactiva |
+| **Valores por defecto** | Admin del tenant que contrató Paquetería | El precio de envío con que nace cada paquete y las **tarifas de pago** al repartidor (nombre, monto, activa; una es la por defecto). El repartidor o el paquete pueden llevar la suya y el monto se copia a la línea al entregar. Hasta guardar el precio y tener una tarifa no se pueden escanear paquetes nuevos |
 
 El gate es `admin` **y** `Paquetería:Leer` (que en `mis-permisos` aparece si el tenant
 contrató el módulo, y también si un rol propio lo recibió en Roles): el backend de las dos es admin-only, y el `lee()` del resto de la página

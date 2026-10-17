@@ -24,8 +24,7 @@ cámara y se abre la ficha:
   el botón dice **"Entregado y cobrado $10.000"** (entregar y cobrar son siempre lo mismo) y el
   repartidor elige **efectivo o transferencia** a su cuenta: las dos cuentan igual en lo que
   debe (owner, 2026-10-16; el modelo vive en
-  [`2026-10-16-cuenta-del-repartidor-design.md`](2026-10-16-cuenta-del-repartidor-design.md),
-  que se construye antes).
+  [`features/paqueteria.md`](../../features/paqueteria.md), ya construido).
 - **No entregado**, con un **motivo de una lista fija del sistema** y un **comentario opcional**.
 
 La oficina ve, en la hoja de ruta, el motivo, el comentario y la foto de cada entrega.
