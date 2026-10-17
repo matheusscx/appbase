@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { LARGO_RECEPTOR } from '~/composables/useReceptor'
+import { LARGO_RECEPTOR, rutValido } from '~/composables/useReceptor'
 import type { TableColumn } from '@nuxt/ui'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
@@ -184,6 +184,9 @@ async function guardar() {
   if (form.value.correo.trim() && !CORREO.test(form.value.correo.trim())) {
     faltan.correo = 'Escribe un correo válido, por ejemplo contacto@empresa.cl'
   }
+  // La regla es del servidor (`@RutChileno`); acá se repite para avisar junto al campo.
+  if (form.value.rut.trim() && !rutValido(form.value.rut)) faltan.rut = 'El RUT no es válido'
+  if (form.value.rutFiscal.trim() && !rutValido(form.value.rutFiscal)) faltan.rutFiscal = 'El RUT no es válido'
   if (marcar(faltan)) return
   saving.value = true
   try {
@@ -220,8 +223,10 @@ async function guardar() {
     drawerOpen.value = false
   }
   catch (e: unknown) {
-    const msg = apiErrorMsg(e, 'Error al guardar')
-    toast.add({ title: msg, color: 'error' })
+    // Un RUT que el servidor rechaza va junto al campo; el resto, al toast.
+    if (!marcar(apiFieldErrors(e))) {
+      toast.add({ title: apiErrorMsg(e, 'Error al guardar'), color: 'error' })
+    }
   }
   finally {
     saving.value = false
@@ -475,14 +480,14 @@ const columns: TableColumn<Tercero>[] = [
                   autofocus
                 />
               </UFormField>
-              <UFormField label="RUT">
-                <UInput v-model="form.rut" placeholder="76.123.456-7" />
+              <UFormField label="RUT" :error="errores.rut">
+                <UInput v-model="form.rut" placeholder="76.123.456-7" @update:model-value="limpiar('rut')" />
               </UFormField>
               <UFormField label="Nombre legal (razón social)">
                 <UInput v-model="form.nombreLegal" placeholder="Distribuidora Andina SpA" />
               </UFormField>
-              <UFormField label="RUT fiscal">
-                <UInput v-model="form.rutFiscal" placeholder="76.123.456-7" />
+              <UFormField label="RUT fiscal" :error="errores.rutFiscal">
+                <UInput v-model="form.rutFiscal" placeholder="76.123.456-7" @update:model-value="limpiar('rutFiscal')" />
               </UFormField>
               <UFormField label="Correo" :error="errores.correo">
                 <UInput v-model="form.correo" type="email" placeholder="contacto@empresa.cl" @update:model-value="limpiar('correo')" />

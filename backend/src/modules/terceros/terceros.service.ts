@@ -82,7 +82,15 @@ export class TercerosService {
     if (!tercero) {
       throw new NotFoundException(`Tercero ${id} no encontrado`);
     }
-    Object.assign(tercero, dto);
+    // Solo las claves que vinieron: `@RutChileno` (un `@Transform`) deja `rut: undefined` en el
+    // DTO aunque el body no lo traiga, y copiarlo borraba el RUT guardado. Omitir conserva;
+    // `null` (o `''`, que el decorador vuelve `null`) sí borra.
+    Object.assign(
+      tercero,
+      Object.fromEntries(
+        Object.entries(dto).filter(([, valor]) => valor !== undefined),
+      ),
+    );
     return this.terceroRepo.save(tercero);
   }
 

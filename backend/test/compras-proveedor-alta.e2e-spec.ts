@@ -84,11 +84,13 @@ describe('Compras — alta de proveedor desde la carga (e2e)', () => {
     const res = await request(app.getHttpServer())
       .post('/api/compras/proveedores')
       .set('Authorization', `Bearer ${tokenEncargado}`)
-      .send({ nombre, rut: '76.123.456-7', plazoPagoDias: 15 });
+      .send({ nombre, rut: '76.123.456-0', plazoPagoDias: 15 });
     expect(res.status).toBe(201);
     const creado = res.body as ProveedorCreado;
     expect(creado.nombre).toBe(nombre);
     expect(creado.plazoPagoDias).toBe(15);
+    // El RUT se guarda siempre con la misma forma (06.16).
+    expect(creado.rut).toBe('76123456-0');
 
     const lista = await request(app.getHttpServer())
       .get('/api/compras/proveedores')
@@ -121,6 +123,34 @@ describe('Compras — alta de proveedor desde la carga (e2e)', () => {
       (t) => t.id === (ok.body as ProveedorCreado).id,
     );
     expect(fila?.tipo).toBe('proveedor');
+  });
+
+  it('el RUT del proveedor se valida: DV malo es 400 junto al campo, vacío se permite (06.16)', async () => {
+    const post = (body: Record<string, unknown>) =>
+      request(app.getHttpServer())
+        .post('/api/compras/proveedores')
+        .set('Authorization', `Bearer ${tokenEncargado}`)
+        .send(body);
+
+    const malo = await post({
+      nombre: nombreUnico('RUT malo'),
+      rut: '76.123.456-7',
+    });
+    expect(malo.status).toBe(400);
+    expect((malo.body as { message: string[] }).message).toEqual([
+      'rut El RUT no es válido',
+    ]);
+
+    const sinPuntos = await post({
+      nombre: nombreUnico('RUT sin puntos'),
+      rut: '761234560',
+    });
+    expect(sinPuntos.status).toBe(201);
+    expect((sinPuntos.body as ProveedorCreado).rut).toBe('76123456-0');
+
+    const vacio = await post({ nombre: nombreUnico('Sin RUT'), rut: '' });
+    expect(vacio.status).toBe(201);
+    expect((vacio.body as ProveedorCreado).rut).toBeNull();
   });
 
   it('el nombre es obligatorio', async () => {

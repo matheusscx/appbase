@@ -54,17 +54,38 @@ describe('CrearProveedorModal', () => {
   it('manda solo el contrato angosto: nombre recortado, RUT y plazo si se escribieron', async () => {
     const wrapper = await abrir()
     await tipear('proveedor-nombre', '  Frutas del Sur ')
-    await tipear('proveedor-rut', '76.123.456-7')
+    await tipear('proveedor-rut', '76.123.456-0')
     await tipear('proveedor-plazo', '15')
     crear().click()
     await new Promise(r => setTimeout(r, 20))
     expect(llamadas).toEqual([{
       url: '/compras/proveedores',
       method: 'POST',
-      body: { nombre: 'Frutas del Sur', rut: '76.123.456-7', plazoPagoDias: 15 },
+      body: { nombre: 'Frutas del Sur', rut: '76.123.456-0', plazoPagoDias: 15 },
     }])
     expect(wrapper.emitted('creado')![0]![0]).toMatchObject({ id: 'prov-nuevo' })
     expect(avisos.map(a => a.title)).toContain('Proveedor creado')
+  })
+
+  it('RUT con dígito verificador malo: lo dice junto al campo y no envía (06.16)', async () => {
+    await abrir()
+    await tipear('proveedor-nombre', 'Frutas del Sur')
+    await tipear('proveedor-rut', '76.123.456-7')
+    crear().click()
+    await new Promise(r => setTimeout(r, 20))
+    expect(llamadas).toHaveLength(0)
+    expect(document.body.textContent).toContain('El RUT no es válido')
+  })
+
+  it('si el servidor rechaza el RUT, lo marca junto al campo y no abre un toast (06.16)', async () => {
+    respuesta = () => Promise.reject({ status: 400, statusCode: 400, data: { message: ['rut El RUT no es válido'] } })
+    await abrir()
+    await tipear('proveedor-nombre', 'Frutas del Sur')
+    await tipear('proveedor-rut', '76.123.456-0')
+    crear().click()
+    await new Promise(r => setTimeout(r, 20))
+    expect(document.body.textContent).toContain('El RUT no es válido')
+    expect(avisos).toHaveLength(0)
   })
 
   it('RUT y plazo vacíos no viajan', async () => {

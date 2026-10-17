@@ -917,12 +917,15 @@ const impresoraSistema = (nombreCola: string) => ({
   nombreCola,
 });
 
-/** Los campos de un tercero que van a una columna `varchar(N)`. */
+/**
+ * Los campos de un tercero que van a una columna `varchar(N)`. Sin `rut` ni `rutFiscal` desde
+ * el 2026-10-17 (auditoría UX 06.16): `@RutChileno` solo deja pasar un RUT válido, que mide como
+ * mucho 10 caracteres, así que el tope de 50 de la columna no se alcanza; lo cubre
+ * `terceros-rut.e2e-spec.ts`.
+ */
 const CAMPOS_TERCERO: [string, number, (n: number) => string][] = [
   ['nombre', 100, texto],
-  ['rut', 50, texto],
   ['nombreLegal', 100, texto],
-  ['rutFiscal', 50, texto],
   ['correo', 100, correoDe],
   ['telefono', 50, texto],
 ];

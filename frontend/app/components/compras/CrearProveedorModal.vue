@@ -36,6 +36,7 @@ async function enviar() {
   if (enviando.value) return
   const faltan: Record<string, string> = {}
   if (!nombre.value.trim()) faltan.nombre = 'Escribe el nombre del proveedor'
+  if (rut.value.trim() && !rutValido(rut.value)) faltan.rut = 'El RUT no es válido'
   if (plazo.value.trim() && !/^[1-9]\d{0,3}$/.test(plazo.value.trim())) {
     faltan.plazo = 'El plazo son días enteros, por ejemplo 30'
   }
@@ -51,7 +52,9 @@ async function enviar() {
     emit('creado', creado)
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al crear el proveedor'), color: 'error' })
+    if (!marcar(apiFieldErrors(e))) {
+      toast.add({ title: apiErrorMsg(e, 'Error al crear el proveedor'), color: 'error' })
+    }
   }
   finally {
     enviando.value = false
@@ -73,8 +76,8 @@ async function enviar() {
             @update:model-value="limpiar('nombre')"
           />
         </UFormField>
-        <UFormField label="RUT (opcional)">
-          <UInput v-model="rut" placeholder="76.123.456-7" class="w-full" data-qa="proveedor-rut" />
+        <UFormField label="RUT (opcional)" :error="errores.rut">
+          <UInput v-model="rut" placeholder="76.123.456-7" class="w-full" data-qa="proveedor-rut" @update:model-value="limpiar('rut')" />
         </UFormField>
         <UFormField label="Plazo de pago en días (opcional)" help="Vacío = 30 días." :error="errores.plazo">
           <UInput

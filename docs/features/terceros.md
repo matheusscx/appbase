@@ -56,9 +56,9 @@ Request:
 {
   "tipo": "proveedor",       // 'proveedor' | 'empresa' | 'persona_natural'
   "nombre": "Distribuidora Andina",
-  "rut": "76.123.456-7",
+  "rut": "76.123.456-0",
   "nombreLegal": "Distribuidora Andina SpA",
-  "rutFiscal": "76.123.456-7",
+  "rutFiscal": "76.123.456-0",
   "correo": "contacto@andina.cl",
   "telefono": "+56 2 2345 6789",
   "direccion": "Av. Providencia 1234, Santiago",
@@ -67,6 +67,18 @@ Request:
 
 Response (201): el tercero creado (incluye tercero_id, creado_el, etc.)
 ```
+
+**El RUT se valida** (auditoría UX 06.16, owner 2026-10-17). `rut` y `rutFiscal`, en `POST` y `PATCH
+/terceros` y en `POST /compras/proveedores`, llevan `@RutChileno()`
+(`backend/src/common/decorators/rut-chileno.decorator.ts`): formato y dígito verificador módulo 11
+(`rutValido`, la misma regla de la boleta) o 400 `rut El RUT no es válido` (o `rutFiscal …`). Lo que se
+guarda siempre tiene la misma forma, sin puntos y con guion (`76.543.210-3` y `765432103` quedan
+`76543210-3`, la K en mayúscula). Es opcional: ausente, `null`, `''` o solo espacios no se validan, y el
+texto en blanco se guarda `null`. El formulario de Terceros y el modal "Nuevo proveedor" de la carga
+revisan lo mismo antes de enviar y ponen el error junto al campo, también cuando lo devuelve el
+servidor. Los RUT ya guardados no se tocan (sin backfill: no hay datos productivos); el formulario de edición
+envía el RUT siempre, así que uno viejo y malo hay que corregirlo para guardar. Tests: `backend/test/terceros-rut.e2e-spec.ts` y
+`compras-proveedor-alta.e2e-spec.ts`.
 
 ### Alta de proveedor desde Compras (auditoría UX 06.11, 2026-10-16)
 

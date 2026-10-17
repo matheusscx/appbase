@@ -116,9 +116,8 @@ async function elegirUnidadDteLinea(linea: Locator, opcion: string) {
   await expect(page.getByRole('listbox')).toHaveCount(0)
 }
 
-/** Dígito verificador de un RUT chileno (módulo 11), para generar uno con
- *  forma válida — el backend no lo verifica (`normalizarRut` solo da forma),
- *  pero total generarlo bien no cuesta nada. */
+/** Dígito verificador de un RUT chileno (módulo 11), para generar uno válido:
+ *  desde el 2026-10-17 el backend lo verifica al crear el tercero (06.16). */
 function digitoVerificador(cuerpo: string): string {
   let suma = 0
   let multiplicador = 2

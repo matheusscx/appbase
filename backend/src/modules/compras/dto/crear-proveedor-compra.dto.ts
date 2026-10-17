@@ -9,6 +9,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { RutChileno } from '../../../common/decorators/rut-chileno.decorator';
 
 /**
  * Alta de un proveedor desde la carga de una compra (auditoría UX 06.11,
@@ -25,10 +26,8 @@ export class CrearProveedorCompraDto {
   @MaxLength(100)
   nombre: string;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  rut?: string;
+  @RutChileno()
+  rut?: string | null;
 
   @IsOptional()
   @IsEmail()

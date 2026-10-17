@@ -77,6 +77,7 @@ elegir: lo que dijo va citado.
 | 06.2 | **La coma es decimal en la cantidad de una compra**: "2,5" se lee 2,5. | Eligió la recomendada |
 | Varianza | **"Faltante sin explicar" pasa a "Diferencia sin explicar"**; el signo dice si faltó o sobró. | Eligió la recomendada (**hecho 2026-10-17**: columna de `/reportes/varianza`) |
 | 08.3 | **Al guardar la contraseña de una invitación, el empleado entra directo.** El owner autoriza tocar la emisión de la sesión (invariante 4) **solo para este caso**. | Eligió la recomendada, con la advertencia de la invariante a la vista |
+| 06.16 | **El RUT de un tercero se valida**: el servidor y la pantalla revisan el formato y el dígito verificador y avisan junto al campo "El RUT no es válido". Se guarda siempre con el mismo formato (`76543210-3`). | Eligió la recomendada (**hecho 2026-10-17**) |
 | 08.7 | **Se quita la casilla "Mantener sesión iniciada"**; la sesión no cambia. | Eligió la recomendada |
 | 08.25 | **"Continuar con Google" se muestra solo si el servidor tiene Google configurado.** | Eligió la recomendada |
 | Suscripciones | **Cualquier persona del local puede contratar un plan, como hoy**; no se agrega un permiso. | Eligió "cualquiera, como hoy" (no la recomendada) |

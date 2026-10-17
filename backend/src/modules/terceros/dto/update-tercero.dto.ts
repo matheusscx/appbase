@@ -11,6 +11,7 @@ import {
   Min,
   ValidateIf,
 } from 'class-validator';
+import { RutChileno } from '../../../common/decorators/rut-chileno.decorator';
 
 // `@ValidateIf` y no `@IsOptional()` en los campos de columnas NOT NULL:
 // `IsOptional` trata `null` igual que ausente y saltea el validador de abajo, y
@@ -31,20 +32,16 @@ export class UpdateTerceroDto {
   @MaxLength(100)
   nombre?: string;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  rut?: string;
+  @RutChileno()
+  rut?: string | null;
 
   @IsOptional()
   @IsString()
   @MaxLength(100)
   nombreLegal?: string;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  rutFiscal?: string;
+  @RutChileno()
+  rutFiscal?: string | null;
 
   @IsOptional()
   @IsEmail()

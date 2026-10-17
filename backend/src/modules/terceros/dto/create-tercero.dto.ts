@@ -10,6 +10,7 @@ import {
   MaxLength,
   Min,
 } from 'class-validator';
+import { RutChileno } from '../../../common/decorators/rut-chileno.decorator';
 
 export class CreateTerceroDto {
   @IsIn(['proveedor', 'empresa', 'persona_natural'])
@@ -22,20 +23,16 @@ export class CreateTerceroDto {
   @MaxLength(100)
   nombre: string;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  rut?: string;
+  @RutChileno()
+  rut?: string | null;
 
   @IsOptional()
   @IsString()
   @MaxLength(100)
   nombreLegal?: string;
 
-  @IsOptional()
-  @IsString()
-  @MaxLength(50)
-  rutFiscal?: string;
+  @RutChileno()
+  rutFiscal?: string | null;
 
   @IsOptional()
   @IsEmail()

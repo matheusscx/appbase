@@ -709,6 +709,36 @@ describe('terceros — el formulario valida al enviar', () => {
     wrapper.unmount()
   })
 
+  // 06.16 (owner 2026-10-17): el RUT se valida con la misma regla del servidor.
+  it('RUT con dígito verificador malo: lo marca junto al campo y no manda nada', async () => {
+    const wrapper = await montar()
+    await abrirNuevo(wrapper)
+    await campo(wrapper, 'Distribuidora Andina').setValue('Sur')
+    await campo(wrapper, '76.123.456-7').setValue('76.123.456-5')
+    await crear(wrapper)
+
+    expect(guardados).toHaveLength(0)
+    expect(wrapper.findAll('[data-slot="error"]').map(e => e.text())).toEqual(['El RUT no es válido'])
+    wrapper.unmount()
+  })
+
+  it('el RUT fiscal se valida igual, y un RUT bien escrito (con o sin puntos) pasa', async () => {
+    const wrapper = await montar()
+    await abrirNuevo(wrapper)
+    await campo(wrapper, 'Distribuidora Andina').setValue('Sur')
+    await campo(wrapper, '76.123.456-7').setValue('761234560')
+    const fiscal = wrapper.findAllComponents({ name: 'UInput' }).filter(i => i.props('placeholder') === '76.123.456-7')[1]!
+    await fiscal.find('input').setValue('1.2.3')
+    await crear(wrapper)
+    expect(guardados).toHaveLength(0)
+    expect(wrapper.findAll('[data-slot="error"]').map(e => e.text())).toEqual(['El RUT no es válido'])
+
+    await fiscal.find('input').setValue('76.123.456-0')
+    await crear(wrapper)
+    expect(guardados).toHaveLength(1)
+    wrapper.unmount()
+  })
+
   it('con nombre y correo válidos manda el tercero', async () => {
     const wrapper = await montar()
     await abrirNuevo(wrapper)

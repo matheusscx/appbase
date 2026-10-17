@@ -695,7 +695,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [06.13](06-compras-y-terceros.md) | P2 | "Pagar todo lo que debo" no tiene atajo y "Pagar" se apaga sin explicar — **hecho 2026-10-16** ("Pagar todo" solo precarga el monto; lo que se envía lo sigue decidiendo "Pagar") | agente |
 | ☑ | [06.14](06-compras-y-terceros.md) | P2 | En la tablet, la columna "Pago" de la lista de compras queda fuera de vista — **hecho 2026-10-16** (medido a 768: la lista entra, 672 de 672 px) | agente |
 | ☑ | [06.15](06-compras-y-terceros.md) | P2 | Un XML con RUT mal formado da un mensaje técnico y no deja elegir otro — **hecho 2026-10-16** | agente |
-| ☐ | [06.16](06-compras-y-terceros.md) | P2 | El formulario de Terceros no valida nada y los errores llegan por toast — *parcial 2026-10-16: Nombre y correo junto al campo; el formato de RUT no, porque el servidor no lo valida hoy; se deja así a propósito (decisión 2026-10-16, grupo 06)* | agente |
+| ☑ | [06.16](06-compras-y-terceros.md) | P2 | El formulario de Terceros no valida nada y los errores llegan por toast — *Nombre y correo junto al campo (2026-10-16); el RUT también (formato y dígito verificador, servidor y pantalla, decisión del owner 2026-10-17)* — **hecho 2026-10-17** | agente |
 | ☑ | [06.17](06-compras-y-terceros.md) | P2 | Un filtro de compras sin resultados dice "No hay compras registradas" — **hecho 2026-10-16** | agente |
 | ☑ | [06.18](06-compras-y-terceros.md) | P2 | Tras pagar, el aviso no dice monto ni medio y "Pagar" sigue activo sin deuda — **hecho 2026-10-16** | agente |
 | ☑ | [06.19](06-compras-y-terceros.md) | P2 | El documento se lee "FacturaAUDIT-001", sin espacio entre tipo y folio — **hecho 2026-10-16** | agente |
