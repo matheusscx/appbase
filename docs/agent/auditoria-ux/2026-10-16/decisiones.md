@@ -58,6 +58,32 @@ vista. "Recomendada" es la opción que la auditoría o el agente pusieron primer
 | 03.9 | **En Caja, los botones principales van en petróleo** ("Enviar conteo", "Confirmar cierre", "Registrar entrada", "Continuar conciliación"). El verde y el rojo quedan en el selector Entrada/Salida y en las cifras. | Eligió la recomendada |
 | 01.17 y 05.17 | **Las insignias de estado y las cantidades de color llevan letra de 12 px como mínimo**, con los tonos de 00.8. | Eligió la recomendada |
 
+## Segunda tanda (2026-10-17)
+
+Las tomó el owner el 2026-10-17, contestando por AskUserQuestion de a una pregunta, con la escena
+y las opciones a la vista. En 02.2 y 09.8 el owner corrigió la premisa con sus palabras antes de
+elegir: lo que dijo va citado.
+
+| # | Decisión | Cómo se decidió |
+|---|---|---|
+| 02.2 | **Una caja del local se marca como principal**, y los cobros de mesa entran ahí. "Las cajas no son de los garzones, son del local y las manejan las cajeras; los garzones solo llevan el punto hacia la mesa y cobran en la mesa". Una sola principal; la marca el admin en Configuración → Cajas. | Lo dijo el owner, corrigiendo la premisa de la pregunta |
+| 02.2 | **Si la principal no está abierta, el cobro entra en otra caja abierta del local**; con más de una abierta, **el garzón elige cuál**; con ninguna, se avisa y la mesa espera. | Eligió "entra en otra caja abierta" y, después, la recomendada |
+| 02.2 | **El efectivo que cobra el garzón cuenta en el esperado de esa caja**, y el cierre lo detalla ("de eso, $38.500 los cobró Ana"). | Eligió la recomendada |
+| 02.2 | **Cobra mesas todo el que opera el salón** (`Salones:Operar`); no hay un permiso nuevo. | Eligió la recomendada |
+| 02.2 | **Quien cobra una mesa con su propia caja abierta (una cajera) la cobra en la suya**; la principal es para quien no tiene caja. | Eligió "en su propia caja" (no la recomendada) |
+| 09.8 | **Las suscripciones no se pausan**: "o está suscrito vigente o se da de baja". Se sacan Pausar y Reanudar. | Lo dijo el owner, corrigiendo la premisa de la pregunta |
+| 03.28 | **Los conceptos rápidos de los movimientos de caja los arma el admin**, por local, en Configuración. **Son atajos**: la cajera puede escribir otro. | Eligió la recomendada, dos veces |
+| 02.12 | **La tarjeta de cada cuenta dice cuánto lleva**, con el total calculado en el servidor, **en su propio frente** (toca el motor de precios). | Eligió la recomendada |
+| 06.2 | **La coma es decimal en la cantidad de una compra**: "2,5" se lee 2,5. | Eligió la recomendada |
+| Varianza | **"Faltante sin explicar" pasa a "Diferencia sin explicar"**; el signo dice si faltó o sobró. | Eligió la recomendada |
+| 08.3 | **Al guardar la contraseña de una invitación, el empleado entra directo.** El owner autoriza tocar la emisión de la sesión (invariante 4) **solo para este caso**. | Eligió la recomendada, con la advertencia de la invariante a la vista |
+| 08.7 | **Se quita la casilla "Mantener sesión iniciada"**; la sesión no cambia. | Eligió la recomendada |
+| 08.25 | **"Continuar con Google" se muestra solo si el servidor tiene Google configurado.** | Eligió la recomendada |
+| Suscripciones | **Cualquier persona del local puede contratar un plan, como hoy**; no se agrega un permiso. | Eligió "cualquiera, como hoy" (no la recomendada) |
+| Cobro | **Un reintento tras un corte recuerda la propina elegida** mientras dure ese intento de cobro. | Eligió la recomendada |
+| Cobro | **El botón final dice "Cobrar $X"** con el total con propina; con saldo pendiente sigue "Confirmar con saldo pendiente". | Eligió la recomendada |
+| 02.25 | **Los favoritos los marca el admin** por producto, en Configuración → Productos, iguales para todos los garzones. | Eligió la recomendada |
+
 ## Fuera de estas tandas
 
 Dos preguntas son fiscales y van en una sesión propia (`CLAUDE.md` § Lo fiscal va solo):
