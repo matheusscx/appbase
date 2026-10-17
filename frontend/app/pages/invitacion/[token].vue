@@ -11,10 +11,13 @@
  */
 definePageMeta({ layout: false })
 
+import type { User } from '~/stores/auth'
+
 const route = useRoute()
 const config = useRuntimeConfig()
 const apiUrl = config.public.apiUrl
 const toast = useToast()
+const auth = useAuthStore()
 
 const token = route.params.token as string
 /** La ruta define el flujo: `/invitacion/:token` o `/recuperar/:token`. */
@@ -100,14 +103,23 @@ async function guardar() {
   guardando.value = true
   error.value = ''
   try {
-    await $fetch(`${apiUrl}/auth/${recurso}/${token}`, {
+    const res = await $fetch<{ access_token?: string, user?: User }>(`${apiUrl}/auth/${recurso}/${token}`, {
       method: 'POST',
       body: { contrasena: form.value.contrasena },
+      // La invitación devuelve la sesión y su refresh viaja en una cookie: sin `include` no llega.
+      credentials: 'include',
     })
+    // Invitación (08.3): el servidor ya abrió la sesión; se sigue como después de un login (elegir
+    // local si corresponde). El reset no abre sesión: vuelve al login.
+    if (esInvitacion && res?.access_token && res.user) {
+      toast.add({ title: 'Contraseña guardada. Ya estás dentro.', color: 'success' })
+      auth.abrirSesion(res.access_token, res.user)
+      // Si el siguiente paso falla, el aviso queda en el store y el login lo muestra.
+      if (!(await auth.handlePostLogin())) await navigateTo('/login')
+      return
+    }
     toast.add({ title: 'Contraseña guardada. Ya puedes entrar.', color: 'success' })
-    // El correo ya se conoce: el login lo trae puesto y solo falta la contraseña (08.3). Va en el
-    // `state` de la navegación, no en la URL: un correo en el query string queda en el historial.
-    await navigateTo(correo.value ? { path: '/login', state: { email: correo.value } } : '/login')
+    await navigateTo('/login')
   }
   catch (e: unknown) {
     error.value = apiErrorMsg(e, 'No se pudo guardar la contraseña')
@@ -171,7 +183,6 @@ async function guardar() {
         {{ error }}
       </p>
 
-      <!-- No dice "entrar": al guardar se vuelve al login, la sesión no se abre sola. -->
       <UButton
         type="submit"
         block

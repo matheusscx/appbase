@@ -7,15 +7,28 @@ import { beforeEach, describe, it, expect, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Invitacion from './[token].vue'
 
-const { estado } = vi.hoisted(() => ({
+const { estado, sesion } = vi.hoisted(() => ({
   estado: {
     path: '/invitacion/tk',
     consulta: (): Promise<unknown> => Promise.resolve({ correo: 'ana@tulocal.cl', tenant: 'Almacén Los Andes' }),
+    guardar: (): Promise<unknown> => Promise.resolve({ access_token: 'acc-tk', user: { id: 'u1' } }),
+  },
+  sesion: {
+    abrirSesion: vi.fn(),
+    handlePostLogin: vi.fn(() => Promise.resolve(true)),
+    opcionesPost: undefined as unknown,
   },
 }))
 
 mockNuxtImport('useRoute', () => () => ({ path: estado.path, params: { token: 'tk' } }))
-mockNuxtImport('$fetch', () => () => estado.consulta())
+mockNuxtImport('$fetch', () => (_url: string, opciones?: { method?: string }) => {
+  if (opciones?.method === 'POST') {
+    sesion.opcionesPost = opciones
+    return estado.guardar()
+  }
+  return estado.consulta()
+})
+mockNuxtImport('useAuthStore', () => () => sesion)
 const { irA } = vi.hoisted(() => ({ irA: vi.fn() }))
 mockNuxtImport('navigateTo', () => irA)
 
@@ -28,6 +41,9 @@ async function montar() {
 beforeEach(() => {
   irA.mockClear()
   estado.path = '/invitacion/tk'
+  estado.guardar = () => Promise.resolve({ access_token: 'acc-tk', user: { id: 'u1' } })
+  sesion.abrirSesion.mockClear()
+  sesion.handlePostLogin.mockClear()
   estado.consulta = () => Promise.resolve({ correo: 'ana@tulocal.cl', tenant: 'Almacén Los Andes' })
 })
 
@@ -126,14 +142,40 @@ describe('invitación — qué dice y qué ofrece', () => {
   })
 })
 
-describe('invitación — al guardar, el login ya trae el correo (08.3)', () => {
-  it('lleva al login con el correo de la invitación, para que solo falte la contraseña', async () => {
+describe('invitación — al guardar, el empleado entra directo (08.3)', () => {
+  async function guardar() {
     const wrapper = await montar()
     const campos = wrapper.findAll('input[type="password"]')
     await campos[0]!.setValue('claveNueva123')
     await campos[1]!.setValue('claveNueva123')
     await wrapper.find('form').trigger('submit')
     await new Promise(r => setTimeout(r, 20))
-    expect(irA).toHaveBeenCalledWith({ path: '/login', state: { email: 'ana@tulocal.cl' } })
+    return wrapper
+  }
+
+  it('abre la sesión con lo que devolvió el servidor y sigue el camino de después del login', async () => {
+    await guardar()
+    expect(sesion.abrirSesion).toHaveBeenCalledWith('acc-tk', { id: 'u1' })
+    expect(sesion.handlePostLogin).toHaveBeenCalled()
+    expect(irA).not.toHaveBeenCalledWith(expect.objectContaining({ path: '/login' }))
+  })
+
+  it('manda las credenciales para que llegue la cookie de refresh', async () => {
+    await guardar()
+    expect(sesion.opcionesPost).toMatchObject({ method: 'POST', credentials: 'include' })
+  })
+
+  it('el reset (recuperar) NO abre sesión: vuelve al login', async () => {
+    estado.path = '/recuperar/tk'
+    await guardar()
+    expect(sesion.abrirSesion).not.toHaveBeenCalled()
+    expect(irA).toHaveBeenCalledWith('/login')
+  })
+
+  it('si el servidor rechaza, muestra el error y no abre sesión', async () => {
+    estado.guardar = () => Promise.reject({ data: { message: 'Ese link ya no sirve' } })
+    const wrapper = await guardar()
+    expect(sesion.abrirSesion).not.toHaveBeenCalled()
+    expect(wrapper.text()).toContain('Ese link ya no sirve')
   })
 })

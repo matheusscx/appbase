@@ -1,5 +1,9 @@
 import { Test, type TestingModule } from '@nestjs/testing';
-import { type INestApplication } from '@nestjs/common';
+import {
+  ClassSerializerInterceptor,
+  type INestApplication,
+} from '@nestjs/common';
+import { Reflector } from '@nestjs/core';
 import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import request from 'supertest';
 import cookieParser from 'cookie-parser';
@@ -46,6 +50,11 @@ describe('Invitación y reset (e2e)', () => {
     // `main.ts`, que el e2e no ejecuta. Sin esto los dos cortan con 401.
     app.use(cookieParser());
     app.useGlobalPipes(validacionGlobal());
+    // El serializer global también vive en `main.ts`: es el que saca el hash de la contraseña de
+    // `Usuario` (`@Exclude`). Sin él, este spec vería en el cuerpo algo que producción no manda.
+    app.useGlobalInterceptors(
+      new ClassSerializerInterceptor(app.get(Reflector)),
+    );
     await app.init();
     dataSource = app.get(DataSource);
 
@@ -122,6 +131,69 @@ describe('Invitación y reset (e2e)', () => {
         .post('/api/auth/login')
         .send({ email: correo, password: 'mi-clave-elegida' });
       expect(login.status).toBe(200);
+    });
+
+    // 08.3 (owner, 2026-10-17): aceptar la invitación abre la sesión. Excepción
+    // autorizada a la invariante 4, solo para este caso.
+    it('aceptar la invitación devuelve una sesión válida, sin volver a escribir la contraseña', async () => {
+      const { correo, token } = await invitar();
+
+      const res = await request(app.getHttpServer())
+        .post(`/api/auth/invitacion/${token}`)
+        .send({ contrasena: 'mi-clave-elegida' });
+      expect(res.status).toBe(200);
+      const cuerpo = res.body as {
+        access_token: string;
+        user: { correo: string; contrasena?: string };
+      };
+      expect(cuerpo.user.correo).toBe(correo);
+      expect(cuerpo.user.contrasena).toBeUndefined();
+
+      // El access token sirve en una ruta protegida.
+      const me = await request(app.getHttpServer())
+        .get('/api/auth/my-tenants')
+        .set('Authorization', `Bearer ${cuerpo.access_token}`);
+      expect(me.status).toBe(200);
+      expect((me.body as { tenantId: string }[]).length).toBe(1);
+
+      // Y el refresh viaja en la cookie httpOnly, como en el login.
+      const cookies = (res.headers['set-cookie'] as unknown as string[]) ?? [];
+      expect(cookies.some((c) => c.startsWith('refresh_token='))).toBe(true);
+      const refresh = await request(app.getHttpServer())
+        .post('/api/auth/refresh')
+        .set('Cookie', cookies);
+      expect(refresh.status).toBe(200);
+    });
+
+    it('un link de invitación usado o vencido no da sesión', async () => {
+      const { token } = await invitar();
+      await request(app.getHttpServer())
+        .post(`/api/auth/invitacion/${token}`)
+        .send({ contrasena: 'primera-clave-1' });
+      const usado = await request(app.getHttpServer())
+        .post(`/api/auth/invitacion/${token}`)
+        .send({ contrasena: 'intruso-clave-2' });
+      expect(usado.status).toBe(400);
+      expect(
+        (usado.body as { access_token?: string }).access_token,
+      ).toBeUndefined();
+      expect(usado.headers['set-cookie']).toBeUndefined();
+    });
+
+    it('el reset NO abre sesión: sigue devolviendo solo el mensaje', async () => {
+      const { correo } = await invitar();
+      const [{ usuario_id: usuarioId }] = await dataSource.query<
+        { usuario_id: string }[]
+      >(`SELECT usuario_id FROM usuarios WHERE correo = $1`, [correo]);
+      const reset = await app
+        .get(TokensAccesoService)
+        .emitir(usuarioId, TipoTokenAcceso.RESET);
+      const res = await request(app.getHttpServer())
+        .post(`/api/auth/recuperar/${reset}`)
+        .send({ contrasena: 'la-mia-de-verdad' });
+      expect(res.status).toBe(200);
+      expect(res.body).toEqual({ message: 'Contraseña actualizada' });
+      expect(res.headers['set-cookie']).toBeUndefined();
     });
 
     // El reuso secuencial, que corta `buscarVigente` con `usadoEl: IsNull()`.

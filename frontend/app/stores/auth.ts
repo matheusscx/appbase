@@ -71,6 +71,26 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
+  /** Abre la sesión con lo que devolvió el servidor (login o invitación aceptada). */
+  function abrirSesion(accessToken: string, usuario: User) {
+    setToken(accessToken)
+    user.value = usuario
+  }
+
+  /**
+   * ¿El servidor tiene Google configurado? (08.25). Si la consulta falla, no: es mejor
+   * esconder el botón que llevar a una página de error.
+   */
+  const googleDisponible = ref(false)
+  async function cargarProveedores() {
+    try {
+      const data = await $fetch<{ google: boolean }>(`${apiUrl}/auth/proveedores`)
+      googleDisponible.value = data?.google === true
+    } catch {
+      googleDisponible.value = false
+    }
+  }
+
   /**
    * Registro público. **No abre sesión**, y devuelve el mensaje a mostrar o el
    * error, en vez de un booleano.
@@ -200,6 +220,9 @@ export const useAuthStore = defineStore('auth', () => {
     setToken,
     updateUser,
     clearAuth,
+    abrirSesion,
+    googleDisponible,
+    cargarProveedores,
     login,
     register,
     tryRefresh,

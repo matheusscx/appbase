@@ -98,15 +98,16 @@ export class AuthController {
   @Limite('token')
   @Post('invitacion/:token')
   @HttpCode(HttpStatus.OK)
-  aceptarInvitacion(
+  async aceptarInvitacion(
     @Param('token') token: string,
     @Body() dto: ElegirContrasenaDto,
+    @Res({ passthrough: true }) res: Response,
   ) {
-    return this.authService.elegirContrasena(
-      token,
-      TipoTokenAcceso.INVITACION,
-      dto.contrasena,
-    );
+    // Abre la sesión (08.3): misma respuesta y misma cookie que el login.
+    const { refresh_token, ...response } =
+      await this.authService.aceptarInvitacion(token, dto.contrasena);
+    res.cookie(REFRESH_COOKIE, refresh_token, refreshCookieOptions());
+    return response;
   }
 
   @Limite('token')
@@ -130,12 +131,17 @@ export class AuthController {
   @Limite('token')
   @Post('recuperar/:token')
   @HttpCode(HttpStatus.OK)
-  restablecer(@Param('token') token: string, @Body() dto: ElegirContrasenaDto) {
-    return this.authService.elegirContrasena(
+  async restablecer(
+    @Param('token') token: string,
+    @Body() dto: ElegirContrasenaDto,
+  ) {
+    // El reset NO abre sesión: solo el mensaje, sin el `usuarioId`.
+    const { message } = await this.authService.elegirContrasena(
       token,
       TipoTokenAcceso.RESET,
       dto.contrasena,
     );
+    return { message };
   }
 
   @Limite('login')
@@ -151,6 +157,21 @@ export class AuthController {
     );
     res.cookie(REFRESH_COOKIE, refresh_token, refreshCookieOptions());
     return response;
+  }
+
+  /**
+   * Qué proveedores de ingreso tiene configurados el servidor (08.25). Público
+   * y mínimo: solo booleanos, nunca el client id ni el secreto. La estrategia
+   * de Google se registra igual sin credenciales (con valores de relleno), así
+   * que sin esto el botón llevaría a una página de error.
+   */
+  @Get('proveedores')
+  proveedores() {
+    return {
+      google:
+        !!this.config.get<string>('GOOGLE_CLIENT_ID') &&
+        !!this.config.get<string>('GOOGLE_CLIENT_SECRET'),
+    };
   }
 
   @Get('google')

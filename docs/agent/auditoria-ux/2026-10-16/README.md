@@ -760,11 +760,11 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
 | ☑ | [08.2](08-ingreso-y-cuenta.md) | P2 | Los errores de registro y de Mi cuenta salen en inglés y con nombres internos *(parte en 00.11)* — **hecho 2026-10-16** (mensajes en español en los DTO de registro, perfil y cambio de contraseña; el barrido de los demás DTO de la app queda fuera de este grupo) | agente |
-| ☐ | [08.3](08-ingreso-y-cuenta.md) | P2 | "Guardar y entrar" manda al login y hay que escribir la contraseña de nuevo | agente — *parcial 2026-10-16: el botón dice "Guardar contraseña" y el aviso "Contraseña guardada"; el login ya llega con el correo puesto (en el `state` de la navegación, no en la URL); volver a escribir la contraseña sigue, porque entrar solo exige emitir tokens (invariante 4), pendiente del owner* |
+| ☑ | [08.3](08-ingreso-y-cuenta.md) | P2 | "Guardar y entrar" manda al login y hay que escribir la contraseña de nuevo — **hecho 2026-10-17** (la invitación abre la sesión; excepción a la invariante 4 autorizada por el owner) | agente |
 | ☑ | [08.4](08-ingreso-y-cuenta.md) | P2 | Un link vencido no deja pedir otro desde ahí y está en voseo — **hecho 2026-10-16** | agente |
 | ☑ | [08.5](08-ingreso-y-cuenta.md) | P2 | Tras registrarse, la pantalla dice "Si ese correo no tenía cuenta…" sin nombrar el correo — **hecho 2026-10-16** | agente |
 | ☑ | [08.6](08-ingreso-y-cuenta.md) | P2 | La invitación no dice a qué empresa te están sumando — **hecho 2026-10-16** (la consulta de la invitación devuelve la empresa) | agente |
-| ☐ | [08.7](08-ingreso-y-cuenta.md) | P2 | "Mantener sesión iniciada" no hace nada | owner |
+| ☑ | [08.7](08-ingreso-y-cuenta.md) | P2 | "Mantener sesión iniciada" no hace nada — **hecho 2026-10-17** (se quitó la casilla) | owner |
 | ☑ | [08.8](08-ingreso-y-cuenta.md) | P2 | Los controles del ingreso miden 32 px y los enlaces 16 px — **hecho 2026-10-16** | agente |
 | ☑ | [08.9](08-ingreso-y-cuenta.md) | P2 | El ojo de mostrar contraseña no se alcanza con Tab ni tiene nombre — **hecho 2026-10-16** | agente |
 | ☑ | [08.10](08-ingreso-y-cuenta.md) | P2 | Los avisos de error del ingreso tienen poco contraste y no se anuncian al lector — **hecho 2026-10-16** (el contraste lo resolvió 00.8; `role="alert"` en los tres avisos) | agente |
@@ -782,7 +782,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [08.22](08-ingreso-y-cuenta.md) | P3 | Los estados de "cargando" del ingreso se ven distintos entre pantallas — **hecho 2026-10-16** (`AppMarco` con `cargando`) | agente |
 | ☑ | [08.23](08-ingreso-y-cuenta.md) | P3 | En link inválido, título y párrafo dicen la misma frase seguida — **hecho 2026-10-16** | agente |
 | ☑ | [08.24](08-ingreso-y-cuenta.md) | P3 | En Mi cuenta los campos miden 167 px y uno se corta a 768 — **hecho 2026-10-16** | agente |
-| ☐ | [08.25](08-ingreso-y-cuenta.md) | P3 | "Continuar con Google" puede llevar a una página de error si no está configurado | owner |
+| ☑ | [08.25](08-ingreso-y-cuenta.md) | P3 | "Continuar con Google" puede llevar a una página de error si no está configurado — **hecho 2026-10-17** (el botón sale solo si el servidor tiene Google) | owner |
 | ☑ | [08.26](08-ingreso-y-cuenta.md) | P3 | "Las contraseñas no coinciden" aparece desde la primera letra de la repetición — **hecho 2026-10-16** | agente |
 
 ### 09 · Tienda y suscripciones

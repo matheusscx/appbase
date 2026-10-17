@@ -97,9 +97,18 @@ una invitación (llegó al mail y lo abrió), y Google **sólo** si el perfil tr
 - El motivo de un link inválido es **solo la causa** ("Puede estar vencido o ya usado."): la
   pantalla ya lo titula "Este link ya no sirve" y pone la salida, que depende de quién puede
   reenviarlo (reset: "Pedir otro link"; invitación y confirmación: "Pídele a quien te invitó").
-- Guardar la contraseña desde un link **no abre sesión**: la pantalla manda al login y el botón
-  dice "Guardar contraseña". Abrirla sola exige emitir tokens (invariante 4) y está pendiente del
-  owner.
+- Guardar la contraseña desde un link de **invitación abre la sesión** (08.3, 2026-10-17):
+  `POST /auth/invitacion/:token` responde como el login (`{ access_token, user }` + cookie de
+  refresh) y la pantalla sigue como después de un login (elegir local si corresponde). **Excepción
+  autorizada por el owner el 2026-10-17 a la invariante 4, solo para este caso:** `aceptarInvitacion`
+  *reusa* `login` → `generateTokens`, la misma emisión de `POST /auth/login`; no cambia cómo se
+  firman, duran, rotan ni validan los tokens. Se emite **después** de `elegirContrasena`, que cierra
+  las sesiones vivas de la cuenta. El **reset** (`POST /auth/recuperar/:token`) no cambia: devuelve
+  solo el mensaje y manda al login.
+- `GET /auth/proveedores` (público) devuelve `{ google: boolean }`: `true` si están
+  `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`. Nunca devuelve valores. El login muestra
+  "Continuar con Google" solo si es `true` (08.25). La casilla "Mantener sesión iniciada" se quitó
+  (08.7): no hacía nada y la sesión no cambia.
 - `PATCH /me/contrasena` con la contraseña actual equivocada responde **400**, no 401: el
   interceptor del front lee todo 401 como sesión vencida y la cierra.
 - Los DTO de registro, perfil y cambio de contraseña traen sus mensajes en español.
@@ -236,6 +245,7 @@ Response (401): Unauthorized (missing/invalid token)
 **Controller**: `src/modules/auth/auth.controller.ts`
 - `@Post('register')` — `RegisterDto`
 - `@Post('login')` — `LocalAuthGuard`, `LoginDto`
+- `@Get('proveedores')` — público, `{ google: boolean }`
 - `@Get('google')` — `AuthGuard('google')`
 - `@Get('google/callback')` — `AuthGuard('google')`
 - `@Get('me')` — `JwtAuthGuard`
@@ -244,6 +254,7 @@ Response (401): Unauthorized (missing/invalid token)
 - `validateUser(email, password)` — Check password via bcrypt
 - `register(dto)` — Responde **lo mismo exista o no el correo** y **no emite sesión**: crea la cuenta sin verificar y manda el link, o avisa al dueño real. Ver "Register"
 - `login(user)` — Issue JWT for existing user
+- `aceptarInvitacion(token, contrasena)` — `elegirContrasena` + `login`: abre la sesión (solo invitación)
 - `googleLogin(profile)` — Find-or-create **sólo por Google ID**. La coincidencia de correo con una cuenta local es `409`, no un vínculo. Exige `email_verified`
 - `generateToken(user)` — Sign JWT with sub + email
 - `getMe(userId)` — Fetch user by ID (protected endpoint)

@@ -291,7 +291,7 @@ export class AuthService {
     token: string,
     tipo: TipoTokenAcceso,
     contrasena: string,
-  ): Promise<{ message: string }> {
+  ): Promise<{ message: string; usuarioId: string }> {
     const fila = await this.tokens.buscarVigente(token, tipo);
     if (!fila) {
       throw new BadRequestException(
@@ -330,7 +330,36 @@ export class AuthService {
       userId: fila.usuarioId,
       usadoEl: IsNull(),
     });
-    return { message: 'Contraseña actualizada' };
+    return { message: 'Contraseña actualizada', usuarioId: fila.usuarioId };
+  }
+
+  /**
+   * Alta de contraseña por **invitación**: fija la contraseña y abre la sesión
+   * (08.3, owner 2026-10-17), para que el empleado no tenga que escribirla de
+   * nuevo en el login.
+   *
+   * Excepción autorizada por el owner a la invariante 4 —solo para este caso—:
+   * no cambia el sistema de tokens, **reusa** `login` (→ `generateTokens`), la
+   * misma emisión que `POST /auth/login`. El reset (`elegirContrasena` directo)
+   * sigue sin abrir sesión.
+   *
+   * ⚠️ La sesión se emite DESPUÉS de `elegirContrasena`: ese método cierra las
+   * sesiones vivas de la cuenta, y emitir antes se llevaría la recién creada.
+   */
+  async aceptarInvitacion(
+    token: string,
+    contrasena: string,
+  ): Promise<{ access_token: string; refresh_token: string; user: Usuario }> {
+    const { usuarioId } = await this.elegirContrasena(
+      token,
+      TipoTokenAcceso.INVITACION,
+      contrasena,
+    );
+    const user = await this.usersService.findById(usuarioId);
+    if (!user) {
+      throw new BadRequestException('Ese link ya no sirve');
+    }
+    return this.login(user);
   }
 
   /**

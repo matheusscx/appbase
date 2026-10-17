@@ -55,6 +55,14 @@ We use **JSON Web Tokens (JWT)** with `passport-jwt` strategy for stateless auth
 - Token stored in localStorage is vulnerable to XSS attacks — mitigate via CSP headers and careful escaping
 - Requires HTTPS in production to prevent token interception
 
+## Excepciones autorizadas por el owner
+
+- **2026-10-17 — la invitación abre sesión.** Invariante 4 de `CLAUDE.md` (no modificar el sistema
+  de tokens). El owner autorizó tocar la *emisión* de la sesión solo para este caso: al aceptar una
+  invitación, `AuthService.aceptarInvitacion` reusa `login` (→ `generateTokens`), la misma emisión
+  que `POST /auth/login`. Firma, duración, rotación y validación no cambiaron. Detalle:
+  [`features/auth.md`](../features/auth.md).
+
 ## Related Decisions
 
 - [ADR-002: Google OAuth 2.0](./002-google-oauth.md) — Extends this auth system to support social login

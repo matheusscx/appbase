@@ -4,12 +4,11 @@ definePageMeta({ layout: false, middleware: 'invitado' })
 const store = useAuthStore()
 
 const state = reactive({
-  // El correo lo manda la pantalla de elegir contraseña en el `state` de la navegación (08.3),
-  // nunca en la URL; la contraseña no viaja.
-  email: typeof window.history.state?.email === 'string' ? window.history.state.email : '',
+  email: '',
   password: '',
-  keepSession: false,
 })
+
+onMounted(() => store.cargarProveedores())
 
 async function onLogin() {
   const ok = await store.login(state.email, state.password)
@@ -134,13 +133,6 @@ async function onGoogle() {
           />
         </UFormField>
 
-        <UCheckbox
-          v-model="state.keepSession"
-          label="Mantener sesión iniciada"
-          :disabled="store.loading"
-          :ui="{ root: 'min-h-11 items-center' }"
-        />
-
         <UButton
           type="submit"
           block
@@ -154,10 +146,11 @@ async function onGoogle() {
       </UForm>
 
       <!-- Divider -->
-      <USeparator label="o" :ui="{ label: 'text-xs text-muted' }" />
+      <USeparator v-if="store.googleDisponible" label="o" :ui="{ label: 'text-xs text-muted' }" />
 
       <!-- Google -->
       <UButton
+        v-if="store.googleDisponible"
         block
         size="xl"
         class="min-h-11"

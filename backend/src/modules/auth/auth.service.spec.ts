@@ -6,6 +6,7 @@ import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
+  BadRequestException,
   ConflictException,
   ForbiddenException,
   UnauthorizedException,
@@ -470,6 +471,56 @@ describe('AuthService', () => {
       await expect(
         service.switchTenant('usuario-uuid', 'tenant-uuid', 'rt-vencido'),
       ).rejects.toBeInstanceOf(UnauthorizedException);
+    });
+  });
+
+  // 08.3 (owner, 2026-10-17): aceptar la invitación abre la sesión. Reusa
+  // `generateTokens`, el mismo camino del login.
+  describe('aceptarInvitacion', () => {
+    const fila = { id: 'tok-1', usuarioId: 'user-uuid' };
+
+    it('quema el link, guarda la contraseña y devuelve la sesión del login', async () => {
+      tokensAcceso.buscarVigente.mockResolvedValue(fila);
+      usersService.findById.mockResolvedValue(mockUser);
+
+      const res = await service.aceptarInvitacion('abc', 'mi-clave-larga');
+
+      expect(tokensAcceso.buscarVigente).toHaveBeenCalledWith(
+        'abc',
+        TipoTokenAcceso.INVITACION,
+      );
+      expect(managerTx.update).toHaveBeenCalled();
+      expect(res.access_token).toBe('mock.access.token');
+      expect(res.refresh_token).toEqual(expect.any(String));
+      expect(res.user).toBe(mockUser);
+    });
+
+    it('la sesión nueva se emite DESPUÉS de matar las vivas, o se llevaría la propia', async () => {
+      tokensAcceso.buscarVigente.mockResolvedValue(fila);
+      usersService.findById.mockResolvedValue(mockUser);
+      const orden: string[] = [];
+      refreshRepo.delete.mockImplementation(() => {
+        orden.push('delete');
+        return Promise.resolve({ affected: 1 });
+      });
+      refreshRepo.save.mockImplementation(() => {
+        orden.push('save');
+        return Promise.resolve({ id: 'rt' });
+      });
+
+      await service.aceptarInvitacion('abc', 'mi-clave-larga');
+
+      expect(orden.indexOf('delete')).toBeGreaterThanOrEqual(0);
+      expect(orden.indexOf('save')).toBeGreaterThan(orden.indexOf('delete'));
+    });
+
+    it('con un link usado o vencido no emite sesión', async () => {
+      tokensAcceso.buscarVigente.mockResolvedValue(null);
+
+      await expect(
+        service.aceptarInvitacion('abc', 'mi-clave-larga'),
+      ).rejects.toThrow(BadRequestException);
+      expect(refreshRepo.save).not.toHaveBeenCalled();
     });
   });
 
