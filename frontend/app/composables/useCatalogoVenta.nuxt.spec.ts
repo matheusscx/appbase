@@ -237,4 +237,26 @@ describe('useCatalogoVenta', () => {
     await asentar()
     expect(new URL(urls.at(-1)!, 'http://x').searchParams.has('categoriaId')).toBe(false)
   })
+
+  it('02.25: "solo favoritos" viaja como favorito=true, vuelve a la página 1, y apagado no manda nada', async () => {
+    const c = await montar({ tipos: TIPOS })
+    await c.cargar()
+    expect(new URL(urls.at(-1)!, 'http://x').searchParams.has('favorito')).toBe(false)
+    c.page.value = 3
+    await asentar()
+    urls = []
+
+    c.soloFavoritos.value = true
+    await asentar()
+
+    expect(c.page.value).toBe(1)
+    const q = new URL(urls.at(-1)!, 'http://x').searchParams
+    expect(q.get('favorito')).toBe('true')
+    expect(q.get('orden')).toBe('disponibilidad')
+
+    urls = []
+    c.soloFavoritos.value = false
+    await asentar()
+    expect(new URL(urls.at(-1)!, 'http://x').searchParams.has('favorito')).toBe(false)
+  })
 })

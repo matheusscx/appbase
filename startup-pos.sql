@@ -812,6 +812,7 @@ CREATE TABLE "items" (
   "precio_base"             NUMERIC(18,4) NOT NULL,
   "precio_incluye_impuesto" BOOLEAN       NOT NULL DEFAULT false,
   "activo"                  BOOLEAN       NOT NULL DEFAULT true,
+  "favorito"                BOOLEAN       NOT NULL DEFAULT false,   -- el admin lo marca; el catálogo de la mesa lo ofrece en el chip Favoritos (solo filtra, no reordena)
   "tipo"                    TEXT          NOT NULL,   -- 'producto' | 'servicio' | 'suscripcion' | 'receta' | 'ingrediente'
   "clasificacion_tributaria" TEXT         DEFAULT 'afecto',  -- 'afecto' | 'exento' | NULL ('ingrediente': no se vende, sin tratamiento fiscal — se inserta NULL explícito, el default no alcanza a los demás tipos por accidente)
   "creado_el"               TIMESTAMPTZ   NOT NULL DEFAULT NOW(),

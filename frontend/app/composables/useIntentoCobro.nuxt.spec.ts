@@ -54,6 +54,51 @@ describe('useIntentoCobro', () => {
     for (const ambito of ['pos', 'otro', 'abono:v1']) useIntentoCobro().terminar(ambito)
   })
 
+  describe('la propina del intento (owner, 2026-10-17)', () => {
+    const OTRO_MONTO = { seleccion: 'otro' as const, monto: '1500' }
+
+    it('un intento sin propina recordada devuelve null', () => {
+      expect(useIntentoCobro().propinaDelIntento('pos')).toBeNull()
+    })
+
+    it('confirmar solo la deja pendiente: si el POST no sale (se cancela el PIN), no queda recordada', () => {
+      const intento = useIntentoCobro()
+      intento.cabecera('pos') // un intento anterior dejó la clave viva
+      intento.recordarPropina('pos', OTRO_MONTO)
+      expect(intento.propinaDelIntento('pos')).toBeNull()
+      intento.olvidarPropinaPendiente('pos')
+      intento.cabecera('pos')
+      expect(intento.propinaDelIntento('pos')).toBeNull()
+    })
+
+    it('queda recordada cuando el POST sale (se pide la cabecera), por ámbito', () => {
+      const intento = useIntentoCobro()
+      intento.recordarPropina('pos', OTRO_MONTO)
+      intento.cabecera('pos')
+      expect(intento.propinaDelIntento('pos')).toEqual(OTRO_MONTO)
+      expect(intento.propinaDelIntento('otro')).toBeNull()
+      // Un reintento (otra cabecera, sin propina nueva pendiente) la conserva.
+      intento.cabecera('pos')
+      expect(intento.propinaDelIntento('pos')).toEqual(OTRO_MONTO)
+    })
+
+    it('terminar() la olvida: el cobro siguiente es otro', () => {
+      const intento = useIntentoCobro()
+      intento.recordarPropina('pos', OTRO_MONTO)
+      intento.cabecera('pos')
+      intento.terminar('pos')
+      expect(intento.propinaDelIntento('pos')).toBeNull()
+    })
+
+    it('el aviso de "otros datos" cierra el intento y la olvida', () => {
+      const intento = useIntentoCobro()
+      intento.recordarPropina('pos', OTRO_MONTO)
+      intento.cabecera('pos')
+      intento.mostrarSiCobroConOtrosDatos(errorOtrosDatos(), 'pos')
+      expect(intento.propinaDelIntento('pos')).toBeNull()
+    })
+  })
+
   it('la cabecera lleva un UUID, estable entre llamados del mismo intento', () => {
     const intento = useIntentoCobro()
     const primera = intento.cabecera('pos')[HEADER_IDEMPOTENCIA]

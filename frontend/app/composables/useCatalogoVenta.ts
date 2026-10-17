@@ -29,6 +29,8 @@ export function useCatalogoVenta(opts: {
   const busqueda = ref('')
   /** La categoría elegida en los chips (solo el salón las ofrece); `null` = todas. */
   const categoriaId = ref<string | null>(null)
+  /** El chip «Favoritos» (los marca el admin por producto): sin él el pedido no manda `favorito` y el orden es el de siempre. */
+  const soloFavoritos = ref(false)
   const loading = ref(false)
   /**
    * La última carga falló. La grilla distingue "no pudimos cargar" de "no hay ítems": un corte del
@@ -62,6 +64,7 @@ export function useCatalogoVenta(opts: {
     })
     if (terminoActivo) params.set('search', terminoActivo)
     if (categoriaId.value) params.set('categoriaId', categoriaId.value)
+    if (soloFavoritos.value) params.set('favorito', 'true')
     try {
       const res = await useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?${params}`)
       if (mio !== turno) return
@@ -122,11 +125,11 @@ export function useCatalogoVenta(opts: {
     }, ESPERA_BUSQUEDA_MS)
   })
   watch(page, () => { void refrescar() })
-  watch(categoriaId, () => {
+  watch([categoriaId, soloFavoritos], () => {
     if (page.value !== 1) page.value = 1
     else void refrescar()
   })
   onBeforeUnmount(() => { if (espera) clearTimeout(espera) })
 
-  return { items, total, page, busqueda, categoriaId, loading, error, sinPermiso, pageSize: PAGE_SIZE_CATALOGO, cargar, refrescar, confirmarBusqueda }
+  return { items, total, page, busqueda, categoriaId, soloFavoritos, loading, error, sinPermiso, pageSize: PAGE_SIZE_CATALOGO, cargar, refrescar, confirmarBusqueda }
 }

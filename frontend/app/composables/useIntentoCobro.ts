@@ -9,6 +9,24 @@ export const AVISO_COBRO_REPETIDO = 'Este cobro ya había entrado, no se registr
 const claves = new Map<string, string>()
 
 /**
+ * La propina que se eligió en el intento. Vive y muere con la clave: el reintento
+ * tras un corte tiene que mandar **lo mismo** que el primero (la huella de la
+ * idempotencia incluye la propina), y el modal, al reabrirse, volvía a "Sin
+ * propina" (owner, 2026-10-17).
+ */
+export interface PropinaDelIntento {
+  seleccion: 'sin' | 'sugerida' | 'otro'
+  monto: string
+}
+const propinas = new Map<string, PropinaDelIntento>()
+/**
+ * Confirmar no alcanza para recordarla: el POST puede no salir (se cancela el teclado del PIN,
+ * una fusión se lleva la cuenta). La propina espera acá y pasa a `propinas` recién cuando el POST
+ * pide su cabecera, o sea cuando sale con la clave del intento.
+ */
+const propinasPendientes = new Map<string, PropinaDelIntento>()
+
+/**
  * El id del 422 de "esta clave ya se usó con otros datos" (`IdempotenciaService`),
  * o `null` si el error es otro. Un 422 sin id es otra cosa —p. ej. el tope de
  * efectivo de la nota de crédito— y lo maneja la pantalla como siempre.
@@ -59,13 +77,34 @@ export function useIntentoCobro() {
 
   return {
     /** Las opciones `headers` del `POST` que cobra. */
-    cabecera: (ambito: string): Record<string, string> => ({
-      [HEADER_IDEMPOTENCIA]: clave(ambito),
-    }),
+    cabecera: (ambito: string): Record<string, string> => {
+      const pendiente = propinasPendientes.get(ambito)
+      if (pendiente) {
+        propinas.set(ambito, pendiente)
+        propinasPendientes.delete(ambito)
+      }
+      return { [HEADER_IDEMPOTENCIA]: clave(ambito) }
+    },
 
     /** El intento terminó (éxito o carrito vacío): el próximo cobro es otro. */
     terminar: (ambito: string): void => {
       claves.delete(ambito)
+      propinas.delete(ambito)
+      propinasPendientes.delete(ambito)
+    },
+
+    /** La propina que se confirmó en el intento vivo, o `null` si no hay. */
+    propinaDelIntento: (ambito: string): PropinaDelIntento | null =>
+      claves.has(ambito) ? (propinas.get(ambito) ?? null) : null,
+
+    /** Al confirmar: queda pendiente hasta que el `POST` pida su cabecera (ver `propinasPendientes`). */
+    recordarPropina: (ambito: string, propina: PropinaDelIntento): void => {
+      propinasPendientes.set(ambito, propina)
+    },
+
+    /** Al abrir el modal: una confirmación cuyo `POST` no salió no condiciona el intento siguiente. */
+    olvidarPropinaPendiente: (ambito: string): void => {
+      propinasPendientes.delete(ambito)
     },
 
     /**
@@ -94,6 +133,8 @@ export function useIntentoCobro() {
       const ventaId = idDeOtrosDatos(error)
       if (!ventaId) return false
       claves.delete(ambito)
+      propinas.delete(ambito)
+      propinasPendientes.delete(ambito)
       toast.add({
         title: apiErrorMsg(error, 'Este cobro ya se había registrado con otros datos'),
         color: 'error',

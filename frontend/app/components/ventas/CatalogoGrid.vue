@@ -19,6 +19,8 @@ const props = defineProps<{
   autofocus?: boolean
   /** Chips de categoría arriba de la búsqueda (hoy solo el salón). Sin ellas no se dibujan. */
   categorias?: { id: string, nombre: string }[]
+  /** Ofrece el chip «Favoritos» junto a las categorías (hoy solo el salón). */
+  favoritos?: boolean
 }>()
 const emit = defineEmits<{
   add: [item: ItemCatalogo]
@@ -42,23 +44,35 @@ const page = defineModel<number>('page', { default: 1 })
 /** La categoría elegida (`id`), o `null` para todas. */
 const categoria = defineModel<string | null>('categoria', { default: null })
 
+/** Solo los productos que el admin marcó como favoritos; excluyente con la categoría. */
+const soloFavoritos = defineModel<boolean>('soloFavoritos', { default: false })
+
 const nombreCategoria = computed(() => props.categorias?.find(c => c.id === categoria.value)?.nombre ?? '')
 
 /** Qué decir cuando una búsqueda, una categoría o las dos dejan la grilla vacía. */
 const textoFiltrado = computed(() => {
   const q = busqueda.value.trim()
+  if (soloFavoritos.value && q) return `No encontramos «${q}» entre los favoritos. Prueba con otra palabra.`
+  if (soloFavoritos.value) return 'Aún no hay favoritos. El administrador los marca en Configuración → Productos.'
   if (q && nombreCategoria.value) return `No encontramos «${q}» en «${nombreCategoria.value}». Prueba con otra palabra.`
   if (q) return `No encontramos «${q}». Prueba con otra palabra.`
   return `No hay productos en «${nombreCategoria.value}».`
 })
 
 function elegirCategoria(id: string | null) {
+  soloFavoritos.value = false
   categoria.value = id
+}
+
+function elegirFavoritos() {
+  categoria.value = null
+  soloFavoritos.value = true
 }
 
 function quitarFiltros() {
   busqueda.value = ''
   categoria.value = null
+  soloFavoritos.value = false
 }
 
 /**
@@ -109,23 +123,35 @@ function onAgregar(item: ItemCatalogo) {
     </UInput>
 
     <div
-      v-if="categorias?.length"
+      v-if="categorias?.length || favoritos"
       class="-mx-1 flex shrink-0 gap-2 overflow-x-auto px-1 pb-1"
       role="group"
       aria-label="Categorías"
     >
-      <UButton
-        v-for="chip in [{ id: null, nombre: 'Todas' }, ...categorias]"
-        :key="chip.id ?? 'todas'"
-        :label="chip.nombre"
-        size="lg"
-        class="min-h-11 shrink-0"
-        :variant="categoria === chip.id ? 'solid' : 'outline'"
-        :color="categoria === chip.id ? 'primary' : 'neutral'"
-        :aria-pressed="categoria === chip.id"
-        data-qa="categoria-chip"
-        @click="elegirCategoria(chip.id)"
-      />
+      <template v-for="chip in [{ id: null, nombre: 'Todas' }, ...(categorias ?? [])]" :key="chip.id ?? 'todas'">
+        <UButton
+          :label="chip.nombre"
+          size="lg"
+          class="min-h-11 shrink-0"
+          :variant="categoria === chip.id && !soloFavoritos ? 'solid' : 'outline'"
+          :color="categoria === chip.id && !soloFavoritos ? 'primary' : 'neutral'"
+          :aria-pressed="categoria === chip.id && !soloFavoritos"
+          data-qa="categoria-chip"
+          @click="elegirCategoria(chip.id)"
+        />
+        <UButton
+          v-if="favoritos && chip.id === null"
+          label="Favoritos"
+          icon="i-lucide-star"
+          size="lg"
+          class="min-h-11 shrink-0"
+          :variant="soloFavoritos ? 'solid' : 'outline'"
+          :color="soloFavoritos ? 'primary' : 'neutral'"
+          :aria-pressed="soloFavoritos"
+          data-qa="favoritos-chip"
+          @click="elegirFavoritos"
+        />
+      </template>
     </div>
 
     <div v-if="loading" class="text-center text-muted py-10 text-sm">
@@ -137,9 +163,9 @@ function onAgregar(item: ItemCatalogo) {
       :vacio="vacio ?? 'Aún no hay ítems para vender. Avisa al encargado.'"
       :error="error"
       :sin-permiso="sinPermiso"
-      :filtrado="!!busqueda.trim() || !!categoria"
+      :filtrado="!!busqueda.trim() || !!categoria || soloFavoritos"
       :filtrado-texto="textoFiltrado"
-      :quitar-texto="categoria ? 'Ver todas' : 'Borrar búsqueda'"
+      :quitar-texto="categoria || soloFavoritos ? 'Ver todas' : 'Borrar búsqueda'"
       @reintentar="emit('reintentar')"
       @quitar-filtros="quitarFiltros"
     />

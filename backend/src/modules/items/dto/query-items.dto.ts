@@ -134,6 +134,20 @@ export class QueryItemsDto extends PaginationQueryDto {
   activo?: boolean;
 
   /**
+   * Favoritos del local. Mismos tres estados y misma coerción estricta que `activo`:
+   * ausente no filtra (ni reordena: el orden de quien no lo pide no cambia), `true` deja
+   * solo los marcados, `false` los no marcados. Lo que no es `true`/`false` sale 400.
+   */
+  @Transform(({ value }: { value: unknown }) => {
+    if (value === 'true' || value === true) return true;
+    if (value === 'false' || value === false) return false;
+    return value;
+  })
+  @IsOptional()
+  @IsBoolean()
+  favorito?: boolean;
+
+  /**
    * `true`: el catálogo que la tienda online puede vender, o sea sin los
    * productos con número de serie (no hay quien elija la unidad, y rechazar la
    * venta después de Webpay dejaría un cargo sin venta). `false` y ausente no

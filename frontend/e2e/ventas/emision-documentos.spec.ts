@@ -181,7 +181,7 @@ test('cobro mixto: efectivo y tarjeta con número — el documento de la máquin
   const respuesta = page.waitForResponse(
     r => r.url().endsWith('/ventas') && r.request().method() === 'POST',
   )
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   const body = (await pedido).postDataJSON() as { pagos: Record<string, unknown>[] }
   const ventaId = ((await (await respuesta).json()) as { id: string }).id
 

@@ -2077,6 +2077,34 @@ describe('configuracion/items — lo que una opción no tipea lo hereda del grup
 
     wrapper.unmount()
   })
+
+  // Decisión del owner 2026-10-17 (02.25): el admin marca los favoritos por producto, iguales
+  // para todos los garzones; el catálogo de la mesa los muestra en su propio chip.
+  it('la casilla Favorito viaja en el PATCH, y abre con el valor que tiene el ítem', async () => {
+    itemDetalleMock = { ...ITEM_PRODUCTO, favorito: false } as typeof ITEM_PRODUCTO
+    const wrapper = await montar()
+    await wrapper.find('[title="Editar"]').trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    const campoFavorito = wrapper.findAllComponents({ name: 'UFormField' })
+      .find(f => String(f.props('label') ?? '') === 'Favorito')
+    expect(campoFavorito, 'campo Favorito').toBeTruthy()
+    const casilla = campoFavorito!.findComponent({ name: 'UCheckbox' })
+    expect(casilla.props('modelValue')).toBe(false)
+    casilla.vm.$emit('update:modelValue', true)
+    await new Promise(r => setTimeout(r, 20))
+
+    const guardar = wrapper.findAllComponents({ name: 'UButton' })
+      .find(b => b.text().includes('Guardar cambios'))
+    await guardar!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    const patch = enviados.find(e => e.method === 'PATCH' && /\/items\/[^/?]+$/.test(e.url))
+    expect(patch, 'PATCH del ítem').toBeTruthy()
+    expect((patch!.body as { favorito: boolean }).favorito).toBe(true)
+
+    wrapper.unmount()
+  })
 })
 
 // El costo de un combo y el de una receta se calculan en la pantalla desde el caché de ítems.

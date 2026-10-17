@@ -3714,6 +3714,8 @@ async function imprimirBoletaDelCierre(boleta: BoletaVenta) {
                 v-model:busqueda="catalogo.busqueda.value"
                 v-model:page="catalogo.page.value"
                 v-model:categoria="catalogo.categoriaId.value"
+                v-model:solo-favoritos="catalogo.soloFavoritos.value"
+                favoritos
                 :categorias="categorias"
                 :items="items"
                 :total="catalogo.total.value"
@@ -4025,6 +4027,7 @@ async function imprimirBoletaDelCierre(boleta: BoletaVenta) {
         :total="cobroTotal"
         :venta-total="cobroTotal"
         v-model:propina-monto="propinaMonto"
+        :ambito-intento="cobroCuenta ? `cuenta:${cobroCuenta.id}` : undefined"
         :porcentaje-sugerido="propinaPorcentaje"
         :propina-no-disponible="propinaNoDisponible"
         v-model:pagador="pagador"

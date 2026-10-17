@@ -75,7 +75,7 @@ elegir: lo que dijo va citado.
 | 03.28 | **Los conceptos rápidos de los movimientos de caja los arma el admin**, por local, en Configuración. **Son atajos**: la cajera puede escribir otro. | Eligió la recomendada, dos veces |
 | 02.12 | **La tarjeta de cada cuenta dice cuánto lleva**, con el total calculado en el servidor, **en su propio frente** (toca el motor de precios). | Eligió la recomendada |
 | 06.2 | **La coma es decimal en la cantidad de una compra**: "2,5" se lee 2,5. | Eligió la recomendada |
-| Varianza | **"Faltante sin explicar" pasa a "Diferencia sin explicar"**; el signo dice si faltó o sobró. | Eligió la recomendada |
+| Varianza | **"Faltante sin explicar" pasa a "Diferencia sin explicar"**; el signo dice si faltó o sobró. | Eligió la recomendada (**hecho 2026-10-17**: columna de `/reportes/varianza`) |
 | 08.3 | **Al guardar la contraseña de una invitación, el empleado entra directo.** El owner autoriza tocar la emisión de la sesión (invariante 4) **solo para este caso**. | Eligió la recomendada, con la advertencia de la invariante a la vista |
 | 08.7 | **Se quita la casilla "Mantener sesión iniciada"**; la sesión no cambia. | Eligió la recomendada |
 | 08.25 | **"Continuar con Google" se muestra solo si el servidor tiene Google configurado.** | Eligió la recomendada |

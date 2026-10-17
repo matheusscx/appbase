@@ -50,6 +50,7 @@ nombre, un solo `tipo`).
 | `ids` | Lista de UUID separados por comas, máximo 100. Respeta el resto de los filtros, también el de borrado: un ítem borrado no vuelve. |
 | `modoInventario` | `cantidad`, `lote` o `serie`. |
 | `orden` | `nombre` (default) o `disponibilidad`. |
+| `favorito` | `true` deja solo los marcados por el admin, `false` los demás; ausente no filtra ni reordena (el orden de quien no lo pide no cambia). Cualquier otro valor da 400. Alimenta el chip «Favoritos» del salón (02.25). |
 
 `pageSize` sigue topado en 100. La grilla pide 48.
 

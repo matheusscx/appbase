@@ -84,7 +84,7 @@ test('sobre el umbral la boleta pide nombre y RUT de quien paga, y congela lo ti
   const respuesta = page.waitForResponse(
     r => r.url().endsWith('/ventas') && r.request().method() === 'POST',
   )
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   const res = await respuesta
   expect(res.status()).toBe(201)
   const ventaId = ((await res.json()) as { id: string }).id

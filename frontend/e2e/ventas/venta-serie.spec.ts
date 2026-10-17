@@ -151,7 +151,7 @@ test('el cajero elige la unidad usada: queda en el carrito y la venta sale con e
   const respuesta = page.waitForResponse(
     r => r.url().endsWith('/ventas') && r.request().method() === 'POST',
   )
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   const crear = await respuesta
   expect(crear.status()).toBe(201)
   const ventaId = ((await crear.json()) as { id: string }).id

@@ -1549,7 +1549,10 @@ Lo que cambia en la pantalla del garzón y en las de gestión, sin tocar plata n
   (02.17, 02.29, 02.33).
 - **Catálogo de la cuenta**: chips de categoría (`categoriaId` en `GET /items`; el POS y la tienda no los
   pasan) y el vacío nombra la categoría (02.25); el combo que depende de la opción dice "Disponible según la opción" (01.26).
-  Favoritos: pendiente, no hay una regla de qué es un favorito.
+  **Favoritos** (owner, 2026-10-17): los marca el admin por producto, en Configuración → Productos (casilla
+  «Favorito», columna `items.favorito`), iguales para todos los garzones. El chip «Favoritos» va entre «Todas» y
+  las categorías y pide `GET /items?favorito=true`; es excluyente con la categoría. Sin favoritos marcados el
+  chip lleva a un vacío que dice dónde se marcan. El POS y la tienda no lo ofrecen.
 - **Anular un plato** con una sola unidad despachada arranca en 1 (02.31). **Anulaciones**: el filtro de
   garzones es el del local (si no se puede leer esa lista, los que fue trayendo el resumen), "Comida del
   personal" se llama igual en todos lados, la tarjeta sin platos se encoge y el aviso de mermas solo sale si

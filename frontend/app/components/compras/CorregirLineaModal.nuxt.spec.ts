@@ -108,6 +108,14 @@ describe('CorregirLineaModal', () => {
     expect(llamadas[0]!.body).toEqual({ cantidad: '12' })
   })
 
+  it('06.2: corregir con coma decimal: «12,5» viaja como «12.5»', async () => {
+    await abrir(linea())
+    await tipear('corregir-cantidad', '12,5')
+    await enviar()
+
+    expect(llamadas[0]!.body).toEqual({ cantidad: '12.5' })
+  })
+
   it('abre con los valores actuales, y sin cambios no se manda nada', async () => {
     await abrir(linea())
     // Montado ya abierto: el modal tiene que llenarse igual (el padre lo monta

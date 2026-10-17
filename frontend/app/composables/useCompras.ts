@@ -329,6 +329,24 @@ export function useCompras() {
     return `${formatStockCantidad(cantidad, true)} ${unidad}`
   }
 
+  /**
+   * La coma es decimal en la cantidad (owner, 2026-10-17): «2,5» se lee 2,5 y
+   * lo que viaja al servidor es el string con punto («2.5»). Con coma, los
+   * puntos de la parte entera son de miles («1.250,5» = 1250,5). Sin coma NO
+   * se toca nada: un punto solo sigue siendo decimal, como siempre —«1.250»
+   * es ambiguo en Chile (mil doscientos cincuenta o 1,25) y no se adivina—.
+   * Lo que no es un número queda igual, para que la validación lo marque.
+   */
+  function normalizarCantidad(texto: string): string {
+    const t = texto.trim()
+    if (!t.includes(',')) return texto
+    const partes = t.split(',')
+    if (partes.length !== 2) return texto
+    const [entera, fraccion] = partes as [string, string]
+    if (!/^\d*$/.test(fraccion) || !/^(\d{1,3}(\.\d{3})+|\d*)$/.test(entera)) return texto
+    return `${entera.replaceAll('.', '')}.${fraccion}`
+  }
+
   /** La cantidad para un input: "10", no "10.0000", con punto decimal. */
   function cantidadParaEditar(cantidad: string): string {
     const c = comoDecimal(cantidad)
@@ -600,6 +618,7 @@ export function useCompras() {
     fechaVencimientoSugerida,
     cantidadConUnidad,
     cantidadParaEditar,
+    normalizarCantidad,
     etiquetaCambio,
     etiquetaPresentacion,
     unidadDeLinea,

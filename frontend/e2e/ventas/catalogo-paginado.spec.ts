@@ -169,7 +169,7 @@ test.describe('POS como cajera', () => {
     const respuesta = page.waitForResponse(
       r => r.url().endsWith('/ventas') && r.request().method() === 'POST',
     )
-    await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+    await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
     const ventaId = ((await (await respuesta).json()) as { id: string }).id
     // ⚠️ Aserción de cliente (el toast sale de un mapa local): la venta de
     // verdad se verifica abajo, contra el servidor.

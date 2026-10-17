@@ -110,6 +110,10 @@ export class UpdateItemDto {
   @ValidateIf((_o, v) => v !== undefined)
   activo?: boolean;
 
+  @IsBoolean()
+  @ValidateIf((_o, v) => v !== undefined)
+  favorito?: boolean;
+
   // @ValidateIf (no @IsOptional): mismo motivo que `costo`/`stock` arriba —
   // @IsOptional() también saltea la validación cuando el valor es `null`
   // explícito, no solo cuando la propiedad falta. Eso dejaría pasar

@@ -54,7 +54,7 @@ const unidadesMedidaStore = useUnidadesMedidaStore()
 const monedasStore = useMonedasStore()
 const {
   subtotal, totalConDescuento, faltaAlgunPrecio, insigniaEstado, cantidadParaEditar,
-  cuerpoDocumento, fechaVencimientoSugerida, cantidadConUnidad,
+  cuerpoDocumento, fechaVencimientoSugerida, cantidadConUnidad, normalizarCantidad,
 } = useCompras()
 const { puedeCrear } = usePermisosCrud('Compras')
 const permissionsStore = usePermissionsStore()
@@ -444,7 +444,6 @@ function faltaDeLinea(l: LineaForm): { campo: CampoLinea, texto: string } | null
   }
   const cantidad = l.cantidad.trim()
   if (!cantidad) return { campo: 'cantidad', texto: 'Falta la cantidad' }
-  if (cantidad.includes(',')) return { campo: 'cantidad', texto: 'Los decimales van con punto, no con coma' }
   // Mismo criterio que el DTO: `@IsNumberString` (acepta «.5» y «+2») y `@IsDecimalPositivo`.
   if (!/^[+-]?(\d*\.)?\d+$/.test(cantidad)) return { campo: 'cantidad', texto: 'La cantidad tiene que ser un número' }
   if (!new Decimal(cantidad).gt(0)) return { campo: 'cantidad', texto: 'La cantidad tiene que ser mayor que 0' }
@@ -1222,7 +1221,7 @@ onBeforeUnmount(() => window.removeEventListener('beforeunload', onBeforeUnload)
               :error-series="erroresCompra[`series:${linea.key}`]"
               :error-lote="erroresCompra[`lote:${linea.key}`]"
               @seleccionar-item="(cambios: Partial<LineaForm>) => { Object.assign(linea, cambios); limpiarErrorCompra(`producto:${linea.key}`) }"
-              @cambiar-cantidad="(v: string) => { linea.cantidad = v; limpiarErrorCompra(`cantidad:${linea.key}`) }"
+              @cambiar-cantidad="(v: string) => { linea.cantidad = normalizarCantidad(v); limpiarErrorCompra(`cantidad:${linea.key}`) }"
               @cambiar-unidad="(cambios: Partial<LineaForm>) => Object.assign(linea, cambios)"
               @nueva-presentacion="() => abrirNuevaPresentacion(linea)"
               @editar-presentacion="() => abrirEditarPresentacion(linea)"

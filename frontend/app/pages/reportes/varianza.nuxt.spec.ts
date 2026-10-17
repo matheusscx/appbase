@@ -279,12 +279,12 @@ describe('varianza — tabla', () => {
 
 // Lote 4 (04.20, decisión del owner 2026-10-16): rótulos del local y primera columna fija.
 describe('varianza — tabla en palabras del local y a 768', () => {
-  it('los encabezados dicen lo que se vendió, entre conteos y faltante sin explicar', async () => {
+  it('los encabezados dicen lo que se vendió, entre conteos y diferencia sin explicar', async () => {
     const wrapper = await montar()
     const encabezados = wrapper.findAll('thead th').map(th => th.text())
     expect(encabezados).toContain('Lo que se vendió')
     expect(encabezados).toContain('Entre conteos')
-    expect(encabezados).toContain('Faltante sin explicar')
+    expect(encabezados).toContain('Diferencia sin explicar')
     for (const jerga of ['Teórico', 'Ventana', 'Sin explicación']) expect(encabezados).not.toContain(jerga)
     wrapper.unmount()
   })

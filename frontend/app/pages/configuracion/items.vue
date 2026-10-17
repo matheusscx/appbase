@@ -30,6 +30,7 @@ interface Item {
   descripcion: string | null
   tipo: string
   activo: boolean
+  favorito?: boolean
   precioBase: string
   precioIncluyeImpuesto: boolean
   clasificacionTributaria?: 'afecto' | 'exento'
@@ -482,6 +483,7 @@ function emptyForm() {
     tipo: 'producto',
     precioIncluyeImpuesto: false,
     activo: true,
+    favorito: false,
     // producto
     stock: '0',
     costo: '',
@@ -1365,6 +1367,7 @@ async function abrirEditar(item: Item) {
       tipo: detalle.tipo,
       precioIncluyeImpuesto: detalle.precioIncluyeImpuesto,
       activo: detalle.activo,
+      favorito: detalle.favorito ?? false,
       stock: detalle.stock ?? '0',
       costo: '',
       unidadMedida: detalle.unidadMedida ?? 'unidad',
@@ -1480,6 +1483,7 @@ async function guardar() {
     if (form.value.tipo !== 'ingrediente') {
       payload.precioBase = form.value.precioBase
       payload.precioIncluyeImpuesto = form.value.precioIncluyeImpuesto
+      payload.favorito = form.value.favorito
       payload.clasificacionTributaria = form.value.clasificacionTributaria
       payload.impuestosIds = form.value.impuestosIds
       payload.recargosIds = form.value.recargosIds
@@ -2215,6 +2219,11 @@ const columnsHistorial: TableColumn<Movimiento>[] = [
 
             <UFormField label="Activo">
               <USwitch v-model="form.activo" />
+            </UFormField>
+
+            <!-- Los favoritos son del local, no de cada garzón: el catálogo de la mesa los ofrece en su propio chip. -->
+            <UFormField v-if="form.tipo !== 'ingrediente'" label="Favorito">
+              <UCheckbox v-model="form.favorito" label="Aparece en el chip Favoritos del catálogo de la mesa" />
             </UFormField>
           </div>
 

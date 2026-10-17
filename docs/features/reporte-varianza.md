@@ -40,7 +40,7 @@ en todos lados.
 | **Merma** | salidas `motivo='merma'` cuyo `motivo_baja.tipo` es `merma` |
 | **Cortesía** | las mismas salidas, con `motivo_baja.tipo = 'cortesia'` |
 | **Personal** | las mismas salidas, con `motivo_baja.tipo = 'consumo_personal'` (desde el 2026-10-04) |
-| **Sin explicación** | Σ `recuento` con signo (salidas − entradas). Un **sobrante resta** |
+| **Sin explicación** (en pantalla: «Diferencia sin explicar», porque el signo dice si faltó o sobró) | Σ `recuento` con signo (salidas − entradas). Un **sobrante resta** |
 | **Otros** | el **residuo** entre las dos formas de calcular el mismo consumo real |
 
 ⛔ **«Otros» es un detector, no un balde.** Vale cero por construcción cuando la cuenta cierra:

@@ -340,7 +340,7 @@ const columns: TableColumn<VarianzaFila>[] = [
   { accessorKey: 'merma', header: 'Merma', meta: DERECHA },
   { accessorKey: 'cortesia', header: 'Cortesía', meta: DERECHA },
   { accessorKey: 'personal', header: 'Personal', meta: DERECHA },
-  { accessorKey: 'sinExplicacion', header: 'Faltante sin explicar', meta: DERECHA },
+  { accessorKey: 'sinExplicacion', header: 'Diferencia sin explicar', meta: DERECHA },
   { accessorKey: 'costoSinExplicacion', header: '$ sin explicación', meta: DERECHA },
   { accessorKey: 'otros', header: 'Otros', meta: DERECHA },
 ]

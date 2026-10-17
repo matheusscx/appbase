@@ -258,6 +258,11 @@ export class CreateItemDto {
   @IsOptional()
   activo?: boolean;
 
+  /** Favorito del local (owner, 2026-10-17): el catálogo de la mesa lo muestra primero. */
+  @IsBoolean()
+  @IsOptional()
+  favorito?: boolean;
+
   // @ValidateIf (no @IsOptional): mismo motivo que en `UpdateItemDto` —
   // @IsOptional() también saltea la validación cuando el valor es `null`
   // explícito, no solo cuando la propiedad falta. El `INSERT` de `create()`

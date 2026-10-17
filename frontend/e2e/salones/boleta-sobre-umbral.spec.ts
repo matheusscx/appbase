@@ -115,7 +115,7 @@ test('sobre el umbral el cobro de la mesa pide nombre y RUT de quien paga, y el 
   await page.getByRole('button', { name: 'Cerrar y cobrar' }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
   await expect(cobro.locator('[data-qa="pagador"]')).toBeVisible()
-  const confirmar = cobro.getByRole('button', { name: 'Confirmar venta' })
+  const confirmar = cobro.getByRole('button', { name: /^Cobrar \$/ })
   await expect(confirmar).toBeDisabled()
 
   // El atributo puede caer en el `input` o en su contenedor: se cubren las dos.

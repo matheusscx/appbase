@@ -280,3 +280,35 @@ describe('QueryItemsDto.vendibleOnline', () => {
     expect(dto.vendibleOnline).toBeUndefined();
   });
 });
+
+// `favorito` es de tres estados como `activo`: ausente no filtra ni reordena, y la basura corta con
+// 400 (un `favorito=TRUE` que cayera a `false` mostraría justo lo que no se pidió).
+describe('QueryItemsDto.favorito', () => {
+  it.each([
+    ['true', true],
+    ['false', false],
+  ])('%s se parsea como boolean', async (crudo, esperado) => {
+    const dto = plainToInstance(QueryItemsDto, { favorito: crudo });
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.favorito).toBe(esperado);
+  });
+
+  it.each(['TRUE', '1', 'si'])(
+    '%s es un error de validación, no un false silencioso',
+    async (basura) => {
+      const dto = plainToInstance(QueryItemsDto, { favorito: basura });
+
+      const errores = await validate(dto);
+      expect(errores).toHaveLength(1);
+      expect(errores[0].property).toBe('favorito');
+    },
+  );
+
+  it('sin el parámetro queda undefined (no filtra)', async () => {
+    const dto = plainToInstance(QueryItemsDto, {});
+
+    expect(await validate(dto)).toHaveLength(0);
+    expect(dto.favorito).toBeUndefined();
+  });
+});

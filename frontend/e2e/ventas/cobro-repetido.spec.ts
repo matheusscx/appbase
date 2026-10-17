@@ -127,7 +127,7 @@ test('POS: confirmar de nuevo después de un corte no crea otra venta', async ({
   await elegirPropinaSugerida(cobro)
 
   // 1. El primer Confirmar: entra en el servidor, pero el navegador ve un error.
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   const primera = await respuestaDelPrimero()
   await expect(page.getByText('Venta pagada')).toHaveCount(0)
 
@@ -135,7 +135,7 @@ test('POS: confirmar de nuevo después de un corte no crea otra venta', async ({
   const reintento = page.waitForResponse(
     r => r.url().endsWith('/ventas') && r.request().method() === 'POST',
   )
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   const segunda = (await (await reintento).json()) as Record<string, unknown>
 
   // 3. Es la misma venta, reproducida, y el cajero lo lee.
@@ -194,7 +194,7 @@ test('Salón: volver a cobrar una mesa después de un corte reproduce el cierre,
     await page.getByRole('button', { name: 'Cerrar y cobrar' }).click()
     const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
     await elegirPropinaSugerida(cobro)
-    await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+    await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
     await rondaDePin(page, conPin)
     const primera = await respuestaDelPrimero()
 
@@ -206,7 +206,7 @@ test('Salón: volver a cobrar una mesa después de un corte reproduce el cierre,
     // El modal reabre sin propina: el garzón la vuelve a elegir, igual que la primera vez. Con otra
     // propina sería otro cobro (422 "otros datos"), no el mismo reintento.
     await elegirPropinaSugerida(cobro)
-    await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+    await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
     await rondaDePin(page, conPin)
     const respuesta = await reintento
     expect(respuesta.status(), 'reproduce, no rebota con "La cuenta no está abierta"').toBe(201)

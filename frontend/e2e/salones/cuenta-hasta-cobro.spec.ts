@@ -272,7 +272,7 @@ test('abre una cuenta en una mesa, le carga un producto y la cobra', async ({
 
   // 7. El PIN se pide DESPUÉS de confirmar, no antes: quién cierra la cuenta es
   //    un dato del cierre y no se hereda de quien la abrió.
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   await rondaDePin(page, garzon)
 
   // 8. La pantalla dice que salió y vuelve al listado de la mesa.

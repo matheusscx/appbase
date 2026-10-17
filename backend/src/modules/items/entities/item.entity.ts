@@ -56,6 +56,13 @@ export class Item {
   @Column({ default: true })
   activo: boolean;
 
+  /**
+   * Favorito del local (owner, 2026-10-17): lo marca el admin, igual para todos los
+   * garzones. Solo filtra (`GET /items?favorito=true`); no cambia ningún orden.
+   */
+  @Column({ default: false })
+  favorito: boolean;
+
   @Column({ type: 'text' })
   tipo: string;
 

@@ -548,6 +548,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
       <VentasCobroModal
         v-model:open="cobroOpen"
         v-model:propina-monto="propinaMonto"
+        :ambito-intento="AMBITO_COBRO"
         :modo-propina="propinaHabilitada"
         :total="totalFinal"
         :venta-total="totalFinal"

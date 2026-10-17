@@ -177,6 +177,7 @@ interface ItemRow {
   descripcion: string | null;
   tipo: string;
   activo: boolean;
+  favorito: boolean;
   clasificacion_tributaria: string | null;
   precio_base: string;
   precio_incluye_impuesto: boolean;
@@ -591,7 +592,7 @@ export class ItemsService {
   ): string {
     return `
     SELECT
-      i.item_id, i.nombre, i.descripcion, i.tipo, i.activo,
+      i.item_id, i.nombre, i.descripcion, i.tipo, i.activo, i.favorito,
       i.precio_base, i.precio_incluye_impuesto,
       i.clasificacion_tributaria,
       i.moneda_id, i.categoria_id, i.creado_el,
@@ -642,6 +643,7 @@ export class ItemsService {
       descripcion: r.descripcion,
       tipo: r.tipo,
       activo: r.activo,
+      favorito: r.favorito,
       precioBase: r.precio_base,
       precioIncluyeImpuesto: r.precio_incluye_impuesto,
       clasificacionTributaria: r.clasificacion_tributaria,
@@ -831,6 +833,12 @@ export class ItemsService {
     if (query.activo !== undefined) {
       where += ` AND i.activo = $${idx++}`;
       params.push(query.activo);
+    }
+    // Favoritos (owner, 2026-10-17): `true` deja solo los marcados por el admin; ausente no
+    // filtra ni reordena nada. `false` filtra los no marcados, por simetría con `activo`.
+    if (query.favorito !== undefined) {
+      where += ` AND i.favorito = $${idx++}`;
+      params.push(query.favorito);
     }
     // Regla 5 de docs/superpowers/specs/2026-08-28-merma-sin-costo-tipeado-design.md:
     // vista de conjunto de los ítems sin costo. Este `where` alimenta DOS
@@ -1985,8 +1993,8 @@ export class ItemsService {
       }[] = await manager.query(
         `INSERT INTO items
            (tenant_id, moneda_id, categoria_id, nombre, descripcion,
-            precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+            precio_base, precio_incluye_impuesto, activo, tipo, clasificacion_tributaria, favorito)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
          RETURNING item_id, creado_el`,
         [
           tenantId,
@@ -2012,6 +2020,7 @@ export class ItemsService {
           dto.tipo === 'ingrediente'
             ? null
             : (dto.clasificacionTributaria ?? 'afecto'),
+          dto.favorito ?? false,
         ],
       );
       const itemId = itemRows[0].item_id;
@@ -2270,6 +2279,7 @@ export class ItemsService {
         descripcion: dto.descripcion ?? null,
         tipo: dto.tipo,
         activo: dto.activo ?? true,
+        favorito: dto.favorito ?? false,
         precioBase: precioBasePersistido,
         precioIncluyeImpuesto: dto.precioIncluyeImpuesto ?? false,
         // Mismo valor que se persistió en el INSERT de arriba — ver el
@@ -2426,6 +2436,11 @@ export class ItemsService {
         setClauses.push(`activo = $${idx++}`);
         params.push(dto.activo);
         patch.activo = dto.activo;
+      }
+      if (dto.favorito !== undefined) {
+        setClauses.push(`favorito = $${idx++}`);
+        params.push(dto.favorito);
+        patch.favorito = dto.favorito;
       }
       if (dto.clasificacionTributaria !== undefined) {
         if (tipo === 'ingrediente') {

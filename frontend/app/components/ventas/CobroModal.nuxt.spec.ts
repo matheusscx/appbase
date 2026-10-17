@@ -10,6 +10,7 @@
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended } from '@nuxt/test-utils/runtime'
 import CobroModal from './CobroModal.vue'
+import { useIntentoCobro } from '~/composables/useIntentoCobro'
 
 interface Metodo {
   metodoPagoId: string
@@ -53,8 +54,8 @@ function escribirNumero(valor: string, indice = 0) {
 
 async function confirmar(wrapper: Awaited<ReturnType<typeof montar>>) {
   const boton = [...dialogo().querySelectorAll('button')]
-    .find(b => b.textContent?.includes('Confirmar venta')) as HTMLButtonElement | undefined
-  expect(boton, 'el botón Confirmar venta').toBeTruthy()
+    .find(b => /^\s*Cobrar \$/.test(b.textContent ?? '')) as HTMLButtonElement | undefined
+  expect(boton, 'el botón Cobrar').toBeTruthy()
   expect(boton!.disabled, 'habilitado').toBe(false)
   boton!.click()
   await esperar()
@@ -173,7 +174,7 @@ describe('CobroModal — boleta sobre el umbral de identidad', () => {
   }
   const botonConfirmar = () =>
     [...dialogo().querySelectorAll('button')]
-      .find(b => b.textContent?.includes('Confirmar venta')) as HTMLButtonElement
+      .find(b => /^\s*Cobrar \$/.test(b.textContent ?? '')) as HTMLButtonElement
 
   it('avisa del voucher solo con un pago de la máquina', async () => {
     await montarCon([TARJETA, EFECTIVO], { sobreUmbralIdentidad: true })
@@ -247,7 +248,7 @@ describe('CobroModal — propina con atajos, sin sumarla (01.2, 02.9)', () => {
     expect(boton('10 %')).toBeTruthy()
     expect(boton('Otro monto')).toBeTruthy()
     const [pagos] = await (async () => {
-      boton('Confirmar venta')!.click()
+      boton('Cobrar $')!.click()
       await esperar()
       return wrapper.emitted('confirmar')!.at(-1) as [Record<string, unknown>[], string]
     })()
@@ -330,7 +331,7 @@ describe('CobroModal — lo tecleado no se pisa (01.4)', () => {
 
 describe('CobroModal — saldo pendiente y billetes (01.3)', () => {
   const botonConfirmar = () =>
-    [...dialogo().querySelectorAll('button')].find(b => /Confirmar/.test(b.textContent ?? '')) as HTMLButtonElement
+    [...dialogo().querySelectorAll('button')].find(b => /Confirmar|^\s*Cobrar \$/.test(b.textContent ?? '')) as HTMLButtonElement
   const botonDe = (texto: string) =>
     [...dialogo().querySelectorAll('button')].find(b => b.textContent?.trim() === texto) as HTMLButtonElement | undefined
 
@@ -346,9 +347,9 @@ describe('CobroModal — saldo pendiente y billetes (01.3)', () => {
     expect(botonConfirmar().textContent).toContain('Confirmar con saldo pendiente')
   })
 
-  it('con el total cubierto el botón sigue siendo "Confirmar venta"', async () => {
+  it('con el total cubierto el botón dice "Cobrar $X" con el total', async () => {
     await montar([EFECTIVO])
-    expect(botonConfirmar().textContent).toContain('Confirmar venta')
+    expect(botonConfirmar().textContent?.replace(/\s/g, '')).toBe('Cobrar$100.000')
     expect(dialogo().querySelector('[data-qa="falta"]')).toBeNull()
   })
 
@@ -389,10 +390,104 @@ describe('CobroModal — lo que se dice en voz alta se ve (01.6, 02.8) y se toca
   it('Confirmar, Cancelar, Agregar pago y quitar pago miden 44 px', async () => {
     await montar([EFECTIVO])
     const porTexto = (t: string) => [...dialogo().querySelectorAll('button')].find(b => b.textContent?.includes(t))!
-    for (const t of ['Confirmar venta', 'Cancelar', 'Agregar pago']) {
+    for (const t of ['Cobrar $', 'Cancelar', 'Agregar pago']) {
       expect(porTexto(t).className, t).toContain('min-h-11')
     }
     expect(dialogo().querySelector('button[aria-label="Quitar pago 1"]')!.className).toContain('size-11')
     expect(dialogo().querySelector('button[aria-label="Método del pago 1"]')!.className).toContain('min-h-11')
+  })
+})
+
+// El botón final dice cuánto se cobra, con la propina adentro (owner, 2026-10-17); y un
+// reintento tras un corte vuelve con la propina que se eligió en el primer intento.
+describe('CobroModal — "Cobrar $X" y la propina del reintento', () => {
+  async function montarPropina(extra: Record<string, unknown> = {}) {
+    const wrapper = await mountSuspended(CobroModal, {
+      props: {
+        total: '10000', ventaTotal: '10000', modoPropina: true, porcentajeSugerido: '0.10',
+        metodos: [EFECTIVO], open: false, ambitoIntento: 'cuenta:prueba', ...extra,
+      },
+    })
+    await wrapper.setProps({ open: true })
+    await esperar()
+    return wrapper
+  }
+  const boton = (texto: string) =>
+    [...dialogo().querySelectorAll('button')].find(b => b.textContent?.includes(texto)) as HTMLButtonElement | undefined
+
+  beforeEach(() => useIntentoCobro().terminar('cuenta:prueba'))
+
+  it('el rótulo suma la propina elegida: $10.000 sin propina, $11.000 con la sugerida', async () => {
+    await montarPropina()
+    expect(boton('Cobrar $')!.textContent?.replace(/\s/g, '')).toBe('Cobrar$10.000')
+    boton('10 %')!.click()
+    await esperar()
+    expect(boton('Cobrar $')!.textContent?.replace(/\s/g, '')).toBe('Cobrar$11.000')
+  })
+
+  it('con saldo pendiente sigue diciendo "Confirmar con saldo pendiente"', async () => {
+    await montarPropina()
+    boton('10 %')!.click()
+    await esperar()
+    const monto = dialogo().querySelector<HTMLInputElement>('input[inputmode="decimal"], input[type="text"]')
+    expect(monto).toBeTruthy()
+    monto!.value = '5000'
+    monto!.dispatchEvent(new Event('input', { bubbles: true }))
+    await esperar()
+    expect(boton('Confirmar con saldo pendiente')).toBeTruthy()
+  })
+
+  it('reabrir tras confirmar con la sugerida vuelve con la sugerida, no con "Sin propina"', async () => {
+    const wrapper = await montarPropina()
+    boton('10 %')!.click()
+    await esperar()
+    boton('Cobrar $')!.click()
+    await esperar()
+    expect(wrapper.emitted('confirmar')).toHaveLength(1)
+    // Como la pantalla: el POST sale y pide su cabecera. Antes de eso la propina no está recordada.
+    useIntentoCobro().cabecera('cuenta:prueba')
+
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true })
+    await esperar()
+
+    expect(wrapper.emitted('update:propinaMonto')?.at(-1)).toEqual(['1000'])
+    expect(boton('Cobrar $')!.textContent?.replace(/\s/g, '')).toBe('Cobrar$11.000')
+    expect(boton('10 %')!.getAttribute('aria-pressed')).toBe('true')
+  })
+
+  it('confirmar y cancelar el PIN (el POST nunca sale): al reabrir vuelve "Sin propina"', async () => {
+    useIntentoCobro().cabecera('cuenta:prueba') // un corte anterior dejó la clave viva
+    const wrapper = await montarPropina()
+    boton('10 %')!.click()
+    await esperar()
+    boton('Cobrar $')!.click()
+    await esperar()
+    expect(wrapper.emitted('confirmar')).toHaveLength(1)
+    // No se pide cabecera: el teclado del PIN se canceló.
+
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true })
+    await esperar()
+
+    expect(wrapper.emitted('update:propinaMonto')?.at(-1)).toEqual(['0'])
+    expect(boton('Cobrar $')!.textContent?.replace(/\s/g, '')).toBe('Cobrar$10.000')
+  })
+
+  it('un monto "otro" también vuelve; y sin intento vivo se abre en "Sin propina"', async () => {
+    const wrapper = await montarPropina()
+    useIntentoCobro().recordarPropina('cuenta:prueba', { seleccion: 'otro', monto: '1500' })
+    useIntentoCobro().cabecera('cuenta:prueba')
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true })
+    await esperar()
+    expect(wrapper.emitted('update:propinaMonto')?.at(-1)).toEqual(['1500'])
+    expect(dialogo().querySelector('[data-qa="propina-monto"]')).toBeTruthy()
+
+    useIntentoCobro().terminar('cuenta:prueba')
+    await wrapper.setProps({ open: false })
+    await wrapper.setProps({ open: true })
+    await esperar()
+    expect(wrapper.emitted('update:propinaMonto')?.at(-1)).toEqual(['0'])
   })
 })

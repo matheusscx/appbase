@@ -96,7 +96,7 @@ test('la factura no se cobra sin el receptor completo ni con un RUT malo, y cong
   const respuesta = page.waitForResponse(
     r => r.url().endsWith('/ventas') && r.request().method() === 'POST',
   )
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   const res = await respuesta
   expect(res.status()).toBe(201)
   const ventaId = ((await res.json()) as { id: string }).id

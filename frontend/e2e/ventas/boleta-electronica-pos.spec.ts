@@ -199,7 +199,7 @@ test('la cajera cobra con la emisión prendida: sin error, con folio, y la franj
   const respuesta = page.waitForResponse(
     r => r.url().endsWith('/ventas') && r.request().method() === 'POST',
   )
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   const creada = await respuesta
   expect(creada.status()).toBe(201)
   const { id: ventaId, boleta } = (await creada.json()) as { id: string, boleta: BoletaServidor }

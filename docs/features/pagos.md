@@ -410,6 +410,16 @@ Auditoría UX 01.2 / 02.9 / 01.19 (owner, 2026-10-16). `CobroModal.vue` es **el 
   "Confirmar con saldo pendiente" (la venta queda `pagada_parcial`, como antes). Los pagos con un método que
   permite vuelto ofrecen **Exacto, $5.000, $10.000 y $20.000**: el billete fija lo que entrega el cliente y
   el sobrante es vuelto (los billetes son fijos, pensados en CLP).
+- **El botón final dice cuánto se cobra** (owner, 2026-10-17): «Cobrar $X», con el total que incluye la propina
+  elegida (`formatMonto` sobre el mismo `totalAPagar`). Con saldo pendiente sigue «Confirmar con saldo
+  pendiente»; con total 0 (nada que cobrar) queda «Confirmar venta».
+- **Un reintento tras un corte recuerda la propina** (owner, 2026-10-17). La huella de la `Idempotency-Key` incluye la
+  propina, y el modal volvía a abrir en «Sin propina»: el reintento mandaba otros datos y salía el 422 «otros
+  datos». `useIntentoCobro` guarda la propina elegida al confirmar (`recordarPropina`, por ámbito: `pos` o
+  `cuenta:<id>`), pero solo queda **recordada cuando el POST sale** (cuando pide su `cabecera`): si se cancela el teclado
+  del PIN o una fusión se lleva la cuenta, no queda nada y la próxima apertura vuelve a «Sin propina». `CobroModal` (prop
+  `ambitoIntento`) la restaura al reabrir. Vive y muere con la clave:
+  `terminar()` y el aviso de «otros datos» la olvidan. Lo demás (los pagos) se rearma como antes.
 - **Lo que se dice en voz alta (01.6, 02.8):** "Total a pagar" y "Vuelto" van en `text-2xl`; el vuelto solo
   destacado cuando hay un pago en efectivo. Todos los botones del modal miden 44 px (01.7).
 - **Una propina distinta en el reintento es otro cobro:** el modal reabre siempre en "Sin propina"; si un corte

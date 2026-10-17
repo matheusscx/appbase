@@ -200,7 +200,7 @@ test('el garzón pide el celular eligiendo la unidad nueva: la línea la muestra
   const respuesta = page.waitForResponse(
     r => /\/cuentas\/[^/]+\/cerrar$/.test(r.url()) && r.request().method() === 'POST',
   )
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   await rondaDePin(page, garzon)
   const cierre = await respuesta
   expect(cierre.status()).toBe(201)

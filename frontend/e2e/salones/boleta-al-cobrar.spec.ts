@@ -210,7 +210,7 @@ test('cobra una cuenta habiendo navegado a otra mientras el cierre viajaba, y la
     await route.continue()
   })
 
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   await rondaDePin(page, garzon)
 
   // 6. Con el cierre todavía retenido: salir de la cuenta A y entrar a la B.

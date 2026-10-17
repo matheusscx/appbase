@@ -160,7 +160,7 @@ test('cobra un afecto y un exento: el IVA sale solo del afecto, y así queda en 
   const respuesta = page.waitForResponse(
     (r) => r.url().endsWith('/ventas') && r.request().method() === 'POST',
   )
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   const ventaId = ((await (await respuesta).json()) as { id: string }).id
 
   // 5. La pantalla cerró el ciclo: avisó y dejó el carrito limpio para la venta
@@ -250,7 +250,7 @@ test('vender descuenta el stock: queda el movimiento auditable y el saldo al dí
 
   await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   await expect(page.getByText('Venta pagada').first()).toBeVisible({
     timeout: 15_000,
   })
@@ -378,7 +378,7 @@ test('pago mixto: dos métodos que suman justo, y la caja espera solo el efectiv
   const respuesta = page.waitForResponse(
     (r) => r.url().endsWith('/ventas') && r.request().method() === 'POST',
   )
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   const ventaId = ((await (await respuesta).json()) as { id: string }).id
   await expect(page.getByText('Venta pagada').first()).toBeVisible({
     timeout: 15_000,
@@ -433,7 +433,7 @@ test('el vuelto depende del método: con tarjeta no se puede devolver, con efect
   ).toBeVisible()
   await expect(valorDeFila(cobro, 'Vuelto')).toHaveText('$0')
   await expect(
-    cobro.getByRole('button', { name: 'Confirmar venta' }),
+    cobro.getByRole('button', { name: /^Cobrar \$/ }),
   ).toBeDisabled()
 
   await elegirEnSelector(filaDePago(cobro, 0), EFECTIVO_NOMBRE)
@@ -442,7 +442,7 @@ test('el vuelto depende del método: con tarjeta no se puede devolver, con efect
   const respuesta = page.waitForResponse(
     (r) => r.url().endsWith('/ventas') && r.request().method() === 'POST',
   )
-  await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
+  await cobro.getByRole('button', { name: /^Cobrar \$/ }).click()
   const ventaId = ((await (await respuesta).json()) as { id: string }).id
   await expect(page.getByText('Venta pagada').first()).toBeVisible({
     timeout: 15_000,

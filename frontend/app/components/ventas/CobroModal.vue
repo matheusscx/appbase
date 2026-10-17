@@ -44,6 +44,12 @@ const props = withDefaults(
     pedirPagador?: boolean
     /** El RUT se valida con DV módulo 11 (`GET /tipos-documento`). */
     rutChileno?: boolean
+    /**
+     * El ámbito del intento de cobro (`useIntentoCobro`). Con él, un reintento tras
+     * un corte reabre con la propina que se eligió en el primer intento: es lo que
+     * mantiene igual lo que viaja (owner, 2026-10-17).
+     */
+    ambitoIntento?: string
   }>(),
   {
     modoPropina: false,
@@ -74,6 +80,7 @@ const pagador = defineModel<{ nombre: string, rut: string }>('pagador', {
   default: () => ({ nombre: '', rut: '' }),
 })
 
+const intento = useIntentoCobro()
 const pagos = ref<PagoInput[]>([])
 
 const metodosHabilitados = computed(() => props.metodos.filter((m) => m.habilitada))
@@ -122,8 +129,10 @@ function elegirPropina(sel: 'sin' | 'sugerida' | 'otro') {
 watch(open, (v) => {
   if (v) {
     if (props.modoPropina) {
-      seleccionPropina.value = 'sin'
-      propinaMonto.value = '0'
+      if (props.ambitoIntento) intento.olvidarPropinaPendiente(props.ambitoIntento)
+      const recordada = props.ambitoIntento ? intento.propinaDelIntento(props.ambitoIntento) : null
+      seleccionPropina.value = recordada?.seleccion ?? 'sin'
+      propinaMonto.value = recordada?.monto ?? '0'
     }
     resetPagos()
   }
@@ -237,6 +246,12 @@ const avisoVoucher = computed(
   () => props.sobreUmbralIdentidad && pagosValidos.value.some((p) => emiteLaMaquina(p.metodoPagoId)),
 )
 
+/** «Cobrar $X» con la propina adentro; sin nada que cobrar (total 0) es solo confirmar. */
+const etiquetaCobrar = computed(() => {
+  if (nadaQueCobrar.value) return 'Confirmar venta'
+  return hayFalta.value ? 'Confirmar con saldo pendiente' : `Cobrar ${formatMonto(totalAPagar.value)}`
+})
+
 function confirmar() {
   // Lo tipeado antes de cambiar de medio no viaja: `comprobanteDelPago` lo suelta
   // si el medio de este pago ya no es de la máquina.
@@ -244,6 +259,9 @@ function confirmar() {
     ...pago,
     ...comprobanteDelPago(emisorDe(pago.metodoPagoId), numeroDocumento, claseDocumento),
   }))
+  if (props.modoPropina && props.ambitoIntento) {
+    intento.recordarPropina(props.ambitoIntento, { seleccion: seleccionPropina.value, monto: propinaMonto.value || '0' })
+  }
   emit('confirmar', aEmitir, resumen.value.vuelto)
 }
 </script>
@@ -463,7 +481,7 @@ function confirmar() {
       <AppModalFooter>
         <UButton label="Cancelar" color="neutral" variant="ghost" size="xl" class="min-h-11" @click="() => { open = false }" />
         <UButton
-          :label="hayFalta && !nadaQueCobrar ? 'Confirmar con saldo pendiente' : 'Confirmar venta'"
+          :label="etiquetaCobrar"
           color="primary"
           size="xl"
           class="min-h-11"

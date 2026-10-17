@@ -1414,7 +1414,8 @@ describe('compras/[id] — una línea incompleta bloquea el envío', () => {
     ['0', 'La cantidad tiene que ser mayor que 0'],
     ['-3', 'La cantidad tiene que ser mayor que 0'],
     ['abc', 'La cantidad tiene que ser un número'],
-    ['2,5', 'Los decimales van con punto, no con coma'],
+    ['1,2,3', 'La cantidad tiene que ser un número'],
+    ['0,0', 'La cantidad tiene que ser mayor que 0'],
   ])('06.2: la cantidad "%s" no se envía y dice por qué', async (valor, texto) => {
     const wrapper = await montar()
     await cabecera(wrapper)
@@ -1439,6 +1440,21 @@ describe('compras/[id] — una línea incompleta bloquea el envío', () => {
 
     expect(errores(wrapper)).toEqual([])
     expect(enviados).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('06.2: la coma es decimal: «2,5» se escribe 2.5 y al servidor viaja «2.5»', async () => {
+    const wrapper = await montar()
+    await cabecera(wrapper)
+    await elegirProducto(wrapper, 0, HARINA.id)
+    await wrapper.find('input[data-qa="compra-cantidad"]').setValue('2,5')
+
+    expect((wrapper.find('input[data-qa="compra-cantidad"]').element as HTMLInputElement).value).toBe('2.5')
+    await guardar(wrapper)
+
+    expect(errores(wrapper)).toEqual([])
+    expect(enviados).toHaveLength(1)
+    expect((enviados[0]!.body!.lineas as { cantidad: string }[])[0]!.cantidad).toBe('2.5')
     wrapper.unmount()
   })
 

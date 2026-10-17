@@ -20,7 +20,7 @@ const open = defineModel<boolean>('open', { required: true })
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatMonto } = useFormatters()
-const { diferenciaCantidad, cuerpoCorreccion, cantidadConUnidad, cantidadParaEditar, unidadDeLinea } = useCompras()
+const { diferenciaCantidad, cuerpoCorreccion, cantidadConUnidad, cantidadParaEditar, normalizarCantidad, unidadDeLinea } = useCompras()
 
 const precio = ref('')
 const cantidad = ref('')
@@ -133,7 +133,7 @@ async function enviar() {
             <MoneyInput v-model="precio" oficial class="w-full" data-qa="corregir-precio" />
           </UFormField>
           <UFormField :label="`Cantidad (${unidadDeLinea(linea)})`" :help="`Actual: ${cantidadConUnidad(linea.cantidad, unidadDeLinea(linea))}`">
-            <UInput v-model="cantidad" inputmode="decimal" class="w-full" data-qa="corregir-cantidad" />
+            <UInput :model-value="cantidad" inputmode="decimal" class="w-full" data-qa="corregir-cantidad" @update:model-value="(v: string) => { cantidad = normalizarCantidad(v) }" />
           </UFormField>
         </div>
 

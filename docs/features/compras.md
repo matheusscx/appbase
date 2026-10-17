@@ -459,15 +459,22 @@ hay transición), el total precargado quedaría puesto sin que nadie lo borre.
 ### Una línea empezada e incompleta bloquea Guardar y Confirmar (auditoría UX 00.10, 06.1, 06.2, 06.3)
 
 `faltaDeLinea` (en `pages/compras/[id].vue`) dice qué le falta a una línea que ya tiene algo cargado:
-el producto (hay cantidad o precio sin producto), la cantidad (vacía, no numérica, cero o con coma), las
+el producto (hay cantidad o precio sin producto), la cantidad (vacía, no numérica o cero), las
 series (producto por serie) o el código del lote. «Guardar borrador» y «Confirmar recepción» no envían
 nada mientras haya una, y la marcan junto al campo; antes se filtraba en silencio y el aviso decía
 «Borrador guardado». Una línea sin nada cargado se ignora, como siempre. «Confirmar recepción» además
 exige el «Total del documento» de un tipo `obligatorio` **antes** de abrir el modal. La cantidad (con el
 mismo criterio que el DTO: número, «.5» incluido, y mayor que 0), las series, el lote y el total son
 condiciones que el backend ya rechaza con 400; «cantidad o precio sin producto» el backend no la ve nunca,
-y bloquearla solo evita descartar en silencio lo escrito. No cambia qué se guarda. La coma decimal («2,5») se avisa
-pero no se convierte en punto (convertirla cambiaría la cantidad que entra al stock; sin decidir).
+y bloquearla solo evita descartar en silencio lo escrito. No cambia qué se guarda.
+
+**La coma es decimal en la cantidad** (owner, 2026-10-17, 06.2). `normalizarCantidad` (en `useCompras`) convierte
+al tipear, en la línea de la compra y en «Corregir línea»: «2,5» pasa a `2.5` y eso es lo que viaja al servidor
+(el contrato no cambió: sigue siendo el string con punto). Con coma, los puntos de la parte entera son de
+miles: «1.250,5» es 1250,5. **Sin coma no se toca nada**: un punto solo sigue siendo decimal, como siempre. «1.250» es
+ambiguo en Chile (mil doscientos cincuenta o 1,25) y no se adivina: se lee como antes, 1,25; quien quiera
+mil doscientos cincuenta escribe «1250» o «1.250,0». Lo que no es un número («1,2,3», «1,250.5») queda
+igual y la validación de la línea lo marca.
 
 ### El modal de confirmar: "¿La pagaste ya?"
 

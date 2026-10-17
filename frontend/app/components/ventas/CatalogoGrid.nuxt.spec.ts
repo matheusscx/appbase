@@ -468,3 +468,52 @@ describe('CatalogoGrid — categorías (02.25)', () => {
     expect(w.emitted('update:categoria')?.at(-1)).toEqual([null])
   })
 })
+
+// Decisión del owner 2026-10-17 (02.25): el admin marca favoritos y el catálogo de la mesa los
+// ofrece en un chip junto a las categorías.
+describe('CatalogoGrid — favoritos (02.25)', () => {
+  const CATEGORIAS = [{ id: 'cat-bebidas', nombre: 'Bebidas' }]
+
+  async function conFavoritos(items: ItemCatalogo[], extra: Record<string, unknown> = {}) {
+    return mountSuspended(CatalogoGrid, {
+      props: { items, total: items.length, pageSize: 48, categorias: CATEGORIAS, favoritos: true, ...extra },
+      global: { stubs },
+    })
+  }
+  const chipFav = (w: Awaited<ReturnType<typeof conFavoritos>>) => w.find('[data-qa="favoritos-chip"]')
+
+  it('sin la opción no hay chip de favoritos (el POS y la tienda siguen como están)', async () => {
+    const w = await mountSuspended(CatalogoGrid, {
+      props: { items: [producto()], total: 1, pageSize: 48, categorias: CATEGORIAS },
+      global: { stubs },
+    })
+    expect(w.find('[data-qa="favoritos-chip"]').exists()).toBe(false)
+  })
+
+  it('el chip va entre "Todas" y las categorías; tocarlo emite soloFavoritos y quita la categoría', async () => {
+    const w = await conFavoritos([producto()], { categoria: 'cat-bebidas' })
+    expect(w.findAll('[data-qa="categoria-chip"], [data-qa="favoritos-chip"]').map(c => c.text()))
+      .toEqual(['Todas', 'Favoritos', 'Bebidas'])
+    await chipFav(w)!.trigger('click')
+    expect(w.emitted('update:soloFavoritos')?.at(-1)).toEqual([true])
+    expect(w.emitted('update:categoria')?.at(-1)).toEqual([null])
+  })
+
+  it('elegir una categoría o "Todas" apaga los favoritos', async () => {
+    const w = await conFavoritos([producto()], { soloFavoritos: true })
+    expect(chipFav(w)!.attributes('aria-pressed')).toBe('true')
+    await w.findAll('[data-qa="categoria-chip"]')[1]!.trigger('click')
+    expect(w.emitted('update:soloFavoritos')?.at(-1)).toEqual([false])
+    await w.findAll('[data-qa="categoria-chip"]')[0]!.trigger('click')
+    expect(w.emitted('update:soloFavoritos')?.at(-1)).toEqual([false])
+  })
+
+  it('sin favoritos marcados lo dice y ofrece volver a todas', async () => {
+    const w = await conFavoritos([], { soloFavoritos: true })
+    expect(w.text()).toContain('Aún no hay favoritos')
+    const volver = w.findAll('button').find(b => b.text() === 'Ver todas')
+    expect(volver).toBeTruthy()
+    await volver!.trigger('click')
+    expect(w.emitted('update:soloFavoritos')?.at(-1)).toEqual([false])
+  })
+})

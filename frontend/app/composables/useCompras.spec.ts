@@ -19,6 +19,7 @@ const {
   cuerpoActualizarDocumento,
   cantidadConUnidad,
   cantidadParaEditar,
+  normalizarCantidad,
   etiquetaCambio,
   etiquetaPresentacion,
   unidadDeLinea,
@@ -103,6 +104,24 @@ describe('useCompras', () => {
     expect(cantidadConUnidad('20.3500', 'kg')).toBe('20,35 kg')
     expect(cantidadParaEditar('10.0000')).toBe('10')
     expect(cantidadParaEditar('20.3500')).toBe('20.35')
+  })
+
+  it('normalizarCantidad: la coma es decimal; el punto solo es de miles si hay coma', () => {
+    expect(normalizarCantidad('2,5')).toBe('2.5')
+    expect(normalizarCantidad(' 2,5 ')).toBe('2.5')
+    expect(normalizarCantidad('2,')).toBe('2.')
+    expect(normalizarCantidad(',5')).toBe('.5')
+    expect(normalizarCantidad('1.250,5')).toBe('1250.5')
+    expect(normalizarCantidad('1.234.567,25')).toBe('1234567.25')
+    // Sin coma no se toca: el punto sigue siendo decimal, como antes (no se adivina «1.250»).
+    expect(normalizarCantidad('1.250')).toBe('1.250')
+    expect(normalizarCantidad('2.5')).toBe('2.5')
+    expect(normalizarCantidad('12')).toBe('12')
+    // Lo que no es un número queda igual, para que la validación lo marque.
+    expect(normalizarCantidad('1,2,3')).toBe('1,2,3')
+    expect(normalizarCantidad('1.25,5')).toBe('1.25,5')
+    expect(normalizarCantidad('1,250.5')).toBe('1,250.5')
+    expect(normalizarCantidad('abc')).toBe('abc')
   })
 
   it('etiquetaCambio nombra el campo del historial', () => {
