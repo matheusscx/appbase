@@ -30,6 +30,7 @@ import { Pago } from '../../modules/pagos/entities/pago.entity';
 import { EntregaRepartidor } from '../../modules/paqueteria/entities/entrega-repartidor.entity';
 import { Paquete } from '../../modules/paqueteria/entities/paquete.entity';
 import { TarifaPago } from '../../modules/paqueteria/entities/tarifa-pago.entity';
+import { TarifaEnvio } from '../../modules/paqueteria/entities/tarifa-envio.entity';
 import { PaqueteConfiguracion } from '../../modules/paqueteria/entities/paquete-configuracion.entity';
 import { Promocion } from '../../modules/promociones/entities/promocion.entity';
 import { LiquidacionPropinasGrupo } from '../../modules/propinas/entities/liquidacion-propinas-grupo.entity';
@@ -119,6 +120,8 @@ const COLUMNAS: Record<string, [Entidad, string][]> = {
   'paqueteria/UpdateEntregaRepartidorDto.monto': [[EntregaRepartidor, 'monto']],
   'paqueteria/CreateTarifaPagoDto.monto': [[TarifaPago, 'monto']],
   'paqueteria/UpdateTarifaPagoDto.monto': [[TarifaPago, 'monto']],
+  'paqueteria/CreateTarifaEnvioDto.monto': [[TarifaEnvio, 'monto']],
+  'paqueteria/UpdateTarifaEnvioDto.monto': [[TarifaEnvio, 'monto']],
   'promociones/CreatePromocionDto.valorMonto': [[Promocion, 'valorMonto']],
   'propinas/MontoManualDto.monto': [[LiquidacionPropinasParticipante, 'monto']],
   'propinas/UpdateLiquidacionParticipanteDto.monto': [

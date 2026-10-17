@@ -14,6 +14,7 @@ import type {
   PaqueteFila,
   RepartidorFila,
   TarifaPagoFila,
+  TarifaEnvioFila,
   RendicionDetalle,
   RendicionFila,
   RespuestaEscaneo,
@@ -176,6 +177,8 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       ['put', '/api/paquetes/configuracion'],
       ['get', '/api/tarifas-pago'],
       ['post', '/api/tarifas-pago'],
+      ['get', '/api/tarifas-envio'],
+      ['post', '/api/tarifas-envio'],
       ['get', '/api/repartidores'],
       ['post', '/api/repartidores'],
       ['get', '/api/paquetes'],
@@ -852,6 +855,260 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       const del = await llamar(
         'delete',
         `/api/tarifas-pago/${moto}`,
+        tokenVendedor,
+      );
+      expect(del.status).toBe(403);
+    });
+  });
+
+  describe('tarifas de envío', () => {
+    // Parte de cero tarifas de envío en Paris y las deja en cero: la API no deja borrar la última
+    // (es la del defecto), así que el cierre las marca con SQL, como las marca un soft delete.
+    const tarifas: string[] = [];
+    const paquetesIds: string[] = [];
+    const sufijo = Date.now();
+    const nuevaTarifa = async (cuerpo: object, token = tokenAdmin) => {
+      const res = await llamar('post', '/api/tarifas-envio', token, cuerpo);
+      expect(res.status).toBe(201);
+      const fila = res.body as TarifaEnvioFila;
+      tarifas.push(fila.id);
+      return fila;
+    };
+    const listar = async () => {
+      const res = await llamar('get', '/api/tarifas-envio');
+      expect(res.status).toBe(200);
+      return res.body as TarifaEnvioFila[];
+    };
+
+    afterAll(async () => {
+      const ds = app.get(DataSource);
+      if (paquetesIds.length) {
+        await ds.query(
+          `UPDATE paquetes SET eliminado_el = now() WHERE paquete_id = ANY($1)`,
+          [paquetesIds],
+        );
+      }
+      await ds.query(
+        `UPDATE tarifas_envio SET eliminado_el = now() WHERE tarifa_envio_id = ANY($1)`,
+        [tarifas],
+      );
+    });
+
+    it('la primera tarifa de envío queda por defecto aunque no se pida; la segunda no', async () => {
+      expect(await listar()).toEqual([]);
+      const moto = await nuevaTarifa({
+        nombre: `Moto ${sufijo}`,
+        monto: '3000',
+      });
+      expect(moto).toMatchObject({
+        esDefecto: true,
+        activa: true,
+        monto: '3000.0000',
+      });
+      const auto = await nuevaTarifa({
+        nombre: `Auto ${sufijo}`,
+        monto: '4500',
+      });
+      expect(auto.esDefecto).toBe(false);
+    });
+
+    it('PATCH { esDefecto: true } sobre otra deja exactamente una por defecto', async () => {
+      const [moto, auto] = tarifas;
+      const res = await llamar(
+        'patch',
+        `/api/tarifas-envio/${auto}`,
+        tokenAdmin,
+        { esDefecto: true },
+      );
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({ id: auto, esDefecto: true });
+      expect(
+        (await listar()).filter((t) => t.esDefecto).map((t) => t.id),
+      ).toEqual([auto]);
+      const vuelta = await llamar(
+        'patch',
+        `/api/tarifas-envio/${moto}`,
+        tokenAdmin,
+        { esDefecto: true },
+      );
+      expect(vuelta.status).toBe(200);
+      expect(
+        (await listar()).filter((t) => t.esDefecto).map((t) => t.id),
+      ).toEqual([moto]);
+    });
+
+    it('desactivar o borrar la por defecto: 400 con el aviso, y sigue igual', async () => {
+      const [moto] = tarifas;
+      const off = await llamar(
+        'patch',
+        `/api/tarifas-envio/${moto}`,
+        tokenAdmin,
+        { activa: false },
+      );
+      expect(off.status).toBe(400);
+      expect(JSON.stringify(off.body)).toContain(
+        'Elige otra tarifa por defecto antes de',
+      );
+      const del = await llamar('delete', `/api/tarifas-envio/${moto}`);
+      expect(del.status).toBe(400);
+      expect(JSON.stringify(del.body)).toContain(
+        'Elige otra tarifa por defecto antes de',
+      );
+      expect((await listar()).find((t) => t.id === moto)).toMatchObject({
+        esDefecto: true,
+        activa: true,
+      });
+    });
+
+    it('un monto con más decimales que la moneda oficial (CLP: 3000.5), o negativo: 400', async () => {
+      const decimales = await llamar('post', '/api/tarifas-envio', tokenAdmin, {
+        nombre: `Decimales ${sufijo}`,
+        monto: '3000.5',
+      });
+      expect(decimales.status).toBe(400);
+      const negativo = await llamar('post', '/api/tarifas-envio', tokenAdmin, {
+        nombre: `Negativo ${sufijo}`,
+        monto: '-1',
+      });
+      expect(negativo.status).toBe(400);
+      const [, auto] = tarifas;
+      const patch = await llamar(
+        'patch',
+        `/api/tarifas-envio/${auto}`,
+        tokenAdmin,
+        { monto: '3000.5' },
+      );
+      expect(patch.status).toBe(400);
+    });
+
+    it('nombre repetido, sin distinguir mayúsculas: 409; renombrar a uno existente también', async () => {
+      const dup = await llamar('post', '/api/tarifas-envio', tokenAdmin, {
+        nombre: `MOTO ${sufijo}`,
+        monto: '1000',
+      });
+      expect(dup.status).toBe(409);
+      const [, auto] = tarifas;
+      const renombre = await llamar(
+        'patch',
+        `/api/tarifas-envio/${auto}`,
+        tokenAdmin,
+        { nombre: `moto ${sufijo}` },
+      );
+      expect(renombre.status).toBe(409);
+    });
+
+    it('PATCH del monto y del nombre; un PATCH vacío la deja igual', async () => {
+      const [, auto] = tarifas;
+      const res = await llamar(
+        'patch',
+        `/api/tarifas-envio/${auto}`,
+        tokenAdmin,
+        { monto: '4600' },
+      );
+      expect(res.status).toBe(200);
+      expect(res.body).toMatchObject({
+        id: auto,
+        monto: '4600.0000',
+        nombre: `Auto ${sufijo}`,
+        esDefecto: false,
+      });
+      const vacio = await llamar(
+        'patch',
+        `/api/tarifas-envio/${auto}`,
+        tokenAdmin,
+        {},
+      );
+      expect(vacio.status).toBe(200);
+      expect(vacio.body).toMatchObject({ id: auto, monto: '4600.0000' });
+    });
+
+    it('borrar una usada por un paquete: 400 y se desactiva; sin uso se borra', async () => {
+      const enPaq = await nuevaTarifa({
+        nombre: `EnPaquete ${sufijo}`,
+        monto: '900',
+      });
+      await tarifaPorMonto('5000'); // crear un paquete exige una tarifa de pago por defecto
+      const paq = await llamar('post', '/api/paquetes', tokenAdmin, {
+        codigo: `E2E-ENVIO-${sufijo}`,
+        cobroEnDestino: false,
+      });
+      expect(paq.status).toBe(201);
+      const paqId = (paq.body as PaqueteFila).id;
+      paquetesIds.push(paqId);
+      // El paquete todavía no recibe la tarifa por la API (llega con el precio de la línea): se
+      // la pone SQL, que es lo que va a hacer la API.
+      await app
+        .get(DataSource)
+        .query(
+          `UPDATE paquetes SET tarifa_envio_id = $2 WHERE paquete_id = $1`,
+          [paqId, enPaq.id],
+        );
+      const delPaq = await llamar('delete', `/api/tarifas-envio/${enPaq.id}`);
+      expect(delPaq.status).toBe(400);
+      const off = await llamar(
+        'patch',
+        `/api/tarifas-envio/${enPaq.id}`,
+        tokenAdmin,
+        { activa: false },
+      );
+      expect(off.status).toBe(200);
+      expect((await listar()).find((t) => t.id === enPaq.id)).toMatchObject({
+        activa: false,
+      });
+
+      const libre = await nuevaTarifa({
+        nombre: `Libre ${sufijo}`,
+        monto: '100',
+      });
+      const delLibre = await llamar('delete', `/api/tarifas-envio/${libre.id}`);
+      expect(delLibre.status).toBe(200);
+      expect((await listar()).some((t) => t.id === libre.id)).toBe(false);
+      expect(
+        (await llamar('delete', `/api/tarifas-envio/${libre.id}`)).status,
+      ).toBe(404);
+    });
+
+    it('aislamiento: el listado de un tenant no trae las del otro; la de otro tenant es 404; id no UUID es 400', async () => {
+      const ajena = await llamar(
+        'post',
+        '/api/tarifas-envio',
+        tokenSegundoTenant,
+        { nombre: `Ajena ${sufijo}`, monto: '1000' },
+      );
+      expect(ajena.status).toBe(201);
+      const ajenaId = (ajena.body as TarifaEnvioFila).id;
+      tarifas.push(ajenaId);
+      expect((await listar()).some((t) => t.id === ajenaId)).toBe(false);
+      const patch = await llamar(
+        'patch',
+        `/api/tarifas-envio/${ajenaId}`,
+        tokenAdmin,
+        { nombre: 'x' },
+      );
+      expect(patch.status).toBe(404);
+      const malo = await llamar(
+        'patch',
+        '/api/tarifas-envio/no-es-uuid',
+        tokenAdmin,
+        {},
+      );
+      expect(malo.status).toBe(400);
+    });
+
+    it('un no admin: 403', async () => {
+      const [moto] = tarifas;
+      const get = await llamar('get', '/api/tarifas-envio', tokenVendedor);
+      expect(get.status).toBe(403);
+      const patch = await llamar(
+        'patch',
+        `/api/tarifas-envio/${moto}`,
+        tokenVendedor,
+        { monto: '1' },
+      );
+      expect(patch.status).toBe(403);
+      const del = await llamar(
+        'delete',
+        `/api/tarifas-envio/${moto}`,
         tokenVendedor,
       );
       expect(del.status).toBe(403);

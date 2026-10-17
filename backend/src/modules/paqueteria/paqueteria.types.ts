@@ -28,6 +28,14 @@ export interface TarifaPagoFila {
   activa: boolean;
 }
 
+export interface TarifaEnvioFila {
+  id: string;
+  nombre: string;
+  monto: string;
+  esDefecto: boolean;
+  activa: boolean;
+}
+
 export interface PaqueteFila {
   id: string;
   codigo: string;

@@ -3127,6 +3127,24 @@ CREATE UNIQUE INDEX uq_tarifas_pago_defecto
 CREATE UNIQUE INDEX uq_tarifas_pago_tenant_nombre
     ON tarifas_pago (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL;
 
+CREATE TABLE tarifas_envio (
+    tarifa_envio_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    tenant_id       UUID NOT NULL REFERENCES tenants(tenant_id),
+    nombre          VARCHAR(100) NOT NULL,
+    monto           NUMERIC(18,4) NOT NULL,
+    es_defecto      BOOLEAN NOT NULL DEFAULT false,
+    activa          BOOLEAN NOT NULL DEFAULT true,
+    creado_el       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    actualizado_el  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    eliminado_el    TIMESTAMPTZ
+);
+-- Lo que se le cobra al cliente por el envío. Misma regla que tarifas_pago: una por defecto y viva
+-- por tenant; el nombre no se repite sin distinguir mayúsculas.
+CREATE UNIQUE INDEX uq_tarifas_envio_defecto
+    ON tarifas_envio (tenant_id) WHERE es_defecto AND eliminado_el IS NULL;
+CREATE UNIQUE INDEX uq_tarifas_envio_tenant_nombre
+    ON tarifas_envio (tenant_id, lower(nombre)) WHERE eliminado_el IS NULL;
+
 CREATE TABLE repartidores (
     repartidor_id  UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     tenant_id      UUID NOT NULL REFERENCES tenants(tenant_id),
@@ -3153,6 +3171,7 @@ CREATE TABLE paquetes (
     cobro_en_destino      BOOLEAN NOT NULL DEFAULT false,
     precio_envio          NUMERIC(18,4) NOT NULL,
     tarifa_pago_id        UUID REFERENCES tarifas_pago(tarifa_pago_id),   -- tarifa especial; null = la del repartidor o la por defecto
+    tarifa_envio_id       UUID REFERENCES tarifas_envio(tarifa_envio_id),  -- tarifa de envío; null = la por defecto al entregar
     creado_el             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     actualizado_el        TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     eliminado_el          TIMESTAMPTZ

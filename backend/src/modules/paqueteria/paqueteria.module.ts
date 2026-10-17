@@ -3,6 +3,7 @@ import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { MonedasModule } from '../monedas/monedas.module';
 import { PaqueteConfiguracion } from './entities/paquete-configuracion.entity';
 import { TarifaPago } from './entities/tarifa-pago.entity';
+import { TarifaEnvio } from './entities/tarifa-envio.entity';
 import { Repartidor } from './entities/repartidor.entity';
 import { Rendicion } from './entities/rendicion.entity';
 import { EntregaRepartidor } from './entities/entrega-repartidor.entity';
@@ -17,6 +18,8 @@ import { PaquetesController } from './paquetes.controller';
 import { PaquetesService } from './paquetes.service';
 import { TarifasPagoController } from './tarifas-pago.controller';
 import { TarifasPagoService } from './tarifas-pago.service';
+import { TarifasEnvioController } from './tarifas-envio.controller';
+import { TarifasEnvioService } from './tarifas-envio.service';
 import { EntregasRepartidorController } from './entregas-repartidor.controller';
 import { EntregasRepartidorService } from './entregas-repartidor.service';
 import { RendicionesController } from './rendiciones.controller';
@@ -29,6 +32,7 @@ import { RepartidoresService } from './repartidores.service';
     RepositoriosModule.forFeature([
       PaqueteConfiguracion,
       TarifaPago,
+      TarifaEnvio,
       Repartidor,
       Paquete,
       HojaRuta,
@@ -43,6 +47,7 @@ import { RepartidoresService } from './repartidores.service';
   controllers: [
     PaqueteConfiguracionController,
     TarifasPagoController,
+    TarifasEnvioController,
     PaquetesController,
     RepartidoresController,
     HojasRutaController,
@@ -52,6 +57,7 @@ import { RepartidoresService } from './repartidores.service';
   providers: [
     PaqueteConfiguracionService,
     TarifasPagoService,
+    TarifasEnvioService,
     PaquetesService,
     RepartidoresService,
     HojasRutaService,
@@ -61,6 +67,7 @@ import { RepartidoresService } from './repartidores.service';
   exports: [
     PaqueteConfiguracionService,
     TarifasPagoService,
+    TarifasEnvioService,
     PaquetesService,
     RepartidoresService,
     HojasRutaService,

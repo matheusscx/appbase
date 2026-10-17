@@ -11,6 +11,7 @@ import {
 } from 'typeorm';
 import { Tercero } from '../../terceros/entities/tercero.entity';
 import { TarifaPago } from './tarifa-pago.entity';
+import { TarifaEnvio } from './tarifa-envio.entity';
 
 @Entity('paquetes')
 @Index('uq_paquetes_tenant_codigo', ['tenantId', 'codigo'], {
@@ -73,6 +74,14 @@ export class Paquete {
   @ManyToOne(() => TarifaPago, { nullable: true })
   @JoinColumn({ name: 'tarifa_pago_id' })
   tarifaPago?: TarifaPago;
+
+  /** Tarifa de envío con la que se cobra este paquete; null = la por defecto del tenant al entregarlo. */
+  @Column({ name: 'tarifa_envio_id', type: 'uuid', nullable: true })
+  tarifaEnvioId: string | null;
+
+  @ManyToOne(() => TarifaEnvio, { nullable: true })
+  @JoinColumn({ name: 'tarifa_envio_id' })
+  tarifaEnvio?: TarifaEnvio;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
