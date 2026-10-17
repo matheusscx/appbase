@@ -116,6 +116,7 @@ import { Turno } from '../modules/turnos/entities/turno.entity';
 import { SesionGarzon } from '../modules/turnos/entities/sesion-garzon.entity';
 import { MotivoDiferenciaInventario } from '../modules/motivos-diferencia-inventario/entities/motivo-diferencia-inventario.entity';
 import { MotivoTraslado } from '../modules/motivos-traslado/entities/motivo-traslado.entity';
+import { ConceptoMovimientoCaja } from '../modules/conceptos-movimiento-caja/entities/concepto-movimiento-caja.entity';
 import { SolicitudIdempotente } from '../modules/idempotencia/entities/solicitud-idempotente.entity';
 import { Impresora } from '../modules/impresoras/entities/impresora.entity';
 import { GrupoModificador } from '../modules/grupos-modificadores/entities/grupo-modificador.entity';
@@ -210,6 +211,7 @@ export const ENTIDADES = [
   MotivoDiferenciaCaja,
   MotivoDiferenciaInventario,
   MotivoTraslado,
+  ConceptoMovimientoCaja,
   MovimientoInventario,
   MovimientoInventarioDetalle,
   MovimientoCaja,

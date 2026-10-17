@@ -1197,6 +1197,34 @@ efectivo*, *divergencia de tarjeta*, *error de lanzamiento manual*, *pago no reg
 *error operacional* (sin comentario obligatorio) y *otro* (`requiereComentario: true`,
 la válvula de escape para lo que no encaja en ninguna categoría fija).
 
+### Conceptos de movimientos — atajos del admin (auditoría UX 03.28)
+
+El concepto de un movimiento de caja (`caja_movimientos.concepto`) **sigue siendo texto libre**.
+El admin arma, por tenant, una lista de conceptos frecuentes ("Compra de insumos", "Retiro de
+efectivo") que el drawer *Registrar movimiento* ofrece como atajos: tocar uno rellena el campo,
+y la cajera puede escribir otro. Por eso `caja_movimientos` no referencia esta tabla: borrar o
+renombrar un concepto no toca los movimientos ya registrados. "Por local" es por tenant.
+
+**Table**: `concepto_movimiento_caja` (`nombre`, `tipo` ∈ `entrada | salida | ambos`, `activo`,
+soft delete con `eliminado_por`). Índice único parcial `(tenant_id, lower(nombre))` sobre los
+vivos. Sin conceptos fijos sembrados. Tiene **papelera** como los demás catálogos
+([papelera.md](papelera.md)): lo que borra una persona se puede restaurar.
+
+**Endpoints** (`src/modules/conceptos-movimiento-caja/`):
+
+| Método | Ruta | Guard | Descripción |
+|---|---|---|---|
+| GET | `/conceptos-movimiento-caja` | `JwtAuthGuard + TenantGuard` | Lista los del tenant por nombre; `?soloActivas=true` filtra; `?incluirEliminados=true` suma los borrados con quién y cuándo (papelera). Lectura abierta a todo miembro: la cajera los necesita en el drawer |
+| POST | `/conceptos-movimiento-caja` | `TenantAdminGuard` | Crea (`tipo` por defecto `ambos`); `400` si el nombre ya existe (sin importar mayúsculas) |
+| PATCH | `/conceptos-movimiento-caja/:id` | `TenantAdminGuard` | Edita `nombre`/`tipo`/`activo` |
+| DELETE | `/conceptos-movimiento-caja/:id` | `TenantAdminGuard` | Soft delete; `404` si no es del tenant |
+| POST | `/conceptos-movimiento-caja/:id/restaurar` | `TenantAdminGuard` | Restaura uno borrado por una persona (`404` si no está en la papelera). Body opcional `{ nombre }`. Si el nombre quedó tomado por uno vivo: `400` con `nombreSugerido`, como los demás catálogos |
+
+**Pantalla**: Configuración → Caja → *Conceptos de movimientos* (`/configuracion/conceptos-movimiento-caja`,
+solo admin), con el interruptor *Ver eliminados* y *Restaurar* (segundo paso si el nombre está tomado). **Drawer**: pide los activos al abrirse y muestra los de `ambos` más los del tipo
+elegido (Entrada/Salida); si la lectura falla o no hay conceptos, no dibuja atajos y el campo
+funciona igual. Tests: `backend/test/conceptos-movimiento-caja.e2e-spec.ts`.
+
 ### Red de seguridad: sin motivos activos, el comentario es obligatorio
 
 Un tenant puede desactivar todos sus motivos (o, en teoría, no tener ninguno). En ese caso

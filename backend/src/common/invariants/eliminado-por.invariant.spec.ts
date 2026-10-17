@@ -18,6 +18,7 @@ import { GrupoModificador } from '../../modules/grupos-modificadores/entities/gr
 import { MotivoBaja } from '../../modules/motivos-baja/entities/motivo-baja.entity';
 import { MotivoDiferenciaCaja } from '../../modules/motivos-diferencia/entities/motivo-diferencia-caja.entity';
 import { MotivoDiferenciaInventario } from '../../modules/motivos-diferencia-inventario/entities/motivo-diferencia-inventario.entity';
+import { ConceptoMovimientoCaja } from '../../modules/conceptos-movimiento-caja/entities/concepto-movimiento-caja.entity';
 import { Item } from '../../modules/items/entities/item.entity';
 
 const RESTAURABLES = [
@@ -36,11 +37,12 @@ const RESTAURABLES = [
   MotivoBaja,
   MotivoDiferenciaCaja,
   MotivoDiferenciaInventario,
+  ConceptoMovimientoCaja,
   Item,
 ];
 
 describe('Invariante papelera: eliminado_por en toda entidad restaurable', () => {
-  it('las 16 entidades del alcance declaran eliminado_por como uuid nullable', () => {
+  it('las 17 entidades del alcance declaran eliminado_por como uuid nullable', () => {
     const faltantes = RESTAURABLES.filter((target) => {
       const col = getMetadataArgsStorage().columns.find(
         (c) =>
@@ -56,8 +58,8 @@ describe('Invariante papelera: eliminado_por en toda entidad restaurable', () =>
     expect(faltantes).toEqual([]);
   });
 
-  it('el alcance es de 16 entidades', () => {
+  it('el alcance es de 17 entidades', () => {
     // Si este número cambia, la spec cambió: actualizar ambos a la vez.
-    expect(RESTAURABLES).toHaveLength(16);
+    expect(RESTAURABLES).toHaveLength(17);
   });
 });

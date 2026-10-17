@@ -57,7 +57,11 @@ const ARBOL_ADMIN: Arbol = {
     '/configuracion/monedas',
   ],
   'Cobros': ['/configuracion/metodos-pago', '/configuracion/pasarelas'],
-  'Caja': ['/configuracion/cajas', '/configuracion/motivos-diferencia'],
+  'Caja': [
+    '/configuracion/cajas',
+    '/configuracion/motivos-diferencia',
+    '/configuracion/conceptos-movimiento-caja',
+  ],
   'Inventario': [
     '/configuracion/ubicaciones',
     '/configuracion/motivos-baja',
@@ -114,8 +118,8 @@ describe('menú de configuración agrupado', () => {
     // `toEqual` no mira el orden de las claves; el de los grupos es decisión.
     expect(Object.keys(arbol)).toEqual(Object.keys(ARBOL_ADMIN))
     const rutas = Object.values(arbol).flat()
-    expect(rutas).toHaveLength(30)
-    expect(new Set(rutas).size).toBe(30)
+    expect(rutas).toHaveLength(31)
+    expect(new Set(rutas).size).toBe(31)
     expect(separadores).toBe(8)
   })
 

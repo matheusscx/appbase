@@ -617,7 +617,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [03.25](03-caja.md) | P3 | El selector Entrada/Salida no anuncia cuál está elegido — **hecho 2026-10-16** | agente |
 | ☑ | [03.26](03-caja.md) | P3 | "Marcar visto" actúa al primer toque y no se puede deshacer — **hecho 2026-10-16** (pregunta antes de marcar; no hay «Deshacer» porque el backend rechaza revisar dos veces) | agente |
 | ☑ | [03.27](03-caja.md) | P3 | Entrar a "Mi caja" sin permiso lleva a Ventas con tres avisos, uno en voseo — **hecho 2026-10-16** | agente |
-| ☐ | [03.28](03-caja.md) | P3 | Idea: fondo sugerido por caja y atajos para los conceptos de movimiento — **parcial 2026-10-16**: el fondo sugerido por caja está hecho; faltan los conceptos rápidos (regla sin definir) | owner |
+| ☑ | [03.28](03-caja.md) | P3 | Fondo sugerido por caja y atajos para los conceptos de movimiento — **hecho 2026-10-17** (el fondo, el 2026-10-16; los conceptos rápidos los arma el admin en Configuración → Caja y son atajos, la cajera puede escribir otro) | owner |
 | ☑ | [03.29](03-caja.md) | P3 | La tabla de movimientos parpadea y pierde el punto de lectura al paginar — **hecho 2026-10-16** | agente |
 
 ### 04 · Inicio y reportes

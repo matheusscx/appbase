@@ -552,6 +552,18 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
           nombre: n,
         })),
     },
+    {
+      // Recurso 19 (auditoría UX 03.28): conceptos rápidos de los movimientos de caja, mismo
+      // molde que motivos-traslado.
+      nombre: 'conceptos-movimiento-caja',
+      path: 'conceptos-movimiento-caja',
+      tabla: 'concepto_movimiento_caja',
+      pk: 'concepto_movimiento_caja_id',
+      crear: () =>
+        crearFila('conceptos-movimiento-caja', 'Concepto', (n) => ({
+          nombre: n,
+        })),
+    },
   ];
 
   // El guard de cobertura, derivado del ESQUEMA y no de sí mismo. Un
@@ -575,7 +587,7 @@ describe('Papelera (e2e) — decisión del owner: solo lo que borró una persona
       ),
     ).map((r) => r.table_name);
 
-    expect(tablas).toHaveLength(18);
+    expect(tablas).toHaveLength(19);
     expect([...recursos.map((r) => r.tabla)].sort()).toEqual(tablas);
   });
 

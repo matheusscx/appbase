@@ -24,17 +24,17 @@ test('el admin ve los nueve grupos en orden y ninguna etiqueta se corta', async 
   await expect(menu.locator('[data-slot="label"]')).toHaveText([
     'Mi cuenta', 'Organización', 'Catálogo', 'Precios', 'Cobros', 'Caja', 'Inventario', 'Restaurante', 'Paquetería',
   ])
-  // 27 de siempre + Boleta electrónica, que ve todo admin del tenant (el del e2e lo es; el que no
+  // 28 de siempre (con Conceptos de movimientos, 03.28) + Boleta electrónica, que ve todo admin del tenant (el del e2e lo es; el que no
   // es superadmin, en el test de más abajo) + las 2 de Paquetería, que Paris contrata:
   // `configuracion.nuxt.spec.ts` fija el árbol.
-  await expect(menu.getByRole('link')).toHaveCount(30)
+  await expect(menu.getByRole('link')).toHaveCount(31)
 
   // `truncate` corta con elipsis sin avisar: el texto completo sigue en el DOM, así que
   // un `toHaveText` pasa igual. Lo que delata el corte es el ancho.
   // Contadas antes de medir: sobre un locator vacío `evaluateAll` devuelve `[]` y pasa.
   // Acotadas a los links: el encabezado de cada grupo también lleva un `linkLabel`.
   const etiquetas = menu.locator('[data-slot="link"] [data-slot="linkLabel"]')
-  await expect(etiquetas).toHaveCount(30)
+  await expect(etiquetas).toHaveCount(31)
   const cortadas = await etiquetas.evaluateAll(els =>
     els.filter(el => el.scrollWidth > el.clientWidth).map(el => el.textContent),
   )
@@ -71,8 +71,8 @@ test.describe('admin de un comercio, sin ser superadmin', () => {
 
     await page.goto('/configuracion/perfil')
     const menu = menuConfiguracion(page)
-    // 28 + Paquetería (2): `mis-permisos` le trae `Paquetería:Leer` porque Paris la contrata.
-    await expect(menu.getByRole('link')).toHaveCount(30)
+    // 29 + Paquetería (2): `mis-permisos` le trae `Paquetería:Leer` porque Paris la contrata.
+    await expect(menu.getByRole('link')).toHaveCount(31)
 
     await menu.getByRole('link', { name: 'Boleta electrónica', exact: true }).click()
     await page.waitForURL('**/configuracion/boleta-electronica')

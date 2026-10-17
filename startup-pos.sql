@@ -1147,6 +1147,25 @@ CREATE TABLE "motivo_traslado" (
 CREATE UNIQUE INDEX "uq_motivo_traslado_tenant_nombre"
   ON "motivo_traslado" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
 
+-- Atajos de concepto para los movimientos de caja (entrada/salida de efectivo).
+-- Los arma el admin del tenant en Configuración → Caja; la cajera puede ignorarlos y
+-- escribir otro concepto, por eso `caja_movimientos.concepto` sigue siendo texto libre
+-- y nada referencia esta tabla. `tipo` dice a qué movimientos se ofrece.
+CREATE TABLE "concepto_movimiento_caja" (
+  "concepto_movimiento_caja_id" UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  "tenant_id"      UUID NOT NULL REFERENCES "tenants" ("tenant_id"),
+  "nombre"         TEXT NOT NULL,
+  "tipo"           TEXT NOT NULL DEFAULT 'ambos',
+  "activo"         BOOLEAN NOT NULL DEFAULT true,
+  "creado_el"      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  "actualizado_el" TIMESTAMPTZ,
+  "eliminado_el"   TIMESTAMPTZ,
+  "eliminado_por"  UUID REFERENCES usuarios("usuario_id"),
+  CONSTRAINT "chk_concepto_mov_caja_tipo" CHECK ("tipo" IN ('entrada', 'salida', 'ambos'))
+);
+CREATE UNIQUE INDEX "uq_concepto_mov_caja_tenant_nombre"
+  ON "concepto_movimiento_caja" ("tenant_id", lower("nombre")) WHERE "eliminado_el" IS NULL;
+
 -- Documento INTERNO de un traslado entre dos ubicaciones del mismo tenant.
 -- Lleva origen, destino, motivo y comentario; las cantidades NO viven acá:
 -- cada línea deja dos filas en movimientos_inventario (salida en el origen,

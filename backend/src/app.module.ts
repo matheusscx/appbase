@@ -46,6 +46,7 @@ import { MermasModule } from './modules/mermas/mermas.module';
 import { MotivosBajaModule } from './modules/motivos-baja/motivos-baja.module';
 import { MotivosDiferenciaInventarioModule } from './modules/motivos-diferencia-inventario/motivos-diferencia-inventario.module';
 import { MotivosTrasladoModule } from './modules/motivos-traslado/motivos-traslado.module';
+import { ConceptosMovimientoCajaModule } from './modules/conceptos-movimiento-caja/conceptos-movimiento-caja.module';
 import { ResumenNegocioModule } from './modules/resumen-negocio/resumen-negocio.module';
 import { IdempotenciaModule } from './modules/idempotencia/idempotencia.module';
 import { GruposModificadoresModule } from './modules/grupos-modificadores/grupos-modificadores.module';
@@ -123,6 +124,7 @@ import { PaqueteriaModule } from './modules/paqueteria/paqueteria.module';
     MotivosDiferenciaModule,
     MotivosDiferenciaInventarioModule,
     MotivosTrasladoModule,
+    ConceptosMovimientoCajaModule,
     RecuentosModule,
     PromocionesModule,
     UbicacionesModule,

@@ -83,6 +83,7 @@ export function useMenuConfiguracion() {
         items: [
           lee('Cajas') && e('Cajas', 'i-lucide-inbox', 'cajas', 'Las cajas de tu local.'),
           admin && e('Motivos de diferencia', 'i-lucide-scale', 'motivos-diferencia', 'Las causas que se pueden elegir cuando una caja no cuadra.'),
+          admin && e('Conceptos de movimientos', 'i-lucide-list-checks', 'conceptos-movimiento-caja', 'Atajos para el concepto de las entradas y salidas de caja.'),
         ],
       },
       {

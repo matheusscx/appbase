@@ -144,7 +144,7 @@ POST está en vuelo (`:loading`), y el esperado y la diferencia los calcula el s
 4. **Lote "cierre forzado del encargado"**: 03.5, 03.6, 03.18, 03.26, que viven en `cajas/[id].vue` y `CajaCierreForzadoPanel`.
 5. **Lote de accesibilidad y contraste:** 03.7, 03.8, 03.10, 03.11, 03.12, 03.25. 03.8 y 03.10 son un reemplazo de clases; 03.9 es de tema si el owner quiere conservar los botones de color de estado.
 6. **Lote mecánico de textos y estilo:** 03.19, 03.20, 03.21, 03.22, 03.23, 03.24, 03.27, 03.29. 03.19 puede ir junto al lote 00.3 del documento transversal.
-7. **03.28** queda como pregunta al owner.
+7. **03.28** lo resolvió el owner (2026-10-17): hecho.
 
 ## Qué no se pudo medir
 

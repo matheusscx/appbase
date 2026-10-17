@@ -25,6 +25,32 @@ const emptyForm = () => ({
 
 const form = ref(emptyForm())
 
+// Atajos del campo Concepto (auditoría UX 03.28): los arma el admin en Configuración y la
+// cajera puede ignorarlos y escribir otro, así que el campo sigue siendo texto libre. Si la
+// lectura falla no se avisa: sin atajos el drawer se usa igual.
+interface ConceptoAtajo {
+  id: string
+  nombre: string
+  tipo: 'entrada' | 'salida' | 'ambos'
+}
+const conceptos = ref<ConceptoAtajo[]>([])
+const atajos = computed(() =>
+  conceptos.value.filter(c => c.tipo === 'ambos' || c.tipo === form.value.tipo),
+)
+
+async function cargarConceptos() {
+  try {
+    conceptos.value = (await useApiFetch<ConceptoAtajo[]>(
+      `${useRuntimeConfig().public.apiUrl}/conceptos-movimiento-caja?soloActivas=true`,
+    )) ?? []
+  }
+  catch {
+    conceptos.value = []
+  }
+}
+
+onMounted(cargarConceptos)
+
 watch(open, (isOpen) => {
   if (!isOpen) {
     form.value = emptyForm()
@@ -104,6 +130,21 @@ async function guardar() {
             autofocus
             @update:model-value="limpiar('concepto')"
           />
+          <div v-if="atajos.length" class="mt-2 flex flex-wrap gap-2" role="group" aria-label="Conceptos frecuentes">
+            <UButton
+              v-for="c in atajos"
+              :key="c.id"
+              type="button"
+              size="lg"
+              class="min-h-11"
+              color="neutral"
+              :variant="form.concepto === c.nombre ? 'soft' : 'outline'"
+              :aria-pressed="form.concepto === c.nombre"
+              :label="c.nombre"
+              data-testid="concepto-atajo"
+              @click="() => { form.concepto = c.nombre; limpiar('concepto') }"
+            />
+          </div>
         </UFormField>
 
         <UFormField label="Monto" required :error="errores.monto">
