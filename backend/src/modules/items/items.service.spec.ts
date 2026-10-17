@@ -1060,6 +1060,55 @@ describe('ItemsService', () => {
     });
   });
 
+  describe('cargarBasePorIdsExistentes', () => {
+    const fila = (id: string) => ({
+      item_id: id,
+      nombre: 'Test',
+      descripcion: null,
+      tipo: 'producto',
+      activo: true,
+      precio_base: '5000',
+      precio_incluye_impuesto: false,
+      moneda_id: MONEDA_ID,
+      moneda_codigo: 'CLP',
+      moneda_simbolo: '$',
+      categoria_id: null,
+      categoria_nombre: null,
+      creado_el: new Date(),
+      stock: '3.0000',
+      unidad_medida: 'unidad',
+      fecha_elaboracion: null,
+      fecha_vencimiento: null,
+      modo_inventario: 'lote',
+    });
+    const BORRADO = '550e8400-e29b-41d4-a716-4466554409ff';
+
+    // Lo que usa el total de la tarjeta de cada cuenta: un ítem borrado deja
+    // sin total a SU cuenta, no tira el lote entero con un 404.
+    it('un id que no existe (o está borrado) no aparece, y no lanza', async () => {
+      dataSource.query.mockResolvedValueOnce([fila(ITEM_ID)]);
+
+      const porId = await service.cargarBasePorIdsExistentes(TENANT, [
+        ITEM_ID,
+        BORRADO,
+      ]);
+
+      expect(porId.has(ITEM_ID)).toBe(true);
+      expect(porId.has(BORRADO)).toBe(false);
+      // La misma consulta, con el filtro de borrado.
+      const [sql] = dataSource.query.mock.calls[0] as [string, unknown[]];
+      expect(sql).toContain('i.eliminado_el IS NULL');
+    });
+
+    it('cargarBasePorIds sigue lanzando 404 con el mismo faltante', async () => {
+      dataSource.query.mockResolvedValueOnce([fila(ITEM_ID)]);
+
+      await expect(
+        service.cargarBasePorIds(TENANT, [ITEM_ID, BORRADO]),
+      ).rejects.toThrow(NotFoundException);
+    });
+  });
+
   // ── findOne ────────────────────────────────────────────────────────────────
 
   describe('findOne', () => {

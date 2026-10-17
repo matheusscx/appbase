@@ -1529,6 +1529,32 @@ function volverACuentas() {
   limpiarResultado()
 }
 
+/**
+ * Las respuestas de las mutaciones de una cuenta no traen `totalFinal` (solo la
+ * lista lo calcula), así que al salir de una cuenta la tarjeta quedaría con el
+ * total de antes de tocarla. Se vuelve a pedir la lista y **solo se copia el
+ * total**: las líneas siguen siendo las de la pantalla, que pueden tener una
+ * edición todavía en vuelo que la lista no vio. Sin spinner y sin aviso si
+ * falla: la tarjeta conserva lo que tenía.
+ */
+async function refrescarTotalesDeCuentas() {
+  const mesaId = selectedMesa.value?.id
+  if (!mesaId) return
+  const mio = tokenCuentas
+  try {
+    const lista = await salonesApi.listarCuentas(mesaId)
+    // Otra carga de la lista (o otra mesa) pasó mientras tanto: la respuesta es vieja.
+    if (mio !== tokenCuentas || selectedMesa.value?.id !== mesaId) return
+    const totales = new Map(lista.map(c => [c.id, c.totalFinal ?? null]))
+    for (const c of cuentas.value) {
+      if (totales.has(c.id)) c.totalFinal = totales.get(c.id)
+    }
+  }
+  catch {
+    // Solo refresca un dato de la tarjeta; el aviso de una falla real lo da `cargarCuentas`.
+  }
+}
+
 // ── Fusionar cuentas (ej. "1 y 3", "3 y 4" o todas) ────────────────────────
 function toggleFusionMode() {
   fusionMode.value = !fusionMode.value
@@ -2425,8 +2451,10 @@ function descartarPendientes(cuentaId: string) {
  * llegan igual —por eso el toast nombra la mesa y la cuenta—.
  */
 function salirDeCuenta() {
-  void flushPendientes()
+  const pendiente = flushPendientes()
   volverACuentas()
+  // Después de que lo pendiente llegó al servidor: si no, el total sería el de antes de la edición.
+  void Promise.resolve(pendiente).catch(() => {}).then(refrescarTotalesDeCuentas)
 }
 
 /**
@@ -3749,7 +3777,15 @@ async function imprimirBoletaDelCierre(boleta: BoletaVenta) {
                       </p>
                     </div>
                   </div>
-                  <UIcon v-if="!fusionMode" name="i-lucide-chevron-right" class="h-5 w-5 text-muted" />
+                  <div class="flex items-center gap-2">
+                    <p
+                      v-if="cuenta.totalFinal != null"
+                      class="text-base font-semibold tabular-nums text-default"
+                    >
+                      {{ formatMonto(cuenta.totalFinal) }}
+                    </p>
+                    <UIcon v-if="!fusionMode" name="i-lucide-chevron-right" class="h-5 w-5 text-muted" />
+                  </div>
                 </div>
               </UCard>
             </div>

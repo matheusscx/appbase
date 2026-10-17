@@ -72,7 +72,7 @@ lo tiene sin sembrar nada, por `es_fijo`.
 | PATCH | `/mesas/:id` | Actualizar | Renombrar / reposicionar mesa |
 | DELETE | `/mesas/:id` | Eliminar | Eliminar mesa |
 | GET | `/salones/operacion` | Operar | Salones + mesas con flag `ocupada` |
-| GET | `/mesas/:id/cuentas` | Operar | Cuentas abiertas de la mesa (con líneas) |
+| GET | `/mesas/:id/cuentas` | Operar | Cuentas abiertas de la mesa (con líneas y `totalFinal` calculado por el motor, 02.12) |
 | POST | `/mesas/:id/cuentas` | Operar | Abrir cuenta (`FOR UPDATE` mesa + `numero` correlativo) |
 | POST | `/mesas/:id/cuentas/fusionar` | Operar | Fusionar 2+ cuentas abiertas de la mesa en una |
 | POST | `/cuentas/:id/lineas` | Operar | Agregar producto (merge por ítem); con serie, `unidadIds` obligatorio |
@@ -1554,9 +1554,15 @@ Lo que cambia en la pantalla del garzón y en las de gestión, sin tocar plata n
   dice "hace 45 min" y, en la tablet personal, "Tuya" (con texto, no solo color). "Actualizar" y volver el
   foco a la pestaña lo leen de nuevo, sin spinner de pantalla entera, **sin polling ni reintentos**: si falla,
   avisa (02.12, 02.24).
-- **Cuenta**: `CuentaDetalle.abiertaEl`. La tarjeta de cada cuenta de la mesa dice "abierta hace…". **Todavía no
-  dice cuánto lleva** (02.12, parcial): pedir un cálculo del motor por cuenta era un N+1 de red, y la salida —que
-  la lista de cuentas traiga su total calculado— toca el motor de precios, así que espera al owner.
+- **Cuenta**: `CuentaDetalle.abiertaEl`. La tarjeta de cada cuenta de la mesa dice "abierta hace…" y **cuánto
+  lleva** (02.12, owner 2026-10-17): `GET /mesas/:id/cuentas` trae `totalFinal` por cuenta, calculado por el
+  motor de precios en un lote (`CalculoPreciosService.totalesDeCuentas`) y es **exactamente** el número de
+  `POST /calculo-precios/calcular` con `cuentaId` —el de la cuenta abierta y el del cobro—. Sin N+1 de red ni de
+  consultas: ver [motor-calculo-precios.md](./motor-calculo-precios.md) § "El total de cada cuenta de una mesa".
+  `null` si esa cuenta no se pudo calcular (ítem borrado, monto que no cabe) y la tarjeta no muestra monto. Solo
+  la lista lo trae: las mutaciones devuelven el detalle sin él, y al tocar *Cuentas* la pantalla vuelve a pedir
+  la lista y copia **solo** el total (las líneas siguen siendo las de la pantalla). Tests:
+  `backend/test/cuenta-total-en-la-lista.e2e-spec.ts`.
 - **Cocina**: cada línea dice "En cocina", "Falta enviar" o "Sin estación de cocina" y el pie resume ("2 de 3
   líneas están en cocina"). "Sin estación" sale de comparar lo pendiente antes del claim con lo que el claim
   devolvió; el aviso nombra las líneas que no salieron (02.4). Reimprimir sigue fuera (02.5).

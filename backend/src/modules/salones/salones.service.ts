@@ -319,6 +319,12 @@ export interface CuentaDetalle {
   lineas: CuentaLineaDetalle[];
   /** Platos ya despachados y anulados de esta cuenta (spec § 5). */
   anulaciones: CuentaAnulacionDetalle[];
+  /**
+   * Cuánto lleva la cuenta, calculado por el motor de precios (el mismo número
+   * que la cuenta abierta y el cobro). **Solo lo trae `listarCuentasDeMesa`**;
+   * `null` si no se pudo calcular (ítem borrado del catálogo, monto que no cabe).
+   */
+  totalFinal?: string | null;
 }
 
 /**
@@ -852,7 +858,15 @@ export class SalonesService {
 
   // ── Operación: cuentas ───────────────────────────────────────────────────
 
-  /** Cuentas ABIERTAS de una mesa, con sus líneas y datos del ítem. */
+  /**
+   * Cuentas ABIERTAS de una mesa, con sus líneas, datos del ítem y **cuánto lleva
+   * cada una** (`totalFinal`, 02.12).
+   *
+   * El total NO se calcula acá: lo da el motor de precios, el mismo cálculo de la
+   * cuenta abierta y del cobro, en un lote (`totalesDeCuentas`: consultas fijas,
+   * no una por cuenta). Solo esta lectura lo trae: los endpoints que mutan una
+   * cuenta devuelven el detalle sin él, y la pantalla ya muestra su total vivo.
+   */
   async listarCuentasDeMesa(
     tenantId: string,
     mesaId: string,
@@ -862,7 +876,16 @@ export class SalonesService {
       where: { tenantId, mesaId, estado: EstadoCuenta.ABIERTA },
       order: { numero: 'ASC' },
     });
-    return this.armarDetalles(tenantId, cuentas);
+    const detalles = await this.armarDetalles(tenantId, cuentas);
+    if (detalles.length === 0) return detalles;
+    const totales = await this.calculoPreciosService.totalesDeCuentas(
+      tenantId,
+      detalles.map((d) => d.id),
+    );
+    return detalles.map((d) => ({
+      ...d,
+      totalFinal: totales.get(d.id) ?? null,
+    }));
   }
 
   async abrirCuenta(

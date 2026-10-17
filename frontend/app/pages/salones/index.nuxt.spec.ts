@@ -199,6 +199,8 @@ let abrirCuentaRetenido: Promise<unknown> | null = null
  * abierta— y lo llena el `describe` del ítem eliminado.
  */
 let cuentasDeLaMesa: unknown[] = []
+/** Cuántas veces se pidió `GET /mesas/:id/cuentas` (02.12: el total de la tarjeta lo calcula el servidor). */
+let listadosDeCuentas = 0
 /** Las URLs completas del catálogo. Ver la rama `/items` del mock. */
 let urlsCatalogo: string[] = []
 /**
@@ -581,6 +583,7 @@ mockNuxtImport('useApiFetch', () => {
       // El snapshot del servidor se toma acá, en el primer `GET`: es el único
       // momento en que el fixture todavía no pasó por la pantalla.
       cuentasServidor ??= structuredClone(cuentasDeLaMesa) as NonNullable<typeof cuentasServidor>
+      listadosDeCuentas++
       const lista = cuentasPorMesa[mesaPedida] ?? cuentasDeLaMesa
       const retenido = listarCuentasRetenido[mesaPedida]
       return retenido ? retenido.then(() => lista) : Promise.resolve(lista)
@@ -1039,6 +1042,7 @@ function reiniciarMock() {
   abrirCuentaRetenido = null
   vinculoPersonal = null
   cuentasDeLaMesa = []
+  listadosDeCuentas = 0
   calculoFalla = false
   calculoFallaCon = null
   calculoRetenido = null
@@ -8795,10 +8799,10 @@ describe('salones — auditoría UX grupo 02', () => {
   })
 
   // ── 02.12 ──
-  it('02.12: la tarjeta de cada cuenta dice hace cuánto se abrió, sin pedir un cálculo por cuenta', async () => {
+  it('02.12: la tarjeta de cada cuenta dice hace cuánto se abrió y cuánto lleva, con el total que mandó el servidor', async () => {
     cuentasDeLaMesa = [
-      cuentaCon([LINEA, { ...LINEA, id: 'linea-2', nombre: 'Bebida' }]),
-      cuentaCon([], { id: 'cuenta-10', numero: 10 }),
+      cuentaCon([LINEA, { ...LINEA, id: 'linea-2', nombre: 'Bebida' }], { totalFinal: '11900.000000' }),
+      cuentaCon([], { id: 'cuenta-10', numero: 10, totalFinal: null }),
     ]
     const wrapper = await montarConMoneda()
     await seleccionarMesa(wrapper)
@@ -8807,9 +8811,35 @@ describe('salones — auditoría UX grupo 02', () => {
     expect(tarjetas).toHaveLength(2)
     expect(tarjetas[0]!.textContent).toContain('abierta hace 45 min')
     expect(tarjetas[0]!.textContent).toContain('2 productos')
-    // El monto por tarjeta queda pendiente: pedirlo era un cálculo del motor por cuenta (N+1 de
-    // red); va con un total que devuelva el servidor en la lista, y eso toca el motor.
+    // La tarjeta muestra el número del servidor: no pide un cálculo por cuenta (sería un N+1 de
+    // red contra el motor) ni suma las líneas en la pantalla.
+    expect(tarjetas[0]!.textContent).toMatch(/11[.,]900/)
     expect(calculosPedidos).toHaveLength(0)
+    // Una cuenta que el servidor no pudo calcular no inventa un monto.
+    expect(tarjetas[1]!.textContent).not.toMatch(/\$|\d{1,3}[.,]\d{3}/)
+  })
+
+  it('02.12: al salir de una cuenta, la tarjeta pide de nuevo su total al servidor y no toca las líneas', async () => {
+    cuentasDeLaMesa = [cuentaCon([LINEA], { totalFinal: '1000.000000' })]
+    const wrapper = await montarConMoneda()
+    await seleccionarMesa(wrapper)
+    await esperar(80)
+    expect(drawerMesa()!.textContent).toMatch(/1[.,]000/)
+    const antes = listadosDeCuentas
+    drawerMesa()!.querySelector<HTMLElement>('.cursor-pointer')!.click()
+    await esperar(40)
+    cuentasDeLaMesa = [cuentaCon([LINEA, { ...LINEA, id: 'linea-2' }], { totalFinal: '2500.000000' })]
+
+    const volver = [...drawerMesa()!.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.trim() === 'Cuentas')
+    expect(volver, 'botón Cuentas').toBeTruthy()
+    volver!.click()
+    await esperar(120)
+
+    expect(listadosDeCuentas).toBe(antes + 1)
+    const tarjeta = drawerMesa()!.querySelector<HTMLElement>('.cursor-pointer')!
+    expect(tarjeta.textContent).toMatch(/2[.,]500/)
+    // Solo el total: las líneas siguen siendo las de la pantalla.
+    expect(tarjeta.textContent).toContain('1 producto')
   })
 
   it('02.12: en la tablet personal el plano recibe el garzón para marcar sus mesas', async () => {

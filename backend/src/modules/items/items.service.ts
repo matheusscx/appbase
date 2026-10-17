@@ -1358,8 +1358,43 @@ export class ItemsService {
   ): Promise<
     Map<string, Omit<ReturnType<ItemsService['mapRow']>, 'stockVendible'>>
   > {
+    const { porId, unicos } = await this.leerBasePorIds(tenantId, itemIds);
+    const faltante = unicos.find((id) => !porId.has(id));
+    if (faltante) throw new NotFoundException('Item no encontrado');
+    return this.aliasarCasingDeIds(porId, itemIds);
+  }
+
+  /**
+   * Lo mismo que `cargarBasePorIds` pero **sin el 404**: un id que no existe, que
+   * es de otro tenant o que se borró simplemente no aparece en el mapa.
+   *
+   * Existe para quien carga los ítems de VARIAS cuentas en una consulta
+   * (`CalculoPreciosService.totalesDeCuentas`) y necesita saber cuál cuenta tiene
+   * el ítem faltante: con el 404 de `cargarBasePorIds`, un solo ítem borrado
+   * tiraba el lote entero. Misma consulta, mismo filtro `eliminado_el IS NULL`.
+   */
+  async cargarBasePorIdsExistentes(
+    tenantId: string,
+    itemIds: string[],
+  ): Promise<
+    Map<string, Omit<ReturnType<ItemsService['mapRow']>, 'stockVendible'>>
+  > {
+    const { porId } = await this.leerBasePorIds(tenantId, itemIds);
+    return this.aliasarCasingDeIds(porId, itemIds);
+  }
+
+  private async leerBasePorIds(
+    tenantId: string,
+    itemIds: string[],
+  ): Promise<{
+    porId: Map<
+      string,
+      Omit<ReturnType<ItemsService['mapRow']>, 'stockVendible'>
+    >;
+    unicos: string[];
+  }> {
     const unicos = [...new Set(itemIds.map((id) => id.toLowerCase()))];
-    if (unicos.length === 0) return new Map();
+    if (unicos.length === 0) return { porId: new Map(), unicos };
 
     const rows: ItemRow[] = await this.db.query(
       this.baseQuery(null) +
@@ -1367,16 +1402,17 @@ export class ItemsService {
       [unicos, tenantId],
     );
 
-    const porId = new Map(
+    const porId: Map<
+      string,
+      Omit<ReturnType<ItemsService['mapRow']>, 'stockVendible'>
+    > = new Map(
       rows.map((r) => {
         // eslint-disable-next-line @typescript-eslint/no-unused-vars
         const { stockVendible: _stockVendible, ...fila } = this.mapRow(r);
         return [r.item_id, fila];
       }),
     );
-    const faltante = unicos.find((id) => !porId.has(id));
-    if (faltante) throw new NotFoundException('Item no encontrado');
-    return this.aliasarCasingDeIds(porId, itemIds);
+    return { porId, unicos };
   }
 
   /**

@@ -232,6 +232,15 @@ export interface CuentaDetalle {
   lineas: CuentaLineaDetalle[]
   /** Platos ya despachados y anulados de esta cuenta (spec § 5). */
   anulaciones: CuentaAnulacionDetalle[]
+  /**
+   * Cuánto lleva la cuenta, **calculado por el servidor** con el motor de precios
+   * (el mismo número que la cuenta abierta y el cobro). Solo lo trae la lista de
+   * cuentas de la mesa (`GET /mesas/:id/cuentas`); las respuestas de las
+   * mutaciones no lo traen. `null`: el servidor no pudo calcularla (un ítem
+   * borrado del catálogo, un monto que no cabe). La pantalla lo muestra, nunca
+   * lo calcula.
+   */
+  totalFinal?: string | null
 }
 
 /**

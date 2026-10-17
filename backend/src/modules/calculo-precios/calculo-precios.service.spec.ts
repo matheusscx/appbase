@@ -2,6 +2,7 @@ import { Test } from '@nestjs/testing';
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { CalculoPreciosService } from './calculo-precios.service';
 import * as engine from './calculo-precios.engine';
+import * as evaluadorPromos from '../promociones/promociones.evaluator';
 import { ItemsService } from '../items/items.service';
 import { ImpuestosService } from '../impuestos/impuestos.service';
 import { DescuentosService } from '../descuentos/descuentos.service';
@@ -30,6 +31,7 @@ describe('CalculoPreciosService', () => {
   let service: CalculoPreciosService;
   let itemsService: {
     cargarBasePorIds: jest.Mock;
+    cargarBasePorIdsExistentes: jest.Mock;
     cargarReglasPorIds: jest.Mock;
     cargarCatalogosPersonalizacion: jest.Mock;
     resolverPersonalizacionReceta: jest.Mock;
@@ -83,6 +85,7 @@ describe('CalculoPreciosService', () => {
   beforeEach(async () => {
     itemsService = {
       cargarBasePorIds: jest.fn(),
+      cargarBasePorIdsExistentes: jest.fn(),
       cargarReglasPorIds: jest.fn(),
       // El catálogo por lote: una consulta para todas las líneas, en vez de
       // tres por línea. El mock devuelve mapas vacíos —los resolvers están
@@ -1815,6 +1818,342 @@ describe('CalculoPreciosService', () => {
         totalImpuestos: '764.370000',
         totalFinal: '4787.370000',
       });
+    });
+  });
+  // ─── totalesDeCuentas: el total de la tarjeta de cada cuenta de una mesa ───
+  //
+  // 02.12. Es el MISMO cálculo que `calcular({ cuentaId })` —el de la cuenta
+  // abierta y el del cobro—, pero para N cuentas con un número FIJO de
+  // consultas. Lo que estos tests fijan es la identidad: el número de la
+  // tarjeta no es una aproximación de otro, es el mismo.
+  describe('totalesDeCuentas', () => {
+    const CUENTA_A = '550e8400-e29b-41d4-a716-4466554407a1';
+    const CUENTA_B = '550e8400-e29b-41d4-a716-4466554407a2';
+    const CUENTA_C = '550e8400-e29b-41d4-a716-4466554407a3';
+    const CUENTA_D = '550e8400-e29b-41d4-a716-4466554407a4';
+    const CUENTA_E = '550e8400-e29b-41d4-a716-4466554407a5';
+
+    const regla = (over: Record<string, unknown>) => ({
+      id: 'r',
+      nombre: 'Regla',
+      codigo: 'general',
+      modo: 'porcentaje',
+      valorMonto: null,
+      valorPorcentaje: '0.10',
+      tramos: [],
+      metodoPagoIds: [],
+      nivel: 'linea',
+      activo: true,
+      vigente: true,
+      ...over,
+    });
+
+    type FilaCuenta = {
+      cuenta_id: string;
+      item_id: string;
+      cantidad: string;
+      precio_unitario: string;
+      reglas_congeladas: { descuentos: unknown[]; recargos: unknown[] };
+      creado_el: Date;
+    };
+    const fila = (
+      cuentaId: string,
+      over: Partial<FilaCuenta> = {},
+    ): FilaCuenta => ({
+      cuenta_id: cuentaId,
+      item_id: 'item-1',
+      cantidad: '2',
+      precio_unitario: '100.0000',
+      reglas_congeladas: { descuentos: [], recargos: [] },
+      // Por defecto FUERA de las promos del bloque (09:00–12:00).
+      creado_el: new Date('2026-06-15T15:00:00Z'),
+      ...over,
+    });
+
+    /** La base: `cuentas` y `cuenta_lineas`, contestando por id (uno o varios). */
+    const laBase = (
+      cuentas: Record<string, { abierta: Date; lineas: FilaCuenta[] }>,
+    ) => {
+      db.query.mockImplementation((sql: string, params: unknown[]) => {
+        const pedido = params?.[0];
+        const ids = (Array.isArray(pedido) ? pedido : [pedido]) as string[];
+        if (sql.includes('FROM cuentas')) {
+          return Promise.resolve(
+            ids
+              .filter((id) => cuentas[id])
+              .map((id) => ({
+                cuenta_id: id,
+                abierta_el: cuentas[id].abierta,
+              })),
+          );
+        }
+        if (sql.includes('FROM cuenta_lineas')) {
+          return Promise.resolve(
+            ids
+              .filter((id) => cuentas[id])
+              .flatMap((id) => cuentas[id].lineas)
+              .sort((a, b) => a.creado_el.getTime() - b.creado_el.getTime()),
+          );
+        }
+        return Promise.resolve([]);
+      });
+    };
+
+    /** Promos que respetan el rango pedido, como la consulta real. */
+    const promosEnLaBase = (promos: ReturnType<typeof promoDelDia>[]) =>
+      promocionesService.cargarVigentes.mockImplementation(
+        (_t: string, desde: string, hasta: string) =>
+          Promise.resolve(
+            promos.filter(
+              (p) =>
+                p.ventana.fechaInicio <= hasta && p.ventana.fechaFin >= desde,
+            ),
+          ),
+      );
+
+    /** 50% solo un día, de 09:00 a 12:00. */
+    const promoDelDia = (dia: string) => ({
+      id: `promo-${dia}`,
+      nombre: `Solo el ${dia}`,
+      tipo: 'porcentaje',
+      valorPorcentaje: '0.5000',
+      cadaN: null,
+      pagaM: null,
+      valorMonto: null,
+      ventana: {
+        fechaInicio: dia,
+        fechaFin: dia,
+        horaInicio: '09:00',
+        horaFin: '12:00',
+        diasSemana: null,
+        canal: null,
+      },
+      scopes: [
+        {
+          slot: 0,
+          tipoScope: 'venta',
+          categoriaId: null,
+          cantidad: 1,
+          itemIds: [],
+        },
+      ],
+    });
+
+    const totalDeCalcularSola = async (cuentaId: string) =>
+      (await service.calcular(TENANT, { cuentaId, lineas: [] })).totales
+        .totalFinal;
+
+    /** Todo lo que el service le pide a la base o a un colaborador. */
+    const consultasHechas = () =>
+      db.query.mock.calls.length +
+      itemsService.cargarBasePorIds.mock.calls.length +
+      itemsService.cargarBasePorIdsExistentes.mock.calls.length +
+      itemsService.cargarReglasPorIds.mock.calls.length +
+      impuestosService.findAll.mock.calls.length +
+      descuentosService.findAll.mock.calls.length +
+      recargosService.findAll.mock.calls.length +
+      tenantsService.getPreferenciasFinancieras.mock.calls.length +
+      monedasService.findMonedas.mock.calls.length +
+      monedasService.decimalesOficiales.mock.calls.length +
+      promocionesService.cargarVigentes.mock.calls.length;
+
+    beforeEach(() => {
+      jest.clearAllMocks();
+      jest.useFakeTimers().setSystemTime(new Date('2026-06-15T19:00:00Z'));
+      itemsService.cargarBasePorIdsExistentes.mockImplementation(
+        (_t: string, ids: string[]) =>
+          Promise.resolve(
+            new Map(
+              ids
+                .filter((id) => id !== 'item-borrado')
+                .map((id) => [id, base({ id })]),
+            ),
+          ),
+      );
+    });
+
+    afterEach(() => {
+      jest.useRealTimers();
+    });
+
+    it('cada total es EXACTAMENTE el de calcular la cuenta sola: descuento, recargo, promo por fecha y precio personalizado', async () => {
+      promosEnLaBase([promoDelDia('2026-06-14'), promoDelDia('2026-06-15')]);
+      laBase({
+        // Sin reglas: el caso de control.
+        [CUENTA_A]: {
+          abierta: new Date('2026-06-15T09:00:00Z'),
+          lineas: [fila(CUENTA_A)],
+        },
+        // Descuento congelado del 10%.
+        [CUENTA_B]: {
+          abierta: new Date('2026-06-15T09:00:00Z'),
+          lineas: [
+            fila(CUENTA_B, {
+              reglas_congeladas: {
+                descuentos: [regla({ id: 'desc-9', valorPorcentaje: '0.10' })],
+                recargos: [],
+              },
+            }),
+          ],
+        },
+        // Recargo congelado del 7%.
+        [CUENTA_C]: {
+          abierta: new Date('2026-06-15T09:00:00Z'),
+          lineas: [
+            fila(CUENTA_C, {
+              reglas_congeladas: {
+                descuentos: [],
+                recargos: [regla({ id: 'rec-9', valorPorcentaje: '0.07' })],
+              },
+            }),
+          ],
+        },
+        // Pedida el 14 a las 10:00 (dentro de la promo del 14) y el 15 a las
+        // 10:00 (dentro de la del 15): cada línea mide SU día.
+        [CUENTA_D]: {
+          abierta: new Date('2026-06-14T09:00:00Z'),
+          lineas: [
+            fila(CUENTA_D, { creado_el: new Date('2026-06-14T10:00:00Z') }),
+            fila(CUENTA_D, { creado_el: new Date('2026-06-15T10:00:00Z') }),
+            fila(CUENTA_D, { creado_el: new Date('2026-06-15T15:00:00Z') }),
+          ],
+        },
+        // Personalización: el precio congelado de la línea no es el del ítem.
+        [CUENTA_E]: {
+          abierta: new Date('2026-06-15T09:00:00Z'),
+          lineas: [
+            fila(CUENTA_E, { precio_unitario: '137.5000', cantidad: '3' }),
+          ],
+        },
+      });
+
+      const ids = [CUENTA_A, CUENTA_B, CUENTA_C, CUENTA_D, CUENTA_E];
+      const lote = await service.totalesDeCuentas(TENANT, ids);
+
+      const solas: Record<string, string> = {};
+      for (const id of ids) solas[id] = await totalDeCalcularSola(id);
+      for (const id of ids) expect(lote.get(id)).toBe(solas[id]);
+
+      // El test no es vacuo: cada regla movió el total de verdad.
+      const distintos = new Set(ids.map((id) => lote.get(id)));
+      expect(distintos.size).toBe(5);
+      expect(Number(lote.get(CUENTA_B))).toBeLessThan(
+        Number(lote.get(CUENTA_A)),
+      );
+      expect(Number(lote.get(CUENTA_C))).toBeGreaterThan(
+        Number(lote.get(CUENTA_A)),
+      );
+    });
+
+    // Las promos se piden UNA vez para el lote (del primer al último día de
+    // cualquier línea), pero cada cuenta tiene que evaluar solo las que tocan SUS
+    // días, como la consulta de `calcular`: el evaluador recibe la misma lista.
+    it('cada cuenta evalúa solo las promos que tocan los días de sus líneas', async () => {
+      promosEnLaBase([promoDelDia('2026-06-14'), promoDelDia('2026-06-15')]);
+      laBase({
+        [CUENTA_A]: {
+          abierta: new Date('2026-06-14T09:00:00Z'),
+          lineas: [
+            fila(CUENTA_A, { creado_el: new Date('2026-06-14T10:00:00Z') }),
+          ],
+        },
+        [CUENTA_B]: {
+          abierta: new Date('2026-06-15T09:00:00Z'),
+          lineas: [
+            fila(CUENTA_B, { creado_el: new Date('2026-06-15T10:00:00Z') }),
+          ],
+        },
+      });
+      const evaluar = jest.spyOn(evaluadorPromos, 'evaluarPromos');
+
+      await service.totalesDeCuentas(TENANT, [CUENTA_A, CUENTA_B]);
+
+      const idsPorLlamada = evaluar.mock.calls.map((c) =>
+        c[0].promos.map((p) => p.id),
+      );
+      expect(idsPorLlamada).toEqual([
+        ['promo-2026-06-14'],
+        ['promo-2026-06-15'],
+      ]);
+      evaluar.mockRestore();
+    });
+
+    it('la cantidad de consultas no crece con la cantidad de cuentas', async () => {
+      promosEnLaBase([promoDelDia('2026-06-15')]);
+      const base2: Record<string, { abierta: Date; lineas: FilaCuenta[] }> = {};
+      const ids6: string[] = [];
+      for (let i = 0; i < 6; i++) {
+        const id = `550e8400-e29b-41d4-a716-44665544070${i}`;
+        ids6.push(id);
+        base2[id] = {
+          abierta: new Date('2026-06-15T09:00:00Z'),
+          lineas: [fila(id), fila(id, { item_id: 'item-2' })],
+        };
+      }
+      laBase(base2);
+
+      await service.totalesDeCuentas(TENANT, ids6.slice(0, 2));
+      const con2 = consultasHechas();
+      jest.clearAllMocks();
+      await service.totalesDeCuentas(TENANT, ids6);
+      const con6 = consultasHechas();
+
+      expect(con6).toBe(con2);
+      // Y las promos se piden UNA vez para todo el lote.
+      expect(promocionesService.cargarVigentes).toHaveBeenCalledTimes(1);
+    });
+
+    it('una cuenta que no se puede calcular da null y no rompe a las demás', async () => {
+      laBase({
+        [CUENTA_A]: {
+          abierta: new Date('2026-06-15T09:00:00Z'),
+          lineas: [fila(CUENTA_A)],
+        },
+        // Un ítem que se borró del catálogo.
+        [CUENTA_B]: {
+          abierta: new Date('2026-06-15T09:00:00Z'),
+          lineas: [fila(CUENTA_B, { item_id: 'item-borrado' })],
+        },
+        // Un monto que la venta no podría guardar.
+        [CUENTA_C]: {
+          abierta: new Date('2026-06-15T09:00:00Z'),
+          lineas: [
+            fila(CUENTA_C, {
+              precio_unitario: '99999999999999.0000',
+              cantidad: '10',
+            }),
+          ],
+        },
+      });
+
+      const lote = await service.totalesDeCuentas(TENANT, [
+        CUENTA_A,
+        CUENTA_B,
+        CUENTA_C,
+        CUENTA_D, // no existe (o es de otro tenant)
+      ]);
+
+      expect(lote.get(CUENTA_A)).toBe(await totalDeCalcularSola(CUENTA_A));
+      expect(lote.get(CUENTA_B)).toBeNull();
+      expect(lote.get(CUENTA_C)).toBeNull();
+      expect(lote.get(CUENTA_D)).toBeNull();
+    });
+
+    it('sin cuentas no consulta nada', async () => {
+      const lote = await service.totalesDeCuentas(TENANT, []);
+
+      expect(lote.size).toBe(0);
+      expect(consultasHechas()).toBe(0);
+    });
+
+    it('una cuenta sin líneas tiene el total que da calcularla sola', async () => {
+      laBase({
+        [CUENTA_A]: { abierta: new Date('2026-06-15T09:00:00Z'), lineas: [] },
+      });
+
+      const lote = await service.totalesDeCuentas(TENANT, [CUENTA_A]);
+
+      expect(lote.get(CUENTA_A)).toBe(await totalDeCalcularSola(CUENTA_A));
     });
   });
 });

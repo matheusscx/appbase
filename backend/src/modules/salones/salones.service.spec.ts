@@ -163,6 +163,7 @@ describe('SalonesService', () => {
     cargarConfig: jest.Mock;
     convertirAMonedaOficial: jest.Mock;
     congelarReglasDeItem: jest.Mock;
+    totalesDeCuentas: jest.Mock;
   };
   let motivosBaja: { assertMotivoActivo: jest.Mock };
   let ubicaciones: { localDe: jest.Mock };
@@ -263,6 +264,9 @@ describe('SalonesService', () => {
       ]),
     };
     calculoPrecios = {
+      // El total de cada tarjeta de la mesa (02.12). Sin totales por default: el
+      // resto del spec no lo mira; los casos que sí, lo fijan.
+      totalesDeCuentas: jest.fn().mockResolvedValue(new Map()),
       // La escala sale de lo que le pasan, como la real: la cortesía cuantiza
       // con ella (spec 2026-10-03).
       cargarConfig: jest.fn((_tenantId: string, decimalesMoneda: number) =>
@@ -5312,6 +5316,53 @@ describe('SalonesService', () => {
       const conCuatro = query.mock.calls.length;
 
       expect(conCuatro).toBe(conUna);
+    });
+
+    // 02.12: la tarjeta de cada cuenta dice cuánto lleva. El número lo calcula
+    // el motor (`CalculoPreciosService.totalesDeCuentas`), UNA vez para todas
+    // las cuentas de la mesa: este service solo lo adjunta, no calcula plata.
+    it('cada cuenta trae el totalFinal que calculó el motor, en UNA llamada para todas', async () => {
+      contarQueries(3);
+      calculoPrecios.totalesDeCuentas.mockResolvedValue(
+        new Map<string, string | null>([
+          ['cuenta-1', '11900.000000'],
+          ['cuenta-2', null],
+          ['cuenta-3', '5950.000000'],
+        ]),
+      );
+
+      const detalles = await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(calculoPrecios.totalesDeCuentas).toHaveBeenCalledTimes(1);
+      expect(calculoPrecios.totalesDeCuentas).toHaveBeenCalledWith(TENANT, [
+        'cuenta-1',
+        'cuenta-2',
+        'cuenta-3',
+      ]);
+      expect(detalles.map((d) => d.totalFinal)).toEqual([
+        '11900.000000',
+        null,
+        '5950.000000',
+      ]);
+    });
+
+    it('una cuenta que el motor no devolvió sale con total null', async () => {
+      contarQueries(2);
+      calculoPrecios.totalesDeCuentas.mockResolvedValue(
+        new Map<string, string | null>([['cuenta-1', '100.000000']]),
+      );
+
+      const detalles = await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(detalles.map((d) => d.totalFinal)).toEqual(['100.000000', null]);
+    });
+
+    it('una mesa sin cuentas no llama al motor', async () => {
+      contarQueries(0);
+
+      await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(calculoPrecios.totalesDeCuentas).not.toHaveBeenCalled();
     });
 
     it('cada cuenta recibe SOLO sus propias líneas', async () => {

@@ -1,4 +1,4 @@
-import { BadRequestException, Injectable } from '@nestjs/common';
+import { BadRequestException, HttpException, Injectable } from '@nestjs/common';
 import Decimal from 'decimal.js';
 import { ItemsService } from '../items/items.service';
 import { ImpuestosService } from '../impuestos/impuestos.service';
@@ -12,6 +12,7 @@ import {
   type AplicacionPromo,
   type InstanteLocal,
   type LineaPromo,
+  type PromoElegible,
 } from '../promociones/promociones.evaluator';
 import { Db } from '../../common/db/db.service';
 import { assertTopeUnidadesVenta } from '../../common/utils/tope-unidades-venta.util';
@@ -55,6 +56,31 @@ type ReglaResueltaConNivel = ReglaResuelta & { nivel: NivelRegla };
 
 type ItemsBaseMap = Awaited<ReturnType<ItemsService['cargarBasePorIds']>>;
 type ItemsReglasMap = Awaited<ReturnType<ItemsService['cargarReglasPorIds']>>;
+
+/** Lo que el cálculo necesita del tenant y no depende de la cuenta (ver `cargarContextoTenant`). */
+interface ContextoTenant {
+  config: ConfigCalculo;
+  zona: string;
+  impuestoMap: Map<string, ImpuestoResuelto & { tipo: string }>;
+  ivaDelPais: (ImpuestoResuelto & { tipo: string }) | null;
+  descuentos: Awaited<ReturnType<DescuentosService['findAll']>>;
+  recargos: Awaited<ReturnType<RecargosService['findAll']>>;
+  tasaMap: Map<string, string>;
+}
+
+/**
+ * Lo que `totalesDeCuentas` ya leyó para todo el lote y le entrega a cada
+ * cuenta, en vez de que `calcularCarrito` lo lea una vez por cuenta. Son los
+ * MISMOS datos que leería solo: solo cambia cuántas veces se consultan.
+ */
+interface CarritoPrecargado {
+  itemsBase: ItemsBaseMap;
+  reglasPorItem: ItemsReglasMap;
+  /** `item_id` y `creado_el` de las líneas VIVAS de la cuenta, por `creado_el`. */
+  filasLineas: { item_id: string; creado_el: Date }[];
+  /** Las promos del lote entero; cada cuenta se queda con las de su rango de días. */
+  promosDelLote: PromoElegible[];
+}
 
 /**
  * **"Sacar no cobra, agregar sí"** — el criterio único del proyecto, y desde el
@@ -173,6 +199,150 @@ export class CalculoPreciosService {
       dto.cuentaId ? 'una mesa' : 'una venta',
     );
 
+    // El día del local para el instante que decide la vigencia de las reglas:
+    // la apertura de la cuenta si la venta nace de una, y si no, ahora. La zona
+    // se resuelve UNA vez y la reusan los instantes de las promos
+    // (`resolverPromociones`): pedirla de nuevo ahí era un viaje repetido.
+    const instanteVigencia = await this.instanteDeVigencia(
+      tenantId,
+      dto.cuentaId,
+    );
+    const ctx = await this.cargarContextoTenant(tenantId, configPrecargada);
+    const fechaLocal = instanteLocalEnZona(ctx.zona, instanteVigencia).fecha;
+
+    return this.calcularCarrito(tenantId, dto, ctx, fechaLocal);
+  }
+
+  /**
+   * El total de cada cuenta de una lista (la tarjeta de cada cuenta de la mesa,
+   * 02.12): **el mismo número** que `calcular({ cuentaId })` da para esa cuenta
+   * sola —el de la cuenta abierta y el del cobro—, con un número FIJO de
+   * consultas aunque haya veinte cuentas.
+   *
+   * Cómo se evita el N+1 sin tocar el motor: lo que `calcular` lee por cuenta se
+   * lee UNA vez para todas —cuentas, líneas, ítems y sus reglas, promos del
+   * rango— y se le entrega a `calcularCarrito` por `precargado`; lo que es del
+   * tenant (`cargarContextoTenant`) se carga una vez. Después cada cuenta pasa
+   * por EL MISMO `calcularCarrito` que usa `calcular`, en memoria: ni una regla
+   * de cálculo se copió acá. `calcularVenta` (el motor puro) ni se enteró.
+   *
+   * Una cuenta que no se puede calcular —no existe o es de otro tenant, tiene un
+   * ítem que se borró del catálogo, o un monto que la venta no podría guardar—
+   * queda en `null` y no tira a las demás: `calcular` la rechazaría con 400/404 y
+   * acá ese rechazo es "sin total", no un error de la lista. Solo se atrapan las
+   * `HttpException` del cálculo; un fallo de la base sube.
+   */
+  async totalesDeCuentas(
+    tenantId: string,
+    cuentaIds: string[],
+  ): Promise<Map<string, string | null>> {
+    const totales = new Map<string, string | null>();
+    if (cuentaIds.length === 0) return totales;
+    for (const id of cuentaIds) totales.set(id, null);
+
+    const cuentas: { cuenta_id: string; abierta_el: Date }[] =
+      await this.db.query(
+        `SELECT cuenta_id, abierta_el FROM cuentas
+          WHERE cuenta_id = ANY($1) AND tenant_id = $2 AND eliminado_el IS NULL`,
+        [cuentaIds, tenantId],
+      );
+    const filas: {
+      cuenta_id: string;
+      item_id: string;
+      cantidad: string;
+      precio_unitario: string;
+      reglas_congeladas: ReglasCongeladas;
+      creado_el: Date;
+    }[] = await this.db.query(
+      `SELECT cuenta_id, item_id, cantidad, precio_unitario, reglas_congeladas,
+              creado_el
+         FROM cuenta_lineas
+        WHERE cuenta_id = ANY($1) AND tenant_id = $2 AND eliminado_el IS NULL
+        ORDER BY creado_el`,
+      [cuentaIds, tenantId],
+    );
+    // El orden global es por `creado_el`: agrupar respetando la llegada deja a
+    // cada cuenta con sus líneas en el orden en que `lineasDeCuenta` las leería.
+    const porCuenta = new Map<string, typeof filas>();
+    for (const f of filas) {
+      const acc = porCuenta.get(f.cuenta_id);
+      if (acc) acc.push(f);
+      else porCuenta.set(f.cuenta_id, [f]);
+    }
+
+    const ctx = await this.cargarContextoTenant(tenantId);
+    const itemIds = [...new Set(filas.map((f) => f.item_id))];
+    const itemsBase = await this.itemsService.cargarBasePorIdsExistentes(
+      tenantId,
+      itemIds,
+    );
+    const reglasPorItem = await this.itemsService.cargarReglasPorIds(
+      tenantId,
+      itemIds,
+    );
+    // Las promos de TODO el lote en una consulta: del primer al último día en
+    // que se pidió cualquier línea. Cada cuenta filtra después las de su rango.
+    const dias = filas
+      .map((f) => instanteLocalEnZona(ctx.zona, f.creado_el).fecha)
+      .sort();
+    const promosDelLote = dias.length
+      ? await this.promocionesService.cargarVigentes(
+          tenantId,
+          dias[0],
+          dias[dias.length - 1],
+        )
+      : [];
+
+    for (const cuenta of cuentas) {
+      const suyas = porCuenta.get(cuenta.cuenta_id) ?? [];
+      // El 404 de `cargarBasePorIds`, cuenta por cuenta: el ítem borrado deja
+      // sin total a SU cuenta y a ninguna otra.
+      if (suyas.some((f) => !itemsBase.has(f.item_id))) continue;
+      const dto: CalcularVentaInput = {
+        cuentaId: cuenta.cuenta_id,
+        lineas: suyas.map((f) => ({
+          itemId: f.item_id,
+          cantidad: f.cantidad,
+          precioUnitarioResuelto: f.precio_unitario,
+          reglasCongeladas: f.reglas_congeladas,
+        })),
+      };
+      try {
+        assertTopeUnidadesVenta(
+          dto.lineas.map((l) => l.cantidad),
+          'una mesa',
+        );
+        const resultado = await this.calcularCarrito(
+          tenantId,
+          dto,
+          ctx,
+          instanteLocalEnZona(ctx.zona, cuenta.abierta_el).fecha,
+          {
+            itemsBase,
+            reglasPorItem,
+            filasLineas: suyas,
+            promosDelLote,
+          },
+        );
+        totales.set(cuenta.cuenta_id, resultado.totales.totalFinal);
+      } catch (e) {
+        if (!(e instanceof HttpException)) throw e;
+      }
+    }
+    return totales;
+  }
+
+  /**
+   * Lo que el cálculo necesita del tenant y **no depende de la cuenta ni del
+   * carrito**: preferencias, zona, catálogos de reglas, IVA del país y tasas.
+   * Se carga una vez por request. Vive aparte para que `totalesDeCuentas` lo
+   * pague UNA vez para todas las cuentas de una mesa en vez de una por cuenta;
+   * `calcular` lo carga igual que siempre, mismas consultas.
+   */
+  private async cargarContextoTenant(
+    tenantId: string,
+    configPrecargada?: ConfigCalculo,
+  ): Promise<ContextoTenant> {
     // Sin `configPrecargada` (la previsualización), acá es donde se resuelve
     // la escala de la moneda oficial: una consulta más, no una por línea.
     const config =
@@ -182,16 +352,7 @@ export class CalculoPreciosService {
         await this.monedasService.decimalesOficiales(tenantId),
       ));
 
-    // El día del local para el instante que decide la vigencia de las reglas:
-    // la apertura de la cuenta si la venta nace de una, y si no, ahora. La zona
-    // se resuelve UNA vez y la reusan los instantes de las promos
-    // (`resolverPromociones`): pedirla de nuevo ahí era un viaje repetido.
-    const instanteVigencia = await this.instanteDeVigencia(
-      tenantId,
-      dto.cuentaId,
-    );
     const zona = await zonaHorariaTenant(this.db, tenantId);
-    const fechaLocal = instanteLocalEnZona(zona, instanteVigencia).fecha;
 
     // Catálogos del tenant cargados una vez e indexados por id.
     /**
@@ -250,15 +411,43 @@ export class CalculoPreciosService {
       // IVA es del país (`tenant_id` nulo) y su PATCH devuelve 404.
       return iva ? { ...iva, activo: true } : null;
     })();
-    const descuentoMap = this.indexarReglas(descuentos, fechaLocal);
-    const recargoMap = this.indexarReglas(recargos, fechaLocal);
-
     const tasaMap = new Map(
       (await this.monedasService.findMonedas(tenantId)).map((m) => [
         m.monedaId,
         m.valorDelDia ?? '1',
       ]),
     );
+
+    return {
+      config,
+      zona,
+      impuestoMap,
+      ivaDelPais,
+      descuentos,
+      recargos,
+      tasaMap,
+    };
+  }
+
+  /**
+   * El cálculo de un carrito ya resuelto contra el contexto del tenant: de aquí
+   * sale el número de la precuenta, del cobro y de la tarjeta de la mesa.
+   *
+   * `precargado` es el único canal por el que `totalesDeCuentas` cambia COMO
+   * llegan los datos —ítems, reglas de ítem, instantes de línea y promos ya
+   * leídos para todas las cuentas del lote—; no cambia qué se calcula. Sin él,
+   * cada cosa se lee acá, igual que antes.
+   */
+  private async calcularCarrito(
+    tenantId: string,
+    dto: CalcularVentaInput,
+    ctx: ContextoTenant,
+    fechaLocal: string,
+    precargado?: CarritoPrecargado,
+  ): Promise<ResultadoVenta> {
+    const { config, zona, impuestoMap, ivaDelPais, tasaMap } = ctx;
+    const descuentoMap = this.indexarReglas(ctx.descuentos, fechaLocal);
+    const recargoMap = this.indexarReglas(ctx.recargos, fechaLocal);
 
     // Ítems del carrito en 2 queries fijas, no 4+ por línea: `cargarBasePorIds`
     // valida pertenencia al tenant (lanza 404 igual que `findOne`) y
@@ -301,14 +490,12 @@ export class CalculoPreciosService {
      * Los dos siguen siendo loaders BATCH —una consulta por llamada, no una por
      * línea—, que es lo que este par vino a resolver.
      */
-    const itemsBase = await this.itemsService.cargarBasePorIds(
-      tenantId,
-      itemIds,
-    );
-    const reglasPorItem = await this.itemsService.cargarReglasPorIds(
-      tenantId,
-      itemIds,
-    );
+    const itemsBase =
+      precargado?.itemsBase ??
+      (await this.itemsService.cargarBasePorIds(tenantId, itemIds));
+    const reglasPorItem =
+      precargado?.reglasPorItem ??
+      (await this.itemsService.cargarReglasPorIds(tenantId, itemIds));
 
     /**
      * El precio de cada línea, decidido **en el servidor**. Tres orígenes, en
@@ -441,6 +628,7 @@ export class CalculoPreciosService {
       lineas,
       itemsBase,
       zona,
+      precargado,
     );
 
     const resultado = calcularVenta({
@@ -602,17 +790,28 @@ export class CalculoPreciosService {
     lineas: LineaResuelta[],
     itemsBase: ItemsBaseMap,
     zona: string,
+    precargado?: CarritoPrecargado,
   ): Promise<AplicacionPromo[]> {
-    const instantes = await this.instantesDeLineas(tenantId, dto, zona);
+    const instantes = await this.instantesDeLineas(
+      tenantId,
+      dto,
+      zona,
+      precargado?.filasLineas,
+    );
     if (instantes.length === 0) return [];
 
     // `'YYYY-MM-DD'`: el orden lexicográfico es el del calendario.
     const dias = instantes.map((i) => i.fecha).sort();
-    const promos = await this.promocionesService.cargarVigentes(
-      tenantId,
-      dias[0],
-      dias[dias.length - 1],
-    );
+    const desde = dias[0];
+    const hasta = dias[dias.length - 1];
+    // Con el lote precargado, el mismo filtro que hace `cargarVigentes` en SQL
+    // (el rango de la promo TOCA el de las líneas), aplicado en memoria sobre
+    // las promos de todas las cuentas: misma lista, en el mismo orden.
+    const promos = precargado
+      ? precargado.promosDelLote.filter(
+          (p) => p.ventana.fechaInicio <= hasta && p.ventana.fechaFin >= desde,
+        )
+      : await this.promocionesService.cargarVigentes(tenantId, desde, hasta);
     if (promos.length === 0) return [];
 
     const lineasPromo: LineaPromo[] = lineas.map((linea, index) => ({
@@ -668,17 +867,20 @@ export class CalculoPreciosService {
     tenantId: string,
     dto: CalcularVentaDto,
     zona: string,
+    filasPrecargadas?: { item_id: string; creado_el: Date }[],
   ): Promise<InstanteLocal[]> {
     const ahora = instanteLocalEnZona(zona, new Date());
     if (!dto.cuentaId) return dto.lineas.map(() => ahora);
 
-    const filas: { item_id: string; creado_el: Date }[] = await this.db.query(
-      `SELECT item_id, creado_el
+    const filas: { item_id: string; creado_el: Date }[] =
+      filasPrecargadas ??
+      (await this.db.query(
+        `SELECT item_id, creado_el
          FROM cuenta_lineas
         WHERE cuenta_id = $1 AND tenant_id = $2 AND eliminado_el IS NULL
         ORDER BY creado_el`,
-      [dto.cuentaId, tenantId],
-    );
+        [dto.cuentaId, tenantId],
+      ));
 
     // Minúsculas, mismo motivo que `advertirItemsPausados`: el body puede
     // traer el UUID en mayúsculas y la BD lo devuelve canónico.

@@ -2,7 +2,7 @@
 
 **Status**: Complete
 **Owner**: Cesar Matheus
-**Last Updated**: 2026-10-08
+**Last Updated**: 2026-10-17
 
 ---
 
@@ -870,6 +870,31 @@ cd backend && npm test            # incluye los specs del motor y del servicio
 ---
 
 ## Notes
+
+### El total de cada cuenta de una mesa (2026-10-17)
+
+`CalculoPreciosService.totalesDeCuentas(tenantId, cuentaIds)` da el total de **varias** cuentas con un
+número fijo de consultas; lo usa `GET /mesas/:id/cuentas` para la tarjeta de cada cuenta (02.12). El
+número es **el mismo** que `calcular({ cuentaId, lineas: [] })` devuelve para esa cuenta sola (la
+cuenta abierta y el cobro): pasa por el mismo `calcularCarrito` y el mismo `calcularVenta`.
+
+**Qué cambió y qué no.** El motor (`calcularVenta`) y las reglas de `calcular` no se tocaron.
+`calcular` se partió en piezas: `cargarContextoTenant` (preferencias, zona, catálogos de reglas,
+IVA, tasas: lo que no depende de la cuenta) y `calcularCarrito` (todo lo demás). `calcular` hace lo
+mismo de antes, con las mismas consultas; lo único que varía es el orden en que se resuelven la
+vigencia de la cuenta y la config (un 400 por cuenta inexistente ahora sale antes de cargarla).
+`totalesDeCuentas` lee **una vez para todo el lote** lo que `calcular` lee por cuenta —cuentas, líneas,
+ítems y reglas de ítem, promos del rango— y se lo pasa a `calcularCarrito` por `precargado`.
+Costo: ~18 consultas fijas, no crece con las cuentas (lo fija un test que cuenta 2 contra 6 cuentas).
+
+- **Promos**: se piden una vez, del primer al último día de cualquier línea del lote, y cada cuenta
+  filtra en memoria las que tocan los días de las suyas (el mismo filtro que la consulta de
+  `cargarVigentes`; un test lo fija mirando qué recibe el evaluador).
+- **Una cuenta que no se puede calcular** (no existe o es de otro tenant, ítem borrado del catálogo,
+  monto que no cabe) queda en `null` sin tirar a las demás: se atrapan solo las `HttpException`
+  que `calcular` habría tirado. Para saber cuál cuenta tiene el ítem faltante,
+  `ItemsService.cargarBasePorIdsExistentes` es `cargarBasePorIds` sin el 404.
+- Es una lectura: el total de la tarjeta **no se congela** ni se guarda en ningún lado.
 
 ### Un monto que no cabe en su columna (2026-10-08)
 
