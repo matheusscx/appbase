@@ -655,7 +655,7 @@ describe('SuscripcionesService', () => {
         },
         {
           id: 's2',
-          estado: 'pausada',
+          estado: 'activa',
           proximoCobro: '2026-08-05',
           activaHasta: null,
         },
@@ -670,6 +670,14 @@ describe('SuscripcionesService', () => {
       );
 
       expect(result).toEqual({ canceladas: 2 });
+      expect(suscripcionRepoMock.find).toHaveBeenCalledWith({
+        where: {
+          tenantId: TENANT_ID,
+          usuarioId: USUARIO_ID,
+          inscripcionId: INSCRIPCION_ID,
+          estado: 'activa',
+        },
+      });
       expect(vigentes[0]).toMatchObject({
         estado: 'cancelada',
         activaHasta: '2026-08-01',
@@ -706,7 +714,7 @@ describe('SuscripcionesService', () => {
       };
     }
 
-    it('pausar sobre activa → ok', async () => {
+    it('cancelar sobre activa → activa_hasta = proximo_cobro', async () => {
       const suscripcion = mockSuscripcion('activa');
       suscripcionRepoMock.findOne.mockResolvedValueOnce(suscripcion);
       suscripcionRepoMock.save.mockImplementationOnce((s) =>
@@ -717,13 +725,13 @@ describe('SuscripcionesService', () => {
         TENANT_ID,
         USUARIO_ID,
         SUSCRIPCION_ID,
-        { accion: 'pausar' } as never,
+        { accion: 'cancelar' },
       );
 
       expect(result).toEqual({
         id: SUSCRIPCION_ID,
-        estado: 'pausada',
-        activaHasta: null,
+        estado: 'cancelada',
+        activaHasta: '2026-07-13',
         proximoCobro: '2026-07-13',
       });
       expect(suscripcionRepoMock.findOne).toHaveBeenCalledWith({
@@ -735,49 +743,17 @@ describe('SuscripcionesService', () => {
       });
     });
 
-    it('cancelar sobre pausada → activa_hasta = proximo_cobro', async () => {
-      const suscripcion = mockSuscripcion('pausada');
-      suscripcionRepoMock.findOne.mockResolvedValueOnce(suscripcion);
-      suscripcionRepoMock.save.mockImplementationOnce((s) =>
-        Promise.resolve(s),
+    it('cancelar sobre una ya cancelada → BadRequestException y no guarda', async () => {
+      suscripcionRepoMock.findOne.mockResolvedValueOnce(
+        mockSuscripcion('cancelada'),
       );
 
-      const result = await service.cambiarEstado(
-        TENANT_ID,
-        USUARIO_ID,
-        SUSCRIPCION_ID,
-        { accion: 'cancelar' } as never,
-      );
-
-      expect(result).toEqual({
-        id: SUSCRIPCION_ID,
-        estado: 'cancelada',
-        activaHasta: '2026-07-13',
-        proximoCobro: '2026-07-13',
-      });
-    });
-
-    it('reanudar sobre pausada → activa, no cobra y devuelve el proximo_cobro que guarda (09.8)', async () => {
-      const suscripcion = mockSuscripcion('pausada');
-      suscripcionRepoMock.findOne.mockResolvedValueOnce(suscripcion);
-      suscripcionRepoMock.save.mockImplementationOnce((s) =>
-        Promise.resolve(s),
-      );
-
-      const result = await service.cambiarEstado(
-        TENANT_ID,
-        USUARIO_ID,
-        SUSCRIPCION_ID,
-        { accion: 'reanudar' } as never,
-      );
-
-      expect(result).toEqual({
-        id: SUSCRIPCION_ID,
-        estado: 'activa',
-        activaHasta: null,
-        proximoCobro: '2026-07-13',
-      });
-      expect(suscripcionRepoMock.save).toHaveBeenCalledTimes(1);
+      await expect(
+        service.cambiarEstado(TENANT_ID, USUARIO_ID, SUSCRIPCION_ID, {
+          accion: 'cancelar',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      expect(suscripcionRepoMock.save).not.toHaveBeenCalled();
     });
 
     it('id ajeno (repo devuelve null) → NotFoundException', async () => {
@@ -785,8 +761,8 @@ describe('SuscripcionesService', () => {
 
       await expect(
         service.cambiarEstado(TENANT_ID, USUARIO_ID, 'ajeno-id', {
-          accion: 'pausar',
-        } as never),
+          accion: 'cancelar',
+        }),
       ).rejects.toThrow(NotFoundException);
     });
   });

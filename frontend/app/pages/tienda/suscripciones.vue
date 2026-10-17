@@ -8,7 +8,7 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 
-const { suscripciones, loading, error, sinPermiso, cargar, pausar, reanudar, cancelar, cambiarTarjeta, crear } =
+const { suscripciones, loading, error, sinPermiso, cargar, cancelar, cambiarTarjeta, crear } =
   useSuscripciones()
 const {
   tarjetas,
@@ -75,8 +75,6 @@ function subtitulo(s: Suscripcion): string {
     return `${base} · activa hasta el ${formatFecha(diaAnterior(s.activaHasta))}`
   if (s.estado === 'cancelada') return base
   const tarjeta = s.tarjetaLast4 ? ` · ${s.tarjetaMarca ?? 'Tarjeta'} ••••${s.tarjetaLast4}` : ''
-  // Pausada no se cobra: mostrar "próximo cobro" prometería un cobro que no ocurre (09.8).
-  if (s.estado === 'pausada') return `${base} · pausada, no se cobra${tarjeta}`
   return `${base} · próximo cobro ${formatFecha(s.proximoCobro)}${tarjeta}`
 }
 
@@ -130,15 +128,13 @@ async function confirmarCambiarTarjeta() {
   }
 }
 
-const estadoColor: Record<Suscripcion['estado'], 'success' | 'warning' | 'neutral'> = {
+const estadoColor: Record<Suscripcion['estado'], 'success' | 'neutral'> = {
   activa: 'success',
-  pausada: 'warning',
   cancelada: 'neutral',
 }
 
 const estadoLabel: Record<Suscripcion['estado'], string> = {
   activa: 'Activa',
-  pausada: 'Pausada',
   cancelada: 'Cancelada',
 }
 
@@ -410,7 +406,7 @@ onMounted(async () => {
       <div class="w-full space-y-6">
         <CrudPageHeader
           title="Mis planes"
-          description="Compras recurrentes de items del catálogo — pausa, reanuda o cancela cuando quieras."
+          description="Compras recurrentes de items del catálogo — cambia la tarjeta o cancela cuando quieras."
         >
           <template #actions>
             <UButton
@@ -456,25 +452,7 @@ onMounted(async () => {
                 size="sm"
                 @click="abrirCambiarTarjeta(row.original)"
               />
-              <UButton
-                v-if="row.original.estado === 'activa'"
-                label="Pausar"
-                icon="i-lucide-pause"
-                color="neutral"
-                variant="soft"
-                size="sm"
-                @click="pausar(row.original.id)"
-              />
-              <UButton
-                v-else-if="row.original.estado === 'pausada'"
-                label="Reanudar"
-                icon="i-lucide-play"
-                color="primary"
-                variant="soft"
-                size="sm"
-                @click="reanudar(row.original.id)"
-              />
-              <!-- Lo destructivo va aparte de lo frecuente: a 8 px de "Pausar" un toque corrido cancelaba (09.7). -->
+              <!-- Lo destructivo va aparte de lo frecuente: a 8 px de "Cambiar tarjeta" un toque corrido cancelaba (09.7). -->
               <div
                 v-if="row.original.estado !== 'cancelada'"
                 data-qa="accion-cancelar"

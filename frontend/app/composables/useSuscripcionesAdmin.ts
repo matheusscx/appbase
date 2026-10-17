@@ -1,23 +1,11 @@
 import { useApiFetch } from './useApiFetch'
-import { explicacionCobro, type Suscripcion } from './useSuscripciones'
+import type { Suscripcion } from './useSuscripciones'
 
 export interface SuscripcionAdmin extends Suscripcion {
   usuarioId: string
   usuarioNombre: string
   usuarioEmail: string
 }
-
-const ESTADO_TRAS_ACCION = {
-  pausar: 'pausada',
-  reanudar: 'activa',
-  cancelar: 'cancelada',
-} as const
-
-const TOAST_ACCION = {
-  pausar: 'Suscripción pausada',
-  reanudar: 'Suscripción reanudada',
-  cancelar: 'Suscripción cancelada',
-} as const
 
 /**
  * Administración de suscripciones del tenant (módulo RBAC "Suscripciones") —
@@ -26,7 +14,6 @@ const TOAST_ACCION = {
 export function useSuscripcionesAdmin() {
   const config = useRuntimeConfig()
   const toast = useToast()
-  const { formatFecha } = useFormatters()
   const apiUrl = config.public.apiUrl
 
   const suscripciones = ref<SuscripcionAdmin[]>([])
@@ -51,25 +38,21 @@ export function useSuscripcionesAdmin() {
     }
   }
 
-  async function accion(id: string, tipo: keyof typeof ESTADO_TRAS_ACCION) {
+  async function cancelar(id: string) {
     if (mutando.has(id)) return
     const susc = suscripciones.value.find((s) => s.id === id)
     if (!susc) return
     mutando.add(id)
     const prev = susc.estado
-    susc.estado = ESTADO_TRAS_ACCION[tipo] // optimista
+    susc.estado = 'cancelada' // optimista
     try {
       const res = await useApiFetch<{ id: string, estado: Suscripcion['estado'], activaHasta: string | null, proximoCobro: string }>(
         `${apiUrl}/suscripciones/admin/${id}`,
-        { method: 'PATCH', body: { accion: tipo } },
+        { method: 'PATCH', body: { accion: 'cancelar' } },
       )
       susc.activaHasta = res.activaHasta
       susc.proximoCobro = res.proximoCobro
-      toast.add({
-        title: TOAST_ACCION[tipo],
-        description: explicacionCobro(tipo, formatFecha(res.proximoCobro)),
-        color: 'success',
-      })
+      toast.add({ title: 'Suscripción cancelada', color: 'success' })
     } catch (e: unknown) {
       susc.estado = prev // revert
       toast.add({ title: apiErrorMsg(e, 'Error al actualizar'), color: 'error' })
@@ -95,11 +78,7 @@ export function useSuscripcionesAdmin() {
     }
   }
 
-  const pausar = (id: string) => accion(id, 'pausar')
-  const reanudar = (id: string) => accion(id, 'reanudar')
-  const cancelar = (id: string) => accion(id, 'cancelar')
-
   onMounted(cargar)
 
-  return { suscripciones, loading, error, sinPermiso, cargar, pausar, reanudar, cancelar, eliminar }
+  return { suscripciones, loading, error, sinPermiso, cargar, cancelar, eliminar }
 }

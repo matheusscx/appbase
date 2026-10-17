@@ -1348,7 +1348,7 @@ muestra un **modal informativo** con ambas fechas.
   tiene acceso total.
 - Página "Suscripciones" (sidebar): lista **todas** las suscripciones del tenant
   con datos del cliente (nombre, email), estado, vigencia y filtro por estado.
-- Acciones del admin sobre cualquier suscripción: pausar, reanudar, cancelar
+- Acciones del admin sobre cualquier suscripción: cancelar (las suscripciones no se pausan)
   (mismo modal de vigencia) y **eliminar** (soft delete, **solo canceladas** —
   evita borrar contratos vigentes por accidente).
 - La vista del customer pasa a llamarse **"Mis planes"** (antes "Mis suscripciones") y solo opera

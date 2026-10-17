@@ -16,14 +16,13 @@ const {
   puedeEliminar,
 } = usePermisosCrud('Suscripciones')
 
-const { suscripciones, loading, error, sinPermiso, cargar, pausar, reanudar, cancelar, eliminar } = useSuscripcionesAdmin()
+const { suscripciones, loading, error, sinPermiso, cargar, cancelar, eliminar } = useSuscripcionesAdmin()
 const { formatMonto, formatFecha } = useFormatters()
 
 const filtroEstado = ref<'todas' | SuscripcionAdmin['estado']>('todas')
 const filtroOpts = [
   { label: 'Todas', value: 'todas' },
   { label: 'Activas', value: 'activa' },
-  { label: 'Pausadas', value: 'pausada' },
   { label: 'Canceladas', value: 'cancelada' },
 ]
 
@@ -44,7 +43,7 @@ function quitarFiltros() {
   busqueda.value = ''
 }
 
-const ESTADO_PLURAL = { activa: 'activas', pausada: 'pausadas', cancelada: 'canceladas' } as const
+const ESTADO_PLURAL = { activa: 'activas', cancelada: 'canceladas' } as const
 /** El vacío nombra el filtro: "No hay suscripciones canceladas", no el "no hay ninguna" de siempre (09.23). */
 const textoFiltrado = computed(() => {
   const estado = filtroEstado.value === 'todas' ? '' : ` ${ESTADO_PLURAL[filtroEstado.value]}`
@@ -63,20 +62,16 @@ function vigencia(s: SuscripcionAdmin): string {
   if (s.estado === 'cancelada' && s.activaHasta)
     return `Activa hasta el ${formatFecha(diaAnterior(s.activaHasta))}`
   if (s.estado === 'cancelada') return ''
-  // Pausada no se cobra (09.8).
-  if (s.estado === 'pausada') return 'Pausada, no se cobra'
   return `Próximo cobro ${formatFecha(s.proximoCobro)}`
 }
 
-const estadoColor: Record<SuscripcionAdmin['estado'], 'success' | 'warning' | 'neutral'> = {
+const estadoColor: Record<SuscripcionAdmin['estado'], 'success' | 'neutral'> = {
   activa: 'success',
-  pausada: 'warning',
   cancelada: 'neutral',
 }
 
 const estadoLabel: Record<SuscripcionAdmin['estado'], string> = {
   activa: 'Activa',
-  pausada: 'Pausada',
   cancelada: 'Cancelada',
 }
 
@@ -198,38 +193,14 @@ function confirmarEliminar() {
             <div class="flex justify-end items-center gap-2">
               <template v-if="puedeActualizar">
                 <UButton
-                  v-if="row.original.estado === 'activa'"
-                  label="Pausar"
-                  icon="i-lucide-pause"
-                  color="neutral"
-                  variant="soft"
-                  size="sm"
-                  @click="pausar(row.original.id)"
-                />
-                <UButton
-                  v-else-if="row.original.estado === 'pausada'"
-                  label="Reanudar"
-                  icon="i-lucide-play"
-                  color="primary"
-                  variant="soft"
-                  size="sm"
-                  @click="reanudar(row.original.id)"
-                />
-                <!-- Lo destructivo va aparte de lo frecuente: a 8 px de "Pausar" un toque corrido cancelaba (09.7). -->
-                <div
                   v-if="row.original.estado !== 'cancelada'"
-                  data-qa="accion-cancelar"
-                  class="ms-4 ps-4 border-s border-default"
-                >
-                  <UButton
-                    label="Cancelar"
-                    icon="i-lucide-x"
-                    color="error"
-                    variant="soft"
-                    size="sm"
-                    @click="abrirCancelar(row.original)"
-                  />
-                </div>
+                  label="Cancelar"
+                  icon="i-lucide-x"
+                  color="error"
+                  variant="soft"
+                  size="sm"
+                  @click="abrirCancelar(row.original)"
+                />
               </template>
               <UButton
                 v-if="puedeEliminar && row.original.estado === 'cancelada'"

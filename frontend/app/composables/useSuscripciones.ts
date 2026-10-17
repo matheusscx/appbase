@@ -9,7 +9,7 @@ export interface Suscripcion {
   frecuencia: 'semanal' | 'quincenal' | 'mensual'
   diaMes: number | null
   diaSemana: number | null
-  estado: 'activa' | 'pausada' | 'cancelada'
+  estado: 'activa' | 'cancelada'
   proximoCobro: string
   activaHasta: string | null
   inscripcionId: string | null
@@ -62,28 +62,6 @@ export function esAltaConOtrosDatos(error: unknown): boolean {
   return (error as { status?: number })?.status === 422
 }
 
-const ESTADO_TRAS_ACCION = {
-  pausar: 'pausada',
-  reanudar: 'activa',
-  cancelar: 'cancelada',
-} as const
-
-const TOAST_ACCION = {
-  pausar: 'Suscripción pausada',
-  reanudar: 'Suscripción reanudada',
-  cancelar: 'Suscripción cancelada',
-} as const
-
-/**
- * La línea que explica el cobro al pausar y al reanudar (09.8). La fecha es la que el servidor
- * guarda (`proximoCobro` de la respuesta): la pantalla no la calcula.
- */
-export function explicacionCobro(tipo: 'pausar' | 'reanudar' | 'cancelar', fecha: string): string | undefined {
-  if (tipo === 'pausar') return `No se cobra mientras esté pausada. Al reanudarla, el próximo cobro es el ${fecha}.`
-  if (tipo === 'reanudar') return `No se cobró nada al reanudar. El próximo cobro es el ${fecha}.`
-  return undefined
-}
-
 /**
  * Suscripciones del usuario autenticado — GET/PATCH /suscripciones.
  * Reemplaza el mock anterior (localStorage): ahora es 100% API-backed.
@@ -91,7 +69,6 @@ export function explicacionCobro(tipo: 'pausar' | 'reanudar' | 'cancelar', fecha
 export function useSuscripciones() {
   const config = useRuntimeConfig()
   const toast = useToast()
-  const { formatFecha } = useFormatters()
   const apiUrl = config.public.apiUrl
 
   // Una clave por intento de alta: el reintento después de un corte no cobra
@@ -164,25 +141,21 @@ export function useSuscripciones() {
     }
   }
 
-  async function accion(id: string, tipo: keyof typeof ESTADO_TRAS_ACCION) {
+  async function cancelar(id: string) {
     if (mutando.has(id)) return
     const susc = suscripciones.value.find((s) => s.id === id)
     if (!susc) return
     mutando.add(id)
     const prev = susc.estado
-    susc.estado = ESTADO_TRAS_ACCION[tipo] // optimista
+    susc.estado = 'cancelada' // optimista
     try {
       const res = await useApiFetch<{ id: string, estado: Suscripcion['estado'], activaHasta: string | null, proximoCobro: string }>(
         `${apiUrl}/suscripciones/${id}`,
-        { method: 'PATCH', body: { accion: tipo } },
+        { method: 'PATCH', body: { accion: 'cancelar' } },
       )
       susc.activaHasta = res.activaHasta
       susc.proximoCobro = res.proximoCobro
-      toast.add({
-        title: TOAST_ACCION[tipo],
-        description: explicacionCobro(tipo, formatFecha(res.proximoCobro)),
-        color: 'success',
-      })
+      toast.add({ title: 'Suscripción cancelada', color: 'success' })
     } catch (e: unknown) {
       susc.estado = prev // revert
       toast.add({ title: apiErrorMsg(e, 'Error al actualizar'), color: 'error' })
@@ -190,10 +163,6 @@ export function useSuscripciones() {
       mutando.delete(id)
     }
   }
-
-  const pausar = (id: string) => accion(id, 'pausar')
-  const reanudar = (id: string) => accion(id, 'reanudar')
-  const cancelar = (id: string) => accion(id, 'cancelar')
 
   /** Reasigna la tarjeta (inscripción Oneclick) de una suscripción y refresca el snapshot. */
   async function cambiarTarjeta(id: string, inscripcionId: string) {
@@ -217,5 +186,5 @@ export function useSuscripciones() {
 
   onMounted(cargar)
 
-  return { suscripciones, loading, error, sinPermiso, cargar, crear, pausar, reanudar, cancelar, cambiarTarjeta }
+  return { suscripciones, loading, error, sinPermiso, cargar, crear, cancelar, cambiarTarjeta }
 }

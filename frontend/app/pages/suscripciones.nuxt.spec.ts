@@ -96,14 +96,21 @@ describe('suscripciones (admin) — vacío, filtro y búsqueda', () => {
   })
 })
 
-describe('suscripciones (admin) — lo destructivo va aparte de lo frecuente (09.7)', () => {
-  it('"Cancelar" va en su propio grupo, apartado de "Pausar"', async () => {
+describe('suscripciones (admin) — no se pausan (09.8, owner 2026-10-17)', () => {
+  it('una activa ofrece Cancelar y nada de Pausar ni Reanudar', async () => {
     const w = await montar()
-    const cancelar = w.find('[data-qa="accion-cancelar"]')
-    expect(cancelar.exists()).toBe(true)
-    expect(cancelar.classes().join(' ')).toMatch(/border-s/)
-    const pausar = w.findAll('button').find(b => b.text().trim() === 'Pausar')!
-    expect(cancelar.element.contains(pausar.element)).toBe(false)
+    const botones = w.findAll('button').map(b => b.text().trim())
+    expect(botones).toContain('Cancelar')
+    expect(botones).not.toContain('Pausar')
+    expect(botones).not.toContain('Reanudar')
+    expect(w.text()).not.toMatch(/paus/i)
+    w.unmount()
+  })
+
+  it('el filtro de estado no ofrece "Pausadas"', async () => {
+    const w = await montar()
+    const opciones = w.findComponent({ name: 'USelectMenu' }).props('items') as { label: string }[]
+    expect(opciones.map(o => o.label)).toEqual(['Todas', 'Activas', 'Canceladas'])
     w.unmount()
   })
 })

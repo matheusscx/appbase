@@ -95,12 +95,6 @@ export interface AltaSuscripcion {
   advertencias: string[];
 }
 
-const TRANSICIONES: Record<string, { desde: string[]; hacia: string }> = {
-  pausar: { desde: ['activa'], hacia: 'pausada' },
-  reanudar: { desde: ['pausada'], hacia: 'activa' },
-  cancelar: { desde: ['activa', 'pausada'], hacia: 'cancelada' },
-};
-
 @Injectable()
 export class SuscripcionesService {
   private readonly logger = new Logger(SuscripcionesService.name);
@@ -630,33 +624,29 @@ export class SuscripcionesService {
       throw new NotFoundException('Suscripción no encontrada');
     }
 
-    const transicion = TRANSICIONES[dto.accion];
-    if (!transicion.desde.includes(suscripcion.estado)) {
+    // Una suscripción se da de baja y nada más: no se pausa (owner, 2026-10-17).
+    if (suscripcion.estado !== 'activa') {
       throw new BadRequestException(
         `No se puede ${dto.accion} una suscripción ${suscripcion.estado}`,
       );
     }
 
-    suscripcion.estado = transicion.hacia;
-    if (dto.accion === 'cancelar') {
-      // El período ya cobrado sigue vigente: usable hasta el día anterior a
-      // activa_hasta, "se cancela ese día a primera hora".
-      suscripcion.activaHasta = suscripcion.proximoCobro;
-    }
+    suscripcion.estado = 'cancelada';
+    // El período ya cobrado sigue vigente: usable hasta el día anterior a
+    // activa_hasta, "se cancela ese día a primera hora".
+    suscripcion.activaHasta = suscripcion.proximoCobro;
     await this.suscripcionRepo.save(suscripcion);
     return {
       id: suscripcion.id,
       estado: suscripcion.estado,
       activaHasta: suscripcion.activaHasta,
-      // La fecha que el servidor guarda: pausar y reanudar no la mueven (09.8), y la pantalla la
-      // muestra en vez de calcularla.
       proximoCobro: suscripcion.proximoCobro,
     };
   }
 
   /**
    * Reasigna la tarjeta (inscripción Oneclick) de una suscripción propia del
-   * usuario. Solo activa/pausada; valida ownership de la suscripción y de la
+   * usuario. Solo activa; valida ownership de la suscripción y de la
    * inscripción, y actualiza el snapshot de tarjeta.
    */
   async cambiarTarjeta(
@@ -671,7 +661,7 @@ export class SuscripcionesService {
     if (!suscripcion) {
       throw new NotFoundException('Suscripción no encontrada');
     }
-    if (!['activa', 'pausada'].includes(suscripcion.estado)) {
+    if (suscripcion.estado !== 'activa') {
       throw new BadRequestException(
         `No se puede cambiar la tarjeta de una suscripción ${suscripcion.estado}`,
       );
@@ -697,7 +687,7 @@ export class SuscripcionesService {
   }
 
   /**
-   * Cuenta las suscripciones vigentes (activa/pausada) amarradas a cada
+   * Cuenta las suscripciones vigentes (activas) amarradas a cada
    * inscripción de un usuario. Alimenta el aviso del modal de borrado de tarjeta.
    */
   async contarPorInscripcion(
@@ -710,7 +700,7 @@ export class SuscripcionesService {
          FROM suscripciones
          WHERE tenant_id = $1 AND usuario_id = $2 AND eliminado_el IS NULL
            AND inscripcion_id IS NOT NULL
-           AND estado IN ('activa', 'pausada')
+           AND estado = 'activa'
          GROUP BY inscripcion_id`,
         [tenantId, usuarioId],
       );
@@ -718,7 +708,7 @@ export class SuscripcionesService {
   }
 
   /**
-   * Cancela todas las suscripciones vigentes (activa/pausada) de un usuario
+   * Cancela todas las suscripciones vigentes (activas) de un usuario
    * amarradas a una inscripción. Se invoca al eliminar la tarjeta: usa la misma
    * semántica que `cancelar` (activa_hasta = proximo_cobro).
    */
@@ -728,10 +718,7 @@ export class SuscripcionesService {
     inscripcionId: string,
   ): Promise<{ canceladas: number }> {
     const suscripciones = await this.suscripcionRepo.find({
-      where: [
-        { tenantId, usuarioId, inscripcionId, estado: 'activa' },
-        { tenantId, usuarioId, inscripcionId, estado: 'pausada' },
-      ],
+      where: { tenantId, usuarioId, inscripcionId, estado: 'activa' },
     });
     for (const s of suscripciones) {
       s.estado = 'cancelada';

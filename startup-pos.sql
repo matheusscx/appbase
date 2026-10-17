@@ -2267,7 +2267,7 @@ CREATE TABLE "suscripciones" (
   "frecuencia"       TEXT        NOT NULL,  -- snapshot del item al suscribirse: 'semanal' | 'quincenal' | 'mensual'
   "dia_mes"          SMALLINT,              -- mensual: 1-28 · quincenal: 1-13 (cobra también dia_mes+15)
   "dia_semana"       SMALLINT,              -- semanal: 0-6 (0 = domingo)
-  "estado"           TEXT        NOT NULL DEFAULT 'activa',  -- 'activa' | 'pausada' | 'cancelada'
+  "estado"           TEXT        NOT NULL DEFAULT 'activa',  -- 'activa' | 'cancelada'
   "proximo_cobro"    DATE        NOT NULL,
   "activa_hasta"     DATE,                  -- al cancelar: fin del período pagado (= proximo_cobro vigente); usable hasta el día anterior
 

@@ -150,7 +150,7 @@ mockNuxtImport('useApiFetch', () => {
     if (/\/suscripciones\/[^/]+$/.test(ruta) && (opts as { method?: string } | undefined)?.method === 'PATCH') {
       const accion = (opts as unknown as { body: { accion: string } }).body.accion
       return Promise.resolve({
-        id: 'susc-1', estado: accion === 'pausar' ? 'pausada' : 'activa', activaHasta: null, proximoCobro: '2026-11-05',
+        id: 'susc-1', estado: accion === 'cancelar' ? 'cancelada' : 'activa', activaHasta: '2026-11-05', proximoCobro: '2026-11-05',
       })
     }
     if (ruta.endsWith('/online/medios-pago')) {
@@ -570,14 +570,14 @@ describe('tienda/suscripciones — la fila separa lo destructivo de lo frecuente
     inscripcionId: 'insc-1', tarjetaMarca: 'Visa', tarjetaLast4: '4242', ventaInicialId: null,
   }
 
-  it('"Cancelar" va en su propio grupo, apartado de "Pausar" y "Cambiar tarjeta"', async () => {
+  it('"Cancelar" va en su propio grupo, apartado de "Cambiar tarjeta"', async () => {
     listaSuscripciones = [ACTIVA]
     const wrapper = await montar()
     await new Promise(r => setTimeout(r, 30))
     const cancelar = wrapper.find('[data-qa="accion-cancelar"]')
     expect(cancelar.exists()).toBe(true)
     expect(cancelar.classes().join(' ')).toMatch(/border-s/)
-    for (const frecuente of ['Pausar', 'Cambiar tarjeta']) {
+    for (const frecuente of ['Cambiar tarjeta']) {
       const b = hijosDe(wrapper, frecuente)!
       expect(cancelar.element.contains(b.element), frecuente).toBe(false)
     }
@@ -703,39 +703,34 @@ describe('tienda/suscripciones — al volver de Webpay el cobro espera el clic (
   })
 })
 
-describe('tienda/suscripciones — pausar y reanudar dicen qué pasa con el cobro (09.8)', () => {
+describe('tienda/suscripciones — no se pausan (09.8, owner 2026-10-17)', () => {
   const FILA = {
     id: 'susc-1', itemId: SEMANAL.id, itemNombre: 'Café semanal', precio: '10000', monedaId: 'moneda-1',
     frecuencia: 'mensual', diaMes: 5, diaSemana: null, estado: 'activa', proximoCobro: '2026-11-05',
     activaHasta: null, inscripcionId: 'insc-1', tarjetaMarca: 'Visa', tarjetaLast4: '4242', ventaInicialId: 'v1',
   }
 
-  async function pulsar(wrapper: Awaited<ReturnType<typeof montar>>, texto: string) {
-    const boton = wrapper.findAll('button').find(b => b.text().trim() === texto)
-    expect(boton, texto).toBeTruthy()
-    await boton!.trigger('click')
-    await new Promise(r => setTimeout(r, 50))
-  }
-
-  it('al pausar avisa que no se cobra y cuándo es el próximo cobro, con la fecha del servidor', async () => {
+  it('una activa ofrece Cambiar tarjeta y Cancelar, sin Pausar ni Reanudar ni mención de pausa', async () => {
     listaSuscripciones = [{ ...FILA }]
-    await pulsar(await montar(), 'Pausar')
-    expect(toasts).toHaveLength(1)
-    expect(toasts[0]!.title).toBe('Suscripción pausada')
-    expect(toasts[0]!.description).toMatch(/^No se cobra mientras esté pausada\. Al reanudarla, el próximo cobro es el .*2026/)
-  })
-
-  it('al reanudar avisa que no se cobra ahora y cuándo es el próximo cobro', async () => {
-    listaSuscripciones = [{ ...FILA, estado: 'pausada' }]
-    await pulsar(await montar(), 'Reanudar')
-    expect(toasts[0]!.title).toBe('Suscripción reanudada')
-    expect(toasts[0]!.description).toMatch(/^No se cobró nada al reanudar\. El próximo cobro es el .*2026/)
-  })
-
-  it('la fila pausada no promete un próximo cobro', async () => {
-    listaSuscripciones = [{ ...FILA, estado: 'pausada' }]
     const wrapper = await montar()
-    expect(wrapper.text()).toContain('pausada, no se cobra')
-    expect(wrapper.text()).not.toContain('próximo cobro')
+    const botones = wrapper.findAll('button').map(b => b.text().trim())
+    expect(botones).toEqual(expect.arrayContaining(['Cambiar tarjeta', 'Cancelar']))
+    expect(botones).not.toContain('Pausar')
+    expect(botones).not.toContain('Reanudar')
+    expect(wrapper.text()).not.toMatch(/paus/i)
+    expect(wrapper.text()).toContain('próximo cobro')
+  })
+
+  it('cancelar sigue andando: avisa "Suscripción cancelada"', async () => {
+    listaSuscripciones = [{ ...FILA }]
+    const wrapper = await montar()
+    await wrapper.findAll('button').find(b => b.text().trim() === 'Cancelar')!.trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+    const confirmar = [...document.body.querySelectorAll('button')]
+      .find(b => b.textContent?.trim() === 'Sí, cancelar suscripción')
+    expect(confirmar).toBeTruthy()
+    confirmar!.click()
+    await new Promise(r => setTimeout(r, 50))
+    expect(toasts[0]!.title).toBe('Suscripción cancelada')
   })
 })

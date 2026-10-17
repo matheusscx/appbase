@@ -327,13 +327,12 @@ nombre/precio/moneda). Incluye `inscripcionId` + snapshot de tarjeta.
 PATCH /suscripciones/:id
 
 Request:
-{ "accion": "pausar" | "reanudar" | "cancelar" }
+{ "accion": "cancelar" }   // pausar y reanudar → 400: no existen
 
-Response (200): { "id": "uuid", "estado": "pausada", "activaHasta": null, "proximoCobro": "2026-11-05" }
+Response (200): { "id": "uuid", "estado": "cancelada", "activaHasta": "2026-11-05", "proximoCobro": "2026-11-05" }
 ```
 
-`proximoCobro` es la fecha que el servidor guarda; pausar y reanudar **no la mueven** y no cobran
-(la pantalla la muestra, nunca la calcula). Ver § "Pausar y reanudar".
+`proximoCobro` es la fecha que el servidor guarda (la pantalla la muestra, nunca la calcula). Ver § "Las suscripciones no se pausan".
 
 ```
 ```
@@ -346,7 +345,7 @@ Request:
 
 Response (200): { "id": "uuid", "inscripcionId": "uuid", "tarjetaMarca": "Visa", "tarjetaLast4": "4242" }
 ```
-Reasigna la tarjeta amarrada (solo suscripciones `activa`/`pausada`); valida
+Reasigna la tarjeta amarrada (solo suscripciones `activa`); valida
 ownership de la suscripción y de la inscripción.
 
 ### Administración (módulo RBAC "Suscripciones")
@@ -358,7 +357,7 @@ short-circuit `es_fijo`:
 ```
 GET    /suscripciones/admin        → Leer       — todas las suscripciones del
                                      tenant (join usuarios: nombre + correo)
-PATCH  /suscripciones/admin/:id    → Actualizar — pausar/reanudar/cancelar
+PATCH  /suscripciones/admin/:id    → Actualizar — cancelar (dar de baja)
                                      cualquier suscripción del tenant
 DELETE /suscripciones/admin/:id    → Eliminar   — soft delete, SOLO canceladas
 ```
@@ -425,12 +424,10 @@ hora** y es de quien la empezó: la de otro usuario u otro local, la de formato 
 (la vencida avisa *"La suscripción que dejaste a medias venció"*; 09.22). Si el plan ya no es suscribible, avisa
 *"El plan que elegiste ya no está disponible"* y no abre nada.
 
-**Pausar y reanudar (09.8):** una pausada no se cobra. Hoy `PATCH /suscripciones/:id` solo cambia el estado
-(`cambiarEstado`): no cobra al reanudar y no toca `proximo_cobro` (tampoco hay job que cobre, ver más abajo). La
-pantalla lo dice en un toast con la fecha del servidor ("No se cobra mientras esté pausada. Al reanudarla, el
-próximo cobro es el …"), y la fila pausada dice "pausada, no se cobra" en vez de "próximo cobro". ⛔ Abierto: si
-la pausa cruzó `proximo_cobro`, al reanudar la fecha queda vencida; recalcularla "a la siguiente fecha del ciclo"
-tiene una decisión pendiente (ver el informe del frente).
+**Las suscripciones no se pausan (09.8, owner 2026-10-17):** "o está suscrito vigente o se da de baja". Los
+estados son `activa` y `cancelada`; `PATCH /suscripciones/:id` y `/admin/:id` solo aceptan `{ accion: 'cancelar' }`
+(el DTO rechaza `pausar` y `reanudar` con 400) y las pantallas no ofrecen Pausar ni Reanudar. `estado` es `TEXT`
+sin CHECK, así que no hubo migración. Antes (2026-10-16) existía la pausa con un toast explicativo: se retiró entera.
 
 **Cascada al eliminar una tarjeta:** `DELETE /online/medios-pago/:id` cancela
 primero las suscripciones vigentes amarradas a esa inscripción
@@ -552,12 +549,12 @@ del mismo permiso `Tienda Online:Leer`; las otras dos dicen abajo cómo se llega
 - `pages/tienda/suscripciones.vue` — **"Mis planes"**: lista de
   suscripciones del usuario (API-backed), drawer "Nueva suscripción" para
   elegir item suscribible, día de cobro y tarjeta preferida, y acciones
-  pausar/reanudar/cancelar. Cancelar abre un **modal informativo** con la
+  cambiar tarjeta y cancelar. Cancelar abre un **modal informativo** con la
   vigencia (activa hasta el día anterior a `proximo_cobro`, se cancela ese
   día a primera hora) antes de confirmar (`/tienda/suscripciones`).
 - `pages/suscripciones.vue` — **administración (admin)**: todas las
   suscripciones del tenant con cliente (nombre + email), estado, vigencia y
-  filtro por estado; acciones pausar/reanudar/cancelar (mismo modal, en
+  filtro por estado; acción cancelar (mismo modal, en
   tercera persona) y eliminar (solo canceladas, con confirmación). Entrada
   propia "Suscripciones" en el sidebar, gated
   `can('Suscripciones', 'Leer')` (sin atajo de admin, 2026-10-15); los botones se gatean por
@@ -608,7 +605,7 @@ del mismo permiso `Tienda Online:Leer`; las otras dos dicen abajo cómo se llega
   ni el CVV, solo marca + últimos 4 que devuelve Transbank.
 - `composables/useSuscripciones.ts` — **API-backed** (`GET`/`PATCH
   /suscripciones`), reemplaza el mock anterior en `localStorage`. Expone
-  `suscripciones`, `loading`, `cargar()` y `pausar()`/`reanudar()`/
+  `suscripciones`, `loading`, `cargar()` y
   `cancelar()` con update optimista (revierte el estado local si el `PATCH`
   falla). Exporta además los helpers compartidos `frecuenciaLabel`,
   `detalleDia()` y `diaAnterior()` (usados por ambas páginas de
@@ -732,8 +729,7 @@ npm test -- modules/online/medios-pago-online.service.spec.ts
    nueva (elegir día + tarjeta), "Rechazar" en la pasarela → no se crea
    suscripción ni venta; "Aprobar" → suscripción `activa` con
    `proximo_cobro` calculado y venta inicial visible en `/ventas`. Probar
-   pausar/reanudar/cancelar y verificar que las transiciones inválidas
-   fallan.
+   cancelar y verificar que pausar/reanudar dan 400.
 
 ---
 
@@ -745,7 +741,7 @@ npm test -- modules/online/medios-pago-online.service.spec.ts
 - [x] RBAC: módulo "Tienda Online" sembrado y filtrado en el sidebar.
 - [x] Suscripciones: tipo de item `item_suscripcion`, endpoints
   `POST/GET/PATCH /suscripciones`, alta atómica con primer cobro, máquina de
-  estados `activa`/`pausada`/`cancelada`.
+  estados `activa`/`cancelada` (no se pausan).
 - [x] Administración de suscripciones: módulo RBAC "Suscripciones" propio,
   endpoints admin (`GET/PATCH/DELETE /suscripciones/admin`), página
   `/suscripciones`, vigencia `activa_hasta` al cancelar y modales de

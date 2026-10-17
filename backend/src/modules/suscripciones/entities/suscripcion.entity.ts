@@ -31,7 +31,7 @@ export class Suscripcion {
   diaSemana: number | null;
 
   @Column({ type: 'text', default: 'activa' })
-  estado: string; // 'activa' | 'pausada' | 'cancelada'
+  estado: string; // 'activa' | 'cancelada'
 
   @Column({ name: 'proximo_cobro', type: 'date' })
   proximoCobro: string;
