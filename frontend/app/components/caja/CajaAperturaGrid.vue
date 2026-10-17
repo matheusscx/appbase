@@ -1,4 +1,7 @@
 <script setup lang="ts">
+import type { CajonDisponible } from '~/stores/caja'
+import { montoParaInput } from '~/utils/currency-format'
+
 const emit = defineEmits<{ opened: [cajaId: string] }>()
 
 const cajaStore = useCajaStore()
@@ -7,7 +10,7 @@ const { errores, marcar, limpiar } = useErroresCampo()
 const loadingCajones = ref(false)
 const saving = ref(false)
 const drawerOpen = ref(false)
-const seleccionado = ref<{ cajonId: string, nombre: string } | null>(null)
+const seleccionado = ref<CajonDisponible | null>(null)
 
 const form = ref({ saldoInicial: '', comentario: '' })
 
@@ -40,9 +43,10 @@ watch(drawerOpen, (open) => {
   }
 })
 
-function abrirDrawer(cajon: { cajonId: string, nombre: string }) {
-  seleccionado.value = { cajonId: cajon.cajonId, nombre: cajon.nombre }
-  form.value = { saldoInicial: '', comentario: '' }
+function abrirDrawer(cajon: CajonDisponible) {
+  seleccionado.value = cajon
+  // El fondo con que suele abrirse esta caja (03.28): precargado, no impuesto.
+  form.value = { saldoInicial: montoParaInput(cajon.fondoSugerido), comentario: '' }
   drawerOpen.value = true
 }
 
@@ -111,7 +115,12 @@ async function abrir() {
 
       <template #body>
         <UForm id="caja-apertura-grid-form" :state="form" class="space-y-4" @submit="abrir">
-          <UFormField label="Saldo inicial" required :error="errores.saldoInicial">
+          <UFormField
+            label="Saldo inicial"
+            required
+            :error="errores.saldoInicial"
+            :help="seleccionado?.fondoSugerido ? 'Viene con el fondo habitual de esta caja. Cámbialo si hoy abres con otro monto.' : undefined"
+          >
             <MoneyInput v-model="form.saldoInicial" oficial class="w-full" @update:model-value="limpiar('saldoInicial')" />
           </UFormField>
 
@@ -126,12 +135,14 @@ async function abrir() {
       </template>
 
       <template #actions>
-        <UButton color="neutral" variant="ghost" @click="() => { drawerOpen = false }">
+        <UButton color="neutral" variant="ghost" size="xl" class="min-h-11" @click="() => { drawerOpen = false }">
           Cancelar
         </UButton>
         <UButton
           type="submit"
           form="caja-apertura-grid-form"
+          size="xl"
+          class="min-h-11"
           icon="i-lucide-lock-open"
           :loading="saving"
         >

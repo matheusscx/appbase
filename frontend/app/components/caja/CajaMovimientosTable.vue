@@ -90,7 +90,8 @@ const columns: TableColumn<typeof movimientos.value[number]>[] = [
             :icon="abierto ? 'i-lucide-chevron-down' : 'i-lucide-chevron-right'"
             variant="ghost"
             color="neutral"
-            size="xs"
+            size="xl"
+            class="size-11"
             square
             :aria-label="abierto ? 'Colapsar movimientos' : 'Expandir movimientos'"
             @click="() => { abierto = !abierto }"

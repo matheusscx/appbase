@@ -5,6 +5,7 @@ import {
   formatMontoDisplay,
   formatMontoManual,
   isIso4217Currency,
+  montoParaInput,
   parseMontoInput,
   parseMontoPegado,
 } from './currency-format'
@@ -281,5 +282,18 @@ describe('parseMontoPegado', () => {
   it('lo que no es un monto se deja pasar: que lo descarte la máscara', () => {
     expect(parseMontoPegado('hola', clp)).toEqual({ tipo: 'sin-cambios' })
     expect(parseMontoPegado('', clp)).toEqual({ tipo: 'sin-cambios' })
+  })
+})
+
+describe('montoParaInput', () => {
+  it('saca los ceros de relleno de la columna NUMERIC(18,4)', () => {
+    expect(montoParaInput('45000.0000')).toBe('45000')
+    expect(montoParaInput('1250.5000')).toBe('1250.5')
+  })
+
+  it('sin monto: el campo queda vacío', () => {
+    expect(montoParaInput(null)).toBe('')
+    expect(montoParaInput(undefined)).toBe('')
+    expect(montoParaInput('')).toBe('')
   })
 })

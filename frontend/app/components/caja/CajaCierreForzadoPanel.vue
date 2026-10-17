@@ -202,6 +202,8 @@ const ESTADO_LABEL: Record<string, string> = {
           color="error"
           variant="soft"
           icon="i-lucide-lock"
+          size="xl"
+          class="min-h-11"
           @click="() => { drawerOpen = true }"
         >
           Cerrar por el cajero

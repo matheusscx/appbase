@@ -38,7 +38,8 @@ const puedeFinalizar = computed(() => enConciliacion.value && !props.readonly)
             <UButton
               color="primary"
               variant="solid"
-              size="sm"
+              size="xl"
+              class="min-h-11"
               @click="() => { cierreDrawerOpen = true }"
             >
               Continuar conciliación

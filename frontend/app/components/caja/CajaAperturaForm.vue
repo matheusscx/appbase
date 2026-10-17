@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { montoParaInput } from '~/utils/currency-format'
+
 const emit = defineEmits<{ opened: [cajaId: string] }>()
 
 const cajaStore = useCajaStore()
@@ -16,6 +18,18 @@ const form = ref({
 const sinCajones = computed(
   () => !loadingCajones.value && cajaStore.cajonesDisponibles.length === 0,
 )
+
+// 03.28: al elegir la caja se precarga el fondo con que suele abrirse. Solo
+// pisa el saldo si está vacío o si es el fondo de la caja anterior: lo que la
+// cajera ya tecleó a mano no se le borra.
+let ultimoFondo = ''
+watch(() => form.value.cajonId, (id) => {
+  const fondo = montoParaInput(cajaStore.cajonesDisponibles.find(c => c.cajonId === id)?.fondoSugerido)
+  if (form.value.saldoInicial === '' || form.value.saldoInicial === ultimoFondo) {
+    form.value.saldoInicial = fondo
+  }
+  ultimoFondo = fondo
+})
 
 onMounted(async () => {
   loadingCajones.value = true

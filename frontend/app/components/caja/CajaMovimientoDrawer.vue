@@ -72,7 +72,8 @@ async function guardar() {
             <UButton
               type="button"
               block
-              class="flex-1"
+              size="xl"
+              class="flex-1 min-h-11"
               :variant="form.tipo === 'entrada' ? 'soft' : 'outline'"
               color="success"
               icon="i-lucide-circle-arrow-down"
@@ -83,7 +84,8 @@ async function guardar() {
             <UButton
               type="button"
               block
-              class="flex-1"
+              size="xl"
+              class="flex-1 min-h-11"
               :variant="form.tipo === 'salida' ? 'soft' : 'outline'"
               color="error"
               icon="i-lucide-circle-arrow-up"
@@ -119,12 +121,14 @@ async function guardar() {
     </template>
 
     <template #actions>
-      <UButton color="neutral" variant="ghost" @click="() => { open = false }">
+      <UButton color="neutral" variant="ghost" size="xl" class="min-h-11" @click="() => { open = false }">
         Cancelar
       </UButton>
       <UButton
         type="submit"
         form="caja-movimiento-form"
+        size="xl"
+        class="min-h-11"
         :loading="saving"
       >
         Registrar {{ form.tipo }}

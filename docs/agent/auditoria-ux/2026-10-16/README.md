@@ -47,7 +47,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☐ | [02.5](02-salones-y-mesas.md) | P1 | Si la comanda no se imprime, la línea queda "enviada" y no se reimprime | medido en parte | owner |
 | ☑ | [03.1](03-caja.md) | P1 | En la tablet, "Ver cierre" y "Marcar visto" de Pendientes quedan fuera de vista — **hecho 2026-10-16** (la forma cambió; a 768 no se pudo medir: la base sembrada no tiene cierres pendientes) | medido | agente |
 | ☑ | [03.2](03-caja.md) | P1 | En el historial de cajas a 768, la columna "Diferencia" queda fuera de vista — **hecho 2026-10-16** (la forma cambió; a 768 no se pudo medir: la base sembrada no tiene historial) | medido | agente |
-| ☐ | [03.3](03-caja.md) | P1 | "Enviar conteo" congela el conteo sin pedir confirmar el número tecleado | medido | agente + owner |
+| ☑ | [03.3](03-caja.md) | P1 | "Enviar conteo" congela el conteo sin pedir confirmar el número tecleado — **hecho 2026-10-16** | medido | agente + owner |
 | ☑ | [04.1](04-inicio-y-reportes.md) | P1 | Inicio llama "Efectivo", en verde, a la suma de diferencias de cierre — **hecho 2026-10-16** | medido | agente + owner |
 | ☑ | [04.2](04-inicio-y-reportes.md) | P1 | En Inicio, "Vendido" queda pegado al borde y lo demás bajo el pliegue — **hecho 2026-10-16** (medido en navegador: las cifras de Vendido, Cobrado y Por cobrar terminan en 774/774/676 px de 800 a 1280×800 y en 961/961/862 de 1024 a 768×1024; el resto de la tarjeta de Ventas queda bajo el pliegue) | medido | agente + owner |
 | ☑ | [04.3](04-inicio-y-reportes.md) | P1 | "Hoy" no dice de qué hora son sus números y se queda viejo — **hecho 2026-10-16** | medido | agente + owner |
@@ -593,10 +593,10 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
-| ☐ | [03.4](03-caja.md) | P2 | Al cerrar la caja el resultado queda solo en un aviso de 5 segundos | agente |
+| ☑ | [03.4](03-caja.md) | P2 | Al cerrar la caja el resultado queda solo en un aviso de 5 segundos — **hecho 2026-10-16** (la tarjeta de resultado también sin modo ciego; el aviso dice solo «Caja cerrada») | agente |
 | ☑ | [03.5](03-caja.md) | P2 | En una caja ajena se muestra el saldo esperado y se dice "a ciegas" — **hecho 2026-10-16** (el texto depende del modo ciego del servidor; el servidor no cambió qué devuelve) | agente |
 | ☑ | [03.6](03-caja.md) | P2 | "Cerrar por el cajero" queda bajo el pliegue, después de las tablas — **hecho 2026-10-16** | agente |
-| ☐ | [03.7](03-caja.md) | P2 | Los botones principales de caja miden 28 a 32 px en la tablet | agente |
+| ☑ | [03.7](03-caja.md) | P2 | Los botones principales de caja miden 28 a 32 px en la tablet — **hecho 2026-10-16** («Cerrar caja» separada de «+ Movimiento»; «Ver cierre» es la fila entera, no un botón) | agente |
 | ☑ | [03.8](03-caja.md) | P2 | Las cifras de plata en verde y rojo no tienen contraste suficiente — **hecho 2026-10-16** | agente |
 | ☑ | [03.9](03-caja.md) | P2 | Los botones sólidos verde, rojo y ámbar de caja no tienen contraste con letra blanca — **hecho 2026-10-16** *(ver 00.8)* | agente + owner |
 | ☑ | [03.10](03-caja.md) | P2 | El texto ámbar de caja ("Sin justificar", avisos) no tiene contraste suficiente — **hecho 2026-10-16** (resuelto por el lote 00.8: `text-warning` ahora es el ámbar `#C53C00`, 5,22:1 sobre blanco y 4,52:1 sobre su fondo suave) *(ver 00.8)* | agente |
@@ -617,7 +617,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [03.25](03-caja.md) | P3 | El selector Entrada/Salida no anuncia cuál está elegido — **hecho 2026-10-16** | agente |
 | ☑ | [03.26](03-caja.md) | P3 | "Marcar visto" actúa al primer toque y no se puede deshacer — **hecho 2026-10-16** (pregunta antes de marcar; no hay «Deshacer» porque el backend rechaza revisar dos veces) | agente |
 | ☑ | [03.27](03-caja.md) | P3 | Entrar a "Mi caja" sin permiso lleva a Ventas con tres avisos, uno en voseo — **hecho 2026-10-16** | agente |
-| ☐ | [03.28](03-caja.md) | P3 | Idea: fondo sugerido por caja y atajos para los conceptos de movimiento | owner |
+| ☐ | [03.28](03-caja.md) | P3 | Idea: fondo sugerido por caja y atajos para los conceptos de movimiento — **parcial 2026-10-16**: el fondo sugerido por caja está hecho; faltan los conceptos rápidos (regla sin definir) | owner |
 | ☑ | [03.29](03-caja.md) | P3 | La tabla de movimientos parpadea y pierde el punto de lectura al paginar — **hecho 2026-10-16** | agente |
 
 ### 04 · Inicio y reportes

@@ -37,6 +37,19 @@ export class Cajon {
   @Column({ default: true })
   activo: boolean;
 
+  // Con cuánto suele abrirse este cajón: la apertura lo precarga y la cajera lo
+  // edita (03.28). Es una sugerencia, no una regla: `null` = sin fondo sugerido
+  // (la apertura arranca vacía) y el saldo inicial real lo sigue fijando
+  // `AbrirCajaDto.saldoInicial`.
+  @Column({
+    name: 'fondo_sugerido',
+    type: 'decimal',
+    precision: 18,
+    scale: 4,
+    nullable: true,
+  })
+  fondoSugerido: string | null;
+
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;
 

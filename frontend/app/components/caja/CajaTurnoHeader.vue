@@ -46,33 +46,43 @@ const puedeOperar = computed(
         Apertura: {{ formatFecha(caja.fechaApertura) }}
       </p>
     </div>
-    <div v-if="historialUrl || puedeOperar" class="flex flex-wrap justify-end gap-2">
-      <UButton
-        v-if="historialUrl"
-        :to="historialUrl"
-        icon="i-lucide-history"
-        color="neutral"
-        variant="outline"
-        :label="historialLabel ?? 'Ver historial'"
-      />
-      <template v-if="puedeOperar">
+    <div v-if="historialUrl || puedeOperar" class="flex flex-wrap items-center justify-end gap-3">
+      <div class="flex flex-wrap justify-end gap-2">
         <UButton
+          v-if="historialUrl"
+          :to="historialUrl"
+          icon="i-lucide-history"
+          color="neutral"
+          variant="outline"
+          size="xl"
+          class="min-h-11"
+          :label="historialLabel ?? 'Ver historial'"
+        />
+        <UButton
+          v-if="puedeOperar"
           icon="i-lucide-circle-plus"
           color="neutral"
           variant="outline"
+          size="xl"
+          class="min-h-11"
           @click="emit('movimiento')"
         >
           + Movimiento
         </UButton>
+      </div>
+      <!-- Cerrar la caja es lo irreversible: aparte de lo que se usa todo el turno (03.7). -->
+      <div v-if="puedeOperar" class="ms-4 border-s border-default ps-4">
         <UButton
           icon="i-lucide-lock"
           color="error"
           variant="soft"
+          size="xl"
+          class="min-h-11"
           @click="emit('cerrar')"
         >
           Cerrar caja
         </UButton>
-      </template>
+      </div>
     </div>
   </div>
 </template>

@@ -23,6 +23,7 @@ import { CajonesService } from './cajones.service';
 import { RestaurarDto } from '../../common/dto/restaurar.dto';
 import { CreateCajonDto } from './dto/create-cajon.dto';
 import { UpdateCajonDto } from './dto/update-cajon.dto';
+import { EscalaMonedaPipe } from '../../common/pipes/escala-moneda.pipe';
 import { SetCajonUsuariosDto } from './dto/set-cajon-usuarios.dto';
 
 @UseGuards(JwtAuthGuard, TenantGuard, PermisosGuard)
@@ -39,7 +40,7 @@ export class CajonesController {
 
   @RequiresPermiso('Cajas', 'Crear')
   @Post()
-  create(@Req() req: Request, @Body() dto: CreateCajonDto) {
+  create(@Req() req: Request, @Body(EscalaMonedaPipe) dto: CreateCajonDto) {
     const user = req.user as { tenantId: string };
     return this.cajonesService.create(user.tenantId, dto);
   }
@@ -49,7 +50,7 @@ export class CajonesController {
   update(
     @Req() req: Request,
     @Param('id', ParseUUIDPipe) id: string,
-    @Body() dto: UpdateCajonDto,
+    @Body(EscalaMonedaPipe) dto: UpdateCajonDto,
   ) {
     const user = req.user as { tenantId: string };
     return this.cajonesService.update(user.tenantId, id, dto);

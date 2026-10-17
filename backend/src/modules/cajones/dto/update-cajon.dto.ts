@@ -1,10 +1,17 @@
 import {
   IsBoolean,
   IsNotEmpty,
+  IsNumberString,
+  IsOptional,
   IsString,
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import {
+  IsDecimalNoNegativo,
+  IsMontoPersistible,
+} from '../../../common/decorators/decimal-signo.decorator';
+import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 
 // `@ValidateIf` y no `@IsOptional()`: `IsOptional` trata `null` igual que
 // ausente, y el service (`!= null`) lo ignoraba con un 200 sin cambiar nada.
@@ -20,4 +27,13 @@ export class UpdateCajonDto {
   @ValidateIf((_o, v) => v !== undefined)
   @IsBoolean()
   activo?: boolean;
+
+  // `null` SÍ es un pedido con sentido acá: quita el fondo sugerido. Omitir la
+  // clave lo conserva (`undefined`); es la única columna nullable del cajón.
+  @IsOptional()
+  @IsNumberString()
+  @IsDecimalNoNegativo()
+  @IsMontoPersistible()
+  @EsMontoCobrado()
+  fondoSugerido?: string | null;
 }

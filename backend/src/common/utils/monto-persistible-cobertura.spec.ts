@@ -8,6 +8,7 @@ import {
   ESCALA_MONEDA_KEY,
 } from '../decorators/escala-moneda.decorator';
 import { Caja } from '../../modules/caja/entities/caja.entity';
+import { Cajon } from '../../modules/cajones/entities/cajon.entity';
 import { CajaArqueoMedio } from '../../modules/caja/entities/caja-arqueo-medio.entity';
 import { MovimientoCaja } from '../../modules/caja/entities/movimiento-caja.entity';
 import { Compra } from '../../modules/compras/entities/compra.entity';
@@ -64,6 +65,8 @@ const COLUMNAS: Record<string, [Entidad, string][]> = {
     [CajaArqueoMedio, 'contado'],
     [Caja, 'montoContado'],
   ],
+  'cajones/CreateCajonDto.fondoSugerido': [[Cajon, 'fondoSugerido']],
+  'cajones/UpdateCajonDto.fondoSugerido': [[Cajon, 'fondoSugerido']],
   'compras/AplicacionPagoProveedorDto.monto': [
     [PagoProveedorAplicacion, 'monto'],
   ],

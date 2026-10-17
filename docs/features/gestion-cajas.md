@@ -213,6 +213,7 @@ términos indistintamente.
 | `tenant_id` | UUID | FK tenants, NOT NULL | Del token — nunca del body |
 | `nombre` | TEXT | NOT NULL | Único por tenant (ver regla abajo) |
 | `activo` | BOOLEAN | NOT NULL, default `true` | Desactivar sin borrar |
+| `fondo_sugerido` | NUMERIC(18,4) | nullable | Con cuánto suele abrirse el cajón (auditoría UX 03.28, 2026-10-16). `NULL` = sin fondo sugerido. Es plata: escala de la moneda oficial, sin negativos y con el techo de la columna, como el saldo inicial. **Solo precarga la apertura**: el saldo inicial real sigue siendo `AbrirCajaDto.saldoInicial`, y no cambia la cuadratura ni el esperado |
 | `creado_el` | TIMESTAMPTZ | NOT NULL | |
 | `actualizado_el` | TIMESTAMPTZ | NOT NULL | |
 | `eliminado_el` | TIMESTAMPTZ | nullable | Soft delete |
@@ -230,8 +231,8 @@ service valida antes (`validarNombreUnico`) para devolver un `409` con mensaje a
 | Método | Ruta | Permiso | Descripción |
 |---|---|---|---|
 | GET | `/cajones` | `Cajas` / `Leer` | Lista cajones del tenant, ordenados por nombre |
-| POST | `/cajones` | `Cajas` / `Crear` | Crea cajón; `409` si el `nombre` ya existe (no borrado) en el tenant |
-| PATCH | `/cajones/:id` | `Cajas` / `Actualizar` | Edita `nombre` y/o `activo`; `409` si el nuevo nombre choca con otro cajón |
+| POST | `/cajones` | `Cajas` / `Crear` | Crea cajón (con `fondoSugerido` opcional); `409` si el `nombre` ya existe (no borrado) en el tenant |
+| PATCH | `/cajones/:id` | `Cajas` / `Actualizar` | Edita `nombre`, `activo` y/o `fondoSugerido` (`null` lo quita, omitir la clave lo conserva); `409` si el nuevo nombre choca con otro cajón; `400` si el fondo no cabe en la moneda |
 | DELETE | `/cajones/:id` | `Cajas` / `Eliminar` | Soft delete (`softDelete`, nunca `DELETE` físico) |
 
 Todos bajo `JwtAuthGuard + TenantGuard + PermisosGuard` en la clase, igual que el resto
@@ -2234,8 +2235,14 @@ Dos superficies, cada una gateada por su módulo (links sueltos "Mi caja" y "Caj
   comentario → abre la caja sobre ese cajón) + botón "Ver historial" →
   `/mi-caja/historial` **solo con `Cajas:Leer`**; con caja abierta → redirect a
   `/mi-caja/[id]`. Arriba, la tarjeta *"Resultado de tu cierre"* cuando el store trae
-  `resultadoCierre` (cierre propio en modo ciego), con *Listo*, que la descarta. Gate:
+  `resultadoCierre` (todo cierre propio, con o sin modo ciego desde 03.4), con *Listo*, que
+  la descarta. El aviso de 5 s dice solo "Caja cerrada". Al abrir un cajón con
+  `fondoSugerido`, el saldo inicial viene precargado y se puede editar (03.28). Gate:
   `MiCaja:Leer`.
+- **Confirmar el conteo (03.3):** "Enviar conteo" no envía: pasa a un paso dentro del mismo
+  drawer con el efectivo contado en grande ("Contaste $45.000 en efectivo. Después de
+  enviarlo no se puede cambiar.") y dos botones, *Corregir* (vuelve al formulario con lo
+  tecleado) y *Enviar conteo* (envía). Lo que se envía y el conteo definitivo no cambian.
 - `pages/mi-caja/historial.vue` — Historial paginado **propio** de quien además supervisa
   (`CajaHistorial` sin `todas`).
   Gate: `Cajas:Leer` desde el 2026-10-08 —el cajero recibiría 403—; queda para quien opera
@@ -2608,7 +2615,9 @@ npm run test:e2e -- umbral-descuadre.e2e-spec.ts
 8. Cerrar caja con un conteo que cuadra exacto: verificar que el drawer muestra la línea
    de efectivo (obligatoria) y, si hubo ventas con tarjeta u otro método, una línea
    adicional por ese método; completar el conteo de las obligatorias → verificar
-   diferencia en vivo por línea → "Enviar conteo" cierra directo (auto-cierre, sin fase 2)
+   diferencia en vivo por línea → "Enviar conteo" pide confirmar el monto en grande →
+   "Enviar conteo" otra vez cierra directo (auto-cierre, sin fase 2) y `/mi-caja` muestra
+   la tarjeta de resultado
 9. Cerrar caja con un conteo que **no** cuadra: "Enviar conteo" no cierra el drawer — pasa
    a "Conciliar diferencias"; elegir un motivo (o escribir un comentario, si el tenant no
    tiene motivos activos) por cada línea descuadrada → "Confirmar cierre"

@@ -102,6 +102,8 @@ export interface CajonEstado {
 export interface CajonDisponible {
   cajonId: string
   nombre: string
+  /** Con cuánto suele abrirse la caja (03.28); `null` = sin fondo sugerido. */
+  fondoSugerido: string | null
 }
 
 export interface ArqueoLinea {

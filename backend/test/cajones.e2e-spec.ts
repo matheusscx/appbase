@@ -23,6 +23,7 @@ interface CajonResponse {
   id: string;
   nombre: string;
   activo: boolean;
+  fondoSugerido?: string | null;
 }
 interface Member {
   usuarioId: string;
@@ -210,6 +211,86 @@ describe('Cajones (e2e) — CRUD admin-only + aislamiento', () => {
     expect(
       (resFalabella.body as CajonResponse[]).some((c) => c.nombre === nombre),
     ).toBe(false);
+  });
+
+  // 03.28: cada cajón guarda el fondo con que suele abrirse. Es plata: va con la
+  // misma regla que el saldo inicial (escala de la moneda oficial, sin negativos,
+  // con techo de la columna) y `null` significa "sin fondo sugerido".
+  describe('fondo sugerido del cajón (03.28)', () => {
+    const crear = async (body: Record<string, unknown>) =>
+      request(app.getHttpServer())
+        .post('/api/cajones')
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send(body);
+    const patch = async (id: string, body: Record<string, unknown>) =>
+      request(app.getHttpServer())
+        .patch(`/api/cajones/${id}`)
+        .set('Authorization', `Bearer ${tokenAdmin}`)
+        .send(body);
+
+    it('se crea con fondo, se edita, se limpia con null y omitirlo lo conserva', async () => {
+      const r = await crear({
+        nombre: `E2E Fondo ${Date.now()}`,
+        fondoSugerido: '45000',
+      });
+      expect(r.status).toBe(201);
+      const id = (r.body as CajonResponse).id;
+      creados.push(id);
+      expect(Number((r.body as CajonResponse).fondoSugerido)).toBe(45000);
+
+      const edit = await patch(id, { fondoSugerido: '50000' });
+      expect(edit.status).toBe(200);
+      expect(Number((edit.body as CajonResponse).fondoSugerido)).toBe(50000);
+
+      const otro = await patch(id, { activo: true });
+      expect(otro.status).toBe(200);
+      expect(Number((otro.body as CajonResponse).fondoSugerido)).toBe(50000);
+
+      const limpio = await patch(id, { fondoSugerido: null });
+      expect(limpio.status).toBe(200);
+      expect((limpio.body as CajonResponse).fondoSugerido).toBeNull();
+    });
+
+    it('un cajón sin fondo lo devuelve null', async () => {
+      const r = await crear({ nombre: `E2E SinFondo ${Date.now()}` });
+      expect(r.status).toBe(201);
+      creados.push((r.body as CajonResponse).id);
+      expect((r.body as CajonResponse).fondoSugerido).toBeNull();
+    });
+
+    it('rechaza con 400 lo que no es plata de la moneda: decimales, negativo, texto, techo', async () => {
+      const { body } = await crear({ nombre: `E2E FondoMalo ${Date.now()}` });
+      const id = (body as CajonResponse).id;
+      creados.push(id);
+      // Sin esto el test pasa antes de implementar el campo: la validación
+      // global rechaza con 400 cualquier propiedad que no conoce.
+      expect((await patch(id, { fondoSugerido: '45000' })).status).toBe(200);
+      for (const malo of ['45000.5', '-1', 'abc', '999999999999999999']) {
+        const e = await patch(id, { fondoSugerido: malo });
+        expect([malo, e.status]).toEqual([malo, 400]);
+        const c = await crear({
+          nombre: `E2E FondoMalo ${malo} ${Date.now()}`,
+          fondoSugerido: malo,
+        });
+        expect([malo, c.status]).toEqual([malo, 400]);
+      }
+    });
+
+    it('cajones-disponibles lo trae para precargar la apertura', async () => {
+      const nombre = `E2E FondoDisp ${Date.now()}`;
+      const r = await crear({ nombre, fondoSugerido: '30000' });
+      expect(r.status).toBe(201);
+      const id = (r.body as CajonResponse).id;
+      creados.push(id);
+      const disp = await request(app.getHttpServer())
+        .get('/api/caja/cajones-disponibles')
+        .set('Authorization', `Bearer ${tokenAdmin}`);
+      expect(disp.status).toBe(200);
+      const fila = (
+        disp.body as { cajonId: string; fondoSugerido: string | null }[]
+      ).find((c) => c.cajonId === id);
+      expect(Number(fila?.fondoSugerido)).toBe(30000);
+    });
   });
 
   describe('allow-list de usuarios por cajón', () => {

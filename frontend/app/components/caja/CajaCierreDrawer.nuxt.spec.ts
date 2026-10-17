@@ -51,6 +51,18 @@ const cajaStoreMock = reactive<{
   mostrarResultadoCierre: vi.fn(),
 })
 
+// Sin moneda oficial resuelta, `MoneyInput` no tiene máscara y `formatMonto` da
+// "—": el monto en pantalla no se podría leer. Se simula la de Paris (CLP).
+const CLP = {
+  monedaId: 'clp-1', codigoIso: 'CLP', nombre: 'Peso', locale: 'es-CL', prefix: '$',
+  thousands: '.', decimal: ',', decimals: 0, habilitada: true, esOficial: true,
+  valorDelDia: null,
+}
+mockNuxtImport('useMonedasStore', () => () => ({
+  monedaOficial: CLP,
+  getById: () => CLP,
+}))
+
 mockNuxtImport('useCajaStore', () => () => cajaStoreMock)
 
 const { navigateToMock } = vi.hoisted(() => ({ navigateToMock: vi.fn() }))
@@ -246,11 +258,11 @@ describe('CajaCierreDrawer — aviso de umbral de descuadre', () => {
 describe('CajaCierreDrawer — revelación del cierre en modo ciego', () => {
   const FECHA_CIERRE = '2026-10-08T22:00:00.000Z'
 
-  async function cerrarEnCiego(props: { redirectBase?: string }) {
+  async function cerrarEnCiego(props: { redirectBase?: string }, ciego = true) {
     vi.mocked(cajaStoreMock.mostrarResultadoCierre).mockClear()
     navigateToMock.mockClear()
     Object.assign(cajaStoreMock, {
-      arqueoCiego: true,
+      arqueoCiego: ciego,
       motivos: [],
       arqueo: ARQUEO_CUADRADO,
       testigos: [],
@@ -273,6 +285,18 @@ describe('CajaCierreDrawer — revelación del cierre en modo ciego', () => {
 
   it('cierre propio: deja el resultado en el store y vuelve a /mi-caja, nunca al detalle de la caja cerrada', async () => {
     await cerrarEnCiego({})
+
+    expect(cajaStoreMock.mostrarResultadoCierre).toHaveBeenCalledWith({
+      arqueo: ARQUEO_CUADRADO,
+      cajonNombre: 'Barra',
+      fechaCierre: FECHA_CIERRE,
+    })
+    expect(navigateToMock.mock.calls).toEqual([['/mi-caja']])
+  })
+
+  // 03.4: en modo normal el resultado también quedaba solo en un aviso de 5 s.
+  it('cierre propio SIN modo ciego: también deja el resultado en pantalla (no solo un aviso)', async () => {
+    await cerrarEnCiego({}, false)
 
     expect(cajaStoreMock.mostrarResultadoCierre).toHaveBeenCalledWith({
       arqueo: ARQUEO_CUADRADO,
@@ -352,5 +376,80 @@ describe('CajaCierreDrawer — por qué el botón está apagado', () => {
     await wrapper.setProps({ open: true })
     await flushPromises()
     expect(wrapper.find('[data-qa="cierre-falta"]').exists()).toBe(false)
+  })
+})
+
+// 03.3: "Enviar conteo" congelaba el número sin pedir que se confirmara.
+describe('CajaCierreDrawer — confirmar el conteo antes de enviarlo', () => {
+  const SIN_CONTAR = [{
+    metodoPagoId: null,
+    nombre: 'Efectivo',
+    esEfectivo: true,
+    esperado: '10000.0000',
+    requiereConteo: true,
+    contado: null,
+    diferencia: null,
+  }]
+
+  async function montarConteo() {
+    vi.mocked(cajaStoreMock.enviarConteo).mockClear()
+    Object.assign(cajaStoreMock, {
+      arqueoCiego: false, motivos: [], arqueo: SIN_CONTAR, testigos: [],
+      detalle: { id: 'caja-1', comentarioCierre: null, cajonNombre: 'Barra' }, activa: null,
+    })
+    const wrapper = await mountSuspended(CajaCierreDrawer, {
+      attachTo: document.body,
+      global: { stubs },
+      props: { cajaId: 'caja-1', open: false },
+    })
+    montados.push(wrapper)
+    await wrapper.setProps({ open: true })
+    await flushPromises()
+    wrapper.findComponent({ name: 'MoneyInput' }).vm.$emit('update:modelValue', '45000')
+    await flushPromises()
+    return wrapper
+  }
+  const boton = (w: Awaited<ReturnType<typeof montarConteo>>, t: string) =>
+    w.findAll('button').find(b => b.text() === t)
+
+  it('el primer "Enviar conteo" no envía: muestra el monto en grande y avisa que es definitivo', async () => {
+    const w = await montarConteo()
+    await w.find('form').trigger('submit')
+    await flushPromises()
+
+    expect(cajaStoreMock.enviarConteo).not.toHaveBeenCalled()
+    const texto = w.text()
+    expect(texto).toContain('Contaste')
+    expect(texto).toContain('45.000')
+    expect(texto).toContain('en efectivo')
+    expect(texto).toContain('Después de enviarlo no se puede cambiar')
+    expect(boton(w, 'Corregir')).toBeTruthy()
+    expect(boton(w, 'Enviar conteo')).toBeTruthy()
+  })
+
+  it('"Corregir" vuelve al formulario con lo tecleado, sin enviar nada', async () => {
+    const w = await montarConteo()
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    await boton(w, 'Corregir')!.trigger('click')
+    await flushPromises()
+
+    expect(cajaStoreMock.enviarConteo).not.toHaveBeenCalled()
+    expect(w.find('form').exists()).toBe(true)
+    expect(w.findComponent({ name: 'MoneyInput' }).props('modelValue')).toBe('45000')
+  })
+
+  it('"Enviar conteo" del paso de confirmación envía el mismo monto, una sola vez', async () => {
+    const w = await montarConteo()
+    await w.find('form').trigger('submit')
+    await flushPromises()
+    await boton(w, 'Enviar conteo')!.trigger('click')
+    await flushPromises()
+
+    expect(cajaStoreMock.enviarConteo).toHaveBeenCalledTimes(1)
+    expect(cajaStoreMock.enviarConteo).toHaveBeenCalledWith('caja-1', {
+      lineas: [{ metodoPagoId: null, montoContado: '45000' }],
+      comentario: undefined,
+    })
   })
 })

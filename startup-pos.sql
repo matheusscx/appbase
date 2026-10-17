@@ -1892,6 +1892,9 @@ CREATE TABLE "cajones" (
   "tenant_id"      UUID          NOT NULL REFERENCES "tenants" ("tenant_id"),
   "nombre"         TEXT          NOT NULL,
   "activo"         BOOLEAN       NOT NULL DEFAULT TRUE,
+  -- Fondo con el que suele abrirse el cajón: la apertura lo precarga (se edita).
+  -- NULL = sin fondo sugerido.
+  "fondo_sugerido" NUMERIC(18,4),
   "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "eliminado_el"   TIMESTAMPTZ,

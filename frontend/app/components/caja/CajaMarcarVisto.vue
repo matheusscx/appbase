@@ -40,7 +40,8 @@ async function marcar() {
 
 <template>
   <UButton
-    size="sm"
+    size="xl"
+    class="min-h-11"
     color="primary"
     icon="i-lucide-check"
     label="Marcar visto"
@@ -62,10 +63,12 @@ async function marcar() {
 
     <template #footer>
       <div class="flex justify-end gap-2 w-full">
-        <UButton label="Cancelar" color="neutral" variant="ghost" @click="() => { confirmando = false }" />
+        <UButton label="Cancelar" color="neutral" variant="ghost" size="xl" class="min-h-11" @click="() => { confirmando = false }" />
         <UButton
           label="Marcar visto"
           color="primary"
+          size="xl"
+          class="min-h-11"
           :loading="marcando"
           data-qa="marcar-visto-confirmar"
           @click="marcar"

@@ -105,6 +105,9 @@ test('cajero desde /mi-caja: cierra a ciegas, ve el resultado una vez y no vuelv
   await expect(efectivo).not.toContainText('Esperado')
   await escribirMonto(efectivo, SALDO)
   await cierre.getByRole('button', { name: 'Enviar conteo' }).click()
+  // 03.3: antes de congelar el conteo se lee el monto y se confirma.
+  await expect(cierre.getByText('Después de enviarlo no se puede cambiar')).toBeVisible()
+  await cierre.getByRole('button', { name: 'Enviar conteo' }).click()
 
   // 3. La revelación: vuelve a /mi-caja con el resultado en la tarjeta.
   await page.waitForURL(url => url.pathname === '/mi-caja')
@@ -140,6 +143,9 @@ test('cajero desde el POS: cierra a ciegas con un faltante, ve la diferencia en 
   await expect(efectivo).not.toContainText('Esperado')
   await escribirMonto(efectivo, '9000')
   await cierre.getByRole('button', { name: 'Enviar conteo' }).click()
+  // 03.3: antes de congelar el conteo se lee el monto y se confirma.
+  await expect(cierre.getByText('Después de enviarlo no se puede cambiar')).toBeVisible()
+  await cierre.getByRole('button', { name: 'Enviar conteo' }).click()
 
   // Faltan $1.000: concilia en el mismo drawer y confirma.
   const conciliacion = page.getByRole('dialog').filter({ hasText: 'Conciliar diferencias' })
@@ -168,6 +174,9 @@ test('logout con la tarjeta en pantalla: el que entra después en ese navegador 
   await page.getByRole('menuitem', { name: 'Cerrar caja' }).click()
   const cierre = page.getByRole('dialog').filter({ hasText: 'Cerrar caja' })
   await escribirMonto(cierre.locator('[data-qa="arqueo-EFECTIVO"]'), SALDO)
+  await cierre.getByRole('button', { name: 'Enviar conteo' }).click()
+  // 03.3: antes de congelar el conteo se lee el monto y se confirma.
+  await expect(cierre.getByText('Después de enviarlo no se puede cambiar')).toBeVisible()
   await cierre.getByRole('button', { name: 'Enviar conteo' }).click()
   await page.waitForURL(url => url.pathname === '/mi-caja')
   await expect(tarjetaResultado(page)).toBeVisible()

@@ -160,6 +160,9 @@ test('abre la caja, la cierra con un faltante, y la diferencia la pone el sistem
 
   // 6. Enviar el conteo lo congela del lado del servidor y abre la conciliación.
   await cierre.getByRole('button', { name: 'Enviar conteo' }).click()
+  // 03.3: antes de congelar el conteo se lee el monto y se confirma.
+  await expect(cierre.getByText('Después de enviarlo no se puede cambiar')).toBeVisible()
+  await cierre.getByRole('button', { name: 'Enviar conteo' }).click()
   await expect(
     conciliacion.getByText(
       'El conteo no cuadró. Justifica cada diferencia para confirmar el cierre.',
@@ -185,10 +188,14 @@ test('abre la caja, la cierra con un faltante, y la diferencia la pone el sistem
   await expect(page.getByRole('listbox')).toHaveCount(0)
   await conciliacion.getByRole('button', { name: 'Confirmar cierre' }).click()
 
-  // 9. El turno quedó cerrado con el faltante registrado, no perdonado.
-  await expect(page.getByText('No hay caja abierta.')).toBeVisible({
+  // 9. El turno quedó cerrado con el faltante registrado, no perdonado, y la
+  //    diferencia queda en pantalla en una tarjeta (03.4), no solo en un aviso.
+  await page.waitForURL((url) => url.pathname === '/mi-caja', {
     timeout: 15_000,
   })
+  await expect(page.locator('[data-qa="resultado-cierre"]')).toContainText(
+    `Diferencia ${DIFERENCIA}`,
+  )
   const caja = await api<{ estado: string }>(
     request,
     'get',

@@ -74,7 +74,11 @@ export class CajonesService {
 
   async create(tenantId: string, dto: CreateCajonDto): Promise<Cajon> {
     await this.validarNombreUnico(tenantId, dto.nombre);
-    const cajon = this.cajonRepo.create({ tenantId, nombre: dto.nombre });
+    const cajon = this.cajonRepo.create({
+      tenantId,
+      nombre: dto.nombre,
+      fondoSugerido: dto.fondoSugerido ?? null,
+    });
     return traducirColisionDeNombre(this.cajonRepo.save(cajon), () =>
       this.validarNombreUnico(tenantId, dto.nombre),
     );
@@ -91,6 +95,9 @@ export class CajonesService {
       await this.validarNombreUnico(tenantId, dto.nombre, id);
       cajon.nombre = dto.nombre;
     }
+    // `undefined` = no tocar; `null` = quitar el fondo sugerido.
+    if (dto.fondoSugerido !== undefined)
+      cajon.fondoSugerido = dto.fondoSugerido;
     if (dto.activo != null) {
       if (dto.activo === false) {
         await this.asegurarSinSesionAbierta(tenantId, id, 'desactivar');

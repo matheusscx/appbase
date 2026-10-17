@@ -10,7 +10,10 @@ import CajaAperturaForm from './CajaAperturaForm.vue'
 import CajaMovimientoDrawer from './CajaMovimientoDrawer.vue'
 
 const cajaStoreMock = reactive({
-  cajonesDisponibles: [{ cajonId: 'c1', nombre: 'Caja 1' }],
+  cajonesDisponibles: [
+    { cajonId: 'c1', nombre: 'Caja 1', fondoSugerido: null },
+    { cajonId: 'c2', nombre: 'Barra', fondoSugerido: '45000.0000' },
+  ],
   cargarCajonesDisponibles: vi.fn(async () => {}),
   abrir: vi.fn(async () => ({ id: 'caja-1' })),
   registrarMovimiento: vi.fn(async () => ({ id: 'm1' })),
@@ -28,6 +31,25 @@ describe('CajaAperturaForm', () => {
     expect(cajaStoreMock.abrir).not.toHaveBeenCalled()
     expect(wrapper.findAll('[data-slot="error"]').map(e => e.text()))
       .toEqual(['Selecciona una caja', 'Ingresa el saldo inicial'])
+  })
+})
+
+// 03.28: elegir una caja con fondo sugerido precarga el saldo inicial.
+describe('CajaAperturaForm — fondo sugerido', () => {
+  it('al elegir la caja se precarga su fondo; sin fondo, no pisa lo que ya se tecleó', async () => {
+    const wrapper = await mountSuspended(CajaAperturaForm)
+    await new Promise(r => setTimeout(r, 20))
+    const saldo = () => wrapper.findComponent({ name: 'MoneyInput' }).props('modelValue')
+    const menu = wrapper.findComponent({ name: 'USelectMenu' })
+
+    menu.vm.$emit('update:modelValue', 'c2')
+    await new Promise(r => setTimeout(r, 20))
+    expect(saldo()).toBe('45000')
+
+    wrapper.findComponent({ name: 'MoneyInput' }).vm.$emit('update:modelValue', '50000')
+    menu.vm.$emit('update:modelValue', 'c1')
+    await new Promise(r => setTimeout(r, 20))
+    expect(saldo()).toBe('50000')
   })
 })
 

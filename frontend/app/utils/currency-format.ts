@@ -15,6 +15,16 @@ export function isIso4217Currency(codigoIso: string): boolean {
   }
 }
 
+/**
+ * Un monto que llegó del backend (`"45000.0000"`, columna NUMERIC(18,4)) listo
+ * para un `MoneyInput`: sin los ceros de relleno, que el campo no reescribe y
+ * se mandarían de vuelta tal cual. `null`/vacío → `''` (campo vacío).
+ */
+export function montoParaInput(valor: string | null | undefined): string {
+  if (valor == null || valor === '') return ''
+  return new Decimal(valor).toFixed()
+}
+
 /** Símbolo pegado al monto (sin espacio intermedio). */
 function symbolPrefix(cfg: MonedaDisplayConfig): string {
   return cfg.prefix.trim()

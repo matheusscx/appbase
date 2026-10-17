@@ -26,6 +26,7 @@ interface CajonFake {
   activo: boolean
   eliminadoEl: string | null
   eliminadoPorNombre: string | null
+  fondoSugerido?: string | null
 }
 
 function cajon(over: Partial<CajonFake> = {}): CajonFake {
@@ -72,6 +73,18 @@ function sugerir(base: string, vivos: string[]): string {
 // El admin de un tenant que contrató Cajas: `mis-permisos` le trae el catálogo completo
 // del módulo, sin atajo `esAdmin` en la pantalla.
 const ADMIN_CAJAS = ['Cajas:Actualizar', 'Cajas:Crear', 'Cajas:Eliminar', 'Cajas:Leer']
+// Sin moneda oficial resuelta, `MoneyInput` no tiene máscara y `formatMonto` da
+// "—": el monto en pantalla no se podría leer. Se simula la de Paris (CLP).
+const CLP = {
+  monedaId: 'clp-1', codigoIso: 'CLP', nombre: 'Peso', locale: 'es-CL', prefix: '$',
+  thousands: '.', decimal: ',', decimals: 0, habilitada: true, esOficial: true,
+  valorDelDia: null,
+}
+mockNuxtImport('useMonedasStore', () => () => ({
+  monedaOficial: CLP,
+  getById: () => CLP,
+}))
+
 let esAdmin = true
 let permisos: string[] = ADMIN_CAJAS
 
@@ -93,6 +106,7 @@ mockNuxtImport('useCajaStore', () => {
 })
 
 let cajonesBackend: CajonFake[] = []
+let escrituras: { method: string, url: string, body: Record<string, unknown> }[] = []
 let overrideConEliminados: Promise<unknown[]> | null = null
 let overrideSinEliminados: Promise<unknown[]> | null = null
 let postsRestaurar: { id: string, nombre?: string }[] = []
@@ -104,6 +118,10 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve([])
     }
     const method = opts?.method ?? 'GET'
+    if (method === 'PATCH' || method === 'POST' && !url.endsWith('/restaurar')) {
+      escrituras.push({ method, url, body: (opts?.body ?? {}) as Record<string, unknown> })
+      return Promise.resolve({ ...cajon(), ...(opts?.body ?? {}) })
+    }
     if (method === 'DELETE') {
       const id = url.split('/').pop()
       const c = cajonesBackend.find(x => x.id === id)
@@ -227,6 +245,7 @@ function reset() {
   overrideSinEliminados = null
   postsRestaurar = []
   restaurarRetenido = null
+  escrituras = []
 }
 
 describe('configuracion/cajas — papelera: eliminar respeta el toggle', () => {
@@ -570,6 +589,78 @@ describe('configuracion/cajas — sin permiso: botones apagados con el motivo', 
     permisos = ['Cajas:Leer', 'Cajas:Crear']
     const wrapper = await montar()
     expect(wrapper.find('[data-qa="estado-vacio-accion"]').text()).toContain('Nueva caja')
+    wrapper.unmount()
+  })
+})
+
+// 03.28: el fondo sugerido se configura donde se configuran las cajas.
+describe('configuracion/cajas — fondo sugerido', () => {
+  beforeEach(() => {
+    cajonesBackend = [cajon({ fondoSugerido: '45000.0000' })]
+    reset()
+  })
+
+  // `UDrawer` (reka-ui) tira un rechazo no manejado en happy-dom al abrirse, y
+  // vitest falla la corrida por eso: se stubea como en los specs de los drawers de
+  // caja (`docs/patterns/frontend.md` §15). Su contenido queda dentro del wrapper.
+  const stubs = {
+    AppDrawer: {
+      name: 'AppDrawer',
+      props: ['open'],
+      template: '<div v-if="open"><slot name="body" /></div>',
+    },
+  }
+  const montarConStub = async () => {
+    const wrapper = await mountSuspended(Cajas, { global: { stubs } })
+    await new Promise(r => setTimeout(r, 0))
+    return wrapper
+  }
+  async function abrirEditar(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await wrapper.find('[aria-label^="Editar caja"]').trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+  }
+  const campoFondo = (w: Awaited<ReturnType<typeof montar>>) =>
+    w.find('#cajon-form input[aria-label="Fondo sugerido"]').element as HTMLInputElement
+  const guardar = async (w: Awaited<ReturnType<typeof montar>>) => {
+    await w.find('#cajon-form').trigger('submit')
+    await new Promise(r => setTimeout(r, 30))
+  }
+
+  it('la tabla muestra el fondo de cada caja', async () => {
+    const wrapper = await montarConStub()
+    expect(wrapper.text()).toContain('45.000')
+    wrapper.unmount()
+  })
+
+  it('al editar se ve el fondo guardado y, sin tocarlo, se manda igual', async () => {
+    const wrapper = await montarConStub()
+    await abrirEditar(wrapper)
+    expect(campoFondo(wrapper).value).toContain('45.000')
+    await guardar(wrapper)
+    expect(escrituras).toHaveLength(1)
+    expect(escrituras[0]!.body.fondoSugerido).toBe('45000')
+    wrapper.unmount()
+  })
+
+  it('vaciar el campo quita el fondo: manda null, no omite la clave', async () => {
+    const wrapper = await montarConStub()
+    await abrirEditar(wrapper)
+    wrapper.findAllComponents({ name: 'MoneyInput' }).at(-1)!.vm.$emit('update:modelValue', '')
+    await new Promise(r => setTimeout(r, 10))
+    await guardar(wrapper)
+    expect(escrituras[0]!.body).toHaveProperty('fondoSugerido', null)
+    wrapper.unmount()
+  })
+
+  it('al crear una caja nueva sin fondo, no manda fondo', async () => {
+    cajonesBackend = []
+    const wrapper = await montarConStub()
+    await wrapper.findAll('button').find(b => b.text().includes('Nueva caja'))!.trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+    await wrapper.find('#cajon-form input').setValue('Terraza')
+    await guardar(wrapper)
+    expect(escrituras[0]!.method).toBe('POST')
+    expect(escrituras[0]!.body).toEqual({ nombre: 'Terraza' })
     wrapper.unmount()
   })
 })

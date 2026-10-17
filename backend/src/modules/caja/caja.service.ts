@@ -409,9 +409,15 @@ export class CajaService {
   async cajonesDisponibles(
     tenantId: string,
     usuarioId: string,
-  ): Promise<{ cajonId: string; nombre: string }[]> {
-    const rows: { cajon_id: string; nombre: string }[] = await this.db.query(
-      `SELECT cj.cajon_id, cj.nombre
+  ): Promise<
+    { cajonId: string; nombre: string; fondoSugerido: string | null }[]
+  > {
+    const rows: {
+      cajon_id: string;
+      nombre: string;
+      fondo_sugerido: string | null;
+    }[] = await this.db.query(
+      `SELECT cj.cajon_id, cj.nombre, cj.fondo_sugerido
            FROM cajones cj
           WHERE cj.tenant_id = $1
             AND cj.activo = true
@@ -437,7 +443,11 @@ export class CajaService {
           ORDER BY cj.nombre ASC`,
       [tenantId, usuarioId],
     );
-    return rows.map((r) => ({ cajonId: r.cajon_id, nombre: r.nombre }));
+    return rows.map((r) => ({
+      cajonId: r.cajon_id,
+      nombre: r.nombre,
+      fondoSugerido: r.fondo_sugerido,
+    }));
   }
 
   async abrir(

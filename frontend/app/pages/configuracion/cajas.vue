@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
+import { montoParaInput } from '~/utils/currency-format'
 
 interface Cajon {
   id: string
@@ -7,6 +8,8 @@ interface Cajon {
   activo: boolean
   eliminadoEl?: string | null
   eliminadoPorNombre?: string | null
+  /** Con cuánto suele abrirse la caja (NUMERIC como texto); `null` = sin fondo sugerido. */
+  fondoSugerido?: string | null
 }
 
 interface Member {
@@ -15,6 +18,7 @@ interface Member {
   apellido: string | null
 }
 
+const { formatMonto } = useFormatters()
 const runtimeConfig = useRuntimeConfig()
 const toast = useToast()
 const avisarConDeshacer = useAvisoDeshacer()
@@ -55,7 +59,7 @@ const seleccionados = ref<string[]>([])
 const loadingUsuarios = ref(false)
 const savingUsuarios = ref(false)
 
-const emptyForm = () => ({ nombre: '', activo: true })
+const emptyForm = () => ({ nombre: '', activo: true, fondoSugerido: '' })
 const form = ref(emptyForm())
 
 const drawerTitle = computed(() => (editingId.value ? 'Editar caja' : 'Nueva caja'))
@@ -127,7 +131,7 @@ function abrirEditar(c: Cajon) {
   if (c.eliminadoEl) return
   resetDrawer()
   editingId.value = c.id
-  form.value = { nombre: c.nombre, activo: c.activo }
+  form.value = { nombre: c.nombre, activo: c.activo, fondoSugerido: montoParaInput(c.fondoSugerido) }
   drawerOpen.value = true
 }
 
@@ -135,10 +139,17 @@ async function guardar() {
   saving.value = true
   try {
     const isNew = !editingId.value
-    const body = { nombre: form.value.nombre, activo: form.value.activo }
+    const fondo = form.value.fondoSugerido
     const saved = isNew
-      ? await useApiFetch<Cajon>(`${apiUrl}/cajones`, { method: 'POST', body: { nombre: body.nombre } })
-      : await useApiFetch<Cajon>(`${apiUrl}/cajones/${editingId.value}`, { method: 'PATCH', body })
+      ? await useApiFetch<Cajon>(`${apiUrl}/cajones`, {
+          method: 'POST',
+          body: { nombre: form.value.nombre, ...(fondo ? { fondoSugerido: fondo } : {}) },
+        })
+      // Al editar, vaciar el campo manda `null`: quita el fondo. Omitir la clave lo conservaría.
+      : await useApiFetch<Cajon>(`${apiUrl}/cajones/${editingId.value}`, {
+          method: 'PATCH',
+          body: { nombre: form.value.nombre, activo: form.value.activo, fondoSugerido: fondo || null },
+        })
     upsertLocal(saved)
     toast.add({ title: isNew ? 'Caja creada' : 'Caja actualizada', color: 'success' })
     drawerOpen.value = false
@@ -354,6 +365,7 @@ onMounted(async () => {
 
 const columns: TableColumn<Cajon>[] = [
   { accessorKey: 'nombre', header: 'Nombre' },
+  { accessorKey: 'fondoSugerido', header: 'Fondo sugerido' },
   { id: 'activo', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
@@ -411,6 +423,13 @@ const columns: TableColumn<Cajon>[] = [
             {{ formatearBorradoPor(row.original) }}
           </p>
         </div>
+      </template>
+
+      <template #fondoSugerido-cell="{ row }">
+        <span v-if="row.original.fondoSugerido != null" class="tabular-nums">
+          {{ formatMonto(row.original.fondoSugerido) }}
+        </span>
+        <span v-else class="text-muted">—</span>
       </template>
 
       <template #activo-cell="{ row }">
@@ -504,6 +523,13 @@ const columns: TableColumn<Cajon>[] = [
         <UForm id="cajon-form" :state="form" class="space-y-4" @submit="guardar">
           <UFormField label="Nombre" required>
             <UInput v-model="form.nombre" placeholder="Mostrador" autofocus />
+          </UFormField>
+
+          <UFormField
+            label="Fondo sugerido"
+            help="Con cuánto suele abrirse esta caja. Aparece ya puesto al abrirla y se puede cambiar. Déjalo vacío si no hay un monto fijo."
+          >
+            <MoneyInput v-model="form.fondoSugerido" oficial aria-label="Fondo sugerido" class="w-full" />
           </UFormField>
 
           <UFormField label="Activo">

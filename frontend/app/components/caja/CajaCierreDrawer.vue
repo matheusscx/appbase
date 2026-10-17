@@ -17,6 +17,9 @@ const toast = useToast()
 const { formatMonto } = useFormatters()
 
 const fase = ref<'conteo' | 'conciliacion'>('conteo')
+// 03.3: entre teclear el conteo y enviarlo hay un paso donde se lee el número en
+// grande. El conteo se congela al enviarlo y un cero de más queda de por vida.
+const confirmando = ref(false)
 const saving = ref(false)
 const loading = ref(false)
 
@@ -52,6 +55,7 @@ function resetEstadoLocal() {
   nivelDescuadre.value = null
   explicacionDescuadre.value = ''
   fase.value = 'conteo'
+  confirmando.value = false
 }
 
 /**
@@ -140,17 +144,31 @@ const obligatoriasCompletas = computed(() =>
   obligatorias.value.every(l => !!contado.value[claveDe(l)]),
 )
 
-/** Común a ambas fases: toast + cierre del drawer + revelación. */
+/** Lo que se va a congelar, para leerlo antes de enviarlo: el efectivo en grande, el resto al lado. */
+const efectivoContado = computed(() => contado.value.EFECTIVO ?? '')
+const otrosContados = computed(() =>
+  cajaStore.arqueo
+    .filter(l => !l.esEfectivo && !!contado.value[claveDe(l)])
+    .map(l => ({ clave: claveDe(l), nombre: l.nombre, monto: contado.value[claveDe(l)]! })),
+)
+
+function pedirConfirmacion() {
+  if (!obligatoriasCompletas.value) {
+    toast.add({ title: 'Completa el conteo de las líneas obligatorias', color: 'warning' })
+    return
+  }
+  confirmando.value = true
+}
+
+/** Común a ambas fases: aviso + cierre del drawer + resultado en pantalla. */
 async function finalizarExito(arqueoResultante: ArqueoLinea[], fechaCierre: string | null) {
-  const efectivo = arqueoResultante.find(l => l.esEfectivo)
-  const dif = efectivo?.diferencia ?? '0'
-  toast.add({
-    title: 'Caja cerrada',
-    description: `Diferencia de efectivo: ${formatMonto(dif)}`,
-    color: new Decimal(dif).gte(0) ? 'success' : 'error',
-  })
+  // El aviso solo confirma que se cerró: la diferencia vive en la tarjeta de
+  // resultado (03.4), que no se va a los 5 segundos.
+  toast.add({ title: 'Caja cerrada', color: 'success' })
   open.value = false
-  if (!ciego.value) return
+  // Cierre forzado sin modo ciego: el encargado queda donde estaba, que ya es
+  // el detalle de la caja que cerró.
+  if (!ciego.value && props.redirectBase) return
   if (props.redirectBase) {
     // Cierre forzado: el encargado tiene `Cajas:Leer` y ve la caja cerrada en
     // su detalle (`/cajas/[id]`), que la remonta y recarga.
@@ -158,9 +176,9 @@ async function finalizarExito(arqueoResultante: ArqueoLinea[], fechaCierre: stri
     return
   }
   // Cierre propio: la caja recién cerrada ya es historial, y el cajero sin
-  // `Cajas:Leer` recibe 403 en su detalle (owner, 2026-09-29). La revelación
-  // sigue ocurriendo al contar: viaja en el store, con lo que devolvió el
-  // cierre, y la muestra `/mi-caja`. Ver `resultadoCierre` en el store.
+  // `Cajas:Leer` recibe 403 en su detalle (owner, 2026-09-29). El resultado
+  // —con o sin modo ciego— viaja en el store, con lo que devolvió el
+  // cierre, y lo muestra `/mi-caja`. Ver `resultadoCierre` en el store.
   cajaStore.mostrarResultadoCierre({
     arqueo: arqueoResultante,
     cajonNombre: cajaStore.detalle?.id === props.cajaId ? cajaStore.detalle.cajonNombre : null,
@@ -184,6 +202,8 @@ async function enviarConteo() {
       }))
     const res = await cajaStore.enviarConteo(props.cajaId, { lineas, comentario: comentario.value || undefined })
     nivelDescuadre.value = res.nivelDescuadre
+    // Ya se envió: de acá en más el botón principal vuelve a ser el de un formulario.
+    confirmando.value = false
 
     if (res.estado === 'en_conciliacion') {
       const cargas = [cajaStore.cargarMotivos(true)]
@@ -260,6 +280,7 @@ const conciliacionCompleta = computed(() =>
 const faltaTexto = computed(() => {
   if (loading.value) return ''
   if (fase.value === 'conteo') {
+    if (confirmando.value) return ''
     const sin = obligatorias.value.filter(l => !contado.value[claveDe(l)])
     if (!sin.length) return ''
     return sin.length === 1 && sin[0]!.esEfectivo
@@ -321,12 +342,40 @@ async function confirmarCierre() {
         Cargando arqueo…
       </div>
 
+      <!-- 03.3: el número que se va a congelar, en grande. -->
+      <div
+        v-else-if="fase === 'conteo' && confirmando"
+        data-qa="cierre-confirmar-conteo"
+        class="space-y-6 py-6 text-center"
+      >
+        <div class="space-y-1">
+          <p class="text-base text-muted">
+            Contaste
+          </p>
+          <p class="text-4xl font-semibold tabular-nums text-default" data-qa="cierre-confirmar-monto">
+            {{ formatMonto(efectivoContado) }}
+          </p>
+          <p class="text-base text-muted">
+            en efectivo
+          </p>
+        </div>
+        <ul v-if="otrosContados.length" class="mx-auto max-w-xs space-y-1 text-sm">
+          <li v-for="o in otrosContados" :key="o.clave" class="flex justify-between gap-4">
+            <span class="text-muted">{{ o.nombre }}</span>
+            <span class="font-medium tabular-nums text-default">{{ formatMonto(o.monto) }}</span>
+          </li>
+        </ul>
+        <p class="text-sm font-medium text-default">
+          Después de enviarlo no se puede cambiar.
+        </p>
+      </div>
+
       <UForm
         v-else-if="fase === 'conteo'"
         id="caja-cierre-form"
         :state="contado"
         class="space-y-6"
-        @submit="enviarConteo"
+        @submit="pedirConfirmacion"
       >
         <!-- A conciliar (obligatorias): efectivo primero -->
         <div class="space-y-3">
@@ -499,15 +548,29 @@ async function confirmarCierre() {
     </template>
 
     <template #actions>
-      <UButton color="neutral" variant="ghost" @click="() => { open = false }">
+      <UButton
+        v-if="confirmando"
+        color="neutral"
+        variant="outline"
+        size="xl"
+        class="min-h-11"
+        :disabled="saving"
+        @click="() => { confirmando = false }"
+      >
+        Corregir
+      </UButton>
+      <UButton v-else color="neutral" variant="ghost" size="xl" class="min-h-11" @click="() => { open = false }">
         Cancelar
       </UButton>
       <UButton
-        type="submit"
+        :type="confirmando ? 'button' : 'submit'"
         form="caja-cierre-form"
         icon="i-lucide-lock"
+        size="xl"
+        class="min-h-11"
         :loading="saving"
         :disabled="loading || (fase === 'conteo' ? !obligatoriasCompletas : !conciliacionCompleta)"
+        @click="confirmando ? enviarConteo() : undefined"
       >
         {{ fase === 'conteo' ? 'Enviar conteo' : 'Confirmar cierre' }}
       </UButton>
