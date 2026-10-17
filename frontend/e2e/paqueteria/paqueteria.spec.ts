@@ -8,16 +8,26 @@ import { entrarComo } from '../support/ui'
  * teclado que tipea y aprieta Enter, la cola de escaneos contra el backend real, la planilla de
  * rendición) y el menú del admin del tenant demo, que no es superadmin.
  *
- * Los números: 10.000 de envío (el default de Demo Restaurante, lo que se cobra en destino) y dos
- * tarifas de pago que cada test crea con nombre propio —1.900 la del repartidor y 4.000 la
- * especial—, porque ese tenant no trae tarifas sembradas y una corrida repetida no tiene que
- * depender de lo que dejó otra. El repartidor también es propio, así que la hoja arranca vacía.
+ * Los números: dos tarifas de envío y dos de pago que cada test crea con nombre propio, porque
+ * Demo Restaurante no trae tarifas sembradas y una corrida repetida no tiene que depender de lo
+ * que dejó otra. Envío: 10.000 la por defecto (la que se cobra en destino) y 14.000 la
+ * prioritaria. Pago: 1.900 la del repartidor y 4.000 la especial. El repartidor también es
+ * propio, así que la hoja arranca vacía.
  */
 
 type Tarifa = { id: string, nombre: string, monto: string }
 
-/** Un repartidor nuevo con su tarifa de 1.900 y una tarifa especial de 4.000. */
+/**
+ * Un repartidor nuevo con su tarifa de pago de 1.900, una tarifa de pago especial de 4.000 y dos
+ * tarifas de envío (10.000, que pasa a ser la por defecto, y 14.000).
+ */
 async function repartidorConTarifas(request: APIRequestContext, token: string, sufijo: string) {
+  const estandar = await api<Tarifa>(request, 'post', '/tarifas-envio', {
+    token, data: { nombre: `E2E Estandar ${sufijo}`, monto: '10000', esDefecto: true },
+  })
+  const prioritaria = await api<Tarifa>(request, 'post', '/tarifas-envio', {
+    token, data: { nombre: `E2E Prioritaria ${sufijo}`, monto: '14000' },
+  })
   const comun = await api<Tarifa>(request, 'post', '/tarifas-pago', {
     token, data: { nombre: `E2E Comun ${sufijo}`, monto: '1900' },
   })
@@ -26,12 +36,12 @@ async function repartidorConTarifas(request: APIRequestContext, token: string, s
   })
   const nombre = `E2E Repartidor ${sufijo}`
   await api(request, 'post', '/repartidores', { token, data: { nombre, tarifaPagoId: comun.id } })
-  return { nombre, comun, especial }
+  return { nombre, comun, especial, estandar, prioritaria }
 }
 
-test('escanear, marcar entregas, anotar plata y rendir: el saldo de la planilla es el que queda congelado', async ({ page, request }) => {
+test('escanear, marcar entregas, anotar plata y rendir: el precio del envío y el saldo de la planilla quedan congelados', async ({ page, request }) => {
   const token = await tokenDe(request, TENANTS.restaurante)
-  const { nombre, comun, especial } = await repartidorConTarifas(request, token, String(Date.now()))
+  const { nombre, comun, especial, estandar, prioritaria } = await repartidorConTarifas(request, token, String(Date.now()))
 
   await page.goto('/paquetes/escanear')
   await page.locator('[data-qa="escanear-repartidor"]').click()
@@ -57,23 +67,30 @@ test('escanear, marcar entregas, anotar plata y rendir: el saldo de la planilla 
   await expect(page.locator('[data-qa="escanear-con-cobro"]')).toHaveText('3 a cobrar en destino')
   await expect(page.locator('[data-qa="escanear-rechazados"]')).toHaveCount(0)
 
-  // Todos nacen sin tarifa propia: se estima con la del repartidor.
+  // Todos nacen sin tarifa propia: el pago se estima con la del repartidor y el envío con la por defecto.
+  await expect(page.locator(`[data-qa="escanear-linea-envio-${codigos[0]}"]`)).toHaveText('$10.000')
   await expect(page.locator(`[data-qa="escanear-linea-pago-${codigos[0]}"]`)).toHaveText('$1.900')
   await expect(page.locator(`[data-qa="escanear-linea-tarifa-${codigos[0]}"]`)).toHaveText(comun.nombre)
 
-  // El primero lleva la tarifa especial: se elige en el modal de montos, con un selector.
+  // El primero lleva las tarifas especiales: se eligen en el modal, con selectores (el precio ya no se tipea).
   await page.locator(`[data-qa="escanear-linea-montos-${codigos[0]}"]`).click()
   const montos = page.getByRole('dialog')
+  await montos.locator('[data-qa="escanear-montos-envio"]').click()
+  await page.getByRole('option', { name: new RegExp(`^${prioritaria.nombre}`) }).click()
+  await expect(page.getByRole('listbox')).toHaveCount(0)
   await montos.locator('[data-qa="escanear-montos-tarifa"]').click()
   await page.getByRole('option', { name: new RegExp(`^${especial.nombre}`) }).click()
   await expect(page.getByRole('listbox')).toHaveCount(0)
   await montos.locator('[data-qa="escanear-montos-guardar"]').click()
   await expect(montos).toHaveCount(0)
+  await expect(page.locator(`[data-qa="escanear-linea-envio-${codigos[0]}"]`)).toHaveText('$14.000')
   await expect(page.locator(`[data-qa="escanear-linea-pago-${codigos[0]}"]`)).toHaveText('$4.000')
   await expect(page.locator(`[data-qa="escanear-linea-tarifa-${codigos[0]}"]`)).toHaveText(especial.nombre)
 
   await page.goto('/paquetes/rutas')
   await page.getByRole('link', { name: nombre, exact: true }).click()
+  await page.waitForURL(/\/paquetes\/rutas\/[0-9a-f-]{36}$/)
+  const hojaId = new URL(page.url()).pathname.split('/').pop()!
   // El primero en efectivo, el segundo por transferencia, el tercero en efectivo y el cuarto, que
   // no cobra, sin medio. Se espera el contador entre un click y el siguiente: la hoja se recarga.
   const marcas = [
@@ -83,20 +100,38 @@ test('escanear, marcar entregas, anotar plata y rendir: el saldo de la planilla 
     await page.locator(`[data-qa="hoja-linea-${codigos[i]}-${accion}"]`).click()
     await expect(page.locator('[data-qa="hoja-entregados"]')).toHaveText(String(i + 1))
   }
-  // Cobrado = solo los 3 con cobro; pago = la especial + 3 comunes (4.000 + 3 × 1.900); total general =
-  // los 4 entregados; neto = 30.000 − 9.700.
-  await expect(page.locator('[data-qa="hoja-cobrado"]')).toHaveText('$30.000')
+  // El precio de cada entrega quedó fijo al marcarla: el primero 14.000 (prioritaria), los otros 10.000.
+  await expect(page.locator(`[data-qa="hoja-linea-envio-${codigos[0]}"]`)).toHaveText('$14.000')
+  await expect(page.locator(`[data-qa="hoja-linea-tarifa-envio-${codigos[0]}"]`)).toHaveText(prioritaria.nombre)
+  await expect(page.locator(`[data-qa="hoja-linea-envio-${codigos[1]}"]`)).toHaveText('$10.000')
+  await expect(page.locator(`[data-qa="hoja-linea-tarifa-envio-${codigos[1]}"]`)).toHaveText(estandar.nombre)
+  // Cobrado = solo los 3 con cobro (14.000 + 10.000 + 10.000); pago = la especial + 3 comunes
+  // (4.000 + 3 × 1.900); total general = los 4 entregados; neto = 34.000 − 9.700.
+  await expect(page.locator('[data-qa="hoja-cobrado"]')).toHaveText('$34.000')
   await expect(page.locator('[data-qa="hoja-pago"]')).toHaveText('$9.700')
-  await expect(page.locator('[data-qa="hoja-total-general"]')).toHaveText('$40.000')
-  await expect(page.locator('[data-qa="hoja-neto-monto"]')).toHaveText('$20.300')
+  await expect(page.locator('[data-qa="hoja-total-general"]')).toHaveText('$44.000')
+  await expect(page.locator('[data-qa="hoja-neto-monto"]')).toHaveText('$24.300')
+
+  // Subir después lo que vale la tarifa por defecto no mueve lo ya entregado: la hoja de la API y la
+  // pantalla recargada siguen con el precio que se fijó al entregar.
+  await api(request, 'patch', `/tarifas-envio/${estandar.id}`, { token, data: { monto: '11000' } })
+  const hoja = await api<{ montoTotalGeneral: string, montoCobradoDestino: string, lineas: { codigo: string, precioEnvio: string }[] }>(
+    request, 'get', `/hojas-ruta/${hojaId}`, { token },
+  )
+  expect(hoja.montoTotalGeneral).toBe('44000.0000')
+  expect(hoja.montoCobradoDestino).toBe('34000.0000')
+  expect(hoja.lineas.find(l => l.codigo === codigos[1])!.precioEnvio).toBe('10000.0000')
+  await page.reload()
+  await expect(page.locator('[data-qa="hoja-total-general"]')).toHaveText('$44.000')
+  await expect(page.locator(`[data-qa="hoja-linea-envio-${codigos[1]}"]`)).toHaveText('$10.000')
 
   // Rendir lleva a la pantalla de rendiciones con el repartidor puesto.
   await page.locator('[data-qa="hoja-rendir"]').click()
   await page.waitForURL(url => url.pathname === '/paquetes/rendiciones/nueva')
   const saldo = page.locator('[data-qa="nueva-saldo"]')
-  await expect(saldo).toHaveText('Debe rendir $20.300')
+  await expect(saldo).toHaveText('Debe rendir $24.300')
 
-  // Una entrega de plata a cuenta baja lo que debe: 20.300 − 5.000.
+  // Una entrega de plata a cuenta baja lo que debe: 24.300 − 5.000.
   await page.locator('[data-qa="nueva-entrega-anotar"]').click()
   const entrega = page.getByRole('dialog')
   const monto = entrega.locator('input[data-qa="nueva-entrega-monto"]')
@@ -104,10 +139,10 @@ test('escanear, marcar entregas, anotar plata y rendir: el saldo de la planilla 
   await monto.pressSequentially('5000')
   await entrega.locator('[data-qa="nueva-entrega-guardar"]').click()
   await expect(entrega).toHaveCount(0)
-  await expect(saldo).toHaveText('Debe rendir $15.300')
+  await expect(saldo).toHaveText('Debe rendir $19.300')
 
   await page.locator('[data-qa="nueva-rendir"]').click()
-  await expect(page.locator('[data-qa="nueva-confirmar-texto"]')).toHaveText('Debe rendir $15.300')
+  await expect(page.locator('[data-qa="nueva-confirmar-texto"]')).toHaveText('Debe rendir $19.300')
   await page.locator('[data-qa="nueva-confirmar"]').click()
 
   // La planilla muestra lo congelado, partido por medio de cobro.
@@ -116,17 +151,17 @@ test('escanear, marcar entregas, anotar plata y rendir: el saldo de la planilla 
   await expect(page.locator('[data-qa="rendicion-repartidor"]')).toContainText(nombre)
   await expect(page.locator('[data-qa="rendicion-total-entregados"]')).toHaveText('4')
   await expect(page.locator('[data-qa="rendicion-total-pago"]')).toHaveText('$9.700')
-  await expect(page.locator('[data-qa="rendicion-total-efectivo"]')).toHaveText('$20.000')
+  await expect(page.locator('[data-qa="rendicion-total-efectivo"]')).toHaveText('$24.000')
   await expect(page.locator('[data-qa="rendicion-total-transferencia"]')).toHaveText('$10.000')
-  await expect(page.locator('[data-qa="rendicion-cobrado"]')).toHaveText('$30.000')
+  await expect(page.locator('[data-qa="rendicion-cobrado"]')).toHaveText('$34.000')
   await expect(page.locator('[data-qa="rendicion-entregado"]')).toHaveText('$5.000')
-  await expect(page.locator('[data-qa="rendicion-saldo"]')).toHaveText('Debe rendir $15.300')
+  await expect(page.locator('[data-qa="rendicion-saldo"]')).toHaveText('Debe rendir $19.300')
 
   // Y en el backend quedó ese mismo saldo, no uno recalculado después.
   const guardada = await api<{ totales: Record<string, string> }>(
     request, 'get', `/rendiciones/${rendicionId}`, { token },
   )
-  expect(guardada.totales.saldo).toBe('15300.0000')
+  expect(guardada.totales.saldo).toBe('19300.0000')
   expect(guardada.totales.montoPagoRepartidor).toBe('9700.0000')
   expect(guardada.totales.montoEntregadoACuenta).toBe('5000.0000')
 
@@ -134,9 +169,9 @@ test('escanear, marcar entregas, anotar plata y rendir: el saldo de la planilla 
   await expect(page.getByRole('row').filter({ hasText: nombre })).toContainText('Rendida')
 })
 
-test('cambiar el precio y la tarifa de un paquete desde la hoja de Escanear', async ({ page, request }) => {
+test('cambiar las tarifas de envío y de pago de un paquete desde la hoja de Escanear', async ({ page, request }) => {
   const token = await tokenDe(request, TENANTS.restaurante)
-  const { nombre, comun, especial } = await repartidorConTarifas(request, token, `montos ${Date.now()}`)
+  const { nombre, comun, especial, estandar, prioritaria } = await repartidorConTarifas(request, token, `montos ${Date.now()}`)
   const codigo = `E2EM${Date.now()}`
 
   await page.goto('/paquetes/escanear')
@@ -149,29 +184,27 @@ test('cambiar el precio y la tarifa de un paquete desde la hoja de Escanear', as
   await campo.fill(codigo)
   await campo.press('Enter')
   await expect(page.locator('[data-qa="escanear-asignados"]')).toHaveText('1 asignados')
-  // Nace con el envío del seed y la tarifa del repartidor.
+  // Nace con el envío estimado de la tarifa por defecto y el pago de la del repartidor.
   await expect(page.locator(`[data-qa="escanear-linea-envio-${codigo}"]`)).toHaveText('$10.000')
   await expect(page.locator(`[data-qa="escanear-linea-pago-${codigo}"]`)).toHaveText('$1.900')
   await expect(page.locator(`[data-qa="escanear-linea-tarifa-${codigo}"]`)).toHaveText(comun.nombre)
 
   await page.locator(`[data-qa="escanear-linea-montos-${codigo}"]`).click()
   const modal = page.getByRole('dialog')
-  // El `data-qa` del MoneyInput cae en el propio <input>: se tipea ahí, tecla por tecla (maska
-  // ignora `fill`, ver `escribirMonto` en support/ui).
-  const envio = modal.locator('input[data-qa="escanear-montos-envio"]')
-  await envio.selectText()
-  await envio.pressSequentially('12000')
+  // La primera opción es la heredada: dice cuál es y cuánto vale.
+  await modal.locator('[data-qa="escanear-montos-envio"]').click()
+  await expect(page.getByRole('option', { name: `Por defecto (${estandar.nombre} $10.000)` })).toBeVisible()
+  await page.getByRole('option', { name: new RegExp(`^${prioritaria.nombre}`) }).click()
+  await expect(page.getByRole('listbox')).toHaveCount(0)
   await modal.locator('[data-qa="escanear-montos-tarifa"]').click()
   await page.getByRole('option', { name: new RegExp(`^${especial.nombre}`) }).click()
   await expect(page.getByRole('listbox')).toHaveCount(0)
-  // Enter en el campo no guarda: es lo que tipea una pistola al final de cada código.
-  await envio.press('Enter')
-  await expect(modal).toBeVisible()
+  // Sin guardar, la línea sigue con lo de antes.
   await expect(page.locator(`[data-qa="escanear-linea-envio-${codigo}"]`)).toHaveText('$10.000')
 
   await modal.locator('[data-qa="escanear-montos-guardar"]').click()
   await expect(modal).toHaveCount(0)
-  await expect(page.locator(`[data-qa="escanear-linea-envio-${codigo}"]`)).toHaveText('$12.000')
+  await expect(page.locator(`[data-qa="escanear-linea-envio-${codigo}"]`)).toHaveText('$14.000')
   await expect(page.locator(`[data-qa="escanear-linea-pago-${codigo}"]`)).toHaveText('$4.000')
   await expect(page.locator(`[data-qa="escanear-linea-tarifa-${codigo}"]`)).toHaveText(especial.nombre)
 
@@ -181,12 +214,12 @@ test('cambiar el precio y la tarifa de un paquete desde la hoja de Escanear', as
   await page.keyboard.press('Enter')
   await expect(page.locator('[data-qa="escanear-asignados"]')).toHaveText('2 asignados')
 
-  // Lo guardado es del paquete, en el backend: el precio y la tarifa, no un monto de pago.
-  const lista = await api<{ data: { codigo: string, precioEnvio: string, tarifaPagoId: string | null }[] }>(
+  // Lo guardado es del paquete, en el backend: sus tarifas, no un monto.
+  const lista = await api<{ data: { codigo: string, tarifaEnvioId: string | null, tarifaPagoId: string | null }[] }>(
     request, 'get', `/paquetes?q=${codigo}`, { token },
   )
   const guardado = lista.data.find(p => p.codigo === codigo)!
-  expect(guardado.precioEnvio).toBe('12000.0000')
+  expect(guardado.tarifaEnvioId).toBe(prioritaria.id)
   expect(guardado.tarifaPagoId).toBe(especial.id)
 })
 

@@ -1,6 +1,6 @@
 # Feature: Paquetería (repartidores, hojas de ruta y rendición)
 
-**Status**: Complete (MVP + cuenta del repartidor: tarifas de pago, entregas de plata y rendición por repartidor; el frente del teléfono sigue pendiente)
+**Status**: Complete (MVP + cuenta del repartidor: tarifas de pago, entregas de plata y rendición por repartidor + tarifas de envío con precio fijo al entregar; el frente del teléfono sigue pendiente)
 **Owner**: Cesar Matheus
 **Last Updated**: 2026-10-17
 
@@ -47,7 +47,7 @@ Cada punto lo eligió el owner con su costo a la vista; esto es lo que quedó y 
 | Repartidor | Ficha que maneja la oficina, sin login | Usuario propio con pantalla móvil: suma rol, permisos y UI |
 | Paquete no entregado | `en_ruta → entregado \| no_entregado`; solo lo entregado suma | Asignar = pagar (un rechazo descuadra la rendición); pagar la visita igual |
 | Qué cobra en destino | Solo el envío | Envío + valor del producto (contrarreembolso con plata de un tercero) |
-| Cuánto se cobra por el envío (owner, 2026-10-17) | **Tarifas de envío** con nombre, una por defecto; el paquete lleva la suya y el precio se copia a la línea al entregar. Sin tarifas por remitente por ahora | Un precio por defecto por empresa y un precio tipeado a mano en cada paquete: no cubre cobrar distinto por servicio, y cambiarlo movía lo ya entregado |
+| Cuánto se cobra por el envío (owner, 2026-10-17) | **Tarifas de envío** con nombre, una por defecto. Orden: la del paquete; si no tiene, la por defecto. El precio se copia a la línea al entregar. Sin tarifas por remitente por ahora | Un precio por defecto por empresa y un precio tipeado a mano en cada paquete: no cubre cobrar distinto por servicio, y cambiarlo movía lo ya entregado |
 | Valores por defecto | Uno por empresa, override por paquete (**superado** el 2026-10-17 por las tarifas de envío, fila de arriba) | Precio por comuna (fase 2). *Tarifa por repartidor*: descartada al inicio y **superada** el 2026-10-16 (ver Tarifas de pago) |
 | Rendición | "Rendir" cierra la hoja y congela los totales; no pasa por Caja | Solo mirar el cálculo; entrar a una Caja (toca cajas: frente aparte) |
 | Datos del paquete | Código obligatorio; destinatario, dirección y remitente opcionales | Dirección obligatoria: frena el escaneo, que crea el paquete con solo el código |
