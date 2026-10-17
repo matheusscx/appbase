@@ -32,8 +32,10 @@ const turnosApi = useTurnos()
 const garzonesApi = useGarzones()
 const { formatMonto, formatFecha, formatPorcentaje } = useFormatters()
 
-const fechaDesde = ref('')
-const fechaHasta = ref('')
+// El período arranca en el mes en curso, del día 1 a hoy: abrir la pantalla y tocar "Ver reparto"
+// calcula algo, en vez de no hacer nada (auditoría UX 02.23).
+const fechaDesde = ref(rangoMesActual().desde)
+const fechaHasta = ref(hoyLocal())
 const turnoIds = ref<string[]>([])
 
 const tab = ref('propinas')
@@ -51,6 +53,9 @@ const exclusiones = ref<string[]>([])
 const montosManuales = reactive<Record<string, string>>({})
 
 const loadingPreview = ref(false)
+/** El garzón cuyo botón disparó el recálculo: solo ése gira, no todos a la vez. */
+const garzonRecalculando = ref<string | null>(null)
+const faltaPeriodo = computed(() => !fechaDesde.value || !fechaHasta.value)
 const liquidando = ref(false)
 
 const resumen = ref<{ pendienteLibreMonto: string, montoCobrado: string } | null>(null)
@@ -135,10 +140,12 @@ const columns: TableColumn<LiquidacionResumen>[] = [
   { accessorKey: 'fechaHasta', header: 'Hasta' },
   { accessorKey: 'estado', header: 'Estado' },
   { accessorKey: 'poolTotal', header: 'Fondo', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'ver', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 
 function garzonNombre(id: string): string {
-  return garzones.value.find(g => g.id === id)?.nombre ?? id
+  // Un garzón dado de baja ya no está en la lista: sin nombre que mostrar, no se muestra su código.
+  return garzones.value.find(g => g.id === id)?.nombre ?? 'Garzón dado de baja'
 }
 
 function participantesGrupo(grupo: PreviewGrupo): PreviewParticipante[] {
@@ -191,15 +198,25 @@ async function cargarPreview() {
   }
 }
 
+async function recalcularPor(garzonId: string) {
+  garzonRecalculando.value = garzonId
+  try {
+    await cargarPreview()
+  }
+  finally {
+    garzonRecalculando.value = null
+  }
+}
+
 function toggleExcluir(garzonId: string) {
   const idx = exclusiones.value.indexOf(garzonId)
   if (idx >= 0) exclusiones.value.splice(idx, 1)
   else exclusiones.value.push(garzonId)
-  cargarPreview()
+  void recalcularPor(garzonId)
 }
 
-function guardarMonto() {
-  cargarPreview()
+function guardarMonto(garzonId: string) {
+  void recalcularPor(garzonId)
 }
 
 async function liquidar() {
@@ -312,11 +329,15 @@ onMounted(async () => {
                   class="w-full justify-center"
                   icon="i-lucide-calculator"
                   label="Ver reparto"
-                  :loading="loadingPreview"
+                  :loading="loadingPreview && garzonRecalculando === null"
+                  :disabled="faltaPeriodo"
                   @click="cargarPreview"
                 />
               </div>
             </div>
+            <p v-if="faltaPeriodo" class="mt-3 text-sm text-muted">
+              Elige desde y hasta para ver el reparto.
+            </p>
           </UCard>
 
           <DiaNegocioNota />
@@ -397,15 +418,16 @@ onMounted(async () => {
                             size="sm"
                             placeholder="Monto manual"
                             @update:model-value="(v: string) => { montosManuales[p.garzonId] = v }"
-                            @keyup.enter="guardarMonto"
+                            @keyup.enter="guardarMonto(p.garzonId)"
                           />
                           <UButton
                             :aria-label="`Guardar el monto de ${garzonNombre(p.garzonId)}`"
                             size="sm"
                             variant="outline"
                             icon="i-lucide-save"
-                            :loading="loadingPreview"
-                            @click="guardarMonto"
+                            :loading="garzonRecalculando === p.garzonId"
+                            :disabled="loadingPreview"
+                            @click="guardarMonto(p.garzonId)"
                           />
                         </div>
                         <div v-else />
@@ -416,8 +438,8 @@ onMounted(async () => {
                             :variant="p.incluido ? 'outline' : 'solid'"
                             :color="p.incluido ? 'neutral' : 'primary'"
                             :label="p.incluido ? 'Excluir' : 'Incluir'"
-                            :disabled="!puedeLiquidar"
-                            :loading="loadingPreview"
+                            :disabled="!puedeLiquidar || loadingPreview"
+                            :loading="garzonRecalculando === p.garzonId"
                             @click="toggleExcluir(p.garzonId)"
                           />
                         </div>
@@ -500,6 +522,18 @@ onMounted(async () => {
               </template>
               <template #poolTotal-cell="{ row }">
                 {{ formatMonto(row.original.poolTotal) }}
+              </template>
+              <template #ver-cell="{ row }">
+                <UButton
+                  :to="`/propinas/liquidaciones/${row.original.id}/imprimir?tipo=resumen`"
+                  label="Ver"
+                  icon="i-lucide-chevron-right"
+                  trailing
+                  color="neutral"
+                  variant="ghost"
+                  size="lg"
+                  class="min-h-11"
+                />
               </template>
             </UTable>
             <p v-if="historial.length === 0" class="py-8 text-center text-sm text-muted">

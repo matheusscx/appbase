@@ -395,11 +395,15 @@ function agregar() {
                 </p>
               </div>
               <UFormField label="Incluir" class="shrink-0">
-                <USwitch
-                  :model-value="incluidos[ing.ingredienteItemId] ?? false"
-                  :disabled="ingredienteDeshabilitado(ing)"
-                  @update:model-value="incluidos[ing.ingredienteItemId] = $event"
-                />
+                <!-- El interruptor mide 36×20: el área que se toca es la del rótulo que lo envuelve, de 44 (auditoría UX 02.3). -->
+                <label class="flex min-h-11 min-w-11 cursor-pointer items-center justify-center">
+                  <USwitch
+                    :model-value="incluidos[ing.ingredienteItemId] ?? false"
+                    :disabled="ingredienteDeshabilitado(ing)"
+                    :aria-label="`Incluir ${ing.ingredienteNombre}`"
+                    @update:model-value="incluidos[ing.ingredienteItemId] = $event"
+                  />
+                </label>
               </UFormField>
             </div>
           </div>
@@ -447,7 +451,7 @@ function agregar() {
           <UFormField label="Comentario">
             <UTextarea
               v-model="comentario"
-              placeholder="Ej. término medio, sin sal..."
+              placeholder="Ej. término medio, sin sal…"
               :maxlength="200"
               :rows="3"
               class="w-full"

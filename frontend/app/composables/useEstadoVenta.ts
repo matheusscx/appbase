@@ -49,8 +49,14 @@ export function useEstadoVenta() {
     return (ETIQUETA as Record<string, string | undefined>)[estado] ?? estado
   }
 
+  /** Canal de la venta con tilde, igual en la lista y en el detalle (auditoría UX 01.27). */
+  function canalLabel(canal: string): string {
+    const map: Record<string, string> = { fisico: 'Físico', online: 'Online' }
+    return map[canal] ?? canal
+  }
+
   const estadoOptions: { label: string, value: string }[] = Object.entries(ETIQUETA)
     .map(([value, label]) => ({ label, value }))
 
-  return { estadoColor, estadoLabel, estadoOptions }
+  return { estadoColor, estadoLabel, estadoOptions, canalLabel }
 }

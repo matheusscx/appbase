@@ -9,6 +9,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { useMonedasStore } from '~/stores/monedas'
+import { rangoMesActual } from '~/composables/usePropinaResumen'
 import Propinas from './index.vue'
 
 /** Task 5: corte del día de negocio que devuelve `GET /tenants/me` — 0 por
@@ -29,6 +30,12 @@ let liquidaciones: Array<Record<string, unknown>> = []
 let previewFalla = false
 /** Para simular el 409 del backend: el fondo cambió entre ver y confirmar. */
 let liquidarConflicto = false
+/** Auditoría UX 02.23: un participante del reparto que ya no está en la lista de garzones. */
+let garzonDadoDeBaja = false
+/** `GET /propinas/liquidaciones`: las cerradas. */
+let historialMock: Array<Record<string, unknown>> = []
+/** Retiene el preview: la ventana en la que un recálculo está en vuelo. */
+let previewRetenido: Promise<void> | null = null
 
 /** El reparto depende del período pedido: así se ve cuál se mostró y cuál se liquidó. */
 function repartoPara(body: { fechaDesde: string, ajustes?: { exclusiones?: string[] } }) {
@@ -72,7 +79,9 @@ mockNuxtImport('useApiFetch', () => {
     if (url.endsWith('/propinas/liquidaciones/preview')) {
       previews.push(JSON.parse(JSON.stringify(opts!.body!)))
       if (previewFalla) return Promise.reject(new Error('preview caído'))
-      return Promise.resolve(repartoPara(opts!.body as { fechaDesde: string }))
+      const reparto = repartoPara(opts!.body as { fechaDesde: string })
+      if (garzonDadoDeBaja) reparto.participantes[1]!.garzonId = 'a1b2c3d4-0000-4000-8000-000000000001'
+      return previewRetenido ? previewRetenido.then(() => reparto) : Promise.resolve(reparto)
     }
     if (url.endsWith('/propinas/liquidaciones/liquidar')) {
       liquidaciones.push(JSON.parse(JSON.stringify(opts!.body!)))
@@ -93,7 +102,7 @@ mockNuxtImport('useApiFetch', () => {
         estadoActual: { pendienteLibreMonto: '0.0000' },
       })
     }
-    if (url.includes('/propinas/liquidaciones')) return Promise.resolve([])
+    if (url.includes('/propinas/liquidaciones')) return Promise.resolve(historialMock)
     if (url.includes('/turnos')) return Promise.resolve([])
     if (url.includes('/garzones')) {
       return Promise.resolve([{ id: 'gz-ana', nombre: 'Ana Torres' }, { id: 'gz-beto', nombre: 'Beto Díaz' }])
@@ -120,6 +129,9 @@ beforeEach(() => {
   liquidaciones = []
   previewFalla = false
   liquidarConflicto = false
+  garzonDadoDeBaja = false
+  historialMock = []
+  previewRetenido = null
   navigateTo.mockClear()
   document.body.innerHTML = ''
 })
@@ -309,6 +321,78 @@ describe('propinas — se liquida el reparto que se vio (auditoría UX 02.1)', (
     await verReparto(wrapper)
     expect(wrapper.text()).not.toContain('El reparto cambió desde que lo viste')
     expect(botonPorTexto(wrapper.element, 'Liquidar período')!.disabled).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('propinas — auditoría UX 02.23', () => {
+  const tick = () => new Promise(r => setTimeout(r, 20))
+
+  function botonPorTexto(raiz: ParentNode, texto: string): HTMLButtonElement | undefined {
+    return [...raiz.querySelectorAll('button')].find(b => b.textContent?.trim() === texto) as HTMLButtonElement | undefined
+  }
+
+  it('el período arranca en el mes en curso (del día 1 a hoy) y "Ver reparto" calcula sin tocar nada', async () => {
+    const wrapper = await montar()
+    const [inDesde, inHasta] = wrapper.findAllComponents({ name: 'AppDateInput' })
+    const { desde } = rangoMesActual()
+    expect(inDesde!.props('modelValue')).toBe(desde)
+    expect(inHasta!.props('modelValue')).toBe(hoyLocal())
+
+    botonPorTexto(wrapper.element, 'Ver reparto')!.click()
+    await tick()
+    expect(previews).toHaveLength(1)
+    expect(previews[0]).toMatchObject({ fechaDesde: desde, fechaHasta: hoyLocal() })
+    wrapper.unmount()
+  })
+
+  it('con una fecha vacía "Ver reparto" queda apagado y dice qué falta', async () => {
+    const wrapper = await montar()
+    wrapper.findAllComponents({ name: 'AppDateInput' })[0]!.vm.$emit('update:modelValue', '')
+    await tick()
+    expect(botonPorTexto(wrapper.element, 'Ver reparto')!.disabled).toBe(true)
+    expect(wrapper.text()).toContain('Elige desde y hasta para ver el reparto')
+    wrapper.unmount()
+  })
+
+  it('un garzón que ya no está en la lista sale como "Garzón dado de baja", no como un código', async () => {
+    garzonDadoDeBaja = true
+    const wrapper = await montar()
+    botonPorTexto(wrapper.element, 'Ver reparto')!.click()
+    await tick()
+    expect(wrapper.text()).toContain('Garzón dado de baja')
+    expect(wrapper.text()).not.toContain('a1b2c3d4')
+    wrapper.unmount()
+  })
+
+  it('al excluir a alguien, solo su botón gira; los demás no', async () => {
+    const wrapper = await montar()
+    botonPorTexto(wrapper.element, 'Ver reparto')!.click()
+    await tick()
+
+    let soltar: () => void = () => {}
+    previewRetenido = new Promise<void>((resolve) => { soltar = resolve })
+    ;[...wrapper.element.querySelectorAll('button')].filter(b => b.textContent?.trim() === 'Excluir')[0]!.click()
+    await tick()
+
+    const girando = [...wrapper.element.querySelectorAll('button')]
+      .filter(b => ['Excluir', 'Incluir'].includes(b.textContent?.trim() ?? '') && b.querySelector('.animate-spin'))
+    expect(girando).toHaveLength(1)
+    soltar()
+    await tick()
+    wrapper.unmount()
+  })
+
+  it('las liquidaciones cerradas se abren con un botón "Ver" en cada fila', async () => {
+    historialMock = [
+      { id: 'liq-1', fechaDesde: '2026-09-01', fechaHasta: '2026-09-30', estado: 'confirmada', poolTotal: '450000.0000' },
+    ]
+    const wrapper = await montar()
+    wrapper.findComponent({ name: 'UTabs' }).vm.$emit('update:modelValue', 'liquidaciones')
+    await tick()
+    const ver = wrapper.findAll('a').find(a => a.attributes('href') === '/propinas/liquidaciones/liq-1/imprimir?tipo=resumen')
+    expect(ver, 'enlace por fila').toBeTruthy()
+    expect(ver!.text()).toBe('Ver')
     wrapper.unmount()
   })
 })

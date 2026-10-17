@@ -384,11 +384,13 @@ export function useImpresoras() {
     /** Reimpresión — ver `buildBoletaTicket`. Se pasa derecho, sin tocarlo. */
     copia?: { impresaEl: Date, anulada?: boolean }
     formatMonto: (v: string) => string
-  }): Promise<void> {
+  }): Promise<boolean> {
     const impresora = await obtenerImpresoraBoleta()
-    if (!impresora) return
+    // `false`: no hay impresora de boletas. Quien llama lo dice; callarlo hace creer que salió el papel.
+    if (!impresora) return false
     const lineas = buildBoletaTicket(input)
     await imprimirEn(impresora, lineas, apiUrl)
+    return true
   }
 
   return {

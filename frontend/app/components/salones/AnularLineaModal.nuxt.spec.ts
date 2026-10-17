@@ -175,3 +175,25 @@ describe('AnularLineaModal — ayuda de la comida del personal', () => {
     expect(dialogo().textContent).toContain(AYUDA)
   })
 })
+
+// Auditoría UX 02.31: con una sola unidad despachada, "Cantidad a anular" arrancaba vacía y "Anular"
+// no se habilitaba hasta tocar "+": un toque de más para elegir lo único posible.
+describe('AnularLineaModal — cantidad inicial (02.31)', () => {
+  const sinSerie = (cantidadEnviada: string) =>
+    lineaSerie({ unidades: [], cantidad: cantidadEnviada, cantidadEnviada })
+
+  it('con una sola unidad despachada, arranca en 1 y se puede anular apenas se elige el motivo', async () => {
+    const wrapper = await abrir(sinSerie('1.0000'))
+    await elegirMotivo(wrapper)
+    expect(botonAnular().disabled).toBe(false)
+    botonAnular().click()
+    await new Promise(r => setTimeout(r, 10))
+    expect(wrapper.emitted('confirm')?.[0]?.[0]).toMatchObject({ cantidad: '1', motivoBajaId: 'motivo-cortesia' })
+  })
+
+  it('con varias despachadas sigue arrancando vacía: hay que elegir cuántas', async () => {
+    const wrapper = await abrir(sinSerie('3.0000'))
+    await elegirMotivo(wrapper)
+    expect(botonAnular().disabled).toBe(true)
+  })
+})

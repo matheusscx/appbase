@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import type { EmisorMedio } from '~/composables/useDocumentosVenta'
-import { useVenta, customerVacio, descontarStockCatalogo, tieneCustomerData, tipoDocumentoPorDefecto, toVentaLineasBody, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
+import { useVenta, customerVacio, descontarStockCatalogo, tieneCustomerData, tipoDocumentoPorDefecto, toVentaLineasBody, puedeAgregarItem, type ItemCatalogo, type PagoInput } from '~/composables/useVenta'
 import { problemaDelReceptor, sobreUmbralIdentidad } from '~/composables/useReceptor'
 import { personalizacionVacia, type PersonalizacionPayload } from '~/composables/useRecetaPersonalizacion'
 import type { UnidadElegida } from '~/composables/useUnidadesSerie'
@@ -41,7 +41,7 @@ const toast = useToast()
 const cajaStore = useCajaStore()
 const { emisor, cargar: cargarEmisor } = useRazonSocialEmisor()
 
-const { lineas, resultado, loadingCalculo, vigente, errorCalculo, asegurarVigente, add, quitar, cambiarCantidadPresentacion, cambiarUnidades, limpiar } = useVenta()
+const { lineas, resultado, loadingCalculo, vigente, errorCalculo, asegurarVigente, recalcular, add, quitar, restaurar, cambiarCantidadPresentacion, cambiarUnidades, limpiar } = useVenta()
 const unidadesStore = useUnidadesMedidaStore()
 const impresorasApi = useImpresoras()
 const { paraTicket, avisoSinEmitir } = useBoletaElectronica()
@@ -138,6 +138,33 @@ const unidadesExcluir = computed(() =>
     .filter((l, i) => i !== unidadesLinea.value && l.item.id === unidadesItem.value?.id)
     .flatMap(l => (l.unidades ?? []).map(u => u.id)),
 )
+
+/**
+ * Quitar es de un toque en un tacho chico: el aviso deja volver atrás sin confirmar antes.
+ * Devuelve la línea a su lugar con todo lo que traía (receta personalizada, unidades de serie).
+ */
+function onQuitar(index: number) {
+  const linea = lineas.value[index]
+  if (!linea) return
+  quitar(index)
+  toast.add({
+    title: `Quitaste ${linea.item.nombre}`,
+    color: 'neutral',
+    actions: [{ label: 'Deshacer', color: 'neutral', variant: 'outline', onClick: () => restaurar(linea, index) }],
+  })
+}
+
+/**
+ * Enter en el buscador: lo que manda un lector de códigos tras leer. Agrega el ítem si la búsqueda
+ * deja uno solo; con varios deja la lista para que la persona elija (owner, 2026-10-16). Pide la
+ * búsqueda ya, sin esperar el retardo de tipeo: el lector escribe y manda Enter en milisegundos.
+ */
+async function onBuscarEnter() {
+  const item = await catalogo.confirmarBusqueda()
+  if (!item || !puedeAgregarItem(item)) return
+  onCatalogoAdd(item)
+  catalogo.busqueda.value = ''
+}
 
 function onCambiarUnidades(index: number) {
   const linea = lineas.value[index]
@@ -348,7 +375,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     // fallando es la impresión en sí (QZ Tray sin responder), un problema de
     // hardware ajeno al armado de la boleta.
     try {
-      await impresorasApi.imprimirBoleta({
+      const impreso = await impresorasApi.imprimirBoleta({
         emisor: emisor.value,
         // Si la boleta salió: su folio y su emisor; si no salió: la línea de pendiente.
         ...paraTicket(venta.boleta),
@@ -377,6 +404,10 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         vuelto: venta.boleta.vuelto ?? undefined,
         formatMonto: (v: string) => formatMonto(v),
       })
+      // Sin impresora de boletas no hay error que atrapar: simplemente no sale papel (01.15).
+      if (!impreso) {
+        toast.add({ title: 'La venta quedó registrada, pero no hay impresora de boletas configurada', color: 'warning' })
+      }
     } catch {
       // Sin cierre automático: es lo único que la cajera tiene que hacer.
       toast.add({ title: 'La venta quedó registrada, pero la boleta no salió', description: 'Revisa la impresora y reimprime desde Ventas.', color: 'warning', duration: 0 })
@@ -444,7 +475,9 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
             :loading="loadingCatalogo"
             :error="catalogo.error.value"
             :sin-permiso="catalogo.sinPermiso.value"
+            autofocus
             @reintentar="catalogo.refrescar"
+            @buscar-enter="onBuscarEnter"
             @add="onCatalogoAdd"
           />
         </div>
@@ -457,11 +490,13 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
             :resultado="resultado"
             :vigente="vigente"
             :loading-calculo="loadingCalculo"
+            :error-calculo="errorCalculo"
             :tipos-documento="tiposDocumento"
             :tiene-caja="tieneCaja"
             @cambiar-cantidad="onCambiarCantidadPresentacion"
             @cambiar-unidades="onCambiarUnidades"
-            @quitar="quitar"
+            @quitar="onQuitar"
+            @recalcular="recalcular"
             @cobrar="abrirCobro"
             @limpiar-todo="limpiar"
           />

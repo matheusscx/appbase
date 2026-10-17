@@ -42,8 +42,8 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☐ | [01.1](01-pos-y-ventas.md) | P1 | Tras cobrar, el carrito vendido sigue en pantalla 5 a 10 s y borra lo que agregas | medido | agente |
 | ☐ | [01.2](01-pos-y-ventas.md) | P1 | El cobro trae la propina de 10% ya sumada, y el carrito no la muestra | medido | owner |
 | ☐ | [02.2](02-salones-y-mesas.md) | P1 | Garzón y encargado no pueden cobrar mesas y el aviso pide abrir caja | medido | owner |
-| ☐ | [02.3](02-salones-y-mesas.md) | P1 | En tablet, los botones de la cuenta son chicos y quitan productos sin querer — **parcial 2026-10-16** ("+"/"−" de cantidad a 44 px y el basurero apartado, "Entrar/Salir de turno", "Nueva cuenta", "Tomar cuenta" y "Ver historial"; quedan fuera los botones del pie de la cuenta (cobrar, frente de plata) y el interruptor "Incluir") | medido | agente |
-| ☐ | [02.4](02-salones-y-mesas.md) | P1 | La cuenta no muestra qué líneas salieron a cocina y cuáles no | medido | agente |
+| ☑ | [02.3](02-salones-y-mesas.md) | P1 | En tablet, los botones de la cuenta son chicos y quitan productos sin querer — **hecho 2026-10-16** | medido | agente |
+| ☑ | [02.4](02-salones-y-mesas.md) | P1 | La cuenta no muestra qué líneas salieron a cocina y cuáles no — **hecho 2026-10-16** | medido | agente |
 | ☐ | [02.5](02-salones-y-mesas.md) | P1 | Si la comanda no se imprime, la línea queda "enviada" y no se reimprime | medido en parte | owner |
 | ☑ | [03.1](03-caja.md) | P1 | En la tablet, "Ver cierre" y "Marcar visto" de Pendientes quedan fuera de vista — **hecho 2026-10-16** (la forma cambió; a 768 no se pudo medir: la base sembrada no tiene cierres pendientes) | medido | agente |
 | ☑ | [03.2](03-caja.md) | P1 | En el historial de cajas a 768, la columna "Diferencia" queda fuera de vista — **hecho 2026-10-16** (la forma cambió; a 768 no se pudo medir: la base sembrada no tiene historial) | medido | agente |
@@ -529,10 +529,10 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [01.9](01-pos-y-ventas.md) | P2 | Las tarjetas del catálogo no se pueden usar con teclado — **hecho 2026-10-16** | agente |
 | ☑ | [01.10](01-pos-y-ventas.md) | P2 | Si el catálogo no carga, el aviso es jerga y el panel dice "no hay ítems" — **hecho 2026-10-16** | agente |
 | ☑ | [01.11](01-pos-y-ventas.md) | P2 | Una búsqueda sin resultados dice lo mismo que un catálogo vacío — **hecho 2026-10-16** | agente |
-| ☐ | [01.12](01-pos-y-ventas.md) | P2 | Si el cálculo falla, el carrito deja el total viejo como si fuera bueno | agente |
-| ☐ | [01.13](01-pos-y-ventas.md) | P2 | El carrito es angosto: nombres y precios se cortan o se solapan | agente |
+| ☑ | [01.12](01-pos-y-ventas.md) | P2 | Si el cálculo falla, el carrito deja el total viejo como si fuera bueno — **hecho 2026-10-16** | agente |
+| ☑ | [01.13](01-pos-y-ventas.md) | P2 | El carrito es angosto: nombres y precios se cortan o se solapan — **hecho 2026-10-16** | agente |
 | ☑ | [01.14](01-pos-y-ventas.md) | P2 | A 768 el detalle de venta corta las líneas y pega etiquetas con valores — **hecho 2026-10-16** (la forma cambió; es un drawer, no se midió a 768) | agente |
-| ☐ | [01.15](01-pos-y-ventas.md) | P2 | Sin impresora o sin QZ la boleta no sale y casi no se avisa | agente |
+| ☑ | [01.15](01-pos-y-ventas.md) | P2 | Sin impresora o sin QZ la boleta no sale y casi no se avisa — **hecho 2026-10-16** *(salones, grupo 02, sigue sin avisar cuando no hay impresora de boletas)* | agente |
 | ☑ | [01.16](01-pos-y-ventas.md) | P2 | Entrar a Órdenes sin permiso muestra una lista vacía en vez de "sin permiso" — **hecho 2026-10-16** | agente |
 | ☑ | [01.17](01-pos-y-ventas.md) | P2 | La insignia "Pagada" y las cifras de estado no tienen contraste suficiente — **hecho 2026-10-16** *(ver 00.8)* | agente + owner |
 | ☑ | [01.18](01-pos-y-ventas.md) | P2 | Abrir caja sin datos avisa con un toast y no marca el campo — **hecho 2026-10-16** | agente |
@@ -540,15 +540,15 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [01.20](01-pos-y-ventas.md) | P3 | El aviso de boleta no impresa usa voseo y jerga ("QZ Tray", "timeout") — **hecho 2026-10-16** | agente |
 | ☑ | [01.21](01-pos-y-ventas.md) | P3 | Diez textos del POS con voseo *(lote 00.3)* — **hecho 2026-10-16** | agente |
 | ☑ | [01.22](01-pos-y-ventas.md) | P3 | Jerga en pantalla: "Tercero registrado", título repetido y "1.0000 unidad" — **hecho 2026-10-16** | agente |
-| ☐ | [01.23](01-pos-y-ventas.md) | P3 | Quitar una línea del carrito es inmediato, sin confirmar ni deshacer | agente |
-| ☐ | [01.24](01-pos-y-ventas.md) | P3 | Las filas "Descuentos -$0" y "Recargos +$0" salen siempre | agente |
-| ☐ | [01.25](01-pos-y-ventas.md) | P3 | El buscador del POS no toma foco, no se borra y no agrega con Enter | agente + owner |
-| ☐ | [01.26](01-pos-y-ventas.md) | P3 | "Disponible" y "Disponibles" se mezclan y una tarjeta sin stock no dice por qué | agente |
-| ☐ | [01.27](01-pos-y-ventas.md) | P3 | El detalle de venta dice "Fisico" sin tilde y "Garzón: Mostrador" | agente |
-| ☐ | [01.28](01-pos-y-ventas.md) | P3 | El historial de ventas no tiene filtro de fecha ni búsqueda por folio | owner |
-| ☐ | [01.29](01-pos-y-ventas.md) | P3 | "Total cobrado" y "cobrado" muestran dos cifras con el mismo nombre | agente |
+| ☑ | [01.23](01-pos-y-ventas.md) | P3 | Quitar una línea del carrito es inmediato, sin confirmar ni deshacer — **hecho 2026-10-16** | agente |
+| ☑ | [01.24](01-pos-y-ventas.md) | P3 | Las filas "Descuentos -$0" y "Recargos +$0" salen siempre — **hecho 2026-10-16** | agente |
+| ☑ | [01.25](01-pos-y-ventas.md) | P3 | El buscador del POS no toma foco, no se borra y no agrega con Enter — **hecho 2026-10-16** *(decisión del owner: Enter agrega si la búsqueda deja un solo ítem)* | agente + owner |
+| ☑ | [01.26](01-pos-y-ventas.md) | P3 | "Disponible" y "Disponibles" se mezclan y una tarjeta sin stock no dice por qué — **hecho 2026-10-16** | agente |
+| ☑ | [01.27](01-pos-y-ventas.md) | P3 | El detalle de venta dice "Fisico" sin tilde y "Garzón: Mostrador" — **hecho 2026-10-16** | agente |
+| ☑ | [01.28](01-pos-y-ventas.md) | P3 | El historial de ventas no tiene filtro de fecha ni búsqueda por folio — **hecho 2026-10-16** *(backend: `desde`/`hasta`/`folio` en `GET /ventas` y `desde`/`hasta` en `/ventas/resumen`)* | owner |
+| ☑ | [01.29](01-pos-y-ventas.md) | P3 | "Total cobrado" y "cobrado" muestran dos cifras con el mismo nombre — **hecho 2026-10-16** | agente |
 | ☑ | [01.30](01-pos-y-ventas.md) | P3 | Un error 500 del cobro se muestra en inglés ("Internal server error") — **hecho 2026-10-16** | agente |
-| ☐ | [01.31](01-pos-y-ventas.md) | P3 | Seis textos con tres puntos en vez de "…" y un placeholder poco legible | agente |
+| ☑ | [01.31](01-pos-y-ventas.md) | P3 | Seis textos con tres puntos en vez de "…" y un placeholder poco legible — **hecho 2026-10-16** | agente |
 
 ### 02 · Salones y mesas
 
@@ -556,36 +556,36 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
-| ☐ | [02.6](02-salones-y-mesas.md) | P2 | Quitar una línea de la cuenta es inmediato, sin confirmar ni deshacer | agente |
+| ☑ | [02.6](02-salones-y-mesas.md) | P2 | Quitar una línea de la cuenta es inmediato, sin confirmar ni deshacer — **hecho 2026-10-16** (aviso con "Deshacer", sin confirmar cada línea) | agente |
 | ☐ | [02.7](02-salones-y-mesas.md) | P2 | La precuenta solo existe en papel; si la impresora falla, no se ve el total | owner |
 | ☐ | [02.8](02-salones-y-mesas.md) | P2 | En el cobro de una mesa, el vuelto va en la letra más chica | agente |
 | ☐ | [02.9](02-salones-y-mesas.md) | P2 | La propina del 10% viene sumada al cobrar y no hay atajos para sacarla | owner |
 | ☐ | [02.10](02-salones-y-mesas.md) | P2 | La cuenta suma sin IVA, el total lleva IVA y nadie explica la diferencia | owner |
 | ☑ | [02.11](02-salones-y-mesas.md) | P2 | Las mesas no se pueden elegir con teclado ni lector de pantalla — **hecho 2026-10-16** | agente |
-| ☐ | [02.12](02-salones-y-mesas.md) | P2 | Una mesa ocupada no muestra monto, hora ni garzón | agente |
-| ☐ | [02.13](02-salones-y-mesas.md) | P2 | El panel de la mesa no tiene botón de cerrar | agente |
-| ☐ | [02.14](02-salones-y-mesas.md) | P2 | A 768 la cuenta queda abajo y caben solo 4 líneas | agente |
-| ☐ | [02.15](02-salones-y-mesas.md) | P2 | "Entrar a turno" no muestra quién está y "Salir de turno" cierra sin confirmar | agente |
+| ☐ | [02.12](02-salones-y-mesas.md) | P2 | Una mesa ocupada no muestra monto, hora ni garzón — **parcial 2026-10-16** (el plano dice hace cuánto está abierta cada mesa y marca "Tuya"; la tarjeta de la cuenta dice la hora. Falta el monto: calcularlo por cuenta desde la pantalla es un N+1 contra el motor, y que la lista lo traiga toca el motor de precios → owner) | agente |
+| ☑ | [02.13](02-salones-y-mesas.md) | P2 | El panel de la mesa no tiene botón de cerrar — **hecho 2026-10-16** | agente |
+| ☑ | [02.14](02-salones-y-mesas.md) | P2 | A 768 la cuenta queda abajo y caben solo 4 líneas — **hecho 2026-10-16** | agente |
+| ☑ | [02.15](02-salones-y-mesas.md) | P2 | "Entrar a turno" no muestra quién está y "Salir de turno" cierra sin confirmar — **hecho 2026-10-16** (la barra dice en qué turno está; "Salir de turno" confirma y, en la tablet personal, dice cuántas cuentas quedan abiertas) | agente |
 | ☐ | [02.16](02-salones-y-mesas.md) | P2 | El modal de turno preselecciona el primero de la lista, no el de la hora | owner |
-| ☐ | [02.17](02-salones-y-mesas.md) | P2 | Al entrar al salón sale siempre una alerta de PIN ámbar de contraste bajo *(ver 00.8)* | agente |
-| ☐ | [02.18](02-salones-y-mesas.md) | P2 | Los avisos ámbar y el "Cancelar cuenta" rojo no tienen contraste suficiente | agente |
+| ☑ | [02.17](02-salones-y-mesas.md) | P2 | Al entrar al salón sale siempre una alerta de PIN ámbar de contraste bajo *(ver 00.8)* — **hecho 2026-10-16** | agente |
+| ☑ | [02.18](02-salones-y-mesas.md) | P2 | Los avisos ámbar y el "Cancelar cuenta" rojo no tienen contraste suficiente — **resuelto por el lote 00.8** (tonos propios: ámbar 4,52:1 y rojo 5,35:1 sobre su fondo teñido) | agente |
 | ☑ | [02.19](02-salones-y-mesas.md) | P2 | En "Cancelar cuenta", los botones "Cancelar" y "Cancelar cuenta" se confunden — **hecho 2026-10-16** | agente |
 | ☑ | [02.20](02-salones-y-mesas.md) | P2 | Las pantallas de gestión de salones abren sin permiso y muestran ceros y avisos — **hecho 2026-10-16** | agente |
-| ☐ | [02.21](02-salones-y-mesas.md) | P2 | El filtro de garzones de Anulaciones se achica al elegir uno | agente |
-| ☐ | [02.22](02-salones-y-mesas.md) | P2 | Sesiones de garzón no se actualiza y "Forzar cierre" no dice cuántas mesas hay abiertas | agente |
-| ☐ | [02.23](02-salones-y-mesas.md) | P2 | Propinas: "Ver reparto" sin fechas no hace nada y un garzón puede salir como código | agente |
-| ☐ | [02.24](02-salones-y-mesas.md) | P2 | El plano de salones no se refresca: dos tablets pueden abrir la misma mesa | agente |
-| ☐ | [02.25](02-salones-y-mesas.md) | P2 | El catálogo de la cuenta no tiene categorías ni favoritos | agente |
+| ☑ | [02.21](02-salones-y-mesas.md) | P2 | El filtro de garzones de Anulaciones se achica al elegir uno — **hecho 2026-10-16** | agente |
+| ☑ | [02.22](02-salones-y-mesas.md) | P2 | Sesiones de garzón no se actualiza y "Forzar cierre" no dice cuántas mesas hay abiertas — **hecho 2026-10-16** | agente |
+| ☑ | [02.23](02-salones-y-mesas.md) | P2 | Propinas: "Ver reparto" sin fechas no hace nada y un garzón puede salir como código — **hecho 2026-10-16** | agente |
+| ☑ | [02.24](02-salones-y-mesas.md) | P2 | El plano de salones no se refresca: dos tablets pueden abrir la misma mesa — **hecho 2026-10-16** | agente |
+| ☐ | [02.25](02-salones-y-mesas.md) | P2 | El catálogo de la cuenta no tiene categorías ni favoritos — **parcial 2026-10-16** (chips de categoría, el vacío que nombra la categoría; el asterisco lo quitó 01.26, que dice "Disponible según la opción"; quedan los favoritos: no hay una regla de qué es un favorito) | agente |
 | ☐ | [02.26](02-salones-y-mesas.md) | P2 | Al cobrar una mesa no queda total, vuelto ni folio, y espera la impresión | agente |
 | ☑ | [02.27](02-salones-y-mesas.md) | P3 | Voseo en la pantalla del garzón *(lote 00.3)* — **hecho 2026-10-16** | agente |
 | ☑ | [02.28](02-salones-y-mesas.md) | P3 | Jerga y números sin formato en las pantallas del garzón — **hecho 2026-10-16** | agente |
-| ☐ | [02.29](02-salones-y-mesas.md) | P3 | "Tomar cuenta" está activo sobre una cuenta que ya es del garzón | agente |
-| ☐ | [02.30](02-salones-y-mesas.md) | P3 | "Nueva cuenta" sin turno obliga a tocarla otra vez tras entrar a turno | agente |
-| ☐ | [02.31](02-salones-y-mesas.md) | P3 | "Cantidad a anular" arranca vacía aunque solo se puede anular una unidad | agente |
-| ☐ | [02.32](02-salones-y-mesas.md) | P3 | Anulaciones: "Personal" y "Comida del personal" nombran lo mismo; tarjetas en cero repetidas | agente |
-| ☐ | [02.33](02-salones-y-mesas.md) | P3 | "¿Te pidieron firmar un cierre?" pesa igual que acciones de uso diario | agente |
+| ☑ | [02.29](02-salones-y-mesas.md) | P3 | "Tomar cuenta" está activo sobre una cuenta que ya es del garzón — **hecho 2026-10-16** | agente |
+| ☑ | [02.30](02-salones-y-mesas.md) | P3 | "Nueva cuenta" sin turno obliga a tocarla otra vez tras entrar a turno — **hecho 2026-10-16** | agente |
+| ☑ | [02.31](02-salones-y-mesas.md) | P3 | "Cantidad a anular" arranca vacía aunque solo se puede anular una unidad — **hecho 2026-10-16** | agente |
+| ☑ | [02.32](02-salones-y-mesas.md) | P3 | Anulaciones: "Personal" y "Comida del personal" nombran lo mismo; tarjetas en cero repetidas — **hecho 2026-10-16** | agente |
+| ☑ | [02.33](02-salones-y-mesas.md) | P3 | "¿Te pidieron firmar un cierre?" pesa igual que acciones de uso diario — **hecho 2026-10-16** | agente |
 | ☑ | [02.34](02-salones-y-mesas.md) | P3 | La tecla borrar del PIN no tiene nombre para el lector de pantalla — **hecho 2026-10-16** | agente |
-| ☐ | [02.35](02-salones-y-mesas.md) | P3 | Si falla cargar garzones y turnos, los filtros quedan vacíos sin aviso | agente |
+| ☑ | [02.35](02-salones-y-mesas.md) | P3 | Si falla cargar garzones y turnos, los filtros quedan vacíos sin aviso — **hecho 2026-10-16** | agente |
 
 ### 03 · Caja
 

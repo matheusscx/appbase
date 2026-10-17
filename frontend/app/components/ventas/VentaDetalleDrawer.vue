@@ -282,6 +282,8 @@ const abonoOpen = ref(false)
 const ncOpen = ref(false)
 const anularOpen = ref(false)
 const reimprimiendoBoleta = ref(false)
+/** Pasaron 2 s y la impresora no responde: el botón lo dice en vez de seguir girando mudo (01.15). */
+const esperandoImpresora = ref(false)
 const permissionsStore = usePermissionsStore()
 // `PATCH …/documentos/:id` pide `Ventas:Crear`: el mismo permiso gatea el botón.
 const { puedeCrear: puedeCompletar } = usePermisosCrud('Ventas')
@@ -411,7 +413,7 @@ const leyendaReembolso = computed(() => {
   return total.gte(venta.value.totalFinal) ? 'Reembolsada totalmente' : 'Reembolsada parcialmente'
 })
 
-const { estadoColor, estadoLabel } = useEstadoVenta()
+const { estadoColor, estadoLabel, canalLabel } = useEstadoVenta()
 
 function cantidadDetalleLabel(det: Detalle): string {
   // La unidad que se va a mostrar decide si lleva sufijo: la de presentación si
@@ -947,12 +949,13 @@ async function confirmarBorrarNumero() {
 async function reimprimirBoleta() {
   if (!venta.value) return
   reimprimiendoBoleta.value = true
+  const avisoDeEspera = setTimeout(() => { esperandoImpresora.value = true }, 2000)
   try {
     const [boleta] = await Promise.all([
       useApiFetch<BoletaVenta>(`${apiUrl}/ventas/${venta.value.id}/boleta`),
       cargarEmisor(),
     ])
-    await impresorasApi.imprimirBoleta({
+    const impreso = await impresorasApi.imprimirBoleta({
       emisor: emisor.value,
       // Después de emitirla, la reimpresión sale con el folio.
       ...paraTicket(boleta),
@@ -985,11 +988,15 @@ async function reimprimirBoleta() {
       copia: { impresaEl: new Date(), anulada: boleta.estado === 'cancelada' },
       formatMonto: (v: string) => formatMonto(v),
     })
+    // Sin impresora de boletas no sale papel y no hay error que mostrar: se dice (01.15).
+    if (!impreso) toast.add({ title: 'No hay impresora de boletas configurada', color: 'warning' })
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'No se pudo reimprimir la boleta'), color: 'error' })
   }
   finally {
+    clearTimeout(avisoDeEspera)
+    esperandoImpresora.value = false
     reimprimiendoBoleta.value = false
   }
 }
@@ -1096,8 +1103,8 @@ function onNcOtrosDatos() {
               <dt class="text-muted">
                 Canal
               </dt>
-              <dd class="font-medium capitalize">
-                {{ venta.canal }}
+              <dd class="font-medium">
+                {{ canalLabel(venta.canal) }}
               </dd>
             </div>
             <div v-if="venta.customer">
@@ -1271,7 +1278,7 @@ function onNcOtrosDatos() {
                   {{ formatMonto(venta.totalBruto) }}
                 </dd>
               </div>
-              <div class="flex justify-between gap-4">
+              <div v-if="!new Decimal(venta.totalDescuentos).isZero()" class="flex justify-between gap-4">
                 <dt class="text-muted">
                   Descuentos
                 </dt>
@@ -1279,7 +1286,7 @@ function onNcOtrosDatos() {
                   -{{ formatMonto(venta.totalDescuentos) }}
                 </dd>
               </div>
-              <div class="flex justify-between gap-4">
+              <div v-if="!new Decimal(venta.totalRecargos).isZero()" class="flex justify-between gap-4">
                 <dt class="text-muted">
                   Recargos
                 </dt>
@@ -1363,7 +1370,7 @@ function onNcOtrosDatos() {
               </div>
               <div class="flex justify-between gap-4">
                 <dt class="text-muted">
-                  Garzón
+                  Atendió
                 </dt>
                 <dd>{{ venta.propina.garzonNombre ?? '—' }}</dd>
               </div>
@@ -1623,7 +1630,7 @@ function onNcOtrosDatos() {
       </UButton>
       <UButton
         v-if="puedeReimprimir"
-        label="Reimprimir boleta"
+        :label="esperandoImpresora ? 'Esperando la impresora…' : 'Reimprimir boleta'"
         icon="i-lucide-printer"
         color="neutral"
         variant="outline"

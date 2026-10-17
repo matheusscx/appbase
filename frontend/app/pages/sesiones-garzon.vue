@@ -15,7 +15,7 @@ definePageMeta({
 })
 
 const toast = useToast()
-const { formatFecha } = useFormatters()
+const { formatFecha, formatHora, formatHace } = useFormatters()
 const { pageSize } = useUserPreferences()
 const sesionesApi = useSesionesGarzon()
 const salonesApi = useSalones()
@@ -28,6 +28,8 @@ const abiertas = ref<SesionGarzon[]>([])
 const loadingAbiertas = ref(false)
 const errorAbiertas = ref(false)
 const abiertasSinPermiso = ref(false)
+/** Cuándo se leyó la lista: una foto sin hora no se sabe cuán vieja es (auditoría UX 02.22). */
+const ultimaCargaAbiertas = ref<Date | null>(null)
 
 const tab = ref('abiertas')
 const tabs = computed(() => [
@@ -44,6 +46,7 @@ async function cargarAbiertas() {
   loadingAbiertas.value = true
   try {
     abiertas.value = await sesionesApi.listarAbiertas()
+    ultimaCargaAbiertas.value = new Date()
     errorAbiertas.value = false
     abiertasSinPermiso.value = false
   }
@@ -129,6 +132,7 @@ const columnsAbiertas: TableColumn<SesionGarzon>[] = [
   { accessorKey: 'garzonNombre', header: 'Garzón' },
   { accessorKey: 'turnoNombre', header: 'Turno' },
   { accessorKey: 'inicioEl', header: 'Inicio' },
+  { accessorKey: 'cuentasAbiertas', header: 'Mesas abiertas', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
 
@@ -191,6 +195,16 @@ function origenLabel(origen: SesionGarzon['origenCierre']): string {
   return '—'
 }
 
+const mensajeForzarCierre = computed(() => {
+  const s = toCerrar.value
+  if (!s) return ''
+  const mesas = s.cuentasAbiertas ?? 0
+  const aviso = mesas > 0
+    ? ` Tiene ${mesas} ${mesas === 1 ? 'mesa abierta' : 'mesas abiertas'}: quedarán sin responsable hasta que las transfieras.`
+    : ''
+  return `Se cerrará la sesión de ${s.garzonNombre} (${s.turnoNombre}).${aviso} Esta acción queda registrada como cierre administrativo.`
+})
+
 const columnsHistorial: TableColumn<SesionGarzon>[] = [
   { accessorKey: 'garzonNombre', header: 'Garzón' },
   { accessorKey: 'turnoNombre', header: 'Turno' },
@@ -209,8 +223,10 @@ async function cargarOpciones() {
     garzones.value = g
     turnos.value = t
   }
-  catch {
-    // El historial sigue usable sin filtros de select
+  catch (e: unknown) {
+    // El historial sigue usable sin los filtros de Garzón y Turno, pero la persona tiene que saber
+    // por qué están vacíos (auditoría UX 02.35). Sin reintento automático: recargar la pantalla.
+    toast.add({ title: 'No se pudieron cargar los filtros', description: apiErrorMsg(e, 'Revisa la conexión y recarga la pantalla.'), color: 'error' })
   }
 }
 
@@ -235,6 +251,20 @@ onMounted(async () => {
         <UTabs v-model="tab" :items="tabs" :content="false" />
 
         <template v-if="tab === 'abiertas'">
+          <div class="flex items-center justify-end gap-3">
+            <p v-if="ultimaCargaAbiertas" class="text-sm text-muted">
+              Actualizado {{ formatHora(ultimaCargaAbiertas) }}
+            </p>
+            <UButton
+              icon="i-lucide-refresh-cw"
+              color="neutral"
+              variant="outline"
+              :loading="loadingAbiertas"
+              @click="cargarAbiertas"
+            >
+              Actualizar
+            </UButton>
+          </div>
           <CrudTable
             :data="abiertas"
             :columns="columnsAbiertas"
@@ -255,6 +285,11 @@ onMounted(async () => {
 
             <template #inicioEl-cell="{ row }">
               <span class="whitespace-nowrap tabular-nums">{{ formatFecha(row.original.inicioEl) }}</span>
+              <span class="block text-xs text-muted">{{ formatHace(row.original.inicioEl) }}</span>
+            </template>
+
+            <template #cuentasAbiertas-cell="{ row }">
+              <span class="tabular-nums">{{ row.original.cuentasAbiertas ?? 0 }}</span>
             </template>
 
             <template #acciones-cell="{ row }">
@@ -428,9 +463,7 @@ onMounted(async () => {
         <CrudModal
           v-model:open="cierreOpen"
           title="Forzar cierre de sesión"
-          :message="toCerrar
-            ? `Se cerrará la sesión de ${toCerrar.garzonNombre} (${toCerrar.turnoNombre}). Esta acción queda registrada como cierre administrativo.`
-            : ''"
+          :message="mensajeForzarCierre"
           confirm-label="Forzar cierre"
           confirm-color="error"
           :loading="cierreLoading"

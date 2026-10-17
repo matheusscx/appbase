@@ -48,7 +48,7 @@ const PRECIO_BASE = '1000'
 const TOTAL_CON_IVA = '$1.190'
 /** Con la propina sugerida del 10% (119), lo que la caja espera en efectivo. */
 const EFECTIVO_ESPERADO = '1309'
-const PLACEHOLDER_BUSQUEDA = 'Buscar ítem...'
+const PLACEHOLDER_BUSQUEDA = 'Buscar ítem…'
 
 interface ProductoDeLaCorrida {
   id: string

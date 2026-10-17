@@ -68,7 +68,19 @@ import {
 } from '../../common/utils/cantidad-presentacion.util';
 import type { CreateVentaDto, CustomerVentaDto } from './dto/create-venta.dto';
 import type { ReceptorNotaCreditoDto } from './dto/create-nota-credito.dto';
-import type { FiltroDocumento, QueryVentasDto } from './dto/query-ventas.dto';
+import type {
+  FiltroDocumento,
+  QueryVentasDto,
+  QueryVentasResumenDto,
+} from './dto/query-ventas.dto';
+import {
+  bordeFechaSql,
+  bordeHastaSql,
+  diaNegocioTenant,
+  empujarDiaNegocio,
+  requiereDiaNegocio,
+  type DiaNegocio,
+} from '../../common/utils/rango-fecha.util';
 import { Venta, EstadoVenta } from './entities/venta.entity';
 import { VentaDetalle } from './entities/venta-detalle.entity';
 import { VentaDescuento } from './entities/venta-descuento.entity';
@@ -4396,10 +4408,42 @@ export class VentasService {
            )`;
   }
 
+  /**
+   * Bordes `desde`/`hasta` sobre `v.fecha`, que empujan sus propios params.
+   * Compartido por el listado y las tarjetas: si el resumen midiera otro rango
+   * que la lista, "Hoy" mostraría filas de hoy bajo cifras de todos los días.
+   * `dia` es el día del negocio del tenant, o `null` si ningún borde es fecha pura.
+   */
+  private filtroDeRango(
+    params: unknown[],
+    rango: { desde?: string; hasta?: string },
+    dia: DiaNegocio | null,
+  ): string {
+    if (!rango.desde && !rango.hasta) return '';
+    const idxDia = dia ? empujarDiaNegocio(params, dia) : null;
+    let filtro = '';
+    if (rango.desde) {
+      params.push(rango.desde);
+      filtro += bordeFechaSql(
+        'v.fecha',
+        '>=',
+        rango.desde,
+        params.length,
+        idxDia,
+      );
+    }
+    if (rango.hasta) {
+      params.push(rango.hasta);
+      filtro += bordeHastaSql('v.fecha', rango.hasta, params.length, idxDia);
+    }
+    return filtro;
+  }
+
   async resumen(
     tenantId: string,
     usuarioId: string,
     verTodas: boolean,
+    rango: QueryVentasResumenDto = {},
   ): Promise<VentasResumen> {
     const params: unknown[] = [tenantId];
 
@@ -4408,6 +4452,10 @@ export class VentasService {
       params.push(usuarioId);
       filtroPropio = this.filtroDeMisCajas(params.length);
     }
+    const dia = requiereDiaNegocio(rango.desde, rango.hasta)
+      ? await diaNegocioTenant(this.db, tenantId)
+      : null;
+    const filtroRango = this.filtroDeRango(params, rango, dia);
 
     // Las correcciones (notas de crédito) son filas con `venta_referencia_id`:
     // heredan la caja de la venta que corrigen y por eso `filtroPropio` las
@@ -4436,7 +4484,7 @@ export class VentasService {
          FROM ventas v
         WHERE v.tenant_id = $1 AND v.eliminado_el IS NULL
           AND v.estado <> 'cancelada'
-          ${filtroPropio}`,
+          ${filtroPropio}${filtroRango}`,
       params,
     );
 
@@ -4457,11 +4505,16 @@ export class VentasService {
     verTodas: boolean,
   ): Promise<PaginatedResponse<VentaListItem>> {
     const { page, pageSize, offset } = resolvePagination(query);
+    // Solo si hay borde de fecha que expandir: ver `rango-fecha.util.ts`.
+    const dia = requiereDiaNegocio(query.desde, query.hasta)
+      ? await diaNegocioTenant(this.db, tenantId)
+      : null;
     const { filters, params } = this.buildListarFilters(
       tenantId,
       query,
       usuarioId,
       verTodas,
+      dia,
     );
 
     const countRows: { total: number }[] = await this.db.query(
@@ -4535,6 +4588,7 @@ export class VentasService {
     query: QueryVentasDto,
     usuarioId: string,
     verTodas: boolean,
+    dia: DiaNegocio | null,
   ): { filters: string; params: unknown[] } {
     const params: unknown[] = [tenantId];
     let paramIdx = 2;
@@ -4545,6 +4599,27 @@ export class VentasService {
     if (!verTodas) {
       params.push(usuarioId);
       filters += this.filtroDeMisCajas(paramIdx++);
+    }
+
+    filters += this.filtroDeRango(params, query, dia);
+    paramIdx = params.length + 1;
+
+    // El folio de un documento vigente de la venta: el de la boleta del sistema
+    // (`dte_documentos.folio`, entero) o el número anotado de la máquina o de afuera
+    // (`venta_documentos.numero`, texto). Exacto y con el valor como parámetro.
+    const folio = query.folio?.trim();
+    if (folio) {
+      params.push(folio);
+      filters += ` AND EXISTS (
+          SELECT 1 FROM venta_documentos d
+          LEFT JOIN dte_documentos dd
+                 ON dd.documento_id = d.dte_documento_id
+                AND dd.tenant_id = d.tenant_id
+                AND dd.eliminado_el IS NULL
+          WHERE ${DOCUMENTO_VIGENTE}
+            AND (d.numero = $${params.length} OR dd.folio::text = $${params.length})
+        )`;
+      paramIdx = params.length + 1;
     }
 
     if (query.estado) {

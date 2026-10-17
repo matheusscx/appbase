@@ -123,7 +123,7 @@ describe('CatalogoGrid — recetas y combos siguen con su propio número', () =>
       producto({ id: 'receta-1', tipo: 'receta', stock: null, disponible: 4, stockDisponible: null }),
     ])
 
-    expect(textoTarjeta(wrapper, 'receta-1')).toContain('Disponibles: 4')
+    expect(textoTarjeta(wrapper, 'receta-1')).toContain('Disponible: 4')
   })
 
   it('una receta con disponible NEGATIVO se atenúa igual que la de cero', async () => {
@@ -301,5 +301,170 @@ describe('CatalogoGrid — se opera con teclado', () => {
     const tarjeta = wrapper.find('[data-qa="item-catalogo-item-1"]')
     await tarjeta.trigger('keydown', { key: 'Enter' })
     expect(wrapper.emitted('add')).toBeUndefined()
+  })
+})
+
+describe('CatalogoGrid — el buscador del mostrador (01.25)', () => {
+  it('un lector que escribe el código y manda Enter emite `buscar-enter`', async () => {
+    const wrapper = await montar([producto({ stockDisponible: '1.0000' })])
+
+    await wrapper.find('input').setValue('7801234')
+    await wrapper.find('input').trigger('keydown', { key: 'Enter' })
+
+    expect(wrapper.emitted('buscar-enter')).toHaveLength(1)
+  })
+
+  it('con texto en el buscador hay un botón para borrarlo', async () => {
+    const wrapper = await mountSuspended(CatalogoGrid, {
+      props: { items: [producto()], total: 1, pageSize: 48, busqueda: 'coca' },
+      global: { stubs },
+    })
+
+    const borrar = wrapper.find('button[aria-label="Borrar búsqueda"]')
+    expect(borrar.exists()).toBe(true)
+    await borrar.trigger('click')
+
+    expect(wrapper.emitted('update:busqueda')?.at(-1)).toEqual([''])
+  })
+
+  it('sin texto no hay botón de borrar', async () => {
+    const wrapper = await montar([producto()])
+
+    expect(wrapper.find('button[aria-label="Borrar búsqueda"]').exists()).toBe(false)
+  })
+
+  it('con `autofocus` y un puntero fino (escritorio), el buscador toma el foco', async () => {
+    const original = window.matchMedia
+    window.matchMedia = ((q: string) => ({ matches: q.includes('pointer: fine'), media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia
+    try {
+      const wrapper = await mountSuspended(CatalogoGrid, {
+        props: { items: [producto()], total: 1, pageSize: 48, autofocus: true },
+        global: { stubs },
+        attachTo: document.body,
+      })
+      await new Promise(r => setTimeout(r, 0))
+      expect(document.activeElement).toBe(wrapper.find('input').element)
+      wrapper.unmount()
+    }
+    finally {
+      window.matchMedia = original
+    }
+  })
+
+  it('en una tablet (puntero grueso) no abre el teclado solo', async () => {
+    const original = window.matchMedia
+    window.matchMedia = ((q: string) => ({ matches: false, media: q, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia
+    try {
+      const wrapper = await mountSuspended(CatalogoGrid, {
+        props: { items: [producto()], total: 1, pageSize: 48, autofocus: true },
+        global: { stubs },
+        attachTo: document.body,
+      })
+      await new Promise(r => setTimeout(r, 0))
+      expect(document.activeElement).not.toBe(wrapper.find('input').element)
+      wrapper.unmount()
+    }
+    finally {
+      window.matchMedia = original
+    }
+  })
+})
+
+describe('CatalogoGrid — una sola palabra para lo que queda, y por qué no se puede vender (01.26)', () => {
+  it('productos y recetas dicen "Disponible"', async () => {
+    const wrapper = await montar([
+      producto({ stockDisponible: '5.0000' }),
+      producto({ id: 'receta-1', tipo: 'receta', stock: null, disponible: 4, stockDisponible: null }),
+    ])
+
+    expect(textoTarjeta(wrapper)).toContain('Disponible: 5')
+    expect(textoTarjeta(wrapper, 'receta-1')).toContain('Disponible: 4')
+    expect(wrapper.text()).not.toContain('Disponibles')
+  })
+
+  it('una tarjeta sin stock lo dice', async () => {
+    const wrapper = await montar([producto({ stock: '0.0000', stockDisponible: '0.0000' })])
+
+    expect(textoTarjeta(wrapper)).toContain('Sin stock')
+  })
+
+  it('una receta agotada también', async () => {
+    const wrapper = await montar([
+      producto({ id: 'receta-1', tipo: 'receta', stock: null, disponible: 0, stockDisponible: null }),
+    ])
+
+    expect(textoTarjeta(wrapper, 'receta-1')).toContain('Sin stock')
+  })
+
+  it('el combo que depende de la opción lo dice en el texto, sin asterisco ni tooltip', async () => {
+    const wrapper = await montar([
+      producto({ id: 'combo-1', tipo: 'combo', stock: null, disponible: null, stockDisponible: null, disponibleCondicional: true }),
+    ])
+
+    const t = textoTarjeta(wrapper, 'combo-1')
+    expect(t).toContain('Disponible según la opción')
+    expect(t).not.toContain('*')
+  })
+
+  it('con stock no dice "Sin stock"', async () => {
+    const wrapper = await montar([producto({ stockDisponible: '2.0000' })])
+
+    expect(textoTarjeta(wrapper)).not.toContain('Sin stock')
+  })
+})
+
+describe('CatalogoGrid — textos con "…" y no con tres puntos (01.31)', () => {
+  it('el placeholder del buscador y el de carga usan el carácter "…"', async () => {
+    const wrapper = await mountSuspended(CatalogoGrid, {
+      props: { items: [], total: 0, pageSize: 48, loading: true },
+      global: { stubs },
+    })
+
+    expect(wrapper.find('input').attributes('placeholder')).toBe('Buscar ítem…')
+    expect(wrapper.text()).toContain('Cargando catálogo…')
+    expect(wrapper.text()).not.toContain('...')
+  })
+})
+
+// Auditoría UX 02.25: con un menú de 80 ítems, buscar solo por texto con el teclado de la tablet
+// es lo único que había. Chips de categoría arriba de la búsqueda (solo si la pantalla las pasa).
+describe('CatalogoGrid — categorías (02.25)', () => {
+  const CATEGORIAS = [{ id: 'cat-bebidas', nombre: 'Bebidas' }, { id: 'cat-platos', nombre: 'Platos' }]
+
+  async function conCategorias(items: ItemCatalogo[], extra: Record<string, unknown> = {}) {
+    return mountSuspended(CatalogoGrid, {
+      props: { items, total: items.length, pageSize: 48, categorias: CATEGORIAS, ...extra },
+      global: { stubs },
+    })
+  }
+
+  const chips = (w: Awaited<ReturnType<typeof conCategorias>>) => w.findAll('[data-qa="categoria-chip"]')
+
+  it('sin categorías no dibuja chips (el POS y la tienda siguen como están)', async () => {
+    const w = await montar([producto()])
+    expect(w.findAll('[data-qa="categoria-chip"]')).toHaveLength(0)
+  })
+
+  it('ofrece "Todas" y una por categoría; tocar una emite su id, "Todas" emite null', async () => {
+    const w = await conCategorias([producto()])
+    expect(chips(w).map(c => c.text())).toEqual(['Todas', 'Bebidas', 'Platos'])
+    await chips(w)[1]!.trigger('click')
+    expect(w.emitted('update:categoria')?.at(-1)).toEqual(['cat-bebidas'])
+    await chips(w)[0]!.trigger('click')
+    expect(w.emitted('update:categoria')?.at(-1)).toEqual([null])
+  })
+
+  it('la elegida queda marcada para el lector de pantalla', async () => {
+    const w = await conCategorias([producto()], { categoria: 'cat-platos' })
+    expect(chips(w).map(c => c.attributes('aria-pressed'))).toEqual(['false', 'false', 'true'])
+  })
+
+  it('una categoría sin productos lo dice y ofrece volver a todas', async () => {
+    const w = await conCategorias([], { categoria: 'cat-platos' })
+    expect(w.text()).toContain('No hay productos en «Platos»')
+    const volver = w.findAll('button').find(b => b.text() === 'Ver todas')
+    expect(volver, 'botón para quitar la categoría').toBeTruthy()
+    await volver!.trigger('click')
+    expect(w.emitted('update:categoria')?.at(-1)).toEqual([null])
   })
 })

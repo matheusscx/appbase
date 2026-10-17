@@ -104,12 +104,15 @@ const ayudaMotivo = computed(() =>
 
 // Arranca vacío en cada apertura (spec: "arrancando destildado o vacío") y
 // carga el catálogo de motivos — activos del tenant, todos los tipos.
+// Única excepción (auditoría UX 02.31): con UNA sola unidad despachada no hay nada que elegir,
+// así que la cantidad arranca en 1 y "Anular" espera solo al motivo.
 watch(open, async (isOpen) => {
   cantidad.value = undefined
   unidadesElegidas.value = []
   motivoBajaId.value = undefined
   if (!isOpen) return
   await unidadesStore.ensureLoaded()
+  if (!esSerie.value && new Decimal(maximoPresentacion.value || '0').eq(1)) cantidad.value = 1
   cargandoMotivos.value = true
   try {
     motivos.value = await salonesApi.listarMotivosBajaActivos()
@@ -121,7 +124,7 @@ watch(open, async (isOpen) => {
   finally {
     cargandoMotivos.value = false
   }
-})
+}, { immediate: true })
 
 const cantidadValida = computed(() => {
   if (cantidad.value === undefined || !Number.isFinite(cantidad.value)) return false

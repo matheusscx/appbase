@@ -83,6 +83,28 @@ export function stockPedible(
   return item.stockDisponible ?? item.stock
 }
 
+/**
+ * ¿Queda algo que se pueda pedir de este producto? Mismo criterio que atenúa la tarjeta del
+ * catálogo y que decide si un lector con Enter puede agregarlo: lo que otras mesas ya apartaron
+ * no cuenta (`stockPedible`).
+ */
+export function tieneStockPedible(item: Pick<ItemCatalogo, 'stock' | 'stockDisponible'>): boolean {
+  const pedible = stockPedible(item)
+  if (pedible === null || pedible === '') return false
+  try {
+    return new Decimal(pedible).greaterThan(0)
+  }
+  catch {
+    return false
+  }
+}
+
+/** Recetas y combos nunca bloquean el click: la validación real vive en el backend. */
+export function puedeAgregarItem(item: ItemCatalogo): boolean {
+  if (item.tipo === 'receta' || item.tipo === 'combo') return true
+  return tieneStockPedible(item)
+}
+
 export interface CarritoLinea {
   item: ItemCatalogo
   /** Cantidad canónica (unidad base del ítem) — precio y stock. */
@@ -226,6 +248,16 @@ export function quitarLinea(
   index: number,
 ): CarritoLinea[] {
   return lineas.filter((_, i) => i !== index)
+}
+
+/** Devuelve una línea quitada a su lugar (el "Deshacer" de quitar). Si el carrito ya es más corto, va al final. */
+export function restaurarLinea(
+  lineas: CarritoLinea[],
+  linea: CarritoLinea,
+  index: number,
+): CarritoLinea[] {
+  const en = Math.min(Math.max(index, 0), lineas.length)
+  return [...lineas.slice(0, en), linea, ...lineas.slice(en)]
 }
 
 export function setCantidadPresentacion(
@@ -538,6 +570,7 @@ export function useVenta() {
     vigente,
     error: errorCalculo,
     asegurarVigente,
+    recalcular,
     limpiar: limpiarResultado,
   } = useResultadoCalculado(() => toCalcularInput(lineas.value), { debounceMs: 300 })
 
@@ -566,6 +599,9 @@ export function useVenta() {
   }
   function quitar(index: number) {
     lineas.value = quitarLinea(lineas.value, index)
+  }
+  function restaurar(linea: CarritoLinea, index: number) {
+    lineas.value = restaurarLinea(lineas.value, linea, index)
   }
   function cambiarCantidadPresentacion(
     index: number,
@@ -599,8 +635,10 @@ export function useVenta() {
     vigente,
     errorCalculo,
     asegurarVigente,
+    recalcular,
     add,
     quitar,
+    restaurar,
     cambiarCantidad,
     cambiarCantidadPresentacion,
     cambiarUnidades,

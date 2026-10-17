@@ -15,6 +15,8 @@ export interface SesionGarzon {
   estado: 'abierta' | 'cerrada'
   origenCierre: 'pin' | 'admin' | null
   cerradaPorUsuarioId: string | null
+  /** Cuentas abiertas a su nombre. Lo traen las sesiones abiertas y `activa`. */
+  cuentasAbiertas?: number
 }
 
 /**

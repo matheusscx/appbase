@@ -104,6 +104,20 @@ mockNuxtImport('useApiFetch', () => {
     if (typeof url === 'string' && url.endsWith('/items/receta-1')) {
       return Promise.resolve(structuredClone(RECETA))
     }
+    if (typeof url === 'string' && url.endsWith('/items/receta-con-ingredientes')) {
+      return Promise.resolve({
+        ...structuredClone(RECETA),
+        id: 'receta-con-ingredientes',
+        ingredientes: [{
+          ingredienteItemId: PAPAS,
+          ingredienteNombre: 'Pepino',
+          cantidad: '1',
+          unidadCodigo: 'unidad',
+          bloqueante: false,
+          stock: '10',
+        }],
+      })
+    }
     const combo = typeof url === 'string' && url.match(/\/items\/combo-(.+)$/)
     if (combo) return Promise.resolve(comboConPapas(combo[1]!))
     return Promise.resolve([])
@@ -253,5 +267,18 @@ describe('ItemPersonalizacionDrawer — componente fraccionario de un combo', ()
     const payload = await confirmar(wrapper)
     expect(payload.componentes).toEqual([salsaEn(1), salsaEn(2)])
     expect(resumenEmitido(wrapper)).toContain('Papas fritas #2 · Salsa: Salsa')
+  })
+})
+
+// Auditoría UX 02.3: el interruptor "Incluir" medía 36×20 px, y se toca con el dedo, de pie.
+describe('ItemPersonalizacionDrawer — tamaño táctil de "Incluir" (02.3)', () => {
+  it('el área táctil del interruptor de cada ingrediente mide al menos 44 px', async () => {
+    wrapper = await montar('receta-con-ingredientes')
+    const interruptor = wrapper.find('button[role="switch"]')
+    expect(interruptor.exists(), 'el interruptor de Incluir').toBe(true)
+    const area = interruptor.element.closest('label')
+    expect(area, 'el rótulo que envuelve al interruptor').toBeTruthy()
+    expect(area!.className).toMatch(/(^|\s)min-h-11(\s|$)/)
+    expect(area!.className).toMatch(/(^|\s)min-w-11(\s|$)/)
   })
 })

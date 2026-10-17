@@ -112,6 +112,10 @@ export interface MesaResumen {
   tamano: TamanoMesa
   cuentasAbiertas: number
   ocupada: boolean
+  /** Desde cuándo está ocupada (la cuenta abierta más antigua); `null` si está libre. */
+  abiertaDesde?: string | null
+  /** Los garzones responsables de sus cuentas abiertas: la tablet personal marca las suyas. */
+  responsablesIds?: string[]
   // Solo llegan con `listarSalones(true)` — la papelera (docs/features/papelera.md).
   eliminadoEl?: string | null
   eliminadoPorNombre?: string | null
@@ -209,6 +213,8 @@ export interface CuentaDetalle {
   garzonResponsableNombre: string | null
   garzonCierreId: string | null
   garzonCierreNombre: string | null
+  /** Cuándo se abrió la cuenta (ISO). */
+  abiertaEl?: string | null
   lineas: CuentaLineaDetalle[]
   /** Platos ya despachados y anulados de esta cuenta (spec § 5). */
   anulaciones: CuentaAnulacionDetalle[]
@@ -323,7 +329,7 @@ export type { BoletaVenta } from '~/types/boleta'
  * `unidades` ausente en un snapshot viejo vale 1, igual que en el backend
  * (`PersonalizacionRecetaSnapshot.unidades`: "ausente en snapshots antiguos = 1").
  */
-function personalizacionDesdeSnapshot(
+export function personalizacionDesdeSnapshot(
   p: NonNullable<CuentaLineaDetalle['personalizacion']>,
 ): PersonalizacionPayload {
   const grupo = (g: CuentaLineaGrupoSnapshot): PersonalizacionGrupoPayload => ({

@@ -25,7 +25,7 @@ import { RbacService } from '../rbac/rbac.service';
 import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { VentasService } from './ventas.service';
 import { CreateVentaDto } from './dto/create-venta.dto';
-import { QueryVentasDto } from './dto/query-ventas.dto';
+import { QueryVentasDto, QueryVentasResumenDto } from './dto/query-ventas.dto';
 import { CreateNotaCreditoDto } from './dto/create-nota-credito.dto';
 import { CancelarVentaDto } from './dto/cancelar-venta.dto';
 import { CompletarDocumentoDto } from './dto/completar-documento.dto';
@@ -263,13 +263,13 @@ export class VentasController {
    */
   @Get('resumen')
   @RequiresPermiso('Ventas', 'Leer')
-  async resumen(@Req() req: Request) {
+  async resumen(@Req() req: Request, @Query() query: QueryVentasResumenDto) {
     const u = req.user as JwtUser;
     const verTodas = await this.rbacService.resolverAlcanceDerivadoDeCaja(
       u.id,
       u.tenantId!,
     );
-    return this.ventasService.resumen(u.tenantId ?? '', u.id, verTodas);
+    return this.ventasService.resumen(u.tenantId ?? '', u.id, verTodas, query);
   }
 
   @Get()

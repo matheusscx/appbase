@@ -97,6 +97,10 @@ export interface MesaResumen {
   tamano: TamanoMesa;
   cuentasAbiertas: number;
   ocupada: boolean;
+  /** Desde cuándo está ocupada: la apertura de su cuenta abierta más antigua. */
+  abiertaDesde: string | null;
+  /** Garzones responsables de sus cuentas abiertas: para marcar las mesas propias. */
+  responsablesIds: string[];
   eliminadoEl?: string | null;
   eliminadoPorNombre?: string | null;
 }
@@ -174,6 +178,10 @@ interface SalonMesaRow {
   mesa_eliminado_el?: string | null;
   mesa_eliminado_por_nombre?: string | null;
   cuentas_abiertas: string;
+  /** `MIN(abierta_el)` de las cuentas abiertas de la mesa; ausente en la papelera. */
+  abierta_desde?: Date | string | null;
+  /** Los garzones responsables de esas cuentas; ausente en la papelera. */
+  responsables?: string[] | null;
 }
 
 /** Fila cruda del JOIN `cuenta_lineas` × `items` que arma el detalle. */
@@ -306,6 +314,8 @@ export interface CuentaDetalle {
   garzonResponsableNombre: string | null;
   garzonCierreId: string | null;
   garzonCierreNombre: string | null;
+  /** Cuándo se abrió la cuenta (ISO). */
+  abiertaEl: string | null;
   lineas: CuentaLineaDetalle[];
   /** Platos ya despachados y anulados de esta cuenta (spec § 5). */
   anulaciones: CuentaAnulacionDetalle[];
@@ -358,12 +368,15 @@ export class SalonesService {
         `SELECT s.salon_id, s.nombre AS salon_nombre,
                 m.mesa_id, m.nombre AS mesa_nombre, m.pos_x, m.pos_y,
                 m.forma, m.tamano,
-                COALESCE(c.abiertas, 0) AS cuentas_abiertas
+                COALESCE(c.abiertas, 0) AS cuentas_abiertas,
+                c.abierta_desde, c.responsables
            FROM salones s
            LEFT JOIN mesas m
              ON m.salon_id = s.salon_id AND m.eliminado_el IS NULL
            LEFT JOIN (
-             SELECT mesa_id, COUNT(*) AS abiertas
+             SELECT mesa_id, COUNT(*) AS abiertas, MIN(abierta_el) AS abierta_desde,
+                    ARRAY_AGG(DISTINCT garzon_responsable_id)
+                      FILTER (WHERE garzon_responsable_id IS NOT NULL) AS responsables
                FROM cuentas
               WHERE tenant_id = $1 AND estado = 'abierta' AND eliminado_el IS NULL
               GROUP BY mesa_id
@@ -490,6 +503,10 @@ export class SalonesService {
           tamano: (r.tamano as TamanoMesa) ?? TamanoMesa.MEDIANO,
           cuentasAbiertas: abiertas,
           ocupada: abiertas > 0,
+          abiertaDesde: r.abierta_desde
+            ? new Date(r.abierta_desde).toISOString()
+            : null,
+          responsablesIds: r.responsables ?? [],
         };
         if (r.mesa_eliminado_el !== undefined) {
           mesa.eliminadoEl = r.mesa_eliminado_el;
@@ -3341,6 +3358,9 @@ export class SalonesService {
       garzonCierreId: cuenta.garzonCierreId,
       garzonCierreNombre: cuenta.garzonCierreId
         ? (nombresGarzon[cuenta.garzonCierreId] ?? null)
+        : null,
+      abiertaEl: cuenta.abiertaEl
+        ? new Date(cuenta.abiertaEl).toISOString()
         : null,
       lineas: lineas.map((l) => {
         const personalizacionTexto = textoComandaPersonalizacion(

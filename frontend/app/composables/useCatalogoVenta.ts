@@ -27,6 +27,8 @@ export function useCatalogoVenta(opts: {
   const total = ref(0)
   const page = ref(1)
   const busqueda = ref('')
+  /** La categoría elegida en los chips (solo el salón las ofrece); `null` = todas. */
+  const categoriaId = ref<string | null>(null)
   const loading = ref(false)
   /**
    * La última carga falló. La grilla distingue "no pudimos cargar" de "no hay ítems": un corte del
@@ -41,7 +43,14 @@ export function useCatalogoVenta(opts: {
   let turno = 0
   let espera: ReturnType<typeof setTimeout> | null = null
 
-  async function refrescar() {
+  let enCurso: Promise<void> = Promise.resolve()
+
+  function refrescar(): Promise<void> {
+    enCurso = pedirPagina()
+    return enCurso
+  }
+
+  async function pedirPagina() {
     const mio = ++turno
     const params = new URLSearchParams({
       ...opts.filtros,
@@ -52,6 +61,7 @@ export function useCatalogoVenta(opts: {
       pageSize: String(PAGE_SIZE_CATALOGO),
     })
     if (terminoActivo) params.set('search', terminoActivo)
+    if (categoriaId.value) params.set('categoriaId', categoriaId.value)
     try {
       const res = await useApiFetch<PaginatedResponse<ItemCatalogo>>(`${apiUrl}/items?${params}`)
       if (mio !== turno) return
@@ -81,6 +91,27 @@ export function useCatalogoVenta(opts: {
     finally { loading.value = false }
   }
 
+  /**
+   * Enter en el buscador (un lector de códigos): aplica la búsqueda YA, sin esperar el retardo de
+   * tipeo, y devuelve el ítem si coincide con uno solo. Con varios, con ninguno o sin texto devuelve
+   * `null` y la lista queda como está.
+   */
+  async function confirmarBusqueda(): Promise<ItemCatalogo | null> {
+    const q = busqueda.value.trim()
+    if (!q) return null
+    if (espera) { clearTimeout(espera); espera = null }
+    terminoActivo = q
+    if (page.value !== 1) {
+      page.value = 1 // el watch de `page` pide la página 1
+      await nextTick()
+    }
+    else {
+      void refrescar()
+    }
+    await enCurso
+    return total.value === 1 && items.value.length === 1 ? items.value[0]! : null
+  }
+
   watch(busqueda, (q) => {
     if (espera) clearTimeout(espera)
     espera = setTimeout(() => {
@@ -91,7 +122,11 @@ export function useCatalogoVenta(opts: {
     }, ESPERA_BUSQUEDA_MS)
   })
   watch(page, () => { void refrescar() })
+  watch(categoriaId, () => {
+    if (page.value !== 1) page.value = 1
+    else void refrescar()
+  })
   onBeforeUnmount(() => { if (espera) clearTimeout(espera) })
 
-  return { items, total, page, busqueda, loading, error, sinPermiso, pageSize: PAGE_SIZE_CATALOGO, cargar, refrescar }
+  return { items, total, page, busqueda, categoriaId, loading, error, sinPermiso, pageSize: PAGE_SIZE_CATALOGO, cargar, refrescar, confirmarBusqueda }
 }

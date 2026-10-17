@@ -21,6 +21,7 @@ const GARZON_ANA = 'garzon-ana'
 const GARZON_BRUNO = 'garzon-bruno'
 
 interface SesionFake {
+  cuentasAbiertas?: number
   id: string
   garzonId: string
   garzonNombre: string
@@ -74,6 +75,15 @@ let transferencias: { cuentaId: string, garzonId: string }[] = []
 let transferenciaFalla: string | null = null
 /** Task 5: corte del día de negocio que devuelve `GET /tenants/me`. */
 let horaCorteBackend = 0
+/** Auditoría UX 02.35: `GET /garzones` y `GET /turnos` (los filtros del historial) fallan. */
+let opcionesFallan = false
+/** Cada `GET /sesiones-garzon/abiertas`: el "Actualizar" de 02.22. */
+let lecturasAbiertas = 0
+let toasts: { title?: string, color?: string }[] = []
+
+mockNuxtImport('useToast', () => () => ({
+  add: (t: { title?: string, color?: string }) => { toasts.push(t) },
+}))
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: { garzonId?: string } }) => {
@@ -108,7 +118,12 @@ mockNuxtImport('useApiFetch', () => {
       })
     }
 
+    if (opcionesFallan && (url.endsWith('/garzones') || url.endsWith('/turnos'))) {
+      return Promise.reject(new Error('sin red'))
+    }
+
     if (url.includes('/sesiones-garzon/abiertas')) {
+      lecturasAbiertas++
       return Promise.resolve(abiertasBackend.map(s => ({ ...s })))
     }
     if (url.includes('/sesiones-garzon?')) {
@@ -299,6 +314,75 @@ describe('sesiones-garzon — nota del día de negocio', () => {
     await new Promise(r => setTimeout(r, 20))
 
     expect(wrapper.text()).not.toContain('Tu día va de')
+    wrapper.unmount()
+  })
+})
+
+// Auditoría UX 02.22 y 02.35.
+describe('sesiones-garzon — auditoría UX grupo 02', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+    abiertasBackend = [sesion({ cuentasAbiertas: 3 })]
+    pendientesAlCerrar = []
+    transferencias = []
+    transferenciaFalla = null
+    opcionesFallan = false
+    lecturasAbiertas = 0
+    toasts = []
+  })
+
+  it('02.22: "Actualizar" vuelve a leer las sesiones abiertas y dice a qué hora quedó la foto', async () => {
+    const wrapper = await montar()
+    expect(lecturasAbiertas).toBe(1)
+    expect(wrapper.text()).toMatch(/Actualizado \d{2}:\d{2}/)
+    abiertasBackend = [sesion({ cuentasAbiertas: 3 }), sesion({ id: 's2', garzonId: GARZON_BRUNO, garzonNombre: 'Bruno' })]
+
+    await wrapper.findAll('button').find(b => b.text().trim() === 'Actualizar')!.trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+
+    expect(lecturasAbiertas).toBe(2)
+    expect(wrapper.text()).toContain('Bruno')
+    wrapper.unmount()
+  })
+
+  it('02.22: la lista trae cuántas mesas tiene abiertas cada garzón y hace cuánto entró', async () => {
+    abiertasBackend = [sesion({ cuentasAbiertas: 3, inicioEl: new Date(Date.now() - 3 * 3_600_000).toISOString() })]
+    const wrapper = await montar()
+    expect(wrapper.text()).toContain('Mesas abiertas')
+    const fila = wrapper.find('tbody tr')
+    expect(fila.text()).toContain('3')
+    expect(fila.text()).toContain('hace 3 h')
+    wrapper.unmount()
+  })
+
+  it('02.22: "Forzar cierre" dice cuántas mesas tiene abiertas antes de confirmar', async () => {
+    const wrapper = await montar()
+    await wrapper.findAll('button').find(b => b.text().trim() === 'Forzar cierre')!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(dialogo()!.textContent).toContain('3 mesas abiertas')
+    wrapper.unmount()
+  })
+
+  it('02.22: con cero mesas el aviso no inventa un problema', async () => {
+    abiertasBackend = [sesion({ cuentasAbiertas: 0 })]
+    const wrapper = await montar()
+    await wrapper.findAll('button').find(b => b.text().trim() === 'Forzar cierre')!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    expect(dialogo()!.textContent).not.toContain('mesas abiertas')
+    expect(dialogo()!.textContent).toContain('Se cerrará la sesión de Ana')
+    wrapper.unmount()
+  })
+
+  it('02.35: si fallan garzones y turnos, la pantalla avisa que los filtros no cargaron', async () => {
+    opcionesFallan = true
+    const wrapper = await montar()
+    expect(toasts.some(t => t.title === 'No se pudieron cargar los filtros' && t.color === 'error')).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('02.35: sin falla no avisa nada', async () => {
+    const wrapper = await montar()
+    expect(toasts).toEqual([])
     wrapper.unmount()
   })
 })

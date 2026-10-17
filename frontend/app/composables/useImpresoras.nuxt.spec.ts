@@ -158,6 +158,13 @@ describe('useImpresoras — impresoras operativas (imprimir sin Impresoras:Leer)
     expect(qzMock.websocket.connect).not.toHaveBeenCalled()
   })
 
+  it('imprimirBoleta() sin impresora de boletas devuelve false: quien llama puede avisar que no salió papel (01.15)', async () => {
+    const impreso = await useImpresoras().imprimirBoleta({} as never)
+
+    expect(impreso).toBe(false)
+    expect(qzMock.websocket.connect).not.toHaveBeenCalled()
+  })
+
   it('connect() vence a los 5 s con el mensaje en castellano', async () => {
     impresorasBoleta = [
       { id: 'imp-b1', tipoConexion: 'red', host: '10.0.0.8', puerto: 9100, nombreCola: null, activo: true },

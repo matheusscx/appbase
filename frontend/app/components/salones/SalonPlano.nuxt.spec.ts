@@ -51,3 +51,47 @@ describe('SalonPlano — las mesas se operan con teclado', () => {
     expect(w.emitted('select')).toBeUndefined()
   })
 })
+
+// Auditoría UX 02.12: una mesa ocupada era un tinte ámbar y un "1" chico. Dice hace cuánto está abierta.
+describe('SalonPlano — la mesa ocupada dice hace cuánto (02.12)', () => {
+  it('una mesa ocupada muestra "hace N min"; una libre, nada', async () => {
+    const abiertaDesde = new Date(Date.now() - 45 * 60_000).toISOString()
+    const w = await montar([
+      mesa({ id: 'm1', ocupada: true, cuentasAbiertas: 1, abiertaDesde }),
+      mesa({ id: 'm2', nombre: 'Mesa 2' }),
+    ])
+    expect(w.find('[data-qa="mesa-m1"]').text()).toContain('hace 45 min')
+    expect(w.find('[data-qa="mesa-m2"]').text()).not.toContain('hace')
+  })
+
+  it('el nombre accesible suma el tiempo', async () => {
+    const abiertaDesde = new Date(Date.now() - 45 * 60_000).toISOString()
+    const w = await montar([mesa({ ocupada: true, cuentasAbiertas: 2, abiertaDesde })])
+    expect(w.find('[data-qa="mesa-m1"]').attributes('aria-label'))
+      .toBe('Mesa 1, ocupada, 2 cuentas abiertas, abierta hace 45 min')
+  })
+
+  it('sin la hora (servidor viejo) no inventa nada', async () => {
+    const w = await montar([mesa({ ocupada: true, cuentasAbiertas: 1 })])
+    expect(w.find('[data-qa="mesa-m1"]').text()).not.toContain('hace')
+  })
+})
+
+describe('SalonPlano — las mesas propias (02.12)', () => {
+  const mesas = () => [
+    mesa({ id: 'm1', ocupada: true, cuentasAbiertas: 1, responsablesIds: ['g1'] }),
+    mesa({ id: 'm2', nombre: 'Mesa 2', ocupada: true, cuentasAbiertas: 1, responsablesIds: ['g2'] }),
+  ]
+
+  it('en la tablet personal marca "Tuya" solo las mesas con cuentas del garzón, con texto', async () => {
+    const w = await mountSuspended(SalonPlano, { props: { mesas: mesas(), miGarzonId: 'g1' } })
+    expect(w.find('[data-qa="mesa-m1"]').text()).toContain('Tuya')
+    expect(w.find('[data-qa="mesa-m2"]').text()).not.toContain('Tuya')
+    expect(w.find('[data-qa="mesa-m1"]').attributes('aria-label')).toContain('tuya')
+  })
+
+  it('en el tótem compartido (sin garzón de la tablet) no marca ninguna', async () => {
+    const w = await montar(mesas())
+    expect(w.text()).not.toContain('Tuya')
+  })
+})

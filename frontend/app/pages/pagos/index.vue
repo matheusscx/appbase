@@ -177,7 +177,7 @@ onMounted(cargar)
               v-if="!loadingResumen && (hayPropinas || hayDevuelto)"
               class="text-xs text-muted"
             >
-              cobrado {{ formatMonto(resumen!.montoCobrado) }}
+              bruto {{ formatMonto(resumen!.montoCobrado) }}
               <template v-if="hayPropinas">
                 · propinas −{{ formatMonto(resumen!.montoPropinas) }}
               </template>
@@ -198,7 +198,7 @@ onMounted(cargar)
               v-if="!loadingResumen && (hayPropinasHoy || hayDevueltoHoy)"
               class="text-xs text-muted"
             >
-              cobrado {{ formatMonto(resumen!.montoHoy) }}
+              bruto {{ formatMonto(resumen!.montoHoy) }}
               <template v-if="hayPropinasHoy">
                 · propinas −{{ formatMonto(resumen!.propinasHoy) }}
               </template>

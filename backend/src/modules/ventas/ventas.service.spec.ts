@@ -5182,6 +5182,100 @@ describe('VentasService', () => {
       expect(params).toEqual([TENANT_ID]);
     });
 
+    describe('listar y resumen: rango de fechas y búsqueda por folio (01.28)', () => {
+      const DIA = { zona_horaria: 'America/Santiago', hora_corte: 4 };
+      const sqlDe = (llamada: unknown[]) => llamada[0] as string;
+      const paramsDe = (llamada: unknown[]) => llamada[1] as unknown[];
+      /** La consulta del listado (la del COUNT lleva los mismos filtros). */
+      function consultaDeListado() {
+        return dataSourceMock.query.mock.calls.find(
+          (c: unknown[]) =>
+            typeof c[0] === 'string' &&
+            c[0].includes('FROM ventas v') &&
+            c[0].includes('LIMIT'),
+        ) as unknown[];
+      }
+      beforeEach(() => {
+        dataSourceMock.query.mockImplementation((sql: string) => {
+          if (sql.includes('zona_horaria')) return Promise.resolve([DIA]);
+          if (sql.includes('COUNT(*)::int AS total'))
+            return Promise.resolve([{ total: 0 }]);
+          return Promise.resolve([]);
+        });
+      });
+
+      it('una fecha pura en desde/hasta se expande al día del negocio del tenant, hasta inclusivo', async () => {
+        await service.listar(
+          TENANT_ID,
+          { desde: '2026-10-16', hasta: '2026-10-16' },
+          'u-test',
+          true,
+        );
+        const llamada = consultaDeListado();
+        const sql = sqlDe(llamada);
+        expect(sql).toContain('v.fecha >=');
+        expect(sql).toContain('v.fecha <');
+        expect(sql).toContain('AT TIME ZONE');
+        expect(paramsDe(llamada)).toEqual(
+          expect.arrayContaining(['2026-10-16', 'America/Santiago', 4]),
+        );
+      });
+
+      it('sin rango no pide el día del negocio ni agrega bordes de fecha', async () => {
+        await service.listar(TENANT_ID, {}, 'u-test', true);
+        const sql = sqlDe(consultaDeListado());
+        expect(sql).not.toContain('v.fecha >=');
+        expect(
+          dataSourceMock.query.mock.calls.some(
+            (c: unknown[]) =>
+              typeof c[0] === 'string' && c[0].includes('zona_horaria'),
+          ),
+        ).toBe(false);
+      });
+
+      it('el folio busca en el número del documento vigente y en el folio de la boleta del sistema, con el valor como parámetro', async () => {
+        await service.listar(TENANT_ID, { folio: ' 1234 ' }, 'u-test', true);
+        const llamada = consultaDeListado();
+        const sql = sqlDe(llamada);
+        expect(sql).toContain('d.numero = $');
+        expect(sql).toContain('dte_documentos');
+        expect(sql).toContain('dd.folio::text = $');
+        // Vigente y sin baja: la misma condición que el filtro por documento.
+        expect(sql).toContain('d.descarte IS NULL AND d.eliminado_el IS NULL');
+        expect(sql).toContain('dd.eliminado_el IS NULL');
+        expect(sql).not.toContain('1234');
+        expect(paramsDe(llamada)).toContain('1234');
+      });
+
+      it('el resumen respeta el mismo rango: las tarjetas cuentan lo que la lista muestra', async () => {
+        dataSourceMock.query.mockImplementation((sql: string) => {
+          if (sql.includes('zona_horaria')) return Promise.resolve([DIA]);
+          return Promise.resolve([
+            {
+              total_ventas: 2,
+              total_bruto: '10',
+              total_notas_credito: '0',
+              total_facturado: '10',
+              saldo_pendiente: '0',
+            },
+          ]);
+        });
+        await service.resumen(TENANT_ID, 'u-test', true, {
+          desde: '2026-10-16',
+          hasta: '2026-10-16',
+        });
+        const llamada = dataSourceMock.query.mock.calls.find(
+          (c: unknown[]) =>
+            typeof c[0] === 'string' && c[0].includes('total_notas_credito'),
+        ) as unknown[];
+        expect(sqlDe(llamada)).toContain('v.fecha >=');
+        expect(sqlDe(llamada)).toContain('v.fecha <');
+        expect(paramsDe(llamada)).toEqual(
+          expect.arrayContaining([TENANT_ID, '2026-10-16']),
+        );
+      });
+    });
+
     describe('exigirTopeDelReembolsoPasarela: el REFUND respeta el tope por pago antes de llamar al proveedor', () => {
       let manager: ReturnType<typeof buildManagerMock>;
       let ventaExiste: boolean;

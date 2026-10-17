@@ -7,8 +7,10 @@ const props = withDefaults(
     mesa: MesaResumen
     editable?: boolean
     selected?: boolean
+    /** Tiene cuentas a nombre del garzón de esta tablet: se marca con texto, no solo con color. */
+    propia?: boolean
   }>(),
-  { editable: false, selected: false },
+  { editable: false, selected: false, propia: false },
 )
 
 // La tabla de tamaños vive en `~/utils/mesa-dimensiones`: la comparte el plano,
@@ -17,6 +19,21 @@ const dimensiones = computed(() => {
   const { width, height } = dimensionesMesaPx(props.mesa.forma, props.mesa.tamano)
   return { width: `${width}px`, height: `${height}px` }
 })
+
+// "hace 45 min": una mesa ocupada dice hace cuánto está abierta (auditoría UX 02.12). El reloj
+// se mueve cada medio minuto solo mientras haya algo que mostrar.
+const { formatHace } = useFormatters()
+const ahora = ref(new Date())
+let reloj: ReturnType<typeof setInterval> | null = null
+onMounted(() => {
+  reloj = setInterval(() => { ahora.value = new Date() }, 30_000)
+})
+onBeforeUnmount(() => {
+  if (reloj) clearInterval(reloj)
+})
+const tiempoAbierta = computed(() =>
+  props.mesa.ocupada && props.mesa.abiertaDesde ? formatHace(props.mesa.abiertaDesde, ahora.value) : '',
+)
 
 const formaClass = computed(() =>
   props.mesa.forma === 'redonda' ? 'rounded-full' : 'rounded-lg',
@@ -35,6 +52,7 @@ const formaClass = computed(() =>
     :style="dimensiones"
   >
     <UIcon
+      v-if="!tiempoAbierta"
       name="i-lucide-utensils"
       class="h-4 w-4"
       :class="mesa.ocupada ? 'text-warning' : 'text-muted'"
@@ -42,6 +60,17 @@ const formaClass = computed(() =>
     <span class="px-1 text-xs font-medium leading-tight text-default">
       {{ mesa.nombre }}
     </span>
+    <span v-if="tiempoAbierta" class="px-1 text-xs leading-tight text-muted">
+      {{ tiempoAbierta }}
+    </span>
+    <UBadge
+      v-if="propia"
+      label="Tuya"
+      color="primary"
+      variant="subtle"
+      size="sm"
+      class="absolute -left-1.5 -top-1.5 rounded-full"
+    />
     <UBadge
       v-if="mesa.ocupada"
       :label="String(mesa.cuentasAbiertas)"

@@ -468,6 +468,14 @@ let cancelarConMotivoRechaza = false
 let advertenciasCancelarConMotivo: string[] = []
 /** La cuenta (ya cancelada) que devuelve el `POST .../cancelar-con-motivo`. */
 let cuentaTrasCancelarConMotivo: Record<string, unknown> | null = null
+/** Lo que devuelve `POST /sesiones-garzon/activa`. `null` = sin turno abierto. */
+let sesionActivaMock: Record<string, unknown> | null = null
+/** Cada `POST /sesiones-garzon/activa`: el body (la credencial) que viajó. */
+let bodiesSesionActiva: Record<string, unknown>[] = []
+/** Cada `POST /sesiones-garzon/cerrar` recibido. */
+let cierresDeSesion = 0
+/** Cuántas veces se leyó `GET /salones/operacion` (el plano): el refresco de 02.24. */
+let lecturasPlano = 0
 
 /**
  * Los toasts no se pueden leer del DOM sin montar `UApp`, así que se captura
@@ -475,7 +483,7 @@ let cuentaTrasCancelarConMotivo: Record<string, unknown> | null = null
  * lo único que permite afirmar el COLOR: un toast que saliera con otro color
  * se vería igual en un assert sobre el texto del wrapper.
  */
-let toasts: { title?: string, description?: string, color?: string, actions?: { label: string }[] }[] = []
+let toasts: { title?: string, description?: string, color?: string, actions?: { label: string, onClick?: () => void }[] }[] = []
 
 mockNuxtImport('useToast', () => {
   return () => ({
@@ -691,6 +699,14 @@ mockNuxtImport('useApiFetch', () => {
         { id: 'turno-1', nombre: 'Mañana', activo: true },
       ])
     }
+    if (ruta.endsWith('/sesiones-garzon/activa')) {
+      bodiesSesionActiva.push((opts?.body ?? {}) as Record<string, unknown>)
+      return Promise.resolve(sesionActivaMock)
+    }
+    if (ruta.endsWith('/sesiones-garzon/cerrar')) {
+      cierresDeSesion++
+      return Promise.resolve({ id: 'sesion-1', garzonNombre: 'Ana', turnoNombre: 'Mañana', cuentasPendientes: [] })
+    }
     if (ruta.endsWith('/sesiones-garzon/iniciar')) {
       const sesion = { id: 'sesion-1', garzonNombre: 'Ana', turnoNombre: 'Mañana' }
       return Promise.resolve(sesion)
@@ -775,6 +791,7 @@ mockNuxtImport('useApiFetch', () => {
       return fusionRetenida ? fusionRetenida.then(() => fusionada) : Promise.resolve(fusionada)
     }
     if (ruta.endsWith('/salones/operacion')) {
+      lecturasPlano++
       return Promise.resolve(salonesMock)
     }
     if (ruta.endsWith('/propinas/porcentaje-sugerido')) {
@@ -1044,6 +1061,10 @@ function reiniciarMock() {
   cancelarConMotivoRechaza = false
   advertenciasCancelarConMotivo = []
   cuentaTrasCancelarConMotivo = null
+  sesionActivaMock = null
+  bodiesSesionActiva = []
+  cierresDeSesion = 0
+  lecturasPlano = 0
   toasts = []
   alSalirDeLaRuta = null
 }
@@ -1117,6 +1138,23 @@ function botonEn(contenedor: HTMLElement | undefined, texto: string) {
   return contenedor
     ? [...contenedor.querySelectorAll('button')].find(b => b.textContent?.trim() === texto)
     : undefined
+}
+
+
+/**
+ * "¿Te pidieron firmar un cierre?" vive en el menú "Más" de la barra (auditoría UX 02.33): se abre el
+ * menú y se elige la entrada. El menú lo teletransporta Reka UI fuera del wrapper.
+ */
+async function pedirFirmaPorMenu(wrapper: Awaited<ReturnType<typeof montar>>) {
+  const mas = wrapper.findAll('button').find(b => b.text().trim() === 'Más')
+  expect(mas, 'botón "Más" de la barra').toBeTruthy()
+  await mas!.trigger('click')
+  await esperar(30)
+  const entrada = [...document.body.querySelectorAll('[role="menuitem"]')]
+    .find(el => el.textContent?.trim() === '¿Te pidieron firmar un cierre?')
+  expect(entrada, 'entrada "¿Te pidieron firmar un cierre?"').toBeTruthy()
+  ;(entrada as HTMLElement).click()
+  await esperar(10)
 }
 
 /**
@@ -1668,10 +1706,7 @@ describe('salones — testigo del cierre forzado (el garzón da fe)', () => {
     const wrapper2 = await montar()
     await esperar(20)
 
-    const boton = wrapper2.findAll('button')
-      .find(b => b.text().trim() === '¿Te pidieron firmar un cierre?')
-    await boton!.trigger('click')
-    await esperar(10)
+    await pedirFirmaPorMenu(wrapper2)
     botonEn(tecladoPin(), 'Ana')!.click()
     await esperar(10)
     for (let i = 0; i < 6; i++) {
@@ -1703,10 +1738,7 @@ describe('salones — testigo del cierre forzado (el garzón da fe)', () => {
     const wrapper = await montar()
     await esperar(20)
 
-    const boton = wrapper.findAll('button')
-      .find(b => b.text().trim() === '¿Te pidieron firmar un cierre?')
-    await boton!.trigger('click')
-    await esperar(10)
+    await pedirFirmaPorMenu(wrapper)
     botonEn(tecladoPin(), 'Ana')!.click()
     await esperar(10)
     for (let i = 0; i < 6; i++) {
@@ -1799,13 +1831,8 @@ describe('salones — testigo del cierre forzado (el garzón da fe)', () => {
     expect(bodiesPendientesTestigo).toHaveLength(0)
     expect(modalTestigo()).toBeUndefined()
 
-    // Botón de la barra de herramientas, no teletransportado: se busca en el
-    // wrapper (`findAll`), no en `document.body` como los diálogos.
-    const boton = wrapper.findAll('button')
-      .find(b => b.text().trim() === '¿Te pidieron firmar un cierre?')
-    expect(boton, 'botón de entrada del tótem').toBeTruthy()
-    await boton!.trigger('click')
-    await esperar(10)
+    // La entrada del tótem vive en el menú "Más" de la barra (02.33).
+    await pedirFirmaPorMenu(wrapper)
 
     // Se abre el teclado de PIN (el mismo embudo `solicitarPin` del resto de
     // la pantalla): elegir garzón y teclear.
@@ -8379,5 +8406,373 @@ describe('salones — tamaño táctil de lo que se usa de pie', () => {
     expect(basurero, 'el basurero tiene el nombre de la línea').toBeTruthy()
     expect(clases(basurero)).toMatch(M44)
     expect(clases(basurero), 'apartado del stepper').toMatch(/(^|\s)ms-[3-9](\s|$)/)
+  })
+})
+
+// ── Auditoría UX 2026-10-16, grupo 02 · Salones y mesas ─────────────────────────────────────────────
+describe('salones — auditoría UX grupo 02', () => {
+  const M44 = /(^|\s)(min-h-11|size-11|h-11)(\s|$)/
+  const clases = (b: Element | undefined | null) => (b?.className ?? '').toString()
+
+  const LINEA = {
+    id: 'linea-1',
+    itemId: 'item-1',
+    nombre: 'Papas fritas',
+    precioBase: '3000',
+    monedaId: 'clp',
+    cantidad: '1',
+    cantidadEnviada: '0',
+  }
+
+  function cuentaCon(lineas: Record<string, unknown>[], extra: Record<string, unknown> = {}) {
+    return {
+      id: 'cuenta-9',
+      numero: 9,
+      nombre: null,
+      estado: 'abierta',
+      mesaId: MESA_ID,
+      ventaId: null,
+      garzonAperturaId: 'g1',
+      garzonAperturaNombre: 'Ana',
+      garzonResponsableId: 'g1',
+      garzonResponsableNombre: 'Ana',
+      garzonCierreId: null,
+      garzonCierreNombre: null,
+      abiertaEl: new Date(Date.now() - 45 * 60_000).toISOString(),
+      lineas,
+      ...extra,
+    }
+  }
+
+  beforeEach(reiniciarMock)
+
+  async function montarConMoneda() {
+    const wrapper = await montar()
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    await esperar(0)
+    return wrapper
+  }
+
+  async function abrirLaCuenta(wrapper: Awaited<ReturnType<typeof montar>>) {
+    await seleccionarMesa(wrapper)
+    await esperar(30)
+    const tarjeta = drawerMesa()?.querySelector<HTMLElement>('.cursor-pointer')
+    expect(tarjeta).toBeTruthy()
+    tarjeta!.click()
+    await esperar(50)
+  }
+
+  // ── 02.13 ──
+  it('02.13: el panel de la mesa tiene un botón "Cerrar" de 44 px que lo cierra', async () => {
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    const cerrar = botonEn(drawerMesa(), 'Cerrar')
+    expect(cerrar, 'botón Cerrar en el encabezado').toBeTruthy()
+    expect(clases(cerrar)).toMatch(M44)
+
+    const drawer = wrapper.findComponent({ name: 'AppDrawer' })
+    expect(drawer.props('open')).toBe(true)
+    cerrar!.click()
+    await esperar(30)
+    expect(drawer.props('open')).toBe(false)
+  })
+
+  // ── 02.14 ──
+  it('02.14: a 768 px (md) el catálogo y la cuenta van lado a lado', async () => {
+    cuentasDeLaMesa = [cuentaCon([LINEA])]
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+    const html = drawerMesa()!.innerHTML
+    expect(html).not.toContain('lg:grid-cols-5')
+    expect(html).toMatch(/md:grid-cols-\[/)
+  })
+
+  // ── 02.3 ──
+  it('02.3: los cuatro botones del pie de la cuenta y "Cambiar unidades" miden 44 px', async () => {
+    cuentasDeLaMesa = [cuentaCon([
+      LINEA,
+      { ...LINEA, id: 'linea-2', nombre: 'Notebook', unidades: [{ id: 'u1', serie: 'SN1', condicion: 'nuevo' }] },
+    ])]
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+    for (const texto of ['Enviar a cocina', 'Imprimir precuenta', 'Cancelar cuenta', 'Cerrar y cobrar', 'Cambiar unidades']) {
+      const boton = botonEn(drawerMesa(), texto)
+      expect(boton, texto).toBeTruthy()
+      expect(clases(boton), texto).toMatch(M44)
+    }
+  })
+
+  // ── 02.4 ──
+  describe('02.4: qué salió a cocina', () => {
+    const lineas = () => [
+      { ...LINEA, id: 'linea-1', nombre: 'Papas fritas', cantidadEnviada: '0' },
+      { ...LINEA, id: 'linea-2', nombre: 'Hamburguesa', cantidadEnviada: '1' },
+      { ...LINEA, id: 'linea-3', nombre: 'Producto demo', cantidadEnviada: '0' },
+    ]
+
+    it('cada línea dice si está en cocina o falta enviar, y el pie resume', async () => {
+      cuentasDeLaMesa = [cuentaCon(lineas())]
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+      const estados = [...drawerMesa()!.querySelectorAll('[data-qa="estado-cocina"]')].map(e => e.textContent?.trim())
+      expect(estados).toEqual(['Falta enviar', 'En cocina', 'Falta enviar'])
+      expect(drawerMesa()!.querySelector('[data-qa="resumen-cocina"]')?.textContent?.trim())
+        .toBe('1 de 3 líneas están en cocina')
+    })
+
+    it('tras enviar, nombra las líneas que no salieron por no tener estación de cocina', async () => {
+      cuentasDeLaMesa = [cuentaCon(lineas())]
+      impresorasComanda = [{
+        id: 'imp-1', nombre: 'Cocina', rol: 'comanda', activo: true, tipoConexion: 'red', host: '10.0.0.9', puerto: 9100, nombreCola: null,
+      }]
+      // Solo sale la hamburguesa... que ya estaba enviada: cocina no recibe nada de lo pendiente.
+      estacionesReclamadas = []
+      const wrapper = await montarConMoneda()
+      await abrirLaCuenta(wrapper)
+
+      botonEn(drawerMesa(), 'Enviar a cocina')!.click()
+      await esperar(100)
+
+      const aviso = toasts.at(-1)
+      expect(aviso?.title).not.toBe('No hay productos nuevos para enviar')
+      expect(aviso?.description).toContain('Papas fritas')
+      expect(aviso?.description).toContain('Producto demo')
+      expect(aviso?.description).not.toContain('Hamburguesa')
+      const estados = [...drawerMesa()!.querySelectorAll('[data-qa="estado-cocina"]')].map(e => e.textContent?.trim())
+      expect(estados).toEqual(['Sin estación de cocina', 'En cocina', 'Sin estación de cocina'])
+    })
+  })
+
+  // ── 02.6 ──
+  it('02.6: quitar una línea avisa con "Deshacer", y deshacer la vuelve a pedir tal cual estaba', async () => {
+    cuentasDeLaMesa = [cuentaCon([
+      {
+        ...LINEA,
+        id: 'linea-1',
+        itemId: 'item-receta',
+        nombre: 'Hamburguesa',
+        cantidad: '2',
+        personalizacion: {
+          omitidos: ['ing-pepino'],
+          extras: [{ ingredienteItemId: 'ing-queso', cantidad: '1', unidadCodigo: 'unidad', precioExtra: '500', unidades: '2' }],
+          comentario: 'sin sal',
+          grupos: [{ grupoId: 'g-prote', grupoNombre: 'Proteína', opciones: [{ itemId: 'it-pollo', nombre: 'Pollo', cantidad: '1', precioExtra: '0', unidades: '1' }] }],
+        },
+      },
+      { ...LINEA, id: 'linea-2', nombre: 'Bebida' },
+    ])]
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+
+    drawerMesa()!.querySelector<HTMLButtonElement>('button[aria-label="Quitar Hamburguesa"]')!.click()
+    await esperar(60)
+    expect(lineasQuitadas).toEqual(['linea-1'])
+
+    const aviso = toasts.find(t => t.actions?.some(a => a.label === 'Deshacer'))
+    expect(aviso, 'toast con Deshacer').toBeTruthy()
+    aviso!.actions!.find(a => a.label === 'Deshacer')!.onClick!()
+    await esperar(60)
+
+    expect(lineasAgregadas).toHaveLength(1)
+    expect(lineasAgregadas[0]).toMatchObject({
+      itemId: 'item-receta',
+      cantidad: '2',
+      personalizacion: {
+        omitidos: ['ing-pepino'],
+        extras: [{ ingredienteItemId: 'ing-queso', unidades: 2 }],
+        comentario: 'sin sal',
+        grupos: [{ grupoId: 'g-prote', opciones: [{ itemId: 'it-pollo', unidades: 1 }] }],
+      },
+    })
+  })
+
+  // ── 02.12 ──
+  it('02.12: la tarjeta de cada cuenta dice hace cuánto se abrió, sin pedir un cálculo por cuenta', async () => {
+    cuentasDeLaMesa = [
+      cuentaCon([LINEA, { ...LINEA, id: 'linea-2', nombre: 'Bebida' }]),
+      cuentaCon([], { id: 'cuenta-10', numero: 10 }),
+    ]
+    const wrapper = await montarConMoneda()
+    await seleccionarMesa(wrapper)
+    await esperar(80)
+    const tarjetas = [...drawerMesa()!.querySelectorAll<HTMLElement>('.cursor-pointer')]
+    expect(tarjetas).toHaveLength(2)
+    expect(tarjetas[0]!.textContent).toContain('abierta hace 45 min')
+    expect(tarjetas[0]!.textContent).toContain('2 productos')
+    // El monto por tarjeta queda pendiente: pedirlo era un cálculo del motor por cuenta (N+1 de
+    // red); va con un total que devuelva el servidor en la lista, y eso toca el motor.
+    expect(calculosPedidos).toHaveLength(0)
+  })
+
+  it('02.12: en la tablet personal el plano recibe el garzón para marcar sus mesas', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    const wrapper = await montar()
+    expect(wrapper.findComponent({ name: 'SalonesSalonPlano' }).props('miGarzonId')).toBe('g1')
+  })
+
+  // ── 02.15 ──
+  describe('02.15: turno', () => {
+    it('en la tablet personal, la barra dice en qué turno está y ofrece salir, no entrar', async () => {
+      vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+      sesionActivaMock = { id: 's1', garzonNombre: 'Ana', turnoNombre: 'Mañana', inicioEl: '2026-10-16T11:12:00.000Z', cuentasAbiertas: 2 }
+      const wrapper = await montar()
+      await esperar(30)
+      expect(bodiesSesionActiva[0]).not.toHaveProperty('pin')
+      expect(wrapper.text()).toContain('En turno: Mañana')
+      const botones = wrapper.findAll('button').map(b => b.text())
+      expect(botones).toContain('Salir de turno')
+      expect(botones).not.toContain('Entrar a turno')
+    })
+
+    it('"Salir de turno" pide confirmar y dice cuántas mesas quedan abiertas; no cierra hasta confirmar', async () => {
+      vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+      sesionActivaMock = { id: 's1', garzonNombre: 'Ana', turnoNombre: 'Mañana', inicioEl: '2026-10-16T11:12:00.000Z', cuentasAbiertas: 2 }
+      const wrapper = await montar()
+      await esperar(30)
+
+      wrapper.findAll('button').find(b => b.text() === 'Salir de turno')!.trigger('click')
+      await esperar(60)
+      expect(cierresDeSesion, 'todavía no cerró').toBe(0)
+      const modal = dialogos().find(d => d.textContent?.includes('¿Salir de turno?'))
+      expect(modal, 'modal de confirmación').toBeTruthy()
+      expect(modal!.textContent).toContain('2 cuentas abiertas')
+
+      botonEn(modal, 'Volver')!.click()
+      await esperar(30)
+      expect(cierresDeSesion).toBe(0)
+
+      wrapper.findAll('button').find(b => b.text() === 'Salir de turno')!.trigger('click')
+      await esperar(60)
+      botonEn(dialogos().find(d => d.textContent?.includes('¿Salir de turno?')), 'Salir de turno')!.click()
+      await esperar(60)
+      expect(cierresDeSesion).toBe(1)
+      expect(wrapper.text()).not.toContain('En turno: Mañana')
+    })
+
+    it('en el tótem compartido la confirmación va antes del teclado de PIN', async () => {
+      const wrapper = await montar()
+      wrapper.findAll('button').find(b => b.text() === 'Salir de turno')!.trigger('click')
+      await esperar(60)
+      expect(tecladoPin(), 'sin PIN todavía').toBeUndefined()
+      botonEn(dialogos().find(d => d.textContent?.includes('¿Salir de turno?')), 'Salir de turno')!.click()
+      await esperar(60)
+      expect(tecladoPin(), 'ahora sí el PIN').toBeTruthy()
+    })
+
+    it('al entrar a turno la barra pasa a decir en cuál', async () => {
+      vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+      const wrapper = await montar()
+      await esperar(30)
+      expect(wrapper.text()).not.toContain('En turno:')
+      wrapper.findAll('button').find(b => b.text() === 'Entrar a turno')!.trigger('click')
+      await esperar(60)
+      botonEn(dialogos().find(d => d.textContent?.includes('Selecciona el turno')), 'Continuar')!.click()
+      await esperar(80)
+      expect(wrapper.text()).toContain('En turno: Mañana')
+    })
+  })
+
+  // ── 02.17 ──
+  it('02.17: el aviso de PIN no pinta de alerta ámbar y se puede descartar', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    miPinMock = { fijado: false, eventos: [] }
+    const wrapper = await montar()
+    await esperar(30)
+    expect(wrapper.text()).toContain('Todavía no tienes PIN')
+    expect(wrapper.html()).not.toMatch(/bg-warning|text-warning/)
+    const cerrar = wrapper.find('button[aria-label="Close"], button[aria-label="Cerrar"]')
+    expect(cerrar.exists(), 'botón para descartarlo').toBe(true)
+    await cerrar.trigger('click')
+    await esperar(30)
+    expect(wrapper.text()).not.toContain('Todavía no tienes PIN')
+  })
+
+  // ── 02.24 ──
+  describe('02.24: refresco del plano', () => {
+    it('al volver el foco a la pestaña se vuelve a leer el plano, una sola vez por vuelta', async () => {
+      await montar()
+      expect(lecturasPlano).toBe(1)
+      document.dispatchEvent(new Event('visibilitychange'))
+      await esperar(30)
+      expect(lecturasPlano).toBe(2)
+    })
+
+    it('el botón "Actualizar" lo vuelve a leer, y un error avisa sin reintentar', async () => {
+      const wrapper = await montar()
+      wrapper.findAll('button').find(b => b.text() === 'Actualizar')!.trigger('click')
+      await esperar(30)
+      expect(lecturasPlano).toBe(2)
+    })
+
+    it('el plano que llega pisa la ocupación vieja de las mesas', async () => {
+      const wrapper = await montar()
+      expect(wrapper.findComponent({ name: 'SalonesSalonPlano' }).props('mesas')[0].ocupada).toBe(false)
+      salonesMock = [{ id: 'salon-1', nombre: 'Principal', mesas: [{ ...mesa(), cuentasAbiertas: 1, ocupada: true }] }]
+      wrapper.findAll('button').find(b => b.text() === 'Actualizar')!.trigger('click')
+      await esperar(30)
+      expect(wrapper.findComponent({ name: 'SalonesSalonPlano' }).props('mesas')[0].ocupada).toBe(true)
+    })
+  })
+
+  // ── 02.29 ──
+  it('02.29: "Tomar cuenta" no se ofrece sobre la cuenta que ya es del garzón', async () => {
+    vinculoPersonal = { garzonId: 'g1', nombre: 'Ana' }
+    cuentasDeLaMesa = [cuentaCon([LINEA])]
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+    expect(botonEn(drawerMesa(), 'Tomar cuenta')).toBeUndefined()
+    const yaEs = botonEn(drawerMesa(), 'Ya eres el responsable')
+    expect(yaEs?.disabled).toBe(true)
+  })
+
+  it('02.29: sobre la cuenta de otro, "Tomar cuenta" sigue activo', async () => {
+    vinculoPersonal = { garzonId: 'g2', nombre: 'Bruno' }
+    cuentasDeLaMesa = [cuentaCon([LINEA])]
+    const wrapper = await montarConMoneda()
+    await abrirLaCuenta(wrapper)
+    expect(botonEn(drawerMesa(), 'Tomar cuenta')?.disabled).toBe(false)
+  })
+
+  // ── 02.30 ──
+  it('02.30: tras entrar a turno por una cuenta que no se pudo abrir, el aviso trae el botón para abrirla', async () => {
+    sinSesionDeTrabajo = true
+    const wrapper = await montar()
+    await seleccionarMesa(wrapper)
+    await rondaDePin()
+    expect(postsAbrirCuenta).toHaveLength(1)
+
+    sinSesionDeTrabajo = false
+    botonEn(dialogos().find(d => d.textContent?.includes('Entrar a turno')), 'Continuar')!.click()
+    await esperar(30)
+    botonEn(tecladoPin(), 'Ana')!.click()
+    await esperar(10)
+    for (let i = 0; i < 6; i++) {
+      botonEn(tecladoPin(), '1')!.click()
+      await esperar(1)
+    }
+    await esperar(300)
+
+    const entro = toasts.find(t => (t.title ?? '').startsWith('Sesión iniciada'))
+    const accion = entro?.actions?.find(a => a.label === 'Abrir la cuenta')
+    expect(accion, 'botón en el aviso').toBeTruthy()
+    // Sin reintento automático: hasta que la persona lo toca, no se abrió nada.
+    expect(postsAbrirCuenta).toHaveLength(1)
+    accion!.onClick!()
+    await esperar(40)
+    expect(tecladoPin(), 'pide el PIN de la cuenta, como "Nueva cuenta"').toBeTruthy()
+  })
+
+  // ── 02.33 ──
+  it('02.33: "¿Te pidieron firmar un cierre?" vive en el menú "Más", no en la barra', async () => {
+    const wrapper = await montar()
+    expect(wrapper.findAll('button').some(b => b.text() === '¿Te pidieron firmar un cierre?')).toBe(false)
+    await wrapper.findAll('button').find(b => b.text() === 'Más')!.trigger('click')
+    await esperar(30)
+    const item = [...document.body.querySelectorAll('[role="menuitem"]')]
+      .find(el => el.textContent?.trim() === '¿Te pidieron firmar un cierre?')
+    expect(item, 'entrada del menú').toBeTruthy()
+    ;(item as HTMLElement).click()
+    await esperar(40)
+    expect(tecladoPin(), 'pide el PIN').toBeTruthy()
   })
 })

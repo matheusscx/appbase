@@ -148,7 +148,7 @@ function ponerReadonly(e: Event) {
           type="tel"
           autocomplete="tel"
           readonly
-          placeholder="+56 9 ..."
+          placeholder="+56 9 1234 5678"
           @focusin="quitarReadonly"
           @focusout="ponerReadonly"
         />

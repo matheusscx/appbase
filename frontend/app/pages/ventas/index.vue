@@ -8,6 +8,7 @@ import {
   type EmisorDocumento,
   type FiltroDocumento,
 } from '~/composables/useDocumentosVenta'
+import { hoyLocal } from '~/composables/useVigenciaRegla'
 
 definePageMeta({ middleware: 'auth', layout: 'dashboard' })
 
@@ -54,10 +55,50 @@ const filtroEstado = ref<string | undefined>()
 const filtroCanal = ref<string | undefined>()
 const filtroDocumento = ref<FiltroDocumento | undefined>()
 
+// La pantalla parte en "Hoy" (owner, 2026-10-16): la cajera que mira el historial quiere lo del día, no
+// contar filas entre todo lo vendido. Arranca optimista con el reloj del navegador y se corrige cuando
+// llega el día de negocio del servidor (si la jornada corta a las 05:00, a la 01:00 "hoy" sigue siendo
+// ayer): mismo patrón que `reportes/varianza.vue`. Si ya tocó el rango, no se pisa.
+const hoyLocalInicial = hoyLocal()
+const filtroDesde = ref<string | null>(hoyLocalInicial)
+const filtroHasta = ref<string | null>(hoyLocalInicial)
+const { diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
+
+async function ajustarAlDiaDeNegocio() {
+  await cargarDiaNegocio()
+  if (!diaNegocioHoy.value || diaNegocioHoy.value === hoyLocalInicial) return
+  if (filtroDesde.value !== hoyLocalInicial || filtroHasta.value !== hoyLocalInicial) return
+  filtroDesde.value = diaNegocioHoy.value
+  filtroHasta.value = diaNegocioHoy.value
+}
+const hoy = computed(() => diaNegocioHoy.value ?? hoyLocalInicial)
+const rangoEsHoy = computed(() => filtroDesde.value === hoy.value && filtroHasta.value === hoy.value)
+
+// El folio se busca con un retardo corto (como el catálogo): cada tecla no pide una lista nueva.
+// Es exacto, y un folio puede ser de cualquier día: mientras hay uno, el rango no se aplica a la lista.
+const folioTexto = ref('')
+const filtroFolio = ref<string | undefined>()
+let esperaFolio: ReturnType<typeof setTimeout> | null = null
+watch(folioTexto, (texto) => {
+  if (esperaFolio) clearTimeout(esperaFolio)
+  esperaFolio = setTimeout(() => {
+    esperaFolio = null
+    filtroFolio.value = texto.trim() || undefined
+  }, 400)
+})
+onBeforeUnmount(() => { if (esperaFolio) clearTimeout(esperaFolio) })
+
+const rangoParams = computed(() => ({
+  desde: filtroDesde.value ?? undefined,
+  hasta: filtroHasta.value ?? undefined,
+}))
+
 const listFilters = computed(() => ({
   estado: filtroEstado.value,
   canal: filtroCanal.value,
   documento: filtroDocumento.value,
+  folio: filtroFolio.value,
+  ...(filtroFolio.value ? {} : rangoParams.value),
 }))
 
 const { items: ventas, meta, page, loading, error, sinPermiso, fetch: fetchVentas } =
@@ -81,7 +122,7 @@ const hayNotas = computed(() =>
 const drawerOpen = ref(false)
 const ventaSeleccionadaId = ref<string | null>(null)
 
-const { estadoColor, estadoLabel, estadoOptions } = useEstadoVenta()
+const { estadoColor, estadoLabel, estadoOptions, canalLabel } = useEstadoVenta()
 
 // La devolución interna no lleva el badge de emisores: su fila `nadie` no es un
 // faltante. La nota de crédito sí lleva el de su documento: "Sin número" la trae
@@ -103,26 +144,33 @@ function badgeReembolso(v: VentaResumen): { label: string, color: 'warning' | 'i
     : { label: 'Reemb. parcial', color: 'warning' }
 }
 
-function canalLabel(canal: string): string {
-  const map: Record<string, string> = {
-    fisico: 'Físico',
-    online: 'Online',
-  }
-  return map[canal] ?? canal
-}
-
 const canalOptions = [
   { label: 'Físico', value: 'fisico' },
   { label: 'Online', value: 'online' },
 ]
 
-const hayFiltrosActivos = computed(() => !!filtroEstado.value || !!filtroCanal.value || !!filtroDocumento.value)
+const hayFiltrosActivos = computed(() =>
+  !!filtroEstado.value || !!filtroCanal.value || !!filtroDocumento.value || !!filtroFolio.value || !rangoEsHoy.value,
+)
 
+// "Limpiar" vuelve a como abre la pantalla: hoy, sin nada más.
 function limpiarFiltros() {
   filtroEstado.value = undefined
   filtroCanal.value = undefined
   filtroDocumento.value = undefined
+  folioTexto.value = ''
+  filtroFolio.value = undefined
+  filtroDesde.value = hoy.value
+  filtroHasta.value = hoy.value
 }
+
+const etiquetaPeriodo = computed(() => {
+  if (rangoEsHoy.value) return 'de hoy'
+  return filtroDesde.value || filtroHasta.value ? 'del período' : 'registradas'
+})
+const textoVacio = computed(() =>
+  rangoEsHoy.value ? 'Todavía no hay ventas hoy.' : 'No hay ventas registradas.',
+)
 
 // El "—" es solo de la carga inicial: una recarga (tras un cobro, una anulación
 // o una NC desde el drawer) deja a la vista los valores de antes hasta que llega
@@ -137,7 +185,11 @@ async function cargarResumen() {
   const pedido = ++pedidoResumen
   loadingResumen.value = true
   try {
-    const nuevo = await useApiFetch<VentasResumenKpi>(`${apiUrl}/ventas/resumen`)
+    const query = new URLSearchParams()
+    if (filtroDesde.value) query.set('desde', filtroDesde.value)
+    if (filtroHasta.value) query.set('hasta', filtroHasta.value)
+    const sufijo = query.size ? `?${query}` : ''
+    const nuevo = await useApiFetch<VentasResumenKpi>(`${apiUrl}/ventas/resumen${sufijo}`)
     if (pedido === pedidoResumen) resumen.value = nuevo
   }
   catch (e: unknown) {
@@ -191,8 +243,12 @@ function abrirDesdeQuery() {
   if (typeof id === 'string' && id) abrirDetalle(id)
 }
 
+// Las tarjetas miden el mismo rango que la lista.
+watch([filtroDesde, filtroHasta], () => { void cargarResumen() })
+
 onMounted(() => {
   cargarResumen()
+  void ajustarAlDiaDeNegocio()
   abrirDesdeQuery()
   // `GET /caja/activa` pide `MiCaja:Leer` (`CajaController`), que esta
   // pantalla no exige (solo `Ventas:Leer`) — sin el `.catch`, un rol que ve
@@ -233,7 +289,7 @@ const columns: TableColumn<VentaResumen>[] = [
         <div class="grid grid-cols-2 sm:grid-cols-3 gap-4">
           <div class="rounded-lg bg-muted p-3">
             <p class="text-xs text-muted">
-              Ventas registradas
+              Ventas {{ etiquetaPeriodo }}
             </p>
             <p class="text-lg font-semibold mt-1">
               <template v-if="cargandoInicial">
@@ -277,7 +333,30 @@ const columns: TableColumn<VentaResumen>[] = [
         </div>
 
         <!-- Filtros -->
+        <AppRangoFechas
+          v-model:desde="filtroDesde"
+          v-model:hasta="filtroHasta"
+          :disabled="!!filtroFolio"
+          qa="ventas-rango"
+        />
         <div class="flex flex-wrap items-center gap-3">
+          <UInput
+            v-model="folioTexto"
+            icon="i-lucide-search"
+            placeholder="Buscar por folio…"
+            class="w-56"
+          >
+            <template v-if="folioTexto" #trailing>
+              <UButton
+                icon="i-lucide-x"
+                color="neutral"
+                variant="link"
+                size="sm"
+                aria-label="Borrar folio"
+                @click="() => { folioTexto = '' }"
+              />
+            </template>
+          </UInput>
           <USelect
             v-model="filtroEstado"
             :items="estadoOptions"
@@ -314,7 +393,7 @@ const columns: TableColumn<VentaResumen>[] = [
           :error="error"
           :sin-permiso="sinPermiso"
           recurso="las ventas"
-          vacio="No hay ventas registradas."
+          :vacio="textoVacio"
           filtrado-texto="Ninguna venta coincide con los filtros."
           :filtrado="hayFiltrosActivos"
           @reintentar="fetchVentas"

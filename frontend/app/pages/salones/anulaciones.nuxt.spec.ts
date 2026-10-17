@@ -141,6 +141,9 @@ let resolverOptimista: ((v: typeof RESUMEN) => void) | null = null
 /** Lote 7: con un status puesto, esa ruta contesta con ese error (500 = se cayó, 403 = sin permiso). */
 let falloResumen: number | null = null
 let falloListado: number | null = null
+/** Auditoría UX 02.21: los garzones del local (`GET /garzones`), con uno que no tiene anulaciones en el rango. */
+let garzonesDelLocal: { id: string, nombre: string }[] = []
+let garzonesFalla403 = false
 
 mockNuxtImport('usePermissionsStore', () => {
   return () => ({
@@ -171,6 +174,10 @@ mockNuxtImport('useApiFetch', () => {
         data: LISTADO,
         meta: { page: 1, pageSize: 15, total: LISTADO.length, totalPages: 1 },
       })
+    }
+    if (url.endsWith('/garzones')) {
+      if (garzonesFalla403) return Promise.reject({ status: 403 })
+      return Promise.resolve(garzonesDelLocal)
     }
     if (url.includes('/motivos-baja')) {
       return Promise.resolve([MOTIVO_CORTESIA, MOTIVO_MERMA, MOTIVO_NO_ELABORADO])
@@ -226,6 +233,12 @@ beforeEach(() => {
   resolverOptimista = null
   falloResumen = null
   falloListado = null
+  garzonesDelLocal = [
+    { id: 'garzon-ana', nombre: 'Ana' },
+    { id: 'garzon-beto', nombre: 'Beto' },
+    { id: 'garzon-carla', nombre: 'Carla' },
+  ]
+  garzonesFalla403 = false
 })
 
 describe('anulaciones — resumen', () => {
@@ -598,5 +611,76 @@ describe('anulaciones — un fallo no se ve como un reporte en ceros (lote 7, 02
     expect(wrapper.text()).not.toContain('No hay anulaciones')
     expect(wrapper.text()).toContain('No pudimos cargar las anulaciones')
     wrapper.unmount()
+  })
+})
+
+// Auditoría UX 02.21 y 02.32.
+describe('anulaciones — auditoría UX grupo 02', () => {
+  const valores = (wrapper: Wrapper, cualquiera: string) =>
+    ((selectConOpcion(wrapper, cualquiera).props('items') ?? []) as { value: string }[]).map(i => i.value)
+
+  it('02.21: el filtro de garzones lista a los del local, también a quien no tiene anulaciones en el rango', async () => {
+    const wrapper = await montar()
+    expect(valores(wrapper, 'garzon-ana')).toEqual(expect.arrayContaining(['todos', 'garzon-ana', 'garzon-beto', 'garzon-carla']))
+    wrapper.unmount()
+  })
+
+  it('02.21: al elegir un garzón, el filtro no se achica a ese garzón', async () => {
+    resumenDispatcher = (url) => {
+      const garzonId = new URL(url, 'http://x').searchParams.get('garzonId')
+      return Promise.resolve(garzonId
+        ? { ...RESUMEN, porGarzon: RESUMEN.porGarzon.filter(g => g.garzonId === garzonId) }
+        : RESUMEN)
+    }
+    const wrapper = await montar()
+    await emitir(selectConOpcion(wrapper, 'garzon-ana'), 'garzon-ana')
+    expect(valores(wrapper, 'garzon-ana')).toEqual(expect.arrayContaining(['garzon-beto', 'garzon-carla']))
+    wrapper.unmount()
+  })
+
+  it('02.21: si no se puede leer la lista de garzones, quedan los que trae el resumen', async () => {
+    garzonesFalla403 = true
+    const wrapper = await montar()
+    const v = valores(wrapper, 'garzon-ana')
+    expect(v).toEqual(expect.arrayContaining(['garzon-ana', 'garzon-beto']))
+    expect(v).not.toContain('garzon-carla')
+    wrapper.unmount()
+  })
+
+  it('02.32: lo mismo se llama igual en el filtro, la tarjeta y la etiqueta: "Comida del personal"', async () => {
+    const wrapper = await montar()
+    const tipos = (selectConOpcion(wrapper, 'consumo_personal').props('items') as { label: string }[]).map(i => i.label)
+    expect(tipos).toContain('Comida del personal')
+    expect(tipos).not.toContain('Personal')
+    wrapper.unmount()
+  })
+
+  it('02.32: una tarjeta en cero se encoge: solo "0 platos", sin precio ni costo', async () => {
+    resumenDispatcher = () => Promise.resolve({
+      ...RESUMEN,
+      porTipo: RESUMEN.porTipo.filter(t => t.tipo === 'cortesia'),
+    })
+    const wrapper = await montar()
+    const tarjeta = (titulo: string) => wrapper.findAll('div.rounded-lg').find(d => d.text().startsWith(titulo))?.text() ?? ''
+    expect(tarjeta('Mermas en mesa')).toContain('0 platos')
+    expect(tarjeta('Mermas en mesa')).not.toContain('Precio de carta')
+    expect(tarjeta('Cortesías')).toContain('Precio de carta')
+    wrapper.unmount()
+  })
+
+  it('02.32: el aviso de mermas aparece solo si el rango tiene mermas, y lleva a Mermas', async () => {
+    const wrapper = await montar()
+    const enlace = wrapper.findAll('a').find(a => a.attributes('href') === '/mermas')
+    expect(wrapper.text()).toContain('Las mermas de esta lista también están contadas en Mermas.')
+    expect(enlace, 'enlace a Mermas').toBeTruthy()
+    wrapper.unmount()
+
+    resumenDispatcher = () => Promise.resolve({
+      ...RESUMEN,
+      porTipo: RESUMEN.porTipo.filter(t => t.tipo !== 'merma'),
+    })
+    const sinMermas = await montar()
+    expect(sinMermas.text()).not.toContain('también están contadas en Mermas')
+    sinMermas.unmount()
   })
 })

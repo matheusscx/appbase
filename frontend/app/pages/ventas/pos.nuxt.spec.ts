@@ -1075,3 +1075,126 @@ describe('ventas/pos — Cobrar con un cálculo que falla dice por qué', () => 
     expect(wrapper.findComponent({ name: 'VentasCobroModal' }).props('open')).toBe(false)
   })
 })
+
+describe('ventas/pos — hallazgos de la auditoría UX 01 (grupo POS)', () => {
+  const palta = {
+    id: 'item-1',
+    nombre: 'Palta',
+    descripcion: null,
+    precioBase: '1000',
+    monedaId: 'clp',
+    monedaSimbolo: '$',
+    stock: '10',
+    stockDisponible: '10.0000',
+    unidadMedida: 'unidad',
+    tipo: 'producto',
+    activo: true,
+  }
+  const bebida = { ...palta, id: 'item-2', nombre: 'Bebida' }
+
+  async function conCaja(items: unknown[]) {
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    itemsCatalogoMock = items
+    const wrapper = await montar()
+    await esperar(20)
+    return wrapper
+  }
+  const lineasDelCarrito = (wrapper: Awaited<ReturnType<typeof montar>>) =>
+    wrapper.findComponent({ name: 'VentasCarritoPanel' }).props('lineas') as { item: { id: string } }[]
+
+  it('01.23: quitar una línea avisa con "Deshacer", y Deshacer la devuelve a su lugar', async () => {
+    const wrapper = await conCaja([palta, bebida])
+    const grilla = wrapper.findComponent({ name: 'VentasCatalogoGrid' })
+    grilla.vm.$emit('add', palta)
+    grilla.vm.$emit('add', bebida)
+    await esperar(20)
+    expect(lineasDelCarrito(wrapper).map(l => l.item.id)).toEqual(['item-1', 'item-2'])
+
+    wrapper.findComponent({ name: 'VentasCarritoPanel' }).vm.$emit('quitar', 0)
+    await esperar(20)
+
+    expect(lineasDelCarrito(wrapper).map(l => l.item.id)).toEqual(['item-2'])
+    const aviso = toasts.find(t => t.title === 'Quitaste Palta')
+    expect(aviso, 'el aviso de la línea quitada').toBeTruthy()
+    expect(aviso!.actions?.map(a => a.label)).toEqual(['Deshacer'])
+
+    ;(aviso!.actions![0] as unknown as { onClick: () => void }).onClick()
+    await esperar(20)
+    expect(lineasDelCarrito(wrapper).map(l => l.item.id)).toEqual(['item-1', 'item-2'])
+  })
+
+  it('01.12: si el recálculo falla, el carrito lo dice y deja recalcular', async () => {
+    totalCalculoMock = '1000'
+    const wrapper = await conCaja([palta])
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', palta)
+    await esperar(500)
+    expect(wrapper.find('[data-qa="aviso-calculo-carrito"]').exists()).toBe(false)
+
+    calculoFallaCon = new Error('fetch failed')
+    wrapper.findComponent({ name: 'VentasCarritoPanel' }).vm.$emit('cambiar-cantidad', 0, { presentacion: '2', unidadCodigo: 'unidad', cantidadCanonica: '2' })
+    await esperar(500)
+    expect(wrapper.find('[data-qa="aviso-calculo-carrito"]').exists()).toBe(true)
+
+    calculoFallaCon = null
+    totalCalculoMock = '2000'
+    wrapper.findComponent({ name: 'VentasCarritoPanel' }).vm.$emit('recalcular')
+    await esperar(50)
+    expect(wrapper.find('[data-qa="aviso-calculo-carrito"]').exists()).toBe(false)
+  })
+
+  it('01.25: Enter con la búsqueda en un solo ítem lo agrega y limpia el buscador', async () => {
+    const wrapper = await conCaja([palta])
+    const grilla = wrapper.findComponent({ name: 'VentasCatalogoGrid' })
+    grilla.vm.$emit('update:busqueda', '7801234')
+    grilla.vm.$emit('buscar-enter')
+    await esperar(80)
+
+    expect(lineasDelCarrito(wrapper).map(l => l.item.id)).toEqual(['item-1'])
+    expect(grilla.props('busqueda')).toBe('')
+  })
+
+  it('01.25: si la búsqueda coincide con varios, Enter deja la lista y no agrega', async () => {
+    const wrapper = await conCaja([palta, bebida])
+    const grilla = wrapper.findComponent({ name: 'VentasCatalogoGrid' })
+    grilla.vm.$emit('update:busqueda', 'a')
+    grilla.vm.$emit('buscar-enter')
+    await esperar(80)
+
+    expect(lineasDelCarrito(wrapper)).toHaveLength(0)
+    expect(grilla.props('busqueda')).toBe('a')
+  })
+
+  it('01.25: Enter con el buscador vacío no hace nada', async () => {
+    const wrapper = await conCaja([palta])
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('buscar-enter')
+    await esperar(80)
+
+    expect(lineasDelCarrito(wrapper)).toHaveLength(0)
+  })
+
+  it('01.15: cobrar sin impresora de boletas avisa que no salió papel', async () => {
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    impresorasBoleta = []
+    ventaBoletaMock = {
+      ventaId: 'venta-1',
+      cajero: 'Ana',
+      items: [{ descripcion: 'Palta', cantidad: '1', cantidadPresentacion: null, unidadCodigoPresentacion: null, unidadCodigoBase: 'unidad', precioUnitario: '4000', totalLinea: '4000' }],
+      totales: { subtotalNeto: '4000', totalDescuentos: '0', totalRecargos: '0', totalImpuestos: '0', totalFinal: '4000' },
+      impuestos: [],
+      promociones: [],
+      propina: null,
+      pagos: [{ nombre: 'Efectivo', monto: '4000' }],
+      vuelto: null,
+      customer: null,
+      boletaElectronica: null,
+      boletaSinEmitir: null,
+    }
+    const wrapper = await montar()
+    wrapper.findComponent({ name: 'VentasCobroModal' }).vm.$emit('confirmar', [{ metodoPagoId: 'mp-efectivo', monto: '4000' }], '0')
+    await esperar(50)
+
+    expect(bodiesDeVenta).toHaveLength(1)
+    expect(toasts.some(t => t.title === 'La venta quedó registrada, pero no hay impresora de boletas configurada')).toBe(true)
+  })
+})

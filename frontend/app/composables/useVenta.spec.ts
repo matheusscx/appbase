@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest'
 import {
   agregarLinea,
   quitarLinea,
+  restaurarLinea,
+  puedeAgregarItem,
   setCantidad,
   setCantidadPresentacion,
   setUnidades,
@@ -376,6 +378,32 @@ describe('carrito helpers', () => {
     const r = quitarLinea(lineas, 0)
     expect(r).toHaveLength(1)
     expect(r[0]!.item.id).toBe('b')
+  })
+
+  it('restaurarLinea devuelve la línea quitada a su lugar, con todo lo que traía (01.23)', () => {
+    const receta: CarritoLinea = {
+      item: item('b'),
+      cantidad: '2',
+      personalizacionResumen: 'Sin cebolla',
+    }
+    const lineas: CarritoLinea[] = [{ item: item('a'), cantidad: '1' }, receta, { item: item('c'), cantidad: '1' }]
+    const sin = quitarLinea(lineas, 1)
+    const r = restaurarLinea(sin, receta, 1)
+    expect(r.map(l => l.item.id)).toEqual(['a', 'b', 'c'])
+    expect(r[1]).toBe(receta)
+    expect(sin).toHaveLength(2)
+  })
+
+  it('restaurarLinea al final si el carrito cambió y el índice ya no existe', () => {
+    const quitada: CarritoLinea = { item: item('z'), cantidad: '1' }
+    const r = restaurarLinea([{ item: item('a'), cantidad: '1' }], quitada, 5)
+    expect(r.map(l => l.item.id)).toEqual(['a', 'z'])
+  })
+
+  it('puedeAgregarItem: un producto sin stock no, una receta siempre', () => {
+    expect(puedeAgregarItem({ ...item('p'), stock: '0', stockDisponible: '0' })).toBe(false)
+    expect(puedeAgregarItem({ ...item('p'), stock: '3', stockDisponible: '1' })).toBe(true)
+    expect(puedeAgregarItem({ ...item('r'), tipo: 'receta', stock: null, stockDisponible: null })).toBe(true)
   })
 
   it('setCantidad reemplaza la cantidad de la línea por índice', () => {

@@ -81,10 +81,10 @@ sesiones abiertas.
 |---|---|---|---|
 | POST | `/sesiones-garzon/iniciar` | `Operar` | `{ garzonId?, pin?, turnoId }` → abre sesión |
 | POST | `/sesiones-garzon/cerrar` | `Operar` | `{ garzonId?, pin? }` → cierra sesión abierta |
-| POST | `/sesiones-garzon/activa` | `Operar` | `{ garzonId?, pin? }` → sesión abierta o `null` |
+| POST | `/sesiones-garzon/activa` | `Operar` | `{ garzonId?, pin? }` → sesión abierta (con `cuentasAbiertas`: las que tiene a su nombre) o `null` |
 | GET | `/garzones/para-selector?enTurno=` | `Operar` | Las dos listas del selector. `enTurno` **obligatorio** |
 | POST | `/garzones/verificar-pin` | `Operar` | `{ garzonId, pin }` → valida **sin ejecutar nada** |
-| GET | `/sesiones-garzon/abiertas` | `Leer` | Sesiones abiertas del tenant |
+| GET | `/sesiones-garzon/abiertas` | `Leer` | Sesiones abiertas del tenant, cada una con `cuentasAbiertas` (cuentas abiertas a su nombre, en la misma consulta) |
 | GET | `/sesiones-garzon` | `Leer` | Historial paginado (`garzonId`, `turnoId`, `estado`, `desde`, `hasta`) |
 | POST | `/sesiones-garzon/:id/cerrar` | `Actualizar` | Cierre admin (sin PIN); registra `cerrada_por_usuario_id` |
 
@@ -271,9 +271,19 @@ Restricción efectiva: una sola sesión `abierta` por `(tenant_id, garzon_id)`.
 - **Módulo → Sesiones**: `pages/sesiones-garzon.vue` — abiertas + forzar cierre +
   historial filtrado (tabs). Ruta antigua `/configuracion/sesiones-garzon` redirige.
   Tras forzar un cierre con mesas abiertas ofrece transferirlas por admin.
+  Desde el 2026-10-16 (auditoría UX 02.22 y 02.35) trae "Actualizar" con la hora de la
+  última lectura, la columna "Mesas abiertas", "hace 3 h" bajo el inicio, el conteo de
+  mesas en la confirmación de "Forzar cierre" y un aviso si no cargan los filtros del
+  historial. Sin refresco automático.
 - **Salones**: `pages/salones/index.vue` — “Entrar a turno” / “Salir de turno”
   con `GarzonPinModal`; toast si falta sesión al abrir/cerrar cuenta. Al salir de
-  turno con mesas abiertas ofrece transferirlas por PIN.
+  turno con mesas abiertas ofrece transferirlas por PIN. Desde el 2026-10-16 (02.15):
+  en la tablet personal la barra dice "En turno: Mañana · desde 08:12" (lee
+  `/sesiones-garzon/activa` al entrar) y deja solo "Salir de turno"; salir pide
+  confirmar antes del PIN y dice cuántas cuentas quedan abiertas. En el tótem
+  compartido siguen los dos botones (entran varios garzones) y la confirmación va antes
+  del teclado. Si "Nueva cuenta" falló por falta de turno, el aviso de "Sesión iniciada"
+  trae el botón "Abrir la cuenta" (02.30): la acción no se repite sola.
 - `useTransferenciaPendientes()` y `etiquetaCuentaPendiente()` en
   `useSesionesGarzon.ts` — el estado del modal, el bucle de transferencia y la
   línea "Terraza · Mesa 4 — Cuenta 2" que comparten las dos pantallas. El bucle

@@ -299,3 +299,100 @@ describe('CarritoPanel — botones de ícono con nombre', () => {
     expect(wrapper.find('button[aria-label="Quitar Bebida"]').exists()).toBe(true)
   })
 })
+
+describe('CarritoPanel — si el cálculo falla, el total viejo no pasa por bueno (01.12)', () => {
+  const lineas = () => [linea('item-0', 'Papas')]
+
+  async function conError(error: unknown) {
+    const wrapper = await mountSuspended(CarritoPanel, {
+      global: { stubs },
+      props: {
+        lineas: lineas(),
+        resultado: resultadoConAvisoEn(-1, 1),
+        vigente: false,
+        errorCalculo: error,
+        tiposDocumento: [{ id: 'doc-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true, receptorCompleto: false, rutChileno: false, umbralIdentidad: null }],
+        tieneCaja: true,
+        customer: { nombre: '', rut: '', giro: '', direccion: '', comuna: '', telefono: '', email: '', terceroId: null },
+      },
+    })
+    return wrapper
+  }
+
+  it('avisa que no se pudo recalcular y atenúa los totales', async () => {
+    const wrapper = await conError(new Error('Failed to fetch'))
+
+    expect(wrapper.find('[data-qa="aviso-calculo-carrito"]').text()).toContain('No se pudo recalcular el total')
+    expect(wrapper.find('[data-qa="totales-carrito"]').classes()).toContain('opacity-50')
+  })
+
+  it('"Volver a calcular" emite `recalcular`', async () => {
+    const wrapper = await conError(new Error('Failed to fetch'))
+
+    const boton = wrapper.find('[data-qa="aviso-calculo-carrito"]').findAll('button')
+      .find(b => b.text().includes('Volver a calcular'))
+    expect(boton, 'el botón Volver a calcular').toBeTruthy()
+    await boton!.trigger('click')
+
+    expect(wrapper.emitted('recalcular')).toHaveLength(1)
+  })
+
+  it('sin error no hay aviso y los totales se ven a plena intensidad', async () => {
+    const wrapper = await conError(null)
+
+    expect(wrapper.find('[data-qa="aviso-calculo-carrito"]').exists()).toBe(false)
+    expect(wrapper.find('[data-qa="totales-carrito"]').classes()).not.toContain('opacity-50')
+  })
+})
+
+describe('CarritoPanel — la línea cabe en un carrito angosto (01.13)', () => {
+  it('el nombre puede ocupar dos líneas y no se corta con puntos', async () => {
+    const wrapper = await montar({
+      lineas: [linea('item-0', 'Hamburguesa doble con queso y tocino')],
+      resultado: resultadoConAvisoEn(-1, 1),
+      vigente: true,
+    })
+
+    const nombre = wrapper.findAll('li p').find(p => p.text().includes('Hamburguesa'))
+    expect(nombre!.classes()).toContain('line-clamp-2')
+    expect(nombre!.classes()).not.toContain('truncate')
+  })
+
+  it('la unidad no se repite junto al precio unitario: ya la dice el selector de cantidad', async () => {
+    const wrapper = await montar({
+      lineas: [linea('item-0', 'Papas')],
+      resultado: resultadoConAvisoEn(-1, 1),
+      vigente: true,
+    })
+
+    const fila = wrapper.find('li').text()
+    expect(fila).toContain('c/u')
+    expect(fila).not.toMatch(/c\/u\s*·/)
+  })
+})
+
+describe('CarritoPanel — no muestra filas en cero (01.24)', () => {
+  const conTotales = (over: Partial<ResultadoVenta['totales']>) => {
+    const r = resultadoConAvisoEn(-1, 1)
+    return { ...r, totales: { ...r.totales, ...over } }
+  }
+
+  it('Descuentos y Recargos en 0 no salen', async () => {
+    const wrapper = await montar({ lineas: [linea('item-0', 'Papas')], resultado: conTotales({}), vigente: true })
+
+    expect(wrapper.text()).not.toContain('Descuentos')
+    expect(wrapper.text()).not.toContain('Recargos')
+    expect(wrapper.text()).toContain('Neto')
+  })
+
+  it('con valor, salen', async () => {
+    const wrapper = await montar({
+      lineas: [linea('item-0', 'Papas')],
+      resultado: conTotales({ totalDescuentos: '500.0000', totalRecargos: '300.0000' }),
+      vigente: true,
+    })
+
+    expect(wrapper.text()).toContain('Descuentos')
+    expect(wrapper.text()).toContain('Recargos')
+  })
+})

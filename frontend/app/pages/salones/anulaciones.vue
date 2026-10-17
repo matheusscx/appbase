@@ -69,7 +69,7 @@ const TIPO_LABELS: Record<TipoMotivoBaja, string> = {
   cortesia: 'Cortesía',
   merma: 'Merma',
   no_elaborado: 'No se hizo',
-  consumo_personal: 'Personal',
+  consumo_personal: 'Comida del personal',
 }
 
 const GRUPO_VACIO: GrupoResumen = { platos: '0', precioCarta: '0', costo: [], sinValorizar: 0 }
@@ -85,6 +85,7 @@ const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatFecha, formatMonto, formatStock, formatCostoPorMoneda, formatPorcentaje } = useFormatters()
 const { pageSize } = useUserPreferences()
+const garzonesApi = useGarzones()
 
 const motivos = ref<MotivoOpt[]>([])
 // La lista pide al montar con el `hoyLocal()` del navegador (arranque
@@ -201,6 +202,7 @@ async function cargarMotivos() {
 }
 
 onMounted(() => {
+  cargarGarzones()
   cargarMotivos()
   cargarResumen()
   ajustarAlDiaDeNegocio()
@@ -219,22 +221,49 @@ const motivosOpts = computed<Opt[]>(() => [
   ...motivos.value.map(m => ({ label: m.nombre, value: m.id })),
 ])
 
-// Las opciones de garzón salen de `resumen.porGarzon`, no de `GET /garzones`:
-// no suma una llamada ni un permiso, y lista justo a quienes tienen algo en
-// el rango filtrado. Sin garzón (`garzonId: null`) no es filtrable — el
-// backend exige un UUID — así que se excluye de las opciones.
-const garzonOpts = computed<Opt[]>(() => [
-  { label: 'Todos los garzones', value: 'todos' },
-  ...(resumen.value?.porGarzon ?? [])
-    .filter((g): g is GrupoPorGarzon & { garzonId: string } => g.garzonId != null)
-    .map(g => ({ label: g.garzonNombre ?? 'Sin garzón', value: g.garzonId })),
-])
+// Las opciones de garzón son las del local (`GET /garzones`), no las del resumen ya filtrado: si
+// salieran del resumen, elegir a uno achicaba la lista a ese uno y para cambiar había que volver a
+// "Todos" (auditoría UX 02.21). Quien no puede leer esa lista (`Salones:Ver todas` sin `Salones:Leer`)
+// se queda con los que el resumen fue trayendo: sin sumar permisos ni errores. Sin garzón
+// (`garzonId: null`) no es filtrable — el backend exige un UUID.
+const garzonesLocal = ref<Opt[]>([])
+const garzonesVistos = ref<Map<string, string>>(new Map())
+
+watch(resumen, (r) => {
+  for (const g of r?.porGarzon ?? []) {
+    if (g.garzonId != null) garzonesVistos.value.set(g.garzonId, g.garzonNombre ?? 'Sin nombre')
+  }
+})
+
+async function cargarGarzones() {
+  try {
+    const lista = await garzonesApi.listar()
+    garzonesLocal.value = (Array.isArray(lista) ? lista : []).map(g => ({ label: g.nombre, value: g.id }))
+  }
+  catch {
+    garzonesLocal.value = []
+  }
+}
+
+const garzonOpts = computed<Opt[]>(() => {
+  const porId = new Map(garzonesLocal.value.map(g => [g.value, g.label]))
+  for (const [id, nombre] of garzonesVistos.value) if (!porId.has(id)) porId.set(id, nombre)
+  return [
+    { label: 'Todos los garzones', value: 'todos' },
+    ...[...porId].map(([value, label]) => ({ label, value })),
+  ]
+})
 
 const tarjetas = computed(() =>
   TARJETAS.map((t) => {
     const grupo = resumen.value?.porTipo.find(g => g.tipo === t.tipo)
     return { ...t, grupo: grupo ?? GRUPO_VACIO, fiscal: grupo?.fiscal ?? null }
   }),
+)
+
+/** El aviso de que las mermas están en otra pantalla solo tiene sentido si este rango tiene mermas. */
+const hayMermas = computed(() =>
+  (resumen.value?.porTipo ?? []).some(g => g.tipo === 'merma' && Number(g.platos) > 0),
 )
 
 function sinValorizarTexto(n: number): string {
@@ -340,18 +369,21 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
             <p class="text-lg font-semibold mt-1">
               {{ loadingResumen ? '…' : `${formatStock(t.grupo.platos)} ${Number(t.grupo.platos) === 1 ? 'plato' : 'platos'}` }}
             </p>
-            <p class="text-sm text-muted mt-1">
-              Precio de carta: {{ loadingResumen ? '…' : formatMonto(t.grupo.precioCarta) }}
-            </p>
-            <p class="text-sm text-muted">
-              Costo: {{ loadingResumen ? '…' : formatCostoPorMoneda(t.grupo.costo) }}
-            </p>
-            <p v-if="t.tipo === 'cortesia'" class="text-sm text-muted" data-qa="anulaciones-iva-cortesias">
-              IVA: {{ loadingResumen ? '…' : formatMonto(t.fiscal?.montoImpuestos ?? '0') }}
-            </p>
-            <p v-if="t.grupo.sinValorizar > 0" class="text-xs text-warning mt-1">
-              {{ sinValorizarTexto(t.grupo.sinValorizar) }}
-            </p>
+            <!-- Sin platos en el rango no hay nada que valorizar: la tarjeta se encoge a su título y su 0. -->
+            <template v-if="loadingResumen || Number(t.grupo.platos) > 0">
+              <p class="text-sm text-muted mt-1">
+                Precio de carta: {{ loadingResumen ? '…' : formatMonto(t.grupo.precioCarta) }}
+              </p>
+              <p class="text-sm text-muted">
+                Costo: {{ loadingResumen ? '…' : formatCostoPorMoneda(t.grupo.costo) }}
+              </p>
+              <p v-if="t.tipo === 'cortesia'" class="text-sm text-muted" data-qa="anulaciones-iva-cortesias">
+                IVA: {{ loadingResumen ? '…' : formatMonto(t.fiscal?.montoImpuestos ?? '0') }}
+              </p>
+              <p v-if="t.grupo.sinValorizar > 0" class="text-xs text-warning mt-1">
+                {{ sinValorizarTexto(t.grupo.sinValorizar) }}
+              </p>
+            </template>
           </div>
         </div>
 
@@ -398,11 +430,16 @@ const columnasAutorizo: TableColumn<GrupoPorAutorizo>[] = [
         </div>
 
         <UAlert
+          v-if="hayMermas"
           color="info"
           variant="subtle"
           icon="i-lucide-info"
           title="Las mermas de esta lista también están contadas en Mermas."
-        />
+        >
+          <template #actions>
+            <UButton to="/mermas" color="neutral" variant="outline" size="sm" label="Ver Mermas" />
+          </template>
+        </UAlert>
 
         <CrudTable
           :data="anulaciones"

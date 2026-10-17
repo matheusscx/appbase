@@ -1,8 +1,7 @@
 <script setup lang="ts">
-import Decimal from 'decimal.js'
-import { stockPedible, type ItemCatalogo } from '~/composables/useVenta'
+import { puedeAgregarItem, stockPedible, tieneStockPedible, type ItemCatalogo } from '~/composables/useVenta'
 
-defineProps<{
+const props = defineProps<{
   items: ItemCatalogo[]
   loading?: boolean
   total: number
@@ -13,36 +12,53 @@ defineProps<{
   sinPermiso?: boolean
   /** Qué decir cuando no hay ítems y nadie buscó nada (la tienda online dice otra cosa que el POS). */
   vacio?: string
+  /**
+   * El mostrador lo prende: el buscador toma el foco al abrir, para que un lector de códigos
+   * escriba directo. Solo con puntero fino (escritorio): en una tablet abriría el teclado en pantalla.
+   */
+  autofocus?: boolean
+  /** Chips de categoría arriba de la búsqueda (hoy solo el salón). Sin ellas no se dibujan. */
+  categorias?: { id: string, nombre: string }[]
 }>()
-const emit = defineEmits<{ add: [item: ItemCatalogo], reintentar: [] }>()
+const emit = defineEmits<{
+  add: [item: ItemCatalogo]
+  reintentar: []
+  /** Enter en el buscador: lo que manda un lector de códigos al terminar de leer. */
+  'buscar-enter': []
+}>()
+
+const buscador = useTemplateRef('buscador')
+onMounted(() => {
+  if (!props.autofocus) return
+  if (!window.matchMedia?.('(hover: hover) and (pointer: fine)').matches) return
+  buscador.value?.inputRef?.focus()
+})
 
 const { esMonedaExtranjera, convertirAMonedaOficial, monedaOficial } = useMonedaConversion()
 const { formatStock } = useFormatters()
 // El servidor busca, ordena (`orden=disponibilidad`) y pagina: la grilla solo pinta.
 const busqueda = defineModel<string>('busqueda', { default: '' })
 const page = defineModel<number>('page', { default: 1 })
+/** La categoría elegida (`id`), o `null` para todas. */
+const categoria = defineModel<string | null>('categoria', { default: null })
 
-/**
- * Mide sobre lo que todavía se puede pedir, no sobre el stock físico: desde el
- * 2026-09-01 lo que las mesas abiertas pidieron ya está apartado, y atenuar por
- * `stock` mostraba como vendible la última unidad que otra mesa ya se llevó —el
- * garzón se enteraba recién con el 400 del pedido.
- */
-function tieneStock(item: ItemCatalogo): boolean {
-  const pedible = stockPedible(item)
-  if (pedible === null || pedible === '') return false
-  try {
-    return new Decimal(pedible).greaterThan(0)
-  }
-  catch {
-    return false
-  }
+const nombreCategoria = computed(() => props.categorias?.find(c => c.id === categoria.value)?.nombre ?? '')
+
+/** Qué decir cuando una búsqueda, una categoría o las dos dejan la grilla vacía. */
+const textoFiltrado = computed(() => {
+  const q = busqueda.value.trim()
+  if (q && nombreCategoria.value) return `No encontramos «${q}» en «${nombreCategoria.value}». Prueba con otra palabra.`
+  if (q) return `No encontramos «${q}». Prueba con otra palabra.`
+  return `No hay productos en «${nombreCategoria.value}».`
+})
+
+function elegirCategoria(id: string | null) {
+  categoria.value = id
 }
 
-/** Recetas y combos nunca bloquean el click: la validación real vive en el backend. */
-function puedeAgregar(item: ItemCatalogo): boolean {
-  if (item.tipo === 'receta' || item.tipo === 'combo') return true
-  return tieneStock(item)
+function quitarFiltros() {
+  busqueda.value = ''
+  categoria.value = null
 }
 
 /**
@@ -60,11 +76,11 @@ function puedeAgregar(item: ItemCatalogo): boolean {
  */
 function sinStockVisual(item: ItemCatalogo): boolean {
   if (item.tipo === 'receta' || item.tipo === 'combo') return (item.disponible ?? 1) <= 0
-  return !tieneStock(item)
+  return !tieneStockPedible(item)
 }
 
 function onAgregar(item: ItemCatalogo) {
-  if (!puedeAgregar(item)) return
+  if (!puedeAgregarItem(item)) return
   emit('add', item)
 }
 </script>
@@ -72,15 +88,48 @@ function onAgregar(item: ItemCatalogo) {
 <template>
   <div class="flex flex-col gap-4 h-full min-h-0 overflow-hidden">
     <UInput
+      ref="buscador"
       v-model="busqueda"
       icon="i-lucide-search"
-      placeholder="Buscar ítem..."
+      placeholder="Buscar ítem…"
       size="lg"
       class="shrink-0"
-    />
+      @keydown.enter.prevent="emit('buscar-enter')"
+    >
+      <template v-if="busqueda" #trailing>
+        <UButton
+          icon="i-lucide-x"
+          color="neutral"
+          variant="link"
+          size="sm"
+          aria-label="Borrar búsqueda"
+          @click="() => { busqueda = '' }"
+        />
+      </template>
+    </UInput>
+
+    <div
+      v-if="categorias?.length"
+      class="-mx-1 flex shrink-0 gap-2 overflow-x-auto px-1 pb-1"
+      role="group"
+      aria-label="Categorías"
+    >
+      <UButton
+        v-for="chip in [{ id: null, nombre: 'Todas' }, ...categorias]"
+        :key="chip.id ?? 'todas'"
+        :label="chip.nombre"
+        size="lg"
+        class="min-h-11 shrink-0"
+        :variant="categoria === chip.id ? 'solid' : 'outline'"
+        :color="categoria === chip.id ? 'primary' : 'neutral'"
+        :aria-pressed="categoria === chip.id"
+        data-qa="categoria-chip"
+        @click="elegirCategoria(chip.id)"
+      />
+    </div>
 
     <div v-if="loading" class="text-center text-muted py-10 text-sm">
-      Cargando catálogo...
+      Cargando catálogo…
     </div>
     <AppEstadoLista
       v-else-if="!items.length"
@@ -88,11 +137,11 @@ function onAgregar(item: ItemCatalogo) {
       :vacio="vacio ?? 'Aún no hay ítems para vender. Avisa al encargado.'"
       :error="error"
       :sin-permiso="sinPermiso"
-      :filtrado="!!busqueda.trim()"
-      :filtrado-texto="`No encontramos «${busqueda.trim()}». Prueba con otra palabra.`"
-      quitar-texto="Borrar búsqueda"
+      :filtrado="!!busqueda.trim() || !!categoria"
+      :filtrado-texto="textoFiltrado"
+      :quitar-texto="categoria ? 'Ver todas' : 'Borrar búsqueda'"
       @reintentar="emit('reintentar')"
-      @quitar-filtros="busqueda = ''"
+      @quitar-filtros="quitarFiltros"
     />
 
     <div v-else class="flex-1 min-h-0 overflow-y-auto overscroll-contain">
@@ -103,14 +152,14 @@ function onAgregar(item: ItemCatalogo) {
           :key="item.id"
           class="h-full transition"
           :class="[
-            puedeAgregar(item) ? 'cursor-pointer hover:ring-2 hover:ring-primary' : 'cursor-not-allowed',
+            puedeAgregarItem(item) ? 'cursor-pointer hover:ring-2 hover:ring-primary' : 'cursor-not-allowed',
             'outline-none focus-visible:ring-2 focus-visible:ring-primary',
             sinStockVisual(item) ? 'opacity-50' : '',
           ]"
           :ui="{ body: 'h-full p-3 sm:p-4' }"
           role="button"
           tabindex="0"
-          :aria-disabled="!puedeAgregar(item)"
+          :aria-disabled="!puedeAgregarItem(item)"
           :data-qa="`item-catalogo-${item.id}`"
           @click="onAgregar(item)"
           @keydown.enter.self.prevent="!$event.repeat && onAgregar(item)"
@@ -138,19 +187,18 @@ function onAgregar(item: ItemCatalogo) {
                  abiertas los dos difieren, y la etiqueta vieja convertía la
                  diferencia en un "el sistema está mal" — el garzón cuenta tres
                  botellas en el refrigerador y la tarjeta decía "Stock: 1". -->
-            <span v-if="item.tipo === 'producto'" class="text-xs text-muted shrink-0">
+            <span v-if="item.tipo === 'combo' && item.disponibleCondicional" class="text-xs text-muted shrink-0">
+              Disponible según la opción
+            </span>
+            <!-- Una sola palabra para lo que queda, y la tarjeta atenuada dice por qué (01.26). -->
+            <span v-else-if="sinStockVisual(item)" class="text-xs font-medium text-error shrink-0">
+              Sin stock
+            </span>
+            <span v-else-if="item.tipo === 'producto'" class="text-xs text-muted shrink-0">
               Disponible: {{ formatStock(stockPedible(item), item.unidadMedida) }}
             </span>
-            <span v-else-if="item.tipo === 'combo' && item.disponibleCondicional" class="text-xs text-muted shrink-0">
-              <UTooltip text="La disponibilidad final depende de la opción elegida">
-                <span class="inline-flex items-center gap-1 cursor-help">
-                  Disponible*
-                  <UIcon name="i-lucide-info" class="size-3" />
-                </span>
-              </UTooltip>
-            </span>
             <span v-else-if="(item.tipo === 'receta' || item.tipo === 'combo') && item.disponible !== null && item.disponible !== undefined" class="text-xs text-muted shrink-0">
-              Disponibles: {{ item.disponible }}
+              Disponible: {{ item.disponible }}
             </span>
             <div
               v-if="!esMonedaExtranjera(item.monedaId)"

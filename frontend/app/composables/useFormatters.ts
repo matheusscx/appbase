@@ -10,6 +10,23 @@ const dateOnlyFmt = new Intl.DateTimeFormat('es-CL', { dateStyle: 'medium' })
 const horaFmt = new Intl.DateTimeFormat('es-CL', { hour: '2-digit', minute: '2-digit' })
 const diaSemanaFmt = new Intl.DateTimeFormat('es-CL', { weekday: 'long' })
 
+/**
+ * "hace 45 min", "hace 2 h 10 min", "hace 2 d": cuánto lleva abierto algo (una cuenta, una
+ * sesión). `ahora` se pasa para poder medirlo; un reloj adelantado no da un tiempo negativo.
+ */
+export function textoHace(iso: string | null | undefined, ahora: Date = new Date()): string {
+  if (!iso) return ''
+  const minutos = Math.max(0, Math.floor((ahora.getTime() - new Date(iso).getTime()) / 60_000))
+  if (minutos < 1) return 'recién'
+  if (minutos < 60) return `hace ${minutos} min`
+  const horas = Math.floor(minutos / 60)
+  if (horas < 24) {
+    const resto = minutos % 60
+    return resto === 0 ? `hace ${horas} h` : `hace ${horas} h ${resto} min`
+  }
+  return `hace ${Math.floor(horas / 24)} d`
+}
+
 export function useFormatters() {
   const { format: formatCurrency, formatCosto, formatOficial } = useCurrency()
 
@@ -147,7 +164,7 @@ export function useFormatters() {
   // su propia regla (los decimales de la moneda son el piso, ver `useCurrency`).
   // Va por acá y no importando `useCurrency` en la página porque las pantallas
   // formatean por `useFormatters` — una sola puerta, no dos.
-  return { formatMonto, formatCosto, formatFecha, formatHora, formatDiaSemana, formatStock, formatCantidadConUnidad, formatTipoPago, formatPorcentaje, formatPorcentajeCorto, formatCostoPorMoneda, esAjusteDeValor }
+  return { formatMonto, formatCosto, formatFecha, formatHora, formatHace: textoHace, formatDiaSemana, formatStock, formatCantidadConUnidad, formatTipoPago, formatPorcentaje, formatPorcentajeCorto, formatCostoPorMoneda, esAjusteDeValor }
 }
 
 /**

@@ -1524,6 +1524,39 @@ Tests: `index.nuxt.spec.ts` § *después de "Enviar a cocina"*.
 
 ---
 
+### Auditoría UX del grupo 02 (2026-10-16)
+
+Lo que cambia en la pantalla del garzón y en las de gestión, sin tocar plata ni el motor de precios:
+
+- **Plano**: `GET /salones/operacion` trae por mesa `abiertaDesde` (la cuenta abierta más antigua,
+  `MIN(abierta_el)` en la misma subconsulta que cuenta las abiertas) y `responsablesIds`. La mesa ocupada
+  dice "hace 45 min" y, en la tablet personal, "Tuya" (con texto, no solo color). "Actualizar" y volver el
+  foco a la pestaña lo leen de nuevo, sin spinner de pantalla entera, **sin polling ni reintentos**: si falla,
+  avisa (02.12, 02.24).
+- **Cuenta**: `CuentaDetalle.abiertaEl`. La tarjeta de cada cuenta de la mesa dice "abierta hace…". **Todavía no
+  dice cuánto lleva** (02.12, parcial): pedir un cálculo del motor por cuenta era un N+1 de red, y la salida —que
+  la lista de cuentas traiga su total calculado— toca el motor de precios, así que espera al owner.
+- **Cocina**: cada línea dice "En cocina", "Falta enviar" o "Sin estación de cocina" y el pie resume ("2 de 3
+  líneas están en cocina"). "Sin estación" sale de comparar lo pendiente antes del claim con lo que el claim
+  devolvió; el aviso nombra las líneas que no salieron (02.4). Reimprimir sigue fuera (02.5).
+- **Quitar una línea** avisa con "Deshacer" unos segundos; deshacer vuelve a pedir la línea con la misma
+  cantidad, personalización y unidades (`personalizacionDesdeSnapshot`), y el servidor la precifica de nuevo (02.6).
+- **Tablet**: del `md` (768 px) catálogo y cuenta van lado a lado (la cuenta mide entre 20 y 26 rem); los
+  botones del pie, "Cambiar unidades" y el interruptor "Incluir" de la personalización miden 44 px de área
+  táctil; el panel de la mesa tiene "Cerrar" (02.3, 02.13, 02.14).
+- **Barra**: "Más" guarda "¿Te pidieron firmar un cierre?"; el aviso de PIN es neutro y descartable (queda
+  descartado en la sesión del navegador); "Tomar cuenta" dice "Ya eres el responsable" sobre la propia
+  (02.17, 02.29, 02.33).
+- **Catálogo de la cuenta**: chips de categoría (`categoriaId` en `GET /items`; el POS y la tienda no los
+  pasan) y el vacío nombra la categoría (02.25); el combo que depende de la opción dice "Disponible según la opción" (01.26).
+  Favoritos: pendiente, no hay una regla de qué es un favorito.
+- **Anular un plato** con una sola unidad despachada arranca en 1 (02.31). **Anulaciones**: el filtro de
+  garzones es el del local (si no se puede leer esa lista, los que fue trayendo el resumen), "Comida del
+  personal" se llama igual en todos lados, la tarjeta sin platos se encoge y el aviso de mermas solo sale si
+  el rango tiene mermas, con enlace a Mermas (02.21, 02.32). **Propinas**: el período arranca en el mes en
+  curso (día 1 a hoy), "Ver reparto" se apaga con su motivo, un garzón dado de baja no sale como código, solo
+  gira el botón que se tocó y cada liquidación cerrada tiene su "Ver" (02.23).
+
 ## Decisiones
 
 - Un módulo RBAC `Salones` con permiso extra `Operar` (patrón de `Reembolsar` /

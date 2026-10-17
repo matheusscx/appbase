@@ -5236,6 +5236,82 @@ describe('SalonesService', () => {
     });
   });
 
+  // Auditoría UX 02.12: la tarjeta de la cuenta dice "abierta hace 45 min" y el plano
+  // "abierta desde". La hora sale de `cuentas.abierta_el`, no de un cálculo de la pantalla.
+  describe('hora de apertura (02.12)', () => {
+    it('cada cuenta del detalle trae `abiertaEl` en ISO', async () => {
+      mesaRepo.findOne.mockResolvedValue({ id: MESA, tenantId: TENANT });
+      cuentaRepo.find.mockResolvedValue([
+        {
+          id: 'cuenta-1',
+          numero: 1,
+          nombre: null,
+          estado: EstadoCuenta.ABIERTA,
+          mesaId: MESA,
+          ventaId: null,
+          garzonAperturaId: null,
+          garzonResponsableId: null,
+          garzonCierreId: null,
+          abiertaEl: new Date('2026-10-16T21:14:00.000Z'),
+        },
+      ]);
+      dataSource.query.mockResolvedValue([]);
+
+      const [detalle] = await service.listarCuentasDeMesa(TENANT, MESA);
+
+      expect(detalle.abiertaEl).toBe('2026-10-16T21:14:00.000Z');
+    });
+
+    it('el plano trae `abiertaDesde` de la cuenta abierta más antigua, y null si no hay', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        {
+          salon_id: 's1',
+          salon_nombre: 'Principal',
+          mesa_id: 'm1',
+          mesa_nombre: 'Mesa 1',
+          pos_x: '0',
+          pos_y: '0',
+          forma: 'cuadrada',
+          tamano: 'mediano',
+          cuentas_abiertas: '2',
+          abierta_desde: new Date('2026-10-16T20:00:00.000Z'),
+          responsables: ['garzon-1', 'garzon-2'],
+        },
+        {
+          salon_id: 's1',
+          salon_nombre: 'Principal',
+          mesa_id: 'm2',
+          mesa_nombre: 'Mesa 2',
+          pos_x: '0',
+          pos_y: '0',
+          forma: 'cuadrada',
+          tamano: 'mediano',
+          cuentas_abiertas: '0',
+          abierta_desde: null,
+          responsables: null,
+        },
+      ]);
+
+      const [salon] = await service.listarSalones(TENANT);
+
+      expect(salon.mesas.map((m) => m.abiertaDesde)).toEqual([
+        '2026-10-16T20:00:00.000Z',
+        null,
+      ]);
+      // Quién tiene cuentas abiertas en la mesa: la tablet personal marca "Tuya" (02.12).
+      expect(salon.mesas.map((m) => m.responsablesIds)).toEqual([
+        ['garzon-1', 'garzon-2'],
+        [],
+      ]);
+      const sql = dataSource.query.mock.calls[0][0] as string;
+      // En la misma subconsulta agregada que cuenta las abiertas: no una consulta por mesa.
+      expect(sql).toMatch(/MIN\(abierta_el\) AS abierta_desde/);
+      expect(sql).toMatch(
+        /ARRAY_AGG\(DISTINCT garzon_responsable_id\)\s+FILTER[\s\S]*?AS responsables/,
+      );
+    });
+  });
+
   describe('armarDetalles — unidades con serie', () => {
     function cuentaAbierta(n: number) {
       return {

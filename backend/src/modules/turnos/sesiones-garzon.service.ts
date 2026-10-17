@@ -59,6 +59,11 @@ export interface SesionPublica {
   cerradaPorUsuarioId: string | null;
 }
 
+/** La sesión abierta de quien pregunta, con lo que tiene a su nombre (confirmar la salida). */
+export interface SesionActiva extends SesionPublica {
+  cuentasAbiertas: number;
+}
+
 /**
  * Cuenta que quedó abierta a nombre del garzón cuando su sesión se cerró.
  *
@@ -97,6 +102,8 @@ export interface SesionListaItem {
   estado: EstadoSesionGarzon;
   origenCierre: OrigenCierreSesion | null;
   cerradaPorUsuarioId: string | null;
+  /** Cuentas abiertas a su nombre. Solo en las sesiones abiertas (`listarAbiertas`). */
+  cuentasAbiertas?: number;
 }
 
 @Injectable()
@@ -209,7 +216,7 @@ export class SesionesGarzonService {
     tenantId: string,
     usuarioId: string,
     credencial: { garzonId?: string; pin?: string },
-  ): Promise<SesionPublica | null> {
+  ): Promise<SesionActiva | null> {
     const garzon = await this.garzones.resolverGarzonActuante(
       tenantId,
       usuarioId,
@@ -229,7 +236,11 @@ export class SesionesGarzonService {
       abierta.garzonId,
       abierta.turnoId,
     );
-    return this.toPublico(abierta, garzon.nombre, turnoNombre);
+    const pendientes = await this.cuentasPendientes(tenantId, garzon.id);
+    return {
+      ...this.toPublico(abierta, garzon.nombre, turnoNombre),
+      cuentasAbiertas: pendientes.length,
+    };
   }
 
   async listarAbiertas(tenantId: string): Promise<SesionListaItem[]> {
@@ -245,6 +256,7 @@ export class SesionesGarzonService {
       estado: EstadoSesionGarzon;
       origen_cierre: OrigenCierreSesion | null;
       cerrada_por_usuario_id: string | null;
+      cuentas_abiertas: number | string | null;
     }[] = await this.db.query(
       `SELECT s.sesion_garzon_id,
               s.garzon_id,
@@ -256,12 +268,19 @@ export class SesionesGarzonService {
               s.fin_el,
               s.estado,
               s.origen_cierre,
-              s.cerrada_por_usuario_id
+              s.cerrada_por_usuario_id,
+              COALESCE(c.abiertas, 0) AS cuentas_abiertas
        FROM sesiones_garzon s
        LEFT JOIN garzones g ON g.garzon_id = s.garzon_id
          AND g.tenant_id = $1 AND g.eliminado_el IS NULL
        LEFT JOIN turnos t ON t.turno_id = s.turno_id
          AND t.tenant_id = $1 AND t.eliminado_el IS NULL
+       LEFT JOIN (
+         SELECT garzon_responsable_id, COUNT(*)::int AS abiertas
+           FROM cuentas
+          WHERE tenant_id = $1 AND estado = 'abierta' AND eliminado_el IS NULL
+          GROUP BY garzon_responsable_id
+       ) c ON c.garzon_responsable_id = s.garzon_id
        WHERE s.tenant_id = $1
          AND s.estado = 'abierta'
          AND s.eliminado_el IS NULL
@@ -269,7 +288,10 @@ export class SesionesGarzonService {
       [tenantId],
     );
 
-    return rows.map((r) => this.mapListaRow(r));
+    return rows.map((r) => ({
+      ...this.mapListaRow(r),
+      cuentasAbiertas: Number(r.cuentas_abiertas ?? 0),
+    }));
   }
 
   /**

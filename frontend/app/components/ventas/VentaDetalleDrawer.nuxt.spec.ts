@@ -326,6 +326,14 @@ mockNuxtImport('usePermissionsStore', () => {
   })
 })
 
+/** Cada aviso que el drawer mostró (`useToast().add`). */
+let avisos: { title?: string, color?: string }[] = []
+mockNuxtImport('useToast', () => () => ({
+  add: (t: { title?: string, color?: string }) => { avisos.push(t) },
+}))
+/** `true`: `GET /ventas/:id/boleta` no contesta (la impresión tarda). */
+let boletaColgada = false
+
 /** La boleta que devuelve `GET /ventas/:id/boleta`. Se cambia ANTES de montar. */
 let boletaActual: Record<string, unknown> | null = BOLETA_REIMPRESION
 /** Impresoras de rol `boleta` que devuelve `GET /impresoras/operacion?rol=boleta`
@@ -362,7 +370,7 @@ mockNuxtImport('useApiFetch', () => {
     // Antes del chequeo genérico de `/ventas/`: las dos rutas comparten el
     // substring y `/ventas/:id/boleta` necesita SU PROPIA respuesta, no la
     // del detalle de venta.
-    if (url.endsWith('/boleta')) return Promise.resolve(structuredClone(boletaActual))
+    if (url.endsWith('/boleta')) return boletaColgada ? new Promise(() => {}) : Promise.resolve(structuredClone(boletaActual))
     // `endsWith`, no `includes`: `/impresoras/qz/certificado` también contiene
     // el substring y espera `{ certificado }`, no la lista — con `includes`
     // acá esa llamada recibiría este array igual, y aunque degrada sin romper
@@ -385,6 +393,8 @@ afterEach(() => {
   permisos = VENTAS_COMPLETO
   patches = []
   borrados = []
+  avisos = []
+  boletaColgada = false
 })
 
 /**
@@ -1718,6 +1728,107 @@ describe('VentaDetalleDrawer — reimprimir boleta', () => {
     }
     finally {
       boletaActual = BOLETA_REIMPRESION
+    }
+  })
+})
+
+describe('VentaDetalleDrawer — textos y filas del detalle (01.27, 01.24)', () => {
+  it('01.27: el canal sale con tilde, como en la lista', async () => {
+    const wrapper = await montar()
+    const canal = wrapper.findAll('dt').find(dt => dt.text() === 'Canal')!.element.parentElement!
+    expect(canal.textContent).toContain('Físico')
+    expect(canal.textContent).not.toContain('Fisico')
+  })
+
+  it('01.27: una venta online dice "Online"', async () => {
+    documentoActual = { ...VENTA, canal: 'online' } as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+      const canal = wrapper.findAll('dt').find(dt => dt.text() === 'Canal')!.element.parentElement!
+      expect(canal.textContent).toContain('Online')
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+
+  it('01.27: la propina dice quién atendió, no "Garzón: Mostrador"', async () => {
+    documentoActual = {
+      ...VENTA,
+      propina: { porcentajeSugerido: '0.1', montoSugerido: '750', montoPagado: '750', garzonNombre: 'Mostrador' },
+    } as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+      const etiquetas = wrapper.findAll('dt').map(dt => dt.text())
+      expect(etiquetas).toContain('Atendió')
+      expect(etiquetas).not.toContain('Garzón')
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+
+  it('01.24: Recargos en 0 no sale; Descuentos con valor sí', async () => {
+    const wrapper = await montar()
+    const etiquetas = wrapper.findAll('dt').map(dt => dt.text())
+    expect(etiquetas).toContain('Descuentos')
+    expect(etiquetas).not.toContain('Recargos')
+  })
+
+  it('01.24: Descuentos en 0 no sale; Recargos con valor sí', async () => {
+    documentoActual = { ...VENTA, totalDescuentos: '0.0000', totalRecargos: '300.0000' } as unknown as typeof VENTA
+    try {
+      const wrapper = await montar()
+      const etiquetas = wrapper.findAll('dt').map(dt => dt.text())
+      expect(etiquetas).not.toContain('Descuentos')
+      expect(etiquetas).toContain('Recargos')
+    }
+    finally {
+      documentoActual = VENTA
+    }
+  })
+})
+
+describe('VentaDetalleDrawer — reimprimir sin impresora o con la impresora lenta (01.15)', () => {
+  const botonReimprimir = (wrapper: Awaited<ReturnType<typeof montar>>) =>
+    wrapper.findAll('button').find(b => /Reimprimir boleta|Esperando la impresora/.test(b.text()))
+
+  it('sin impresora de boletas dice que no hay, en vez de callar', async () => {
+    impresorasBoleta = []
+    try {
+      const wrapper = await montar()
+      await botonReimprimir(wrapper)!.trigger('click')
+      await new Promise(r => setTimeout(r, 50))
+
+      expect(avisos.some(a => a.title === 'No hay impresora de boletas configurada')).toBe(true)
+    }
+    finally {
+      impresorasBoleta = [IMPRESORA_BOLETA]
+    }
+  })
+
+  it('con impresora y papel que sale, no avisa nada', async () => {
+    impresionesQz.length = 0
+    const wrapper = await montar()
+    await botonReimprimir(wrapper)!.trigger('click')
+    await new Promise(r => setTimeout(r, 50))
+
+    expect(impresionesQz).toHaveLength(1)
+    expect(avisos.some(a => a.title === 'No hay impresora de boletas configurada')).toBe(false)
+  })
+
+  it('a los 2 s de espera el botón dice "Esperando la impresora…"', async () => {
+    const wrapper = await montar()
+    boletaColgada = true
+    vi.useFakeTimers({ toFake: ['setTimeout'] })
+    try {
+      await botonReimprimir(wrapper)!.trigger('click')
+      expect(botonReimprimir(wrapper)!.text()).not.toContain('Esperando la impresora')
+      await vi.advanceTimersByTimeAsync(2100)
+      expect(botonReimprimir(wrapper)!.text()).toContain('Esperando la impresora…')
+    }
+    finally {
+      vi.useRealTimers()
     }
   })
 })

@@ -7,6 +7,7 @@ import { sugerirPropina, fetchPorcentajeSugerido, PROPINA_PORCENTAJE_DEFAULT } f
 import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
 import {
   cuentaToCalcularInput,
+  personalizacionDesdeSnapshot,
   tipoMotivoBajaLabel,
   formatCantidadAnulacion,
   type SalonConMesas,
@@ -82,8 +83,9 @@ const garzonesApi = useGarzones()
 const turnosApi = useTurnos()
 const sesionesApi = useSesionesGarzon()
 const unidadesStore = useUnidadesMedidaStore()
-const { formatMonto, formatFecha } = useFormatters()
+const { formatMonto, formatFecha, formatHace, formatHora } = useFormatters()
 const impresorasApi = useImpresoras()
+const calculoApi = useCalculoPrecios()
 const { paraTicket, avisoSinEmitir } = useBoletaElectronica()
 // La franja de avisos de la boleta electrónica: se vuelve a leer después de cada cobro.
 const franjaEmision = useTemplateRef('franjaEmision')
@@ -100,6 +102,19 @@ const selectedSalonId = ref<string | undefined>(undefined)
 // en silencio (ver `cargarCatalogo`).
 const catalogo = useCatalogoVenta({ tipos: ['producto', 'receta', 'combo'] })
 const items = catalogo.items
+/** Chips de categoría de la grilla (02.25). Si no se pueden leer, la grilla queda sin chips y busca por texto. */
+const categorias = ref<{ id: string, nombre: string }[]>([])
+async function cargarCategorias() {
+  try {
+    const lista = await useApiFetch<{ id: string, nombre: string, activo?: boolean }[]>(`${apiUrl}/categorias`)
+    categorias.value = (Array.isArray(lista) ? lista : [])
+      .filter(c => c.activo !== false)
+      .map(c => ({ id: c.id, nombre: c.nombre }))
+  }
+  catch {
+    categorias.value = []
+  }
+}
 const metodos = ref<MetodoPago[]>([])
 const tiposDocumento = ref<TipoDoc[]>([])
 const loadingCatalogo = ref(false)
@@ -548,6 +563,21 @@ const TEXTO_INVALIDACION: Record<
  * si ese orden cambiara, este `.find()` dejaría de traer el último evento
  * real y el aviso nombraría a la persona y la fecha equivocadas.
  */
+/** El aviso se descarta y no vuelve en esta sesión del navegador (02.17): no es una alarma, no puede abrir cada entrada. */
+const CLAVE_AVISO_PIN = 'salones-aviso-pin-cerrado'
+const avisoPinCerrado = ref(false)
+try {
+  avisoPinCerrado.value = sessionStorage.getItem(CLAVE_AVISO_PIN) === '1'
+}
+catch { /* sin storage (ventana privada, vista previa): el aviso sale y se descarta en memoria */ }
+function cerrarAvisoPin() {
+  avisoPinCerrado.value = true
+  try {
+    sessionStorage.setItem(CLAVE_AVISO_PIN, '1')
+  }
+  catch { /* idem */ }
+}
+
 const avisoPin = computed(() => {
   if (!garzonPersonal.value || !miPinEstado.value || miPinEstado.value.fijado) return null
   const ultima = miPinEstado.value.eventos.find(
@@ -633,6 +663,9 @@ const turnoItems = computed(() =>
 )
 
 async function abrirEntrarTurno() {
+  // Una apertura manual no arrastra la oferta de una acción que falló antes (02.30); el error de
+  // sesión la vuelve a poner justo después de llamar acá.
+  retomarTrasTurno.value = null
   cargandoTurnos.value = true
   turnoSeleccionadoId.value = undefined
   try {
@@ -661,7 +694,7 @@ async function abrirEntrarTurno() {
  * que hubiera en pantalla al repetir —otra mesa, otra cuenta— o, en el cobro, con los
  * pagos de antes sobre una cuenta que una fusión pudo haber cambiado entre medio.
  */
-function toastErrorOperativo(e: unknown, fallback: string) {
+function toastErrorOperativo(e: unknown, fallback: string, retomar?: { label: string, accion: () => void }) {
   const msg = apiErrorMsg(e, fallback)
   if (msg.includes('sesión de trabajo')) {
     toast.add({
@@ -670,14 +703,20 @@ function toastErrorOperativo(e: unknown, fallback: string) {
       color: 'warning',
     })
     void abrirEntrarTurno()
+    // Sin repetirla sola: al entrar a turno el aviso trae un botón y lo toca la persona (02.30).
+    retomarTrasTurno.value = retomar ?? null
     return
   }
   toast.add({ title: msg, color: 'error' })
 }
 
+/** La acción que no se pudo hacer por falta de turno, para ofrecerla (sin repetirla) cuando se entre. */
+const retomarTrasTurno = ref<{ label: string, accion: () => void } | null>(null)
+
 /** Cierra el modal de turno sin iniciar. */
 function cancelarEntrarTurno() {
   turnoModalOpen.value = false
+  retomarTrasTurno.value = null
 }
 
 function confirmarEntrarTurno() {
@@ -702,8 +741,20 @@ async function iniciarSesionConPin(
 ) {
   try {
     const sesion = await sesionesApi.iniciar({ garzonId, pin, turnoId })
+    const retomar = retomarTrasTurno.value
+    retomarTrasTurno.value = null
+    // La barra dice en qué turno está, solo donde hay UN garzón: en el tótem compartido entran varios.
+    if (garzonPersonal.value) {
+      sesionActual.value = { turnoNombre: sesion.turnoNombre, inicioEl: sesion.inicioEl ?? null, cuentasAbiertas: 0 }
+    }
     toast.add({
       title: `Sesión iniciada: ${sesion.garzonNombre} · ${sesion.turnoNombre}`,
+      ...(retomar
+        ? {
+            description: `Listo. Toca «${retomar.label}» para seguir.`,
+            actions: [{ label: retomar.label, color: 'neutral' as const, variant: 'outline' as const, onClick: retomar.accion }],
+          }
+        : {}),
       color: 'success',
     })
   }
@@ -712,7 +763,52 @@ async function iniciarSesionConPin(
   }
 }
 
-function salirDeTurno() {
+// ── Estado del turno y salida con confirmación (auditoría UX 02.15) ─────────
+/** La sesión abierta de esta tablet personal. En el tótem compartido no hay "la" sesión: ahí no se muestra. */
+const sesionActual = ref<{ turnoNombre: string, inicioEl: string | null, cuentasAbiertas: number } | null>(null)
+const salirTurnoOpen = ref(false)
+const salirTurnoCuentas = ref<number | null>(null)
+const preparandoSalida = ref(false)
+
+async function cargarSesionActual() {
+  if (!garzonPersonal.value) return
+  try {
+    const s = await sesionesApi.activa({ garzonId: garzonPersonal.value.garzonId, pin: '' })
+    // Solo un objeto con turno es una sesión: un cuerpo vacío no es "en turno" (mismo cuidado que `mi-vinculo`).
+    sesionActual.value = s && typeof s === 'object' && 'turnoNombre' in s
+      ? { turnoNombre: s.turnoNombre, inicioEl: s.inicioEl ?? null, cuentasAbiertas: s.cuentasAbiertas ?? 0 }
+      : null
+  }
+  catch {
+    // Sin la lectura, la barra queda como estaba; el cierre y las demás acciones no dependen de esto.
+  }
+}
+
+const horaInicioTurno = computed(() =>
+  sesionActual.value?.inicioEl ? formatHora(new Date(sesionActual.value.inicioEl)) : '',
+)
+
+const mensajeSalirTurno = computed(() => {
+  const n = salirTurnoCuentas.value
+  if (n === null) return 'Si tienes cuentas abiertas a tu nombre, quedan sin responsable y nadie puede cobrarlas hasta que las transfieras.'
+  if (n === 0) return 'No tienes cuentas abiertas. Puedes volver a entrar a turno cuando quieras.'
+  return `Tienes ${n} ${n === 1 ? 'cuenta abierta' : 'cuentas abiertas'} a tu nombre. Al salir quedan sin responsable y nadie puede cobrarlas hasta que las transfieras.`
+})
+
+/** "Salir de turno" cierra la sesión: antes de pedir el PIN se confirma, y en la tablet personal se dice cuántas cuentas quedan. */
+async function salirDeTurno() {
+  salirTurnoCuentas.value = null
+  if (garzonPersonal.value) {
+    preparandoSalida.value = true
+    await cargarSesionActual()
+    preparandoSalida.value = false
+    salirTurnoCuentas.value = sesionActual.value?.cuentasAbiertas ?? null
+  }
+  salirTurnoOpen.value = true
+}
+
+function confirmarSalirDeTurno() {
+  salirTurnoOpen.value = false
   solicitarPin('PIN del garzón para salir de turno', (garzonId, pin) => {
     void cerrarSesionConPin(garzonId, pin)
   })
@@ -721,6 +817,7 @@ function salirDeTurno() {
 async function cerrarSesionConPin(garzonId: string, pin: string) {
   try {
     const sesion = await sesionesApi.cerrar({ garzonId, pin })
+    if (garzonPersonal.value) sesionActual.value = null
     toast.add({
       title: `Sesión cerrada: ${sesion.garzonNombre} · ${sesion.turnoNombre}`,
       color: 'success',
@@ -815,6 +912,15 @@ function pedirFirmaTestigo() {
     void cargarPendientesTestigo(garzonId, pin)
   })
 }
+
+/** El menú "Más" de la barra: lo que no se usa todos los días (02.33). */
+const menuMas = computed(() => [[
+  {
+    label: '¿Te pidieron firmar un cierre?',
+    icon: 'i-lucide-shield-check',
+    onSelect: pedirFirmaTestigo,
+  },
+]])
 
 /** El modal resolvió una solicitud: sale de la lista local, sin re-fetch. */
 function onTestigoResuelto(testigoId: string) {
@@ -1019,6 +1125,7 @@ async function cargarSalones() {
   loading.value = true
   try {
     salones.value = await salonesApi.listarOperacion()
+    ultimaLecturaPlano.value = new Date()
     if (!selectedSalonId.value || !selectedSalon.value) {
       selectedSalonId.value = salones.value[0]?.id ?? undefined
     }
@@ -1030,6 +1137,41 @@ async function cargarSalones() {
     loading.value = false
   }
 }
+
+// ── Refrescar el plano (auditoría UX 02.24) ─────────────────────────────────
+// El plano se leía una vez al entrar: con dos tablets, la mesa que otra garzona acababa de abrir se
+// seguía viendo libre. Se vuelve a leer cuando la pestaña recupera el foco y con "Actualizar", sin
+// spinner de pantalla entera (no tapa el plano) y SIN reintentos ni polling: si falla, avisa y la
+// persona vuelve a tocar.
+const ultimaLecturaPlano = ref<Date | null>(null)
+const actualizandoPlano = ref(false)
+
+async function actualizarPlano() {
+  if (actualizandoPlano.value || loading.value) return
+  actualizandoPlano.value = true
+  try {
+    salones.value = await salonesApi.listarOperacion()
+    ultimaLecturaPlano.value = new Date()
+    if (!selectedSalon.value) selectedSalonId.value = salones.value[0]?.id ?? undefined
+  }
+  catch (e: unknown) {
+    toast.add({
+      title: 'No se pudo actualizar el plano',
+      description: apiErrorMsg(e, 'Revisa la conexión y toca Actualizar.'),
+      color: 'error',
+    })
+  }
+  finally {
+    actualizandoPlano.value = false
+  }
+}
+
+function alCambiarVisibilidad() {
+  if (document.visibilityState === 'visible') void actualizarPlano()
+}
+
+onMounted(() => document.addEventListener('visibilitychange', alCambiarVisibilidad))
+onBeforeUnmount(() => document.removeEventListener('visibilitychange', alCambiarVisibilidad))
 
 /** Ajusta el contador de cuentas abiertas/ocupación sin re-fetch de salones. */
 function patchMesaOcupacion(mesaId: string, deltaAbiertas: number) {
@@ -1184,6 +1326,7 @@ onMounted(async () => {
     // motivo que `miVinculo` arriba—. Sin él ese 404 voltea el `Promise.all`
     // entero y el salón no vuelve a aparecer.
     garzonesApi.miPin().catch(() => null),
+    cargarCategorias(),
   ])
   // Se mira `garzonId`, no la verdad del objeto: "sin vínculo" puede llegar como
   // `null`, `''` o `{}` según cómo se serialice un body vacío, y `{}` es
@@ -1201,6 +1344,7 @@ onMounted(async () => {
   // límite honesto del dispositivo compartido.
   if (garzonPersonal.value) {
     void cargarPendientesTestigo(garzonPersonal.value.garzonId, '', { silencioso: true })
+    void cargarSesionActual()
   }
 })
 
@@ -1289,7 +1433,14 @@ async function abrirCuentaConPin(
     if (!activeCuenta.value) abrirCuenta(cuenta)
   }
   catch (e: unknown) {
-    toastErrorOperativo(e, 'Error al abrir la cuenta')
+    const mesaId = selectedMesa.value?.id
+    toastErrorOperativo(e, 'Error al abrir la cuenta', {
+      label: 'Abrir la cuenta',
+      // Solo si la persona sigue parada en la misma mesa y en la lista: en otra pantalla no abre nada.
+      accion: () => {
+        if (mesaId && selectedMesa.value?.id === mesaId && mesaDrawerOpen.value && !activeCuenta.value) nuevaCuenta()
+      },
+    })
   }
   finally {
     abriendoCuenta.value = false
@@ -1547,8 +1698,15 @@ function aplicarCuentaActualizada(actualizada: CuentaDetalle) {
   }
 }
 
+/** La cuenta ya es de quien opera esta tablet: tomarla no hace nada (02.29). Solo se sabe en modo personal. */
+const cuentaEsMia = computed(() =>
+  !!garzonPersonal.value
+  && !!activeCuenta.value
+  && activeCuenta.value.garzonResponsableId === garzonPersonal.value.garzonId,
+)
+
 function tomarCuenta() {
-  if (!activeCuenta.value) return
+  if (!activeCuenta.value || cuentaEsMia.value) return
   solicitarPin('PIN para tomar esta cuenta', (garzonId, pin) => {
     void transferirCuentaConPin(garzonId, pin)
   })
@@ -2220,6 +2378,12 @@ function onDrawerMesaToggle(abierto: boolean) {
   if (!abierto && activeCuenta.value) salirDeCuenta()
 }
 
+/** El botón "Cerrar" del encabezado: lo mismo que ESC, el fondo o arrastrarlo (02.13). */
+function cerrarDrawerMesa() {
+  mesaDrawerOpen.value = false
+  onDrawerMesaToggle(false)
+}
+
 async function addProducto(item: ItemCatalogo) {
   if (!activeCuenta.value) return
   if (cuentaActivaEnCobro.value) {
@@ -2355,6 +2519,32 @@ function yaEnviadaACocina(linea: CuentaLineaDetalle): boolean {
   return new Decimal(linea.cantidadEnviada || '0').greaterThan(0)
 }
 
+/** Falta mandar a cocina algo de esta línea: lo pedido supera lo despachado. */
+function faltaEnviar(linea: CuentaLineaDetalle): boolean {
+  return new Decimal(linea.cantidad || '0').greaterThan(new Decimal(linea.cantidadEnviada || '0'))
+}
+
+/**
+ * Las líneas que se intentaron mandar y no salieron porque su categoría no tiene impresora de
+ * cocina (02.4). Lo dice el claim: lo que estaba pendiente y no volvió en ninguna estación.
+ */
+const lineasSinEstacion = ref<Set<string>>(new Set())
+
+function estadoCocina(linea: CuentaLineaDetalle): { texto: string, color: 'success' | 'neutral' | 'warning' } {
+  if (!faltaEnviar(linea)) return { texto: 'En cocina', color: 'success' }
+  if (lineasSinEstacion.value.has(linea.id)) return { texto: 'Sin estación de cocina', color: 'warning' }
+  return { texto: 'Falta enviar', color: 'neutral' }
+}
+
+const resumenCocina = computed(() => {
+  const lineas = activeCuenta.value?.lineas ?? []
+  if (lineas.length === 0) return ''
+  const enCocina = lineas.filter(l => !faltaEnviar(l)).length
+  return lineas.length === 1
+    ? `${enCocina} de 1 línea está en cocina`
+    : `${enCocina} de ${lineas.length} líneas están en cocina`
+})
+
 /**
  * "Algo despachado" (spec § 6): alguna línea viva de la cuenta con
  * `cantidad_enviada > 0`. Decide qué ruta de cancelar usar — la simple o la
@@ -2373,9 +2563,49 @@ async function quitarLinea(linea: CuentaLineaDetalle) {
       salonesApi.quitarLinea(activeCuenta.value.id, linea.id),
     )
     syncCuenta(cuenta)
+    // Quitar es inmediato, sin confirmar cada línea: se avisa y se puede deshacer unos segundos (02.6).
+    toast.add({
+      title: `Quitaste ${linea.nombre}`,
+      color: 'neutral',
+      actions: [{ label: 'Deshacer', color: 'neutral' as const, variant: 'outline' as const, onClick: () => { void deshacerQuitar(cuenta.id, linea) } }],
+    })
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al quitar el producto'), color: 'error' })
+  }
+}
+
+/**
+ * Vuelve a pedir la línea que se quitó, con lo mismo que tenía (cantidad, personalización, unidades
+ * con serie): el servidor la vuelve a precificar, la pantalla no manda ningún precio. Es una línea
+ * nueva —no llegó a cocina, si no el tacho no se habría podido tocar— y solo se repone si la cuenta
+ * sigue abierta y no se está cobrando.
+ */
+async function deshacerQuitar(cuentaId: string, linea: CuentaLineaDetalle) {
+  if (!cuentas.value.some(c => c.id === cuentaId)) {
+    toast.add({ title: 'Ya no se puede deshacer', description: 'La cuenta se cerró o se cobró.', color: 'warning' })
+    return
+  }
+  if (cobroEnVueloId.value === cuentaId || cobroPedidoId.value === cuentaId) {
+    avisarCuentaEnCobro()
+    return
+  }
+  try {
+    const cuenta = await registrarEnVuelo(
+      cuentaId,
+      'agregar',
+      salonesApi.agregarLinea(
+        cuentaId,
+        linea.itemId,
+        linea.cantidad,
+        linea.personalizacion ? personalizacionDesdeSnapshot(linea.personalizacion) : undefined,
+        linea.unidades?.length ? linea.unidades.map(u => u.id) : undefined,
+      ),
+    )
+    syncCuenta(cuenta)
+  }
+  catch (e: unknown) {
+    mostrarRechazoPorStock({ error: e, fallback: 'No se pudo deshacer. Vuelve a pedir el producto', puedeTrasladar: puedeTrasladar.value })
   }
 }
 
@@ -2479,6 +2709,10 @@ async function enviarComanda() {
   const mesaNombre = selectedMesa.value.nombre
   try {
     await flushPendientes(e => e.cuentaId === cuenta.id)
+    // Lo que faltaba mandar ANTES del claim y los ids que el claim devolvió: la diferencia son las
+    // líneas sin estación de cocina.
+    const pendientesAntes = (cuentas.value.find(c => c.id === cuenta.id) ?? cuenta).lineas.filter(faltaEnviar)
+    const reclamados = new Set<string>()
     const estaciones = await impresorasApi.imprimirComanda(cuenta.id, {
       mesaNombre,
       cuentaNumero: cuenta.numero,
@@ -2497,6 +2731,7 @@ async function enviarComanda() {
       // entra al cálculo, así que no hace falta `recalcular()`.
       const enviadas = new Map(reclamadas.flatMap(e =>
         e.items.map(i => [i.cuentaLineaId, i.cantidadEnviada] as const)))
+      for (const id of enviadas.keys()) reclamados.add(id)
       const viva = cuentas.value.find(c => c.id === cuenta.id)
       if (!viva || enviadas.size === 0) return
       aplicarCuentaActualizada({
@@ -2509,12 +2744,26 @@ async function enviarComanda() {
     })
     // null = no hay impresoras de comanda activas → se saltó el flujo sin toast.
     if (estaciones === null) return
-    toast.add({
-      title: estaciones.length === 0
-        ? 'No hay productos nuevos para enviar'
-        : `Comanda enviada a ${estaciones.length} estación(es)`,
-      color: estaciones.length === 0 ? 'neutral' : 'success',
-    })
+    const sinEstacion = pendientesAntes.filter(l => !reclamados.has(l.id))
+    lineasSinEstacion.value = new Set([...lineasSinEstacion.value, ...sinEstacion.map(l => l.id)])
+    const nombresSinEstacion = sinEstacion.map(l => l.nombre).join(', ')
+    if (estaciones.length === 0) {
+      toast.add(sinEstacion.length > 0
+        ? {
+            title: 'No salió nada a cocina',
+            description: `Sin estación de cocina: ${nombresSinEstacion}. Avisa a cocina de viva voz.`,
+            color: 'warning',
+          }
+        : { title: 'No hay productos nuevos para enviar', color: 'neutral' })
+    }
+    else {
+      toast.add({
+        title: `Comanda enviada a ${estaciones.length} estación(es)`,
+        ...(sinEstacion.length > 0
+          ? { description: `No salieron, sin estación de cocina: ${nombresSinEstacion}.`, color: 'warning' as const }
+          : { color: 'success' as const }),
+      })
+    }
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'No se pudo enviar la comanda. Revisa la impresora'), color: 'error' })
@@ -3050,16 +3299,19 @@ async function cerrarCuentaConPin(
              del `v-else` de abajo a propósito: no depende de que haya salones
              configurados, así que un tenant sin salones igual se lo muestra a
              quien lo necesita. -->
+        <!-- Informa, no alarma: neutro y descartable (auditoría UX 02.17). En este dispositivo se trabaja normal. -->
         <UAlert
-          v-if="avisoPin"
-          color="warning"
-          variant="soft"
+          v-if="avisoPin && !avisoPinCerrado"
+          color="neutral"
+          variant="subtle"
           icon="i-lucide-key-round"
           title="Tu PIN no está listo"
           :description="avisoPin"
+          :close="{ color: 'neutral', variant: 'ghost', size: 'xl', class: 'min-h-11 min-w-11' }"
+          @update:open="cerrarAvisoPin"
         >
           <template #actions>
-            <UButton to="/configuracion/perfil" color="warning" variant="solid" size="sm">
+            <UButton to="/configuracion/perfil" color="neutral" variant="outline" size="sm">
               Ir a mi perfil
             </UButton>
           </template>
@@ -3083,9 +3335,34 @@ async function cerrarCuentaConPin(
             />
             <p class="text-sm text-muted flex-1 min-w-40">
               Selecciona una mesa para gestionar sus cuentas.
+              <span v-if="ultimaLecturaPlano" class="block text-xs">Plano actualizado {{ formatHora(ultimaLecturaPlano) }}</span>
             </p>
             <div class="flex flex-wrap items-center gap-2 ml-auto">
               <UButton
+                icon="i-lucide-refresh-cw"
+                color="neutral"
+                variant="ghost"
+                size="xl"
+                class="min-h-11"
+                :loading="actualizandoPlano"
+                @click="actualizarPlano"
+              >
+                Actualizar
+              </UButton>
+              <!-- En la tablet personal la barra dice en qué turno está (02.15); en el tótem compartido
+                   entran varios garzones y no hay "el" turno: ahí siguen los dos botones. -->
+              <UBadge
+                v-if="garzonPersonal && sesionActual"
+                color="success"
+                variant="subtle"
+                size="lg"
+                icon="i-lucide-clock"
+                data-qa="estado-turno"
+              >
+                En turno: {{ sesionActual.turnoNombre }}<template v-if="horaInicioTurno"> · desde {{ horaInicioTurno }}</template>
+              </UBadge>
+              <UButton
+                v-if="!(garzonPersonal && sesionActual)"
                 icon="i-lucide-log-in"
                 color="neutral"
                 variant="soft"
@@ -3097,30 +3374,37 @@ async function cerrarCuentaConPin(
                 Entrar a turno
               </UButton>
               <UButton
+                v-if="!garzonPersonal || sesionActual"
                 icon="i-lucide-log-out"
                 color="neutral"
                 variant="outline"
                 size="xl"
                 class="min-h-11"
+                :loading="preparandoSalida"
                 @click="salirDeTurno"
               >
                 Salir de turno
               </UButton>
-              <UButton
-                icon="i-lucide-shield-check"
-                color="neutral"
-                variant="ghost"
-                :loading="cargandoTestigos"
-                @click="pedirFirmaTestigo"
-              >
-                ¿Te pidieron firmar un cierre?
-              </UButton>
+              <!-- Una acción rara y con jerga de caja: no pesa lo mismo que las de uso diario (02.33). -->
+              <UDropdownMenu :items="menuMas">
+                <UButton
+                  icon="i-lucide-ellipsis"
+                  color="neutral"
+                  variant="ghost"
+                  size="xl"
+                  class="min-h-11"
+                  :loading="cargandoTestigos"
+                >
+                  Más
+                </UButton>
+              </UDropdownMenu>
             </div>
           </div>
 
           <SalonesSalonPlano
             v-if="selectedSalon"
             :mesas="selectedSalon.mesas"
+            :mi-garzon-id="garzonPersonal?.garzonId"
             @select="onSelectMesa"
           />
         </template>
@@ -3155,6 +3439,16 @@ async function cerrarCuentaConPin(
               <UIcon name="i-lucide-user" class="size-3" />
               Responsable: {{ activeCuenta.garzonResponsableNombre }}
             </span>
+            <!-- El panel ocupa el 90 % del ancho: sin este botón se salía tocando una franja de 77 px (02.13). -->
+            <UButton
+              icon="i-lucide-x"
+              label="Cerrar"
+              color="neutral"
+              variant="outline"
+              size="xl"
+              class="ms-auto min-h-11"
+              @click="cerrarDrawerMesa"
+            />
           </div>
         </template>
 
@@ -3230,6 +3524,7 @@ async function cerrarCuentaConPin(
                       <p class="font-semibold text-default">Cuenta {{ cuenta.numero }}</p>
                       <p class="text-sm text-muted">
                         {{ cuenta.lineas.length }} {{ cuenta.lineas.length === 1 ? 'producto' : 'productos' }}
+                        <template v-if="cuenta.abiertaEl"> · abierta {{ formatHace(cuenta.abiertaEl) }}</template>
                       </p>
                       <p
                         v-if="cuenta.garzonResponsableNombre"
@@ -3247,11 +3542,14 @@ async function cerrarCuentaConPin(
           </div>
 
           <!-- Detalle de una cuenta: catálogo + productos -->
-          <div v-else class="grid h-full min-h-0 grid-cols-1 gap-4 overflow-hidden lg:grid-cols-5">
-            <div class="flex min-h-0 flex-col overflow-hidden lg:col-span-3">
+          <!-- Desde 768 px (md) catálogo y cuenta van lado a lado: la cuenta es lo que no se mueve (02.14). -->
+          <div v-else class="grid h-full min-h-0 grid-cols-1 gap-4 overflow-hidden md:grid-cols-[minmax(0,1fr)_minmax(20rem,26rem)]">
+            <div class="flex min-h-0 flex-col overflow-hidden">
               <VentasCatalogoGrid
                 v-model:busqueda="catalogo.busqueda.value"
                 v-model:page="catalogo.page.value"
+                v-model:categoria="catalogo.categoriaId.value"
+                :categorias="categorias"
                 :items="items"
                 :total="catalogo.total.value"
                 :page-size="catalogo.pageSize"
@@ -3263,16 +3561,17 @@ async function cerrarCuentaConPin(
               />
             </div>
 
-            <div class="flex min-h-0 flex-col gap-3 overflow-hidden lg:col-span-2">
+            <div class="flex min-h-0 flex-col gap-3 overflow-hidden">
               <div class="flex flex-wrap items-center gap-2">
                 <UButton
-                  label="Tomar cuenta"
+                  :label="cuentaEsMia ? 'Ya eres el responsable' : 'Tomar cuenta'"
                   icon="i-lucide-user-check"
                   color="neutral"
                   variant="soft"
                   size="xl"
                   class="min-h-11"
                   :loading="transfiriendo"
+                  :disabled="cuentaEsMia"
                   @click="tomarCuenta"
                 />
                 <UButton
@@ -3360,6 +3659,14 @@ async function cerrarCuentaConPin(
                         {{ linea.personalizacionTexto }}
                       </p>
                       <p class="text-xs text-muted">{{ lineaSubtotal(index, linea) }}</p>
+                      <UBadge
+                        :label="estadoCocina(linea).texto"
+                        :color="estadoCocina(linea).color"
+                        variant="subtle"
+                        size="sm"
+                        class="mt-1"
+                        data-qa="estado-cocina"
+                      />
                       <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />
                       <PromocionesAplicadas :promociones="calculoVigente?.lineas[index]?.trazas.promociones ?? []" />
                     </div>
@@ -3370,7 +3677,8 @@ async function cerrarCuentaConPin(
                       icon="i-lucide-list-checks"
                       color="neutral"
                       variant="outline"
-                      size="xs"
+                      size="lg"
+                      class="min-h-11"
                       :disabled="cuentaActivaEnCobro || guardandoUnidades"
                       @click="abrirUnidades({ id: linea.itemId, nombre: linea.nombre }, linea)"
                     />
@@ -3444,6 +3752,13 @@ async function cerrarCuentaConPin(
                   <span>Total</span>
                   <span>{{ totalNoDisponible ? '—' : formatMonto(totalFinal) }}</span>
                 </div>
+                <p
+                  v-if="resumenCocina"
+                  class="mb-3 text-sm text-muted"
+                  data-qa="resumen-cocina"
+                >
+                  {{ resumenCocina }}
+                </p>
                 <UAlert
                   v-if="!tieneCaja"
                   color="warning"
@@ -3457,7 +3772,8 @@ async function cerrarCuentaConPin(
                   <UButton
                     color="neutral"
                     variant="soft"
-                    class="flex-1 justify-center"
+                    size="xl"
+                    class="min-h-11 flex-1 justify-center"
                     icon="i-lucide-chef-hat"
                     :loading="enviandoComanda"
                     :disabled="activeCuenta.lineas.length === 0"
@@ -3468,7 +3784,8 @@ async function cerrarCuentaConPin(
                   <UButton
                     color="neutral"
                     variant="soft"
-                    class="flex-1 justify-center"
+                    size="xl"
+                    class="min-h-11 flex-1 justify-center"
                     icon="i-lucide-receipt"
                     :loading="imprimiendoPrecuenta"
                     :disabled="activeCuenta.lineas.length === 0 || cuentaConItemEliminado"
@@ -3481,7 +3798,8 @@ async function cerrarCuentaConPin(
                   <UButton
                     color="error"
                     variant="soft"
-                    class="flex-1 justify-center"
+                    size="xl"
+                    class="min-h-11 flex-1 justify-center"
                     :disabled="cuentaActivaEnCobro"
                     @click="abrirCancelar"
                   >
@@ -3489,7 +3807,8 @@ async function cerrarCuentaConPin(
                   </UButton>
                   <UButton
                     color="primary"
-                    class="flex-1 justify-center"
+                    size="xl"
+                    class="min-h-11 flex-1 justify-center"
                     :loading="abriendoCobro || submitting"
                     :disabled="activeCuenta.lineas.length === 0 || !tieneCaja || cuentaConItemEliminado"
                     @click="abrirCobro"
@@ -3640,6 +3959,16 @@ async function cerrarCuentaConPin(
           </AppModalFooter>
         </template>
       </UModal>
+
+      <CrudModal
+        v-model:open="salirTurnoOpen"
+        title="¿Salir de turno?"
+        :message="mensajeSalirTurno"
+        confirm-label="Salir de turno"
+        cancel-label="Volver"
+        confirm-color="primary"
+        @confirm="confirmarSalirDeTurno"
+      />
 
       <UModal
         v-model:open="pendientesOpen"

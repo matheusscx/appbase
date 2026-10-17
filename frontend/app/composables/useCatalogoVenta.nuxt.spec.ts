@@ -216,4 +216,25 @@ describe('useCatalogoVenta', () => {
     expect(c.items.value[0]).toStrictEqual(serie)
     expect((c.items.value[0] as unknown as { modoInventario: string }).modoInventario).toBe('serie')
   })
+
+  it('02.25: la categoría elegida viaja como categoriaId y vuelve a la página 1', async () => {
+    const c = await montar({ tipos: TIPOS })
+    await c.cargar()
+    c.page.value = 3
+    await asentar()
+    urls = []
+
+    c.categoriaId.value = 'cat-1'
+    await asentar()
+
+    expect(c.page.value).toBe(1)
+    const q = new URL(urls.at(-1)!, 'http://x').searchParams
+    expect(q.get('categoriaId')).toBe('cat-1')
+    expect(q.get('page')).toBe('1')
+
+    urls = []
+    c.categoriaId.value = null
+    await asentar()
+    expect(new URL(urls.at(-1)!, 'http://x').searchParams.has('categoriaId')).toBe(false)
+  })
 })

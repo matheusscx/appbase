@@ -162,7 +162,7 @@ const columns: TableColumn<OrdenRow>[] = [
           <UInput
             v-model="busqueda"
             icon="i-lucide-search"
-            placeholder="Buscar por código, descripción o referencia..."
+            placeholder="Buscar por código, descripción o referencia…"
             class="min-w-48 flex-1 max-w-md"
           />
           <USelect

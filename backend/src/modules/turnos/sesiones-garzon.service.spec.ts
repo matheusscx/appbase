@@ -489,6 +489,34 @@ describe('SesionesGarzonService', () => {
     expect(result[0].turnoNombre).toBe('');
   });
 
+  // Auditoría UX 02.22: "Forzar cierre" dice cuántas mesas tiene abiertas quien se va a cerrar.
+  it('listarAbiertas trae cuántas cuentas abiertas tiene cada garzón, en la misma consulta', async () => {
+    dataSource.query.mockResolvedValueOnce([
+      {
+        sesion_garzon_id: SESION_ID,
+        garzon_id: GARZON_ID,
+        garzon_nombre: 'Ana',
+        turno_id: TURNO_ID,
+        turno_nombre: 'Mañana',
+        tipo_garzon: TipoGarzon.GARZON,
+        inicio_el: new Date('2026-07-16T12:00:00Z'),
+        fin_el: null,
+        estado: EstadoSesionGarzon.ABIERTA,
+        origen_cierre: null,
+        cerrada_por_usuario_id: null,
+        cuentas_abiertas: 3,
+      },
+    ]);
+
+    const result = await service.listarAbiertas(TENANT);
+
+    expect(dataSource.query).toHaveBeenCalledTimes(1);
+    const sql = (dataSource.query.mock.calls[0] as [string])[0];
+    expect(sql).toMatch(/FROM cuentas[\s\S]*?eliminado_el IS NULL/);
+    expect(sql).toMatch(/garzon_responsable_id/);
+    expect(result[0].cuentasAbiertas).toBe(3);
+  });
+
   // Los JOIN a `garzones` y `turnos` de los dos listados acotaban solo por
   // `eliminado_el`, mientras `sesiones_garzon` sí filtra por tenant. No son
   // explotables hoy —el `garzon_id` y el `turno_id` de esas filas se escriben por
@@ -571,6 +599,37 @@ describe('SesionesGarzonService', () => {
         },
       });
       expect(result?.id).toBe(SESION_ID);
+    });
+
+    it('trae cuántas cuentas abiertas tiene a su nombre (02.15)', async () => {
+      sesionRepo.findOne.mockResolvedValue(sesion({ id: SESION_ID }));
+      dataSource.query.mockImplementation((sql: string) =>
+        Promise.resolve(
+          sql.includes('FROM cuentas c')
+            ? [
+                {
+                  cuenta_id: 'c1',
+                  numero: 1,
+                  mesa_nombre: 'M1',
+                  salon_nombre: 'S',
+                },
+                {
+                  cuenta_id: 'c2',
+                  numero: 2,
+                  mesa_nombre: 'M2',
+                  salon_nombre: 'S',
+                },
+              ]
+            : [{ garzon_nombre: 'Ana', turno_nombre: 'Mañana' }],
+        ),
+      );
+
+      const result = await service.activaPropia(TENANT, USUARIO_ID, {
+        garzonId: GARZON_ID,
+        pin: PIN,
+      });
+
+      expect(result?.cuentasAbiertas).toBe(2);
     });
 
     it('devuelve null si el garzón no tiene sesión abierta', async () => {

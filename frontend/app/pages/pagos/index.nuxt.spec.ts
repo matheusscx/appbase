@@ -81,7 +81,7 @@ beforeEach(() => {
 })
 
 describe('pagos/index — cobrado, devuelto y neto', () => {
-  it('el café: muestra el neto y debajo "cobrado $100.000 · devuelto −$40.000", en el total y en hoy', async () => {
+  it('el café: muestra el neto y debajo "bruto $100.000 · devuelto −$40.000", en el total y en hoy', async () => {
     resumenRespuesta = {
       ...SIN_DEVOLUCIONES,
       totalPagos: 1,
@@ -98,12 +98,12 @@ describe('pagos/index — cobrado, devuelto y neto', () => {
     for (const titulo of ['Total cobrado', 'Cobrado hoy']) {
       const texto = tarjeta(wrapper, titulo).replace(/\s+/g, ' ')
       expect(texto).toContain('$60.000')
-      expect(texto).toContain('cobrado $100.000 · devuelto −$40.000')
+      expect(texto).toContain('bruto $100.000 · devuelto −$40.000')
       expect(texto).not.toContain('propinas')
     }
   })
 
-  it('con propina: "cobrado $105.000 · propinas −$5.000 · devuelto −$40.000" bajo un neto de $60.000', async () => {
+  it('con propina: "bruto $105.000 · propinas −$5.000 · devuelto −$40.000" bajo un neto de $60.000', async () => {
     resumenRespuesta = {
       totalPagos: 1,
       montoCobrado: '105000.0000',
@@ -122,7 +122,7 @@ describe('pagos/index — cobrado, devuelto y neto', () => {
     for (const titulo of ['Total cobrado', 'Cobrado hoy']) {
       const texto = tarjeta(wrapper, titulo).replace(/\s+/g, ' ')
       expect(texto).toContain('$60.000')
-      expect(texto).toContain('cobrado $105.000 · propinas −$5.000 · devuelto −$40.000')
+      expect(texto).toContain('bruto $105.000 · propinas −$5.000 · devuelto −$40.000')
     }
   })
 
@@ -136,7 +136,7 @@ describe('pagos/index — cobrado, devuelto y neto', () => {
     const wrapper = await montar()
 
     const total = tarjeta(wrapper, 'Total cobrado').replace(/\s+/g, ' ')
-    expect(total).toContain('cobrado $255.000 · propinas −$5.000')
+    expect(total).toContain('bruto $255.000 · propinas −$5.000')
     expect(total).not.toContain('devuelto')
   })
 
@@ -163,7 +163,7 @@ describe('pagos/index — cobrado, devuelto y neto', () => {
     const wrapper = await montar()
 
     expect(tarjeta(wrapper, 'Total cobrado').replace(/\s+/g, ' '))
-      .toContain('cobrado $250.000 · devuelto −$15.000')
+      .toContain('bruto $250.000 · devuelto −$15.000')
     expect(tarjeta(wrapper, 'Cobrado hoy')).not.toContain('devuelto')
   })
 })

@@ -1,8 +1,9 @@
 <script setup lang="ts">
 import type { CarritoLinea } from '~/composables/useVenta'
 import { customerVacio, puedeCobrar, tieneCustomerData, tipoDocumentoPorDefecto } from '~/composables/useVenta'
+import Decimal from 'decimal.js'
 import { unidadBaseItem } from '~/utils/cantidad-presentacion'
-import type { ResultadoVenta } from '~/composables/useCalculoPrecios'
+import { avisoCalculoEnPantalla, type ResultadoVenta } from '~/composables/useCalculoPrecios'
 import { sobreUmbralIdentidad } from '~/composables/useReceptor'
 import type { CustomerForm } from './ClienteForm.vue'
 
@@ -23,6 +24,8 @@ const props = defineProps<{
   /** ¿`resultado` corresponde a `lineas`? Ver `useResultadoCalculado`. */
   vigente: boolean
   loadingCalculo?: boolean
+  /** Por qué falló el último cálculo de ESTE carrito (`useVenta().errorCalculo`); `null` si no falló. */
+  errorCalculo?: unknown
   tiposDocumento: TipoDoc[]
   tieneCaja: boolean
 }>()
@@ -35,6 +38,8 @@ const emit = defineEmits<{
   'cambiar-unidades': [index: number]
   quitar: [index: number]
   cobrar: []
+  /** "Volver a calcular", tras un cálculo que falló. */
+  recalcular: []
   'limpiar-todo': []
 }>()
 
@@ -48,6 +53,20 @@ const clienteDrawerOpen = ref(false)
 // corresponda al carrito actual no se dibujan, porque el índice apuntaría a otra
 // línea. Los totales sí conservan el último valor conocido.
 const calculoVigente = computed(() => props.vigente ? props.resultado : null)
+
+// Si el cálculo de ESTE carrito falló, `resultado` es el del carrito anterior: sigue a la vista (no
+// parpadea) pero atenuado y con el motivo, para que no pase por el total de lo que hay en pantalla.
+// Mismo aviso y mismo botón que la cuenta del salón.
+const avisoCalculo = computed(() =>
+  props.errorCalculo != null && props.lineas.length > 0
+    ? avisoCalculoEnPantalla(props.errorCalculo, 'No se pudo recalcular el total')
+    : null,
+)
+const totalesDesactualizados = computed(() => props.errorCalculo != null && props.lineas.length > 0)
+
+const toDecimal = (v: string) => new Decimal(v || '0')
+const hayDescuentos = computed(() => !!props.resultado && !toDecimal(props.resultado.totales.totalDescuentos).isZero())
+const hayRecargos = computed(() => !!props.resultado && !toDecimal(props.resultado.totales.totalRecargos).isZero())
 
 const docSeleccionado = computed(() =>
   props.tiposDocumento.find((t) => t.id === tipoDocumentoId.value),
@@ -248,29 +267,41 @@ watch(clienteDrawerOpen, (open) => {
         Agrega ítems desde el catálogo.
       </div>
       <ul v-else class="divide-y divide-default">
-        <li v-for="(linea, index) in lineas" :key="`${linea.item.id}-${index}`" class="py-2 flex items-center gap-2">
-          <div class="flex-1 min-w-0">
-            <p class="text-sm font-medium text-default truncate">{{ linea.item.nombre }}</p>
-            <p v-if="linea.personalizacionResumen" class="text-xs text-muted truncate">
-              {{ linea.personalizacionResumen }}
-            </p>
-            <p class="text-xs text-muted">
-              {{ precioUnitarioLinea(index) }} c/u · {{ unidadBaseItem(linea.item) }}
-            </p>
-            <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />
-            <PromocionesAplicadas :promociones="calculoVigente?.lineas[index]?.trazas.promociones ?? []" />
-            <div v-if="linea.unidades?.length" class="flex flex-wrap gap-1 pt-1" data-qa="series-linea">
-              <UBadge
-                v-for="u in linea.unidades"
-                :key="u.id"
-                :color="colorCondicion(u.condicion)"
-                variant="subtle"
-                size="sm"
-                class="font-mono"
-              >
-                {{ u.serie }}<template v-if="u.condicion !== 'nuevo'"> · {{ etiquetaCondicion(u.condicion) }}</template>
-              </UBadge>
+        <li v-for="(linea, index) in lineas" :key="`${linea.item.id}-${index}`" class="py-2 flex flex-col gap-1">
+          <!-- El selector de cantidad ocupa casi 18 rem: en una fila con el nombre dejaba el nombre en una
+               letra. Va en su propia fila y el nombre usa todo el ancho (01.13). -->
+          <div class="flex items-start gap-2">
+            <div class="flex-1 min-w-0">
+              <p class="text-sm font-medium text-default line-clamp-2">{{ linea.item.nombre }}</p>
+              <p v-if="linea.personalizacionResumen" class="text-xs text-muted line-clamp-2">
+                {{ linea.personalizacionResumen }}
+              </p>
+              <p class="text-xs text-muted">
+                {{ precioUnitarioLinea(index) }} c/u
+              </p>
+              <AdvertenciasPrecio :advertencias="calculoVigente?.lineas[index]?.advertencias ?? []" />
+              <PromocionesAplicadas :promociones="calculoVigente?.lineas[index]?.trazas.promociones ?? []" />
+              <div v-if="linea.unidades?.length" class="flex flex-wrap gap-1 pt-1" data-qa="series-linea">
+                <UBadge
+                  v-for="u in linea.unidades"
+                  :key="u.id"
+                  :color="colorCondicion(u.condicion)"
+                  variant="subtle"
+                  size="sm"
+                  class="font-mono"
+                >
+                  {{ u.serie }}<template v-if="u.condicion !== 'nuevo'"> · {{ etiquetaCondicion(u.condicion) }}</template>
+                </UBadge>
+              </div>
             </div>
+            <UButton
+              :aria-label="`Quitar ${linea.item.nombre}`"
+              icon="i-lucide-trash-2"
+              color="error"
+              variant="ghost"
+              size="xs"
+              @click="emit('quitar', index)"
+            />
           </div>
           <!-- Con serie la cantidad no se tipea: son las unidades que se eligieron. -->
           <UButton
@@ -280,6 +311,7 @@ watch(clienteDrawerOpen, (open) => {
             color="neutral"
             variant="outline"
             size="xs"
+            class="self-start"
             @click="emit('cambiar-unidades', index)"
           />
           <AppCantidadInput
@@ -287,15 +319,8 @@ watch(clienteDrawerOpen, (open) => {
             :model-value="presentacionLinea(linea)"
             :unidad-codigo="unidadPresLinea(linea)"
             :unidad-base-codigo="unidadBaseItem(linea.item)"
+            class="self-start"
             @change="emit('cambiar-cantidad', index, $event)"
-          />
-          <UButton
-            :aria-label="`Quitar ${linea.item.nombre}`"
-            icon="i-lucide-trash-2"
-            color="error"
-            variant="ghost"
-            size="xs"
-            @click="emit('quitar', index)"
           />
         </li>
       </ul>
@@ -303,14 +328,39 @@ watch(clienteDrawerOpen, (open) => {
 
     <template #footer>
       <div class="flex flex-col gap-2">
-        <div v-if="resultado" class="text-sm space-y-1">
+        <UAlert
+          v-if="avisoCalculo"
+          color="error"
+          variant="soft"
+          icon="i-lucide-triangle-alert"
+          :title="avisoCalculo.title"
+          :description="avisoCalculo.description"
+          data-qa="aviso-calculo-carrito"
+        >
+          <template v-if="avisoCalculo.reintentable" #actions>
+            <UButton
+              label="Volver a calcular"
+              color="error"
+              variant="outline"
+              size="sm"
+              :loading="loadingCalculo"
+              @click="emit('recalcular')"
+            />
+          </template>
+        </UAlert>
+        <div
+          v-if="resultado"
+          class="text-sm space-y-1"
+          :class="totalesDesactualizados ? 'opacity-50' : ''"
+          data-qa="totales-carrito"
+        >
           <div class="flex justify-between text-muted">
             <span>Neto</span><span>{{ formatMonto(resultado.totales.subtotalNeto) }}</span>
           </div>
-          <div class="flex justify-between text-muted">
+          <div v-if="hayDescuentos" class="flex justify-between text-muted">
             <span>Descuentos</span><span>-{{ formatMonto(resultado.totales.totalDescuentos) }}</span>
           </div>
-          <div class="flex justify-between text-muted">
+          <div v-if="hayRecargos" class="flex justify-between text-muted">
             <span>Recargos</span><span>+{{ formatMonto(resultado.totales.totalRecargos) }}</span>
           </div>
           <div class="flex justify-between text-muted">

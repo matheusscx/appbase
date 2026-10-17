@@ -7,8 +7,10 @@ const props = withDefaults(
     mesas: MesaResumen[]
     editable?: boolean
     selectedId?: string | null
+    /** El garzón de esta tablet personal: sus mesas se marcan "Tuya". */
+    miGarzonId?: string | null
   }>(),
-  { editable: false, selectedId: null },
+  { editable: false, selectedId: null, miGarzonId: null },
 )
 
 const emit = defineEmits<{
@@ -29,6 +31,7 @@ const emit = defineEmits<{
   solape: [mesaId: string, nombres: string[]]
 }>()
 
+const { formatHace } = useFormatters()
 const plano = ref<HTMLElement | null>(null)
 const draggingId = ref<string | null>(null)
 const dragMoved = ref(false)
@@ -152,7 +155,10 @@ function onActivar(mesa: MesaResumen) {
 function nombreAccesible(mesa: MesaResumen): string {
   if (!mesa.ocupada) return `${mesa.nombre}, libre`
   const n = mesa.cuentasAbiertas
-  return `${mesa.nombre}, ocupada, ${n} ${n === 1 ? 'cuenta abierta' : 'cuentas abiertas'}`
+  const base = `${mesa.nombre}, ocupada, ${n} ${n === 1 ? 'cuenta abierta' : 'cuentas abiertas'}`
+  const tiempo = mesa.abiertaDesde ? `, abierta ${formatHace(mesa.abiertaDesde)}` : ''
+  const propia = props.miGarzonId && mesa.responsablesIds?.includes(props.miGarzonId) ? ', tuya' : ''
+  return `${base}${tiempo}${propia}`
 }
 </script>
 
@@ -189,6 +195,7 @@ function nombreAccesible(mesa: MesaResumen): string {
         :mesa="mesa"
         :editable="editable"
         :selected="selectedId === mesa.id"
+        :propia="!!miGarzonId && !!mesa.responsablesIds?.includes(miGarzonId)"
       />
     </div>
   </div>

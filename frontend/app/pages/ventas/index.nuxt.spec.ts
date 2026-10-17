@@ -22,6 +22,7 @@ import { describe, it, expect, beforeEach } from 'vitest'
 import { defineComponent } from 'vue'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import VentasIndex from './index.vue'
+import { hoyLocal } from '~/composables/useVigenciaRegla'
 
 const llamadas: string[] = []
 /** Las filas que devuelve `GET /ventas` (el listado). Se pisa en el caso que las necesita. */
@@ -161,7 +162,7 @@ describe('ventas/index — carga la caja activa al montar', () => {
 
   it('un 403 de /caja/activa (rol sin MiCaja:Leer) no rompe el resto del montaje', async () => {
     const wrapper = await montar()
-    expect(wrapper.text()).toContain('Ventas registradas')
+    expect(wrapper.text()).toContain('Ventas de hoy')
   })
 })
 
@@ -384,5 +385,88 @@ describe('ventas/index — recargar el resumen no parpadea ni pisa lo nuevo con 
 
     expect(wrapper.text()).toContain('$263.000')
     expect(wrapper.text()).not.toContain('$280.000')
+  })
+})
+
+describe('ventas/index — parte en "Hoy" y busca por folio (01.28)', () => {
+  const esperar = () => new Promise(r => setTimeout(r, 20))
+  const urlsListado = () => llamadas.filter(u => /\/ventas\?/.test(u))
+  const urlsResumen = () => llamadas.filter(u => u.includes('/ventas/resumen'))
+  const buscadorFolio = (wrapper: Awaited<ReturnType<typeof montar>>) =>
+    wrapper.find('input[placeholder="Buscar por folio…"]')
+
+  it('la lista y las tarjetas piden el día de hoy', async () => {
+    await montar()
+    const hoy = hoyLocal()
+
+    expect(urlsListado()[0]).toContain(`desde=${hoy}`)
+    expect(urlsListado()[0]).toContain(`hasta=${hoy}`)
+    expect(urlsResumen()[0]).toContain(`desde=${hoy}`)
+    expect(urlsResumen()[0]).toContain(`hasta=${hoy}`)
+  })
+
+  it('cambiar el rango recarga la lista y las tarjetas con el rango nuevo', async () => {
+    const wrapper = await montar()
+    const rango = wrapper.findComponent({ name: 'AppRangoFechas' })
+
+    rango.vm.$emit('update:desde', '2026-10-01')
+    await esperar()
+
+    expect(urlsListado().at(-1)).toContain('desde=2026-10-01')
+    expect(urlsResumen().at(-1)).toContain('desde=2026-10-01')
+  })
+
+  it('vaciar las fechas muestra todo el historial', async () => {
+    const wrapper = await montar()
+    const rango = wrapper.findComponent({ name: 'AppRangoFechas' })
+
+    rango.vm.$emit('update:desde', null)
+    rango.vm.$emit('update:hasta', null)
+    await esperar()
+
+    expect(urlsListado().at(-1)).not.toContain('desde=')
+    expect(urlsListado().at(-1)).not.toContain('hasta=')
+    expect(urlsResumen().at(-1)).not.toContain('desde=')
+  })
+
+  it('el folio se manda tal cual y borrarlo lo saca', async () => {
+    const wrapper = await montar()
+
+    await buscadorFolio(wrapper).setValue(' 1234 ')
+    await new Promise(r => setTimeout(r, 500))
+    expect(urlsListado().at(-1)).toContain('folio=1234')
+
+    await buscadorFolio(wrapper).setValue('')
+    await new Promise(r => setTimeout(r, 500))
+    expect(urlsListado().at(-1)).not.toContain('folio=')
+  })
+
+  it('con un folio activo la búsqueda no se limita a hoy: el folio puede ser de otro día', async () => {
+    const wrapper = await montar()
+    await buscadorFolio(wrapper).setValue('1234')
+    await new Promise(r => setTimeout(r, 500))
+
+    const ultima = urlsListado().at(-1)!
+    expect(ultima).toContain('folio=1234')
+    expect(ultima).not.toContain('desde=')
+    expect(ultima).not.toContain('hasta=')
+  })
+
+  it('"Limpiar filtros" vuelve a hoy', async () => {
+    const wrapper = await montar()
+    const rango = wrapper.findComponent({ name: 'AppRangoFechas' })
+    rango.vm.$emit('update:desde', '2026-10-01')
+    await esperar()
+
+    await wrapper.findAll('button').find(b => b.text().includes('Limpiar filtros'))!.trigger('click')
+    await esperar()
+
+    expect(urlsListado().at(-1)).toContain(`desde=${hoyLocal()}`)
+  })
+
+  it('sin ventas hoy lo dice con esas palabras, no "No hay ventas registradas"', async () => {
+    const wrapper = await montar()
+
+    expect(wrapper.text()).toContain('Todavía no hay ventas hoy.')
   })
 })

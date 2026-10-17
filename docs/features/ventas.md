@@ -454,11 +454,12 @@ Origen de la decisión: `docs/agent/investigaciones/2026-07-27-anulacion-y-notas
 
 ### GET /api/ventas/resumen
 
-KPIs globales del tenant (no dependen de la página actual del listado). Sin fecha: suma
-desde siempre. Respeta "solo mis cajas" como el listado (`filtroDeMisCajas`).
+KPIs del tenant (no dependen de la página actual del listado). Sin `desde`/`hasta`: suma
+desde siempre; con ellos mide **el mismo rango que el listado** (el historial parte en "Hoy" y las
+tarjetas tienen que contar lo que la lista muestra). Respeta "solo mis cajas" como el listado (`filtroDeMisCajas`).
 
 ```
-GET /api/ventas/resumen
+GET /api/ventas/resumen?desde=2026-10-16&hasta=2026-10-16
 Authorization: Bearer <token-con-tenant_id>
 
 Response (200):
@@ -512,7 +513,16 @@ respuesta de la última.
 
 ### GET /api/ventas
 
-Lista paginada de ventas del tenant autenticado. Query params: `page` (default 1), `pageSize` (default 15, max 100), `estado`, `canal`, `documento`. La respuesta incluye campos enriquecidos por fila: `montoPagado` (suma de pagos menos vuelto), `saldo` (la expresión única del saldo, no `total − montoPagado`; una corrección da 0) y el resumen de quién emitió (`emisores`, `tieneDuplicado`).
+**Rango y folio (2026-10-16, owner; auditoría UX 01.28).** `desde`/`hasta` filtran por `ventas.fecha`
+(la que muestra la lista). Una **fecha pura** (`YYYY-MM-DD`, lo que emite `AppRangoFechas`) se
+expande al **día del negocio** del tenant (zona + hora de corte) y `hasta` incluye el día completo
+([`patterns/backend.md`](../patterns/backend.md) § 10b); un timestamp se usa tal cual. `folio` es
+coincidencia **exacta** con el folio de la boleta del sistema (`dte_documentos.folio`) o con el número
+anotado de un documento de la máquina o de afuera (`venta_documentos.numero`), solo de documentos
+vigentes. La pantalla parte en "Hoy"; con un folio escrito no aplica el rango a la lista (el folio
+puede ser de otro día) y lo deja inactivo.
+
+Lista paginada de ventas del tenant autenticado. Query params: `page` (default 1), `pageSize` (default 15, max 100), `estado`, `canal`, `documento`, `desde`/`hasta` y `folio`. La respuesta incluye campos enriquecidos por fila: `montoPagado` (suma de pagos menos vuelto), `saldo` (la expresión única del saldo, no `total − montoPagado`; una corrección da 0) y el resumen de quién emitió (`emisores`, `tieneDuplicado`).
 
 ```
 GET /api/ventas?page=1&pageSize=15&estado=pendiente&canal=fisico&documento=sin_numero
@@ -966,12 +976,17 @@ Interfaz de punto de venta para crear una venta desde el catálogo hasta el cobr
 - **Ruta**: `/ventas/pos` (`app/pages/ventas/pos.vue`)
 - **Layout**: Dos paneles — catálogo + buscador a la izquierda, carrito + desglose + cobro a la derecha
 - **Gate**: Panel bloqueante si no hay caja abierta (verifica estado en el store de cajas)
+- **Lector de códigos (owner, 2026-10-16)**: Enter en el buscador pide la búsqueda al instante y, si deja **un solo** ítem vendible, lo agrega y limpia el buscador; con varios deja la lista. Hoy el catálogo busca por nombre y descripción: no hay campo de código de barras en el ítem, así que el código funciona si está escrito en alguno de los dos.
+- **Quitar una línea** avisa "Quitaste X" con **Deshacer**, que la devuelve a su lugar con todo lo que traía (receta personalizada, unidades de serie).
+- **Si el cálculo falla**, el carrito atenúa el desglose y muestra "No se pudo recalcular el total" con "Volver a calcular" (igual que la cuenta del salón); no cambia cómo se calcula.
+- **Sin impresora de boletas** el cobro avisa "…no hay impresora de boletas configurada"; la reimpresión del detalle dice lo mismo y, tras 2 s de espera, el botón pasa a "Esperando la impresora…".
+- El desglose del carrito y el de Totales del detalle **no muestran Descuentos ni Recargos en 0**.
 
 ### Componentes
 
 | Componente | Ubicación | Responsabilidad |
 |---|---|---|
-| `CatalogoGrid` | `app/components/ventas/CatalogoGrid.vue` | Buscador + grilla de productos, paginada en el servidor ([catalogo-paginado.md](./catalogo-paginado.md)); emite `add` al carrito |
+| `CatalogoGrid` | `app/components/ventas/CatalogoGrid.vue` | Buscador + grilla de productos, paginada en el servidor ([catalogo-paginado.md](./catalogo-paginado.md)); emite `add` al carrito. Botón de borrar la búsqueda; con `autofocus` (solo el POS) el buscador toma el foco al abrir si hay puntero fino; Enter emite `buscar-enter`. La tarjeta dice "Disponible: n", "Sin stock" o "Disponible según la opción" |
 | `ClienteForm` | `app/components/ventas/ClienteForm.vue` | Datos del cliente (nombre, RUT, dirección, teléfono, email); exporta tipo `CustomerForm` |
 | `UnidadesSerieModal` | `app/components/ventas/UnidadesSerieModal.vue` | Selector de unidades de un producto con serie: serie, condición como badge, garantía, buscador por serie y selección múltiple; también lo usa el salón |
 | `CarritoPanel` | `app/components/ventas/CarritoPanel.vue` | Líneas del carrito con `AppCantidadInput` (±, selector de unidad de la misma magnitud), selector de tipo de documento, desglose, botón Cobrar |
@@ -1068,7 +1083,7 @@ Implementado en 2026-06-30; rutas unificadas en 2026-07-01.
 
 | Página | Ruta | Descripción |
 |--------|------|-------------|
-| Historial de ventas | `/ventas` | Tabla con filtros, KPIs; fila clickeable abre detalle |
+| Historial de ventas | `/ventas` | Tabla con filtros, KPIs; **parte en "Hoy"** (rango `desde`/`hasta` cambiable, vaciarlo muestra todo; "Limpiar filtros" vuelve a hoy) y busca por **folio**; fila clickeable abre detalle |
 | Detalle de venta | `/ventas?venta={uuid}` | Drawer lateral (`VentaDetalleDrawer`): líneas, totales, pagos, saldo; botón "Registrar pago" para `pendiente`/`pagada_parcial`; sección "Documentos"; botón "Reimprimir boleta" (ver abajo) |
 | Punto de venta | `/ventas/pos` | Crear venta (ver sección POS arriba) |
 
@@ -1139,7 +1154,7 @@ manda `externoHecho`.
 
 ## Pendiente (fase futura)
 
-- **Filtrado avanzado en historial** — Rango de fechas, búsqueda por cliente, exportación
+- **Filtrado avanzado en historial** — Búsqueda por cliente, exportación (el rango de fechas y el folio ya están, 2026-10-16)
 - **Comprobante imprimible** — Generación y descarga de PDF del comprobante de venta
 - **Descuentos/recargos manuales** — Aplicación inline de descuentos o recargos por línea o a nivel de venta
 - **Canal online** — Soporte de ventas en canal `online` con caja virtual automática
