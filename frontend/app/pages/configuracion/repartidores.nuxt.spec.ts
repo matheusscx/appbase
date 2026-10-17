@@ -9,7 +9,12 @@ import Repartidores from './repartidores.vue'
 
 const MENSAJE_HOJAS = 'El repartidor tiene hojas de ruta: desactívalo en vez de eliminarlo.'
 
-let repartidoresBackend: { id: string, nombre: string, telefono: string | null, activo: boolean }[] = []
+let repartidoresBackend: { id: string, nombre: string, telefono: string | null, activo: boolean, tarifaPagoId: string | null }[] = []
+const tarifasBackend = [
+  { id: 't-auto', nombre: 'Auto', monto: '1900', esDefecto: true, activa: true },
+  { id: 't-moto', nombre: 'Moto', monto: '1000', esDefecto: false, activa: true },
+  { id: 't-vieja', nombre: 'Vieja', monto: '500', esDefecto: false, activa: false },
+]
 let fallaPatch = false
 let fallaDelete = false
 let llamadas: { url: string, method: string, body?: Record<string, unknown> }[] = []
@@ -18,6 +23,7 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     const method = opts?.method ?? 'GET'
     llamadas.push({ url, method, body: opts?.body })
+    if (url.includes('/tarifas-pago')) return Promise.resolve(tarifasBackend.map(t => ({ ...t })))
     if (method === 'POST') {
       return Promise.resolve({ id: 'r-3', activo: true, ...opts!.body })
     }
@@ -55,8 +61,8 @@ describe('configuracion/repartidores', () => {
   beforeEach(() => {
     repartidoresBackend = [
       // Ya ordenados por nombre, como los entrega el backend (`ORDER BY nombre`).
-      { id: 'r-2', nombre: 'Ana Soto', telefono: null, activo: false },
-      { id: 'r-1', nombre: 'Juan Pérez', telefono: '+56 9 1111 2222', activo: true },
+      { id: 'r-2', nombre: 'Ana Soto', telefono: null, activo: false, tarifaPagoId: null },
+      { id: 'r-1', nombre: 'Juan Pérez', telefono: '+56 9 1111 2222', activo: true, tarifaPagoId: 't-moto' },
     ]
     fallaPatch = false
     fallaDelete = false
@@ -67,6 +73,19 @@ describe('configuracion/repartidores', () => {
     // `AppDrawer` stubeado y `attachTo`, por lo mismo que en `impuestos.nuxt.spec.ts`: el drawer
     // real revienta al cerrarse bajo happy-dom, y el submit por `form="…"` lo resuelve el documento.
     async function montarConDrawerStub() {
+      useMonedasStore().hydrate([{
+        monedaId: 'clp-1',
+        nombre: 'Peso chileno',
+        codigoIso: 'CLP',
+        simbolo: '$',
+        decimales: 0,
+        separadorDecimal: ',',
+        separadorMiles: '.',
+        locale: 'es-CL',
+        habilitada: true,
+        esOficial: true,
+        valorDelDia: null,
+      }], 'tenant-1')
       const wrapper = await mountSuspended(Repartidores, {
         attachTo: document.body,
         global: {
@@ -104,7 +123,7 @@ describe('configuracion/repartidores', () => {
 
       const patch = llamadas.find(l => l.method === 'PATCH')
       expect(patch?.url).toMatch(/\/repartidores\/r-1$/)
-      expect(patch?.body).toEqual({ nombre: 'Juan Pérez', telefono: null })
+      expect(patch?.body).toEqual({ nombre: 'Juan Pérez', telefono: null, tarifaPagoId: 't-moto' })
       expect(wrapper.text()).toContain('Sin teléfono')
 
       wrapper.unmount()
@@ -112,7 +131,7 @@ describe('configuracion/repartidores', () => {
 
     it('crear manda { nombre, telefono } recortados y suma la fila ordenada sin volver a pedir la lista', async () => {
       const wrapper = await montarConDrawerStub()
-      expect(llamadas.filter(l => l.method === 'GET')).toHaveLength(1)
+      expect(llamadas.filter(l => l.method === 'GET' && l.url.endsWith('/repartidores'))).toHaveLength(1)
 
       await wrapper.findAll('button').find(b => b.text() === 'Nuevo repartidor')!.trigger('click')
       await new Promise(r => setTimeout(r, 0))
@@ -123,13 +142,43 @@ describe('configuracion/repartidores', () => {
 
       const post = llamadas.find(l => l.method === 'POST')
       expect(post?.url).toMatch(/\/repartidores$/)
-      expect(post?.body).toEqual({ nombre: 'Beto Rojas', telefono: '+56 9 3333 4444' })
+      expect(post?.body).toEqual({ nombre: 'Beto Rojas', telefono: '+56 9 3333 4444', tarifaPagoId: null })
       // Sin segundo GET: la respuesta del POST se mergea en la lista.
-      expect(llamadas.filter(l => l.method === 'GET')).toHaveLength(1)
+      expect(llamadas.filter(l => l.method === 'GET' && l.url.endsWith('/repartidores'))).toHaveLength(1)
       const texto = wrapper.text()
       expect(texto).toContain('Beto Rojas')
       expect(texto.indexOf('Ana Soto')).toBeLessThan(texto.indexOf('Beto Rojas'))
       expect(texto.indexOf('Beto Rojas')).toBeLessThan(texto.indexOf('Juan Pérez'))
+
+      wrapper.unmount()
+    })
+
+    const selectorTarifa = (w: Awaited<ReturnType<typeof montarConDrawerStub>>) =>
+      w.findAllComponents({ name: 'USelect' }).find(c => (c.props('items') as { value: string | null }[]).some(i => i.value === 't-moto'))!
+
+    it('el selector de tarifa ofrece «Según la por defecto» y las activas; elegir una la manda y «según» manda null', async () => {
+      const wrapper = await montarConDrawerStub()
+
+      await wrapper.findAll('[title="Editar"]')[1]!.trigger('click')
+      await new Promise(r => setTimeout(r, 0))
+      const sel = selectorTarifa(wrapper)
+      expect(sel.props('items')).toEqual([
+        { label: 'Según la por defecto (Auto $1.900)', value: null },
+        { label: 'Auto $1.900', value: 't-auto' },
+        { label: 'Moto $1.000', value: 't-moto' },
+      ])
+      expect(sel.props('modelValue')).toBe('t-moto')
+      sel.vm.$emit('update:modelValue', 't-auto')
+      await wrapper.find('form#repartidor-form').trigger('submit')
+      await new Promise(r => setTimeout(r, 30))
+      expect(cuerpo('PATCH')).toMatchObject({ tarifaPagoId: 't-auto' })
+
+      await wrapper.findAll('[title="Editar"]')[1]!.trigger('click')
+      await new Promise(r => setTimeout(r, 0))
+      selectorTarifa(wrapper).vm.$emit('update:modelValue', null)
+      await wrapper.find('form#repartidor-form').trigger('submit')
+      await new Promise(r => setTimeout(r, 30))
+      expect(llamadas.filter(l => l.method === 'PATCH').at(-1)?.body).toMatchObject({ tarifaPagoId: null })
 
       wrapper.unmount()
     })
@@ -143,7 +192,7 @@ describe('configuracion/repartidores', () => {
       await wrapper.find('form#repartidor-form').trigger('submit')
       await new Promise(r => setTimeout(r, 30))
 
-      expect(cuerpo('POST')).toEqual({ nombre: 'Beto Rojas', telefono: null })
+      expect(cuerpo('POST')).toEqual({ nombre: 'Beto Rojas', telefono: null, tarifaPagoId: null })
 
       wrapper.unmount()
     })
@@ -173,6 +222,9 @@ describe('configuracion/repartidores', () => {
     expect(wrapper.text()).toContain('+56 9 1111 2222')
     expect(wrapper.text()).toContain('Ana Soto')
     expect(wrapper.text()).toContain('Sin teléfono')
+    // Juan tiene tarifa propia; Ana usa la por defecto.
+    expect(wrapper.text()).toContain('Tarifa: Moto')
+    expect(wrapper.text()).toContain('Tarifa: Auto (por defecto)')
 
     wrapper.unmount()
   })

@@ -305,7 +305,12 @@ export class PaquetesService {
         poner('cobro_en_destino', dto.cobroEnDestino);
       if (dto.precioEnvio !== undefined) poner('precio_envio', dto.precioEnvio);
       if (dto.tarifaPagoId !== undefined) {
-        if (dto.tarifaPagoId !== null) {
+        // Solo si cambia: el formulario reenvía la que ya tiene, y una tarifa que se desactivó
+        // después no puede hacer fallar la edición de cualquier otro campo del paquete.
+        if (
+          dto.tarifaPagoId !== null &&
+          dto.tarifaPagoId !== actual.tarifaPagoId
+        ) {
           await this.tarifas.exigirActivaDelTenant(tenantId, dto.tarifaPagoId, {
             bloquear: true,
           });

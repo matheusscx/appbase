@@ -24,6 +24,8 @@ function hoja(parcial: Partial<HojaRutaFila> & { id: string }): HojaRutaFila {
     entregados: 8,
     cobroDestino: 3,
     montoCobradoDestino: '30000',
+    montoCobradoEfectivo: '20000',
+    montoCobradoTransferencia: '10000',
     montoPagoRepartidor: '8000',
     montoTotalGeneral: '20000',
     netoARendir: '22000',
@@ -36,6 +38,7 @@ const RESUMEN: ResumenPaqueteria = {
   entregados: 21,
   cobroDestino: 7,
   montoCobradoDestino: '70000',
+  montoCobradoTransferencia: '25000',
   montoTotalGeneral: '52500',
   montoPagoRepartidor: '21000',
 }

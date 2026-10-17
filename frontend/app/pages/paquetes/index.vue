@@ -7,6 +7,7 @@ import type {
   PaqueteConfiguracionRespuesta,
   PaqueteFila,
   RepartidorFila,
+  TarifaPagoFila,
 } from '~/types/paqueteria'
 
 // Admin-only: el backend va con `TenantAdminGuard` en todo el módulo.
@@ -22,7 +23,7 @@ interface Tercero {
 const toast = useToast()
 const apiUrl = useRuntimeConfig().public.apiUrl
 const { formatOficial } = useCurrency()
-const { rotuloEstadoPaquete, colorEstadoPaquete, fechaCorta } = usePaqueteria()
+const { rotuloEstadoPaquete, colorEstadoPaquete, fechaCorta, opcionesTarifa } = usePaqueteria()
 const { pageSize } = useUserPreferences()
 const { diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
 const permissionsStore = usePermissionsStore()
@@ -127,6 +128,7 @@ function marcarTodos(marcar: boolean) {
 const config = ref<PaqueteConfiguracionRespuesta | null>(null)
 const terceros = ref<Tercero[]>([])
 const repartidores = ref<RepartidorFila[]>([])
+const tarifas = ref<TarifaPagoFila[]>([])
 
 async function cargarConfig() {
   try {
@@ -156,8 +158,18 @@ async function cargarRepartidores() {
   }
 }
 
+async function cargarTarifas() {
+  try {
+    tarifas.value = await useApiFetch<TarifaPagoFila[]>(`${apiUrl}/tarifas-pago`)
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar las tarifas de pago'), color: 'error' })
+  }
+}
+
 onMounted(() => {
   cargarConfig()
+  cargarTarifas()
   cargarTerceros()
   cargarRepartidores()
   cargarDiaNegocio()
@@ -179,7 +191,8 @@ const emptyForm = () => ({
   remitenteTerceroId: undefined as string | undefined,
   cobroEnDestino: false,
   precioEnvio: '',
-  pagoRepartidor: '',
+  // null = «Según repartidor»: el servidor resuelve la tarifa al pagar.
+  tarifaPagoId: null as string | null,
 })
 const form = ref(emptyForm())
 
@@ -188,11 +201,19 @@ const bloqueado = computed(() => editando.value?.bloqueado ?? false)
 const drawerTitle = computed(() => editando.value ? 'Editar paquete' : 'Nuevo paquete')
 const submitLabel = computed(() => editando.value ? 'Guardar' : 'Crear')
 
-// Sin valores por defecto guardados, un alta sin montos es 400: se pide tipearlos acá.
-const montosRequeridos = computed(() => !!editando.value || !configurada.value)
+// Sin precio por defecto guardado, un alta sin precio es 400: se pide tipearlo acá. Sin tarifa de
+// pago por defecto, lo mismo con «Según repartidor»: hay que elegir una tarifa.
+const precioRequerido = computed(() => !!editando.value || !configurada.value)
+const tarifaDefecto = computed(() => tarifas.value.find(t => t.esDefecto && t.activa) ?? null)
 const montosFaltan = computed(() =>
-  montosRequeridos.value && !bloqueado.value
-  && (form.value.precioEnvio === '' || form.value.pagoRepartidor === ''),
+  !bloqueado.value
+  && ((precioRequerido.value && form.value.precioEnvio === '')
+    || (!editando.value && !tarifaDefecto.value && form.value.tarifaPagoId === null)),
+)
+// Sin monto en «Según repartidor»: acá el repartidor todavía no se conoce, y la por defecto
+// podría no ser la que se pague.
+const tarifaOptions = computed(() =>
+  opcionesTarifa(tarifas.value, null, form.value.tarifaPagoId),
 )
 const guardarDeshabilitado = computed(() => form.value.codigo.trim() === '' || montosFaltan.value)
 
@@ -222,7 +243,6 @@ function abrirCrear() {
   resetDrawer()
   if (config.value?.configurada) {
     form.value.precioEnvio = config.value.precioEnvioDefecto
-    form.value.pagoRepartidor = config.value.pagoRepartidorDefecto
   }
   drawerOpen.value = true
 }
@@ -240,7 +260,7 @@ function abrirEditar(p: PaqueteFila) {
     remitenteTerceroId: p.remitenteTerceroId ?? undefined,
     cobroEnDestino: p.cobroEnDestino,
     precioEnvio: p.precioEnvio,
-    pagoRepartidor: p.pagoRepartidor,
+    tarifaPagoId: p.tarifaPagoId,
   }
   drawerOpen.value = true
 }
@@ -270,7 +290,7 @@ async function guardar() {
       // Con la rendición hecha el backend rechaza cualquier cambio de montos o de cobro: ni se mandan.
       const montos = bloqueado.value
         ? {}
-        : { cobroEnDestino: f.cobroEnDestino, precioEnvio: f.precioEnvio, pagoRepartidor: f.pagoRepartidor }
+        : { cobroEnDestino: f.cobroEnDestino, precioEnvio: f.precioEnvio, tarifaPagoId: f.tarifaPagoId }
       const guardado = await useApiFetch<PaqueteFila>(`${apiUrl}/paquetes/${editando.value.id}`, {
         method: 'PATCH',
         body: { ...datos, ...remitenteCambio, ...montos },
@@ -285,7 +305,7 @@ async function guardar() {
           remitenteTerceroId: remitente,
           cobroEnDestino: f.cobroEnDestino,
           precioEnvio: f.precioEnvio || null,
-          pagoRepartidor: f.pagoRepartidor || null,
+          tarifaPagoId: f.tarifaPagoId,
         }).filter(([, valor]) => valor !== null),
       )
       await useApiFetch<PaqueteFila>(`${apiUrl}/paquetes`, { method: 'POST', body })
@@ -422,7 +442,7 @@ const columns: TableColumn<PaqueteFila>[] = [
   { id: 'destinatario', header: 'Destinatario' },
   { accessorKey: 'cobroEnDestino', header: 'Cobro en destino' },
   { accessorKey: 'precioEnvio', header: 'Envío', meta: { class: { th: 'text-right', td: 'text-right' } } },
-  { accessorKey: 'pagoRepartidor', header: 'Pago repartidor', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'tarifa', header: 'Tarifa de pago' },
   { accessorKey: 'estado', header: 'Estado' },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
@@ -562,8 +582,10 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
             <template #precioEnvio-cell="{ row }">
               <span class="text-sm">{{ formatOficial(row.original.precioEnvio) }}</span>
             </template>
-            <template #pagoRepartidor-cell="{ row }">
-              <span class="text-sm">{{ formatOficial(row.original.pagoRepartidor) }}</span>
+            <template #tarifa-cell="{ row }">
+              <span class="text-sm" :class="row.original.tarifaPagoNombre ? 'text-default' : 'text-muted'">
+                {{ row.original.tarifaPagoNombre ?? 'Según repartidor' }}
+              </span>
             </template>
 
             <template #estado-cell="{ row }">
@@ -647,7 +669,7 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
           color="info"
           variant="subtle"
           icon="i-lucide-info"
-          title="Todavía no hay valores por defecto: escribe el precio de envío y el pago al repartidor de este paquete."
+          title="Todavía no hay valores por defecto: escribe el precio de envío y elige la tarifa de pago de este paquete."
           data-qa="paquete-sin-configurar"
         />
 
@@ -707,13 +729,14 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
               data-qa="paquete-precio-envio"
             />
           </UFormField>
-          <UFormField label="Pago al repartidor">
-            <MoneyInput
-              v-model="form.pagoRepartidor"
-              oficial
+          <UFormField label="Tarifa de pago" description="Lo que se le paga al repartidor si lo entrega.">
+            <USelect
+              v-model="form.tarifaPagoId"
+              :items="tarifaOptions"
+              :placeholder="tarifaOptions[0]?.label"
               :disabled="bloqueado"
-              class="w-48"
-              data-qa="paquete-pago-repartidor"
+              class="w-full"
+              data-qa="paquete-tarifa-pago"
             />
           </UFormField>
           <p v-if="bloqueado" class="text-sm text-muted" data-qa="paquete-bloqueado">

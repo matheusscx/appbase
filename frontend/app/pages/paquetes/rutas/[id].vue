@@ -283,7 +283,11 @@ async function rendir() {
                   {{ linea.direccion }}<template v-if="linea.comuna">, {{ linea.comuna }}</template>
                 </p>
                 <p class="text-xs tabular-nums text-muted">
-                  Envío {{ formatOficial(linea.precioEnvio) }} · Pago {{ formatOficial(linea.pagoRepartidor) }}
+                  Envío {{ formatOficial(linea.precioEnvio) }} · {{ linea.pagoEstimado ? 'Pago estimado' : 'Pago' }}
+                  <span :data-qa="`hoja-linea-pago-${linea.codigo}`">{{ formatOficial(linea.pagoRepartidor) }}</span>
+                  <template v-if="linea.tarifaPagoNombre">
+                    · Tarifa <span :data-qa="`hoja-linea-tarifa-${linea.codigo}`">{{ linea.tarifaPagoNombre }}</span>
+                  </template>
                 </p>
                 <UBadge
                   v-if="linea.cobroEnDestino"

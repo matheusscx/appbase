@@ -94,8 +94,13 @@ export class RepartidoresService {
     if (sets.length === 0) return this.buscar(tenantId, id);
 
     return this.db.transaccion(async () => {
-      // Sacarle la tarifa (`null`) no pide nada; ponerla exige una activa de este tenant.
-      if (dto.tarifaPagoId) {
+      // Sacarle la tarifa (`null`) no pide nada; ponerla exige una activa de este tenant. Si es la
+      // misma que ya tiene tampoco: una tarifa desactivada después no puede hacer fallar la
+      // edición de otro campo (el formulario reenvía todo).
+      if (
+        dto.tarifaPagoId &&
+        dto.tarifaPagoId !== (await this.buscar(tenantId, id)).tarifaPagoId
+      ) {
         await this.tarifas.exigirActivaDelTenant(tenantId, dto.tarifaPagoId, {
           bloquear: true,
         });

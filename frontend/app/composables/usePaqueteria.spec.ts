@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { setActivePinia, createPinia } from 'pinia'
 import { ref } from 'vue'
 import type { MonedaTenantApi } from '~/types/moneda'
-import type { LineaHoja } from '~/types/paqueteria'
+import type { LineaHoja, TarifaPagoFila } from '~/types/paqueteria'
 
 // Mismo andamiaje que `useMonedaConversion.spec.ts`: el store de monedas llama a
 // `useRuntimeConfig()` al armarse y necesita una app Nuxt que acá no hay.
@@ -97,7 +97,12 @@ describe('usePaqueteria', () => {
       comuna: null,
       cobroEnDestino,
       precioEnvio: '2500',
+      tarifaPagoId: null,
+      tarifaPagoNombre: null,
+      tarifaPaqueteId: null,
       pagoRepartidor: '1000',
+      pagoEstimado: true,
+      medioCobro: null,
       estado,
     })
 
@@ -114,6 +119,37 @@ describe('usePaqueteria', () => {
 
     it('una hoja vacía da cero', () => {
       expect(usePaqueteria().lineasConCobro([])).toBe(0)
+    })
+  })
+
+  describe('opcionesTarifa: el selector de tarifa de pago', () => {
+    const tarifa = (id: string, nombre: string, monto: string, parcial: Partial<TarifaPagoFila> = {}): TarifaPagoFila =>
+      ({ id, nombre, monto, esDefecto: false, activa: true, ...parcial })
+    const auto = tarifa('t-auto', 'Auto', '1900', { esDefecto: true })
+    const moto = tarifa('t-moto', 'Moto', '1000')
+
+    it('la primera opción es «Según repartidor» con la tarifa que valdría hoy, y vale null', () => {
+      const [primera] = usePaqueteria().opcionesTarifa([auto, moto], auto)
+      expect(primera).toEqual({ label: 'Según repartidor (Auto $1.900)', value: null })
+    })
+
+    it('sin tarifa heredada la primera opción no inventa un monto', () => {
+      expect(usePaqueteria().opcionesTarifa([], null)).toEqual([{ label: 'Según repartidor', value: null }])
+    })
+
+    it('después van las tarifas activas con su monto; las inactivas no se ofrecen', () => {
+      const vieja = tarifa('t-vieja', 'Vieja', '500', { activa: false })
+      const opciones = usePaqueteria().opcionesTarifa([auto, moto, vieja], auto)
+      expect(opciones.slice(1)).toEqual([
+        { label: 'Auto $1.900', value: 't-auto' },
+        { label: 'Moto $1.000', value: 't-moto' },
+      ])
+    })
+
+    it('una inactiva que el paquete ya tiene asignada se mantiene visible', () => {
+      const vieja = tarifa('t-vieja', 'Vieja', '500', { activa: false })
+      const opciones = usePaqueteria().opcionesTarifa([auto, vieja], auto, 't-vieja')
+      expect(opciones.at(-1)).toEqual({ label: 'Vieja $500 (inactiva)', value: 't-vieja' })
     })
   })
 

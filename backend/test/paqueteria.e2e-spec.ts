@@ -605,6 +605,78 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       expect(ajenaDelOtro.status).toBe(404);
     });
 
+    it('reenviar la misma tarifa ya desactivada no bloquea editar otro campo del paquete ni del repartidor', async () => {
+      const usada = await nuevaTarifa({
+        nombre: `Reenviada ${sufijo}`,
+        monto: '850',
+      });
+      const rep = await nuevoRepartidor({ tarifaPagoId: usada.id });
+      const paq = await llamar('post', '/api/paquetes', tokenAdmin, {
+        codigo: `E2E-REENVIO-${sufijo}`,
+        cobroEnDestino: false,
+        tarifaPagoId: usada.id,
+      });
+      expect(paq.status).toBe(201);
+      const paqId = (paq.body as PaqueteFila).id;
+      paquetesIds.push(paqId);
+      const off = await llamar(
+        'patch',
+        `/api/tarifas-pago/${usada.id}`,
+        tokenAdmin,
+        { activa: false },
+      );
+      expect(off.status).toBe(200);
+
+      // El formulario reenvía todos los campos: la misma tarifa, ahora inactiva, no es un cambio.
+      const editaRep = await llamar(
+        'patch',
+        `/api/repartidores/${rep.id}`,
+        tokenAdmin,
+        { nombre: `E2E reenvío ${sufijo}`, tarifaPagoId: usada.id },
+      );
+      expect(editaRep.status).toBe(200);
+      expect(editaRep.body).toMatchObject({ tarifaPagoId: usada.id });
+      const editaPaq = await llamar(
+        'patch',
+        `/api/paquetes/${paqId}`,
+        tokenAdmin,
+        { direccion: 'Alameda 100', tarifaPagoId: usada.id },
+      );
+      expect(editaPaq.status).toBe(200);
+      expect(editaPaq.body).toMatchObject({
+        direccion: 'Alameda 100',
+        tarifaPagoId: usada.id,
+      });
+
+      // Una tarifa inactiva DISTINTA de la que tiene sigue siendo 400.
+      const otraInactiva = await nuevaTarifa({
+        nombre: `OtraInactiva ${sufijo}`,
+        monto: '860',
+      });
+      await llamar(
+        'patch',
+        `/api/tarifas-pago/${otraInactiva.id}`,
+        tokenAdmin,
+        {
+          activa: false,
+        },
+      );
+      expect(
+        (
+          await llamar('patch', `/api/repartidores/${rep.id}`, tokenAdmin, {
+            tarifaPagoId: otraInactiva.id,
+          })
+        ).status,
+      ).toBe(400);
+      expect(
+        (
+          await llamar('patch', `/api/paquetes/${paqId}`, tokenAdmin, {
+            tarifaPagoId: otraInactiva.id,
+          })
+        ).status,
+      ).toBe(400);
+    });
+
     it('borrar una usada por un repartidor o por un paquete: 400 y se desactiva; sin uso se borra', async () => {
       const enRep = await nuevaTarifa({
         nombre: `EnRepartidor ${sufijo}`,
@@ -1515,6 +1587,8 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
         precioEnvio: '10000.0000',
         // Sin tarifa en el paquete ni en el repartidor: la por defecto, como estimado.
         tarifaPagoNombre: `E2E pago 5000 ${sufijoTarifas}`,
+        // La propia del paquete es otra cosa que la resuelta: este no tiene.
+        tarifaPaqueteId: null,
         pagoRepartidor: '5000.0000',
         pagoEstimado: true,
         medioCobro: null,
@@ -2496,11 +2570,14 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           // En ruta: lo que se pagaría hoy, marcado como estimado.
           expect(lineaDe(hojaMoto, pColina.id)).toMatchObject({
             tarifaPagoNombre: colina.nombre,
+            tarifaPaqueteId: colina.id,
             pagoRepartidor: '4000.0000',
             pagoEstimado: true,
           });
+          // La resuelta es la del repartidor, pero el paquete no tiene propia.
           expect(lineaDe(hojaMoto, pRepartidor.id)).toMatchObject({
             tarifaPagoNombre: moto.nombre,
+            tarifaPaqueteId: null,
             pagoRepartidor: '1900.0000',
             pagoEstimado: true,
           });

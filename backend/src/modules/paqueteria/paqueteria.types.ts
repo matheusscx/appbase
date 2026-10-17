@@ -82,6 +82,9 @@ export interface LineaHoja {
   // con la tarifa; null/0 si no hay ninguna que aplique.
   tarifaPagoId: string | null;
   tarifaPagoNombre: string | null;
+  // La del PAQUETE (su caso especial), no la resuelta: null = se paga con la del repartidor o la
+  // por defecto. Es lo que el selector del paquete preselecciona.
+  tarifaPaqueteId: string | null;
   pagoRepartidor: string;
   pagoEstimado: boolean;
   medioCobro: MedioCobro | null; // solo en una entregada con cobro en destino

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import type { TableColumn } from '@nuxt/ui'
-import type { RepartidorFila } from '~/types/paqueteria'
+import type { RepartidorFila, TarifaPagoFila } from '~/types/paqueteria'
 
 // Admin-only: el backend va con `TenantAdminGuard`. Sin guard de ruta, la URL escrita a mano la
 // abría igual y el 403 llegaba recién al guardar.
@@ -9,8 +9,11 @@ definePageMeta({ middleware: 'admin' })
 const toast = useToast()
 const avisarConDeshacer = useAvisoDeshacer()
 const apiUrl = useRuntimeConfig().public.apiUrl
+const { opcionesTarifa } = usePaqueteria()
+const { formatOficial } = useCurrency()
 
 const repartidores = ref<RepartidorFila[]>([])
+const tarifas = ref<TarifaPagoFila[]>([])
 const loading = ref(false)
 /** La lectura del listado falló: la tabla lo dice en vez de mostrar su vacío (auditoría UX 07.3). */
 const errorCarga = ref(false)
@@ -26,7 +29,8 @@ const eliminando = ref(false)
 // la fila seguía ahí sin explicación a la vista.
 const errorEliminar = ref<string | null>(null)
 
-const emptyForm = () => ({ nombre: '', telefono: '' })
+// `tarifaPagoId` null = «Según la por defecto»: el repartidor no tiene tarifa propia.
+const emptyForm = () => ({ nombre: '', telefono: '', tarifaPagoId: null as string | null })
 const form = ref(emptyForm())
 
 const drawerTitle = computed(() => editingId.value ? 'Editar repartidor' : 'Nuevo repartidor')
@@ -35,6 +39,22 @@ const nombreVacio = computed(() => form.value.nombre.trim() === '')
 const repartidorAEliminar = computed(() =>
   repartidores.value.find(r => r.id === confirmDeleteId.value) ?? null,
 )
+
+const tarifaDefecto = computed(() => tarifas.value.find(t => t.esDefecto && t.activa) ?? null)
+const tarifaOptions = computed(() => {
+  const opciones = opcionesTarifa(tarifas.value, tarifaDefecto.value, form.value.tarifaPagoId)
+  // Sin tarifa propia, el repartidor cobra la por defecto: la opción lo dice así.
+  opciones[0]!.label = tarifaDefecto.value
+    ? `Según la por defecto (${tarifaDefecto.value.nombre} ${formatOficial(tarifaDefecto.value.monto)})`
+    : 'Según la por defecto'
+  return opciones
+})
+
+function nombreTarifa(id: string | null): string {
+  const t = id ? tarifas.value.find(x => x.id === id) : tarifaDefecto.value
+  if (!t) return 'Sin tarifa'
+  return id ? t.nombre : `${t.nombre} (por defecto)`
+}
 
 function resetDrawer() {
   editingId.value = null
@@ -49,7 +69,12 @@ async function cargar() {
   errorCarga.value = false
   loading.value = true
   try {
-    repartidores.value = await useApiFetch<RepartidorFila[]>(`${apiUrl}/repartidores`)
+    const [filas, listaTarifas] = await Promise.all([
+      useApiFetch<RepartidorFila[]>(`${apiUrl}/repartidores`),
+      useApiFetch<TarifaPagoFila[]>(`${apiUrl}/tarifas-pago`),
+    ])
+    repartidores.value = filas
+    tarifas.value = listaTarifas
   }
   catch (e: unknown) {
     errorCarga.value = true
@@ -81,7 +106,7 @@ function abrirCrear() {
 function abrirEditar(r: RepartidorFila) {
   resetDrawer()
   editingId.value = r.id
-  form.value = { nombre: r.nombre, telefono: r.telefono ?? '' }
+  form.value = { nombre: r.nombre, telefono: r.telefono ?? '', tarifaPagoId: r.tarifaPagoId }
   drawerOpen.value = true
 }
 
@@ -92,6 +117,8 @@ async function guardar() {
       nombre: form.value.nombre.trim(),
       // `null` y no ausente: al editar, vaciar el campo tiene que borrar el teléfono.
       telefono: form.value.telefono.trim() || null,
+      // Igual: `null` quita la tarifa propia y vuelve a la por defecto.
+      tarifaPagoId: form.value.tarifaPagoId,
     }
     const isNew = !editingId.value
     const saved = isNew
@@ -200,7 +227,7 @@ const columns: TableColumn<RepartidorFila>[] = [
       <template #nombre-cell="{ row }">
         <CrudListItem
           :title="row.original.nombre"
-          :subtitle="row.original.telefono ?? 'Sin teléfono'"
+          :subtitle="`${row.original.telefono ?? 'Sin teléfono'} · Tarifa: ${nombreTarifa(row.original.tarifaPagoId)}`"
         />
       </template>
 
@@ -267,6 +294,15 @@ const columns: TableColumn<RepartidorFila>[] = [
               inputmode="tel"
               placeholder="+56 9 1234 5678"
               maxlength="30"
+            />
+          </UFormField>
+          <UFormField label="Tarifa de pago" description="Lo que se le paga por cada paquete que entrega.">
+            <USelect
+              v-model="form.tarifaPagoId"
+              :items="tarifaOptions"
+              :placeholder="tarifaOptions[0]?.label"
+              class="w-full"
+              data-qa="repartidor-tarifa"
             />
           </UFormField>
         </UForm>

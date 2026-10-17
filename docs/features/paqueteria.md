@@ -297,6 +297,10 @@ Tabla `tarifas_pago` por tenant (nombre, monto, `es_defecto`, `activa`); diseño
   tarifa activa del tenant (`exigirActivaDelTenant`, 400), tomada `FOR SHARE` dentro de la
   transacción de quien escribe: `eliminar` la toma `FOR UPDATE` antes de mirar el uso, así uno de
   los dos espera al otro. La reciben el repartidor y el paquete (alta, edición y escaneo).
+  En una **edición** solo se exige si la tarifa **cambia**: el formulario reenvía la que ya
+  tiene, y una desactivada después no puede hacer fallar el cambio de otro campo.
+- `LineaHoja.tarifaPaqueteId` es la tarifa propia del **paquete** (null = hereda), distinta de
+  `tarifaPagoId`, que es la resuelta: la pantalla preselecciona la primera, y no calcula la regla.
 - Qué tarifa se paga y cómo se fija en la línea: regla 10.
 
 ## API

@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js'
-import type { EstadoHoja, EstadoLinea, EstadoPaquete, LineaHoja } from '~/types/paqueteria'
+import type { EstadoHoja, EstadoLinea, EstadoPaquete, LineaHoja, TarifaPagoFila } from '~/types/paqueteria'
 
 type ColorEstadoPaquete = 'neutral' | 'info' | 'success'
 type ColorEstadoLinea = 'info' | 'success' | 'warning'
@@ -74,7 +74,30 @@ export function usePaqueteria() {
     return fecha.split('-').slice(1).reverse().join('-')
   }
 
+  /**
+   * Items de `USelect` para elegir la tarifa de pago de un paquete. La primera, con `value: null`,
+   * es «Según repartidor»: el servidor resuelve al pagar (la del repartidor o la por defecto), y
+   * entre paréntesis va la que valdría hoy (`heredada`). Después, las tarifas activas con su monto.
+   * `actualId` mantiene visible una tarifa ya asignada que se desactivó después; sin eso el
+   * selector quedaría en blanco y guardar la borraría sin que nadie lo pida.
+   */
+  function opcionesTarifa(
+    tarifas: TarifaPagoFila[],
+    heredada: TarifaPagoFila | null,
+    actualId: string | null = null,
+  ): { label: string, value: string | null }[] {
+    const etiqueta = (t: TarifaPagoFila) => `${t.nombre} ${formatOficial(t.monto)}`
+    return [
+      { label: heredada ? `Según repartidor (${etiqueta(heredada)})` : 'Según repartidor', value: null },
+      ...tarifas.filter(t => t.activa || t.id === actualId).map(t => ({
+        label: t.activa ? etiqueta(t) : `${etiqueta(t)} (inactiva)`,
+        value: t.id,
+      })),
+    ]
+  }
+
   return {
+    opcionesTarifa,
     fechaCorta,
     lineasConCobro,
     rotuloEstadoPaquete: (estado: EstadoPaquete) => PAQUETE[estado].rotulo,

@@ -12,10 +12,17 @@ import type { HojaRutaDetalle, LineaHoja, ResultadoEscaneo } from '~/types/paque
 type Llamada = { url: string, method: string, body?: Record<string, unknown> }
 
 const repartidoresBackend = [
-  { id: 'r-1', nombre: 'Juan Pérez', telefono: null, activo: true },
-  { id: 'r-2', nombre: 'Ana Soto', telefono: null, activo: false },
-  { id: 'r-3', nombre: 'Beto Rojas', telefono: null, activo: true },
+  { id: 'r-1', nombre: 'Juan Pérez', telefono: null, activo: true, tarifaPagoId: 't-moto' },
+  { id: 'r-2', nombre: 'Ana Soto', telefono: null, activo: false, tarifaPagoId: null },
+  { id: 'r-3', nombre: 'Beto Rojas', telefono: null, activo: true, tarifaPagoId: null },
 ]
+
+const tarifasBackend = [
+  { id: 't-auto', nombre: 'Auto', monto: '1900', esDefecto: true, activa: true },
+  { id: 't-moto', nombre: 'Moto', monto: '1000', esDefecto: false, activa: true },
+  { id: 't-colina', nombre: 'Colina', monto: '2500', esDefecto: false, activa: true },
+]
+
 
 function linea(parcial: Partial<LineaHoja> & { paqueteId: string, codigo: string }): LineaHoja {
   return {
@@ -24,7 +31,12 @@ function linea(parcial: Partial<LineaHoja> & { paqueteId: string, codigo: string
     comuna: 'Providencia',
     cobroEnDestino: false,
     precioEnvio: '2500',
+    tarifaPagoId: 't-moto',
+    tarifaPagoNombre: 'Moto',
+    tarifaPaqueteId: null,
     pagoRepartidor: '1000',
+    pagoEstimado: true,
+    medioCobro: null,
     estado: 'en_ruta',
     ...parcial,
   }
@@ -49,6 +61,8 @@ function hojaDe(
     entregados: lineas.filter(l => l.estado === 'entregado').length,
     cobroDestino: 0,
     montoCobradoDestino: '0',
+    montoCobradoEfectivo: '0',
+    montoCobradoTransferencia: '0',
     montoPagoRepartidor: '0',
     montoTotalGeneral: '0',
     netoARendir: '0',
@@ -67,6 +81,8 @@ let respuestasEscaneo: Record<string, { resultado: ResultadoEscaneo } | { error:
 let compuertas: Record<string, () => void> = {}
 let esperandoCompuerta: Record<string, Promise<void>> = {}
 let falloPatch: string | null = null
+// Si está puesta, la relectura de una hoja no contesta hasta que el test la abra.
+let compuertaRelectura: Promise<void> | null = null
 let falloListaHojas: string | null = null
 let toasts: { title?: string, color?: string }[] = []
 
@@ -81,6 +97,7 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/tenants/me')) {
       return diaNegocio ? { ...diaNegocio } : Promise.reject(new Error('sin red'))
     }
+    if (url.includes('/tarifas-pago')) return tarifasBackend.map(t => ({ ...t }))
     if (url.includes('/repartidores')) return repartidoresBackend.map(r => ({ ...r }))
     if (url.endsWith('/hojas-ruta/escanear')) {
       const { codigo, repartidorId, fecha } = opts!.body as { codigo: string, repartidorId: string, fecha: string }
@@ -104,7 +121,10 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (method === 'GET' && /\/hojas-ruta\/[^/]+$/.test(url)) {
       const id = url.split('/').pop()
-      return Object.values(hojasExistentes).find(h => h.id === id)
+      // La foto se toma al pedirla: una relectura con compuerta contesta con lo que había entonces.
+      const foto = Object.values(hojasExistentes).find(h => h.id === id)
+      if (compuertaRelectura) await compuertaRelectura
+      return foto
     }
     if (method === 'DELETE') {
       const [, , hojaId, , paqueteId] = new URL(url, 'http://x').pathname.split('/').slice(-5)
@@ -115,7 +135,19 @@ mockNuxtImport('useApiFetch', () => {
     }
     if (method === 'PATCH') {
       if (falloPatch) return Promise.reject({ data: { message: falloPatch } })
-      return { id: url.split('/').pop(), ...opts!.body }
+      // El servidor guarda y resuelve la tarifa de la línea (paquete → repartidor → por defecto).
+      const paqueteId = url.split('/').pop()!
+      const { precioEnvio, tarifaPagoId } = opts!.body as { precioEnvio: string, tarifaPagoId: string | null }
+      for (const [clave, h] of Object.entries(hojasExistentes).filter(() => 'tarifaPagoId' in opts!.body!)) {
+        const resuelta = tarifasBackend.find(t => t.id === (tarifaPagoId ?? repartidoresBackend.find(r => r.id === h.repartidorId)!.tarifaPagoId ?? 't-auto'))!
+        hojasExistentes[clave] = {
+          ...h,
+          lineas: h.lineas.map(l => l.paqueteId !== paqueteId
+            ? l
+            : { ...l, precioEnvio, tarifaPaqueteId: tarifaPagoId, tarifaPagoId: resuelta.id, tarifaPagoNombre: resuelta.nombre, pagoRepartidor: resuelta.monto }),
+        }
+      }
+      return { id: paqueteId, ...opts!.body }
     }
     return []
   }
@@ -189,6 +221,8 @@ beforeEach(() => {
   compuertas = {}
   esperandoCompuerta = {}
   falloPatch = null
+  compuertaRelectura = null
+  for (const t of tarifasBackend) t.activa = true
   falloListaHojas = null
   toasts = []
 })
@@ -642,14 +676,15 @@ describe('escanear: montos de cada paquete', () => {
     document.body.querySelector<HTMLButtonElement>(`[data-qa="escanear-linea-montos-${codigo}"]`)
   const texto = (qa: string) => document.body.querySelector(`[data-qa="${qa}"]`)?.textContent?.trim()
   const botonGuardar = () => document.body.querySelector<HTMLButtonElement>('[data-qa="escanear-montos-guardar"]')!
+  const selectorTarifa = (w: Wrapper) => w.findAllComponents({ name: 'USelect' })
+    .find(s => (s.props('items') as { value: string | null }[]).some(i => i.value === 't-colina'))!
 
-  async function cargarMontos(w: Wrapper, precioEnvio: string, pagoRepartidor: string) {
-    const [envio, pago] = w.findAllComponents({ name: 'MoneyInput' })
-    await emitir(envio!, precioEnvio)
-    await emitir(pago!, pagoRepartidor)
+  async function cargarMontos(w: Wrapper, precioEnvio: string, tarifaPagoId?: string | null) {
+    await emitir(w.findAllComponents({ name: 'MoneyInput' })[0]!, precioEnvio)
+    if (tarifaPagoId !== undefined) await emitir(selectorTarifa(w), tarifaPagoId)
   }
 
-  it('cada fila muestra el precio del envío y el pago al repartidor', async () => {
+  it('cada fila muestra el precio del envío, la tarifa y el pago estimado', async () => {
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
       linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', precioEnvio: '2500.0000', pagoRepartidor: '1000.0000' }),
     ])
@@ -657,46 +692,99 @@ describe('escanear: montos de cada paquete', () => {
     await elegirRepartidor(w, 'r-1')
     expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$2.500')
     expect(texto('escanear-linea-pago-EN-RUTA')).toBe('$1.000')
+    expect(texto('escanear-linea-tarifa-EN-RUTA')).toBe('Moto')
+    expect(document.body.querySelector('[data-qa="escanear-linea-pago-EN-RUTA"]')!.previousElementSibling!.textContent).toContain('Pago estimado')
     void w
   })
 
-  it('el lápiz abre el modal con los montos del paquete y Guardar manda PATCH /paquetes/:id', async () => {
+  it('el lápiz abre el modal con el precio y la tarifa propia del paquete; Guardar manda { precioEnvio, tarifaPagoId }', async () => {
     // El backend devuelve los montos con la escala de la columna (numeric 18,4).
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
-      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', precioEnvio: '2500.0000', pagoRepartidor: '1000.0000' }),
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', precioEnvio: '2500.0000', pagoRepartidor: '1900', tarifaPagoId: 't-auto', tarifaPagoNombre: 'Auto', tarifaPaqueteId: 't-auto' }),
     ])
     const w = await montar()
     await elegirRepartidor(w, 'r-1')
     lapiz('EN-RUTA')!.click()
     await esperar(30)
 
-    const [envio, pago] = w.findAllComponents({ name: 'MoneyInput' })
-    expect(envio!.props('modelValue')).toBe('2500.0000')
-    expect(pago!.props('modelValue')).toBe('1000.0000')
-    await cargarMontos(w, '3000', '1500')
-    const getsAntes = llamadas.filter(l => l.method === 'GET').length
+    expect(w.findAllComponents({ name: 'MoneyInput' })[0]!.props('modelValue')).toBe('2500.0000')
+    expect(w.findAllComponents({ name: 'MoneyInput' })).toHaveLength(1)
+    expect(selectorTarifa(w).props('modelValue')).toBe('t-auto')
+    await cargarMontos(w, '3000', 't-colina')
     botonGuardar().click()
     await esperar(30)
 
     const patch = llamadas.find(l => l.method === 'PATCH')!
     expect(patch.url.endsWith('/paquetes/p-9')).toBe(true)
-    expect(patch.body).toEqual({ precioEnvio: '3000', pagoRepartidor: '1500' })
+    expect(patch.body).toEqual({ precioEnvio: '3000', tarifaPagoId: 't-colina' })
     expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$3.000')
-    expect(texto('escanear-linea-pago-EN-RUTA')).toBe('$1.500')
-    // Sin entregados los totales del servidor no cambian: no se relee la hoja.
-    expect(llamadas.filter(l => l.method === 'GET')).toHaveLength(getsAntes)
+    expect(texto('escanear-linea-tarifa-EN-RUTA')).toBe('Colina')
+    expect(texto('escanear-linea-pago-EN-RUTA')).toBe('$2.500')
+    // La línea sale de la hoja que se relee, no de una cuenta en la pantalla.
+    const orden = llamadas.filter(l => l.method === 'PATCH' || /\/hojas-ruta\/[^/?]+$/.test(l.url))
+    expect(orden.at(-1)).toMatchObject({ method: 'GET' })
+    expect(orden.at(-1)!.url.endsWith('/hojas-ruta/h-r-1-2026-10-14')).toBe(true)
     expect(toasts.some(t => t.title === 'Montos de EN-RUTA guardados')).toBe(true)
   })
 
-  it('con entregados en la hoja, después de guardar se relee la hoja para los totales', async () => {
+  it('«Según repartidor» manda tarifaPagoId null y la fila queda con la heredada del repartidor', async () => {
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
-      linea({ paqueteId: 'p-8', codigo: 'ENTREGADO', estado: 'entregado' }),
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', tarifaPagoId: 't-colina', tarifaPagoNombre: 'Colina', tarifaPaqueteId: 't-colina', pagoRepartidor: '2500' }),
+    ])
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+    lapiz('EN-RUTA')!.click()
+    await esperar(30)
+    // La primera opción dice qué valdría hoy: la tarifa de Juan.
+    const items = selectorTarifa(w).props('items') as { label: string, value: string | null }[]
+    expect(items[0]).toEqual({ label: 'Según repartidor (Moto $1.000)', value: null })
+    await cargarMontos(w, '2500', null)
+    botonGuardar().click()
+    await esperar(30)
+
+    expect(llamadas.find(l => l.method === 'PATCH')!.body).toEqual({ precioEnvio: '2500', tarifaPagoId: null })
+    expect(texto('escanear-linea-tarifa-EN-RUTA')).toBe('Moto')
+    expect(texto('escanear-linea-pago-EN-RUTA')).toBe('$1.000')
+  })
+
+  it('el repartidor con una tarifa desactivada: el aviso muestra esa tarifa, porque el servidor la sigue pagando', async () => {
+    tarifasBackend.find(t => t.id === 't-moto')!.activa = false
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA' }),
+    ])
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+    lapiz('EN-RUTA')!.click()
+    await esperar(30)
+
+    const items = selectorTarifa(w).props('items') as { label: string, value: string | null }[]
+    expect(items[0]).toEqual({ label: 'Según repartidor (Moto $1.000)', value: null })
+  })
+
+  it('sin tarifa propia el modal abre en «Según repartidor» (null), no en la resuelta de la línea', async () => {
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA' }),
+    ])
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+    lapiz('EN-RUTA')!.click()
+    await esperar(30)
+
+    expect(selectorTarifa(w).props('modelValue')).toBeNull()
+    botonGuardar().click()
+    await esperar(30)
+    expect(llamadas.find(l => l.method === 'PATCH')!.body).toEqual({ precioEnvio: '2500', tarifaPagoId: null })
+  })
+
+  it('también con la hoja entregada se relee: el servidor re-resuelve el pago de una entrega', async () => {
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-8', codigo: 'ENTREGADO', estado: 'entregado', pagoEstimado: false }),
     ])
     const w = await montar()
     await elegirRepartidor(w, 'r-1')
     lapiz('ENTREGADO')!.click()
     await esperar(30)
-    await cargarMontos(w, '4000', '2000')
+    await cargarMontos(w, '4000', 't-auto')
     botonGuardar().click()
     await esperar(40)
 
@@ -704,6 +792,30 @@ describe('escanear: montos de cada paquete', () => {
     const iPatch = orden.findIndex(l => l.method === 'PATCH')
     expect(iPatch).toBeGreaterThanOrEqual(0)
     expect(orden.slice(iPatch + 1).some(l => l.method === 'GET' && l.url.endsWith('/hojas-ruta/h-r-1-2026-10-14'))).toBe(true)
+    expect(texto('escanear-linea-tarifa-ENTREGADO')).toBe('Auto')
+  })
+
+  it('una relectura que llega vieja (se escaneó otro paquete mientras tanto) no pisa la hoja más nueva', async () => {
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA' }),
+    ])
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+    lapiz('EN-RUTA')!.click()
+    await esperar(30)
+    await cargarMontos(w, '3000', 't-auto')
+    let abrir!: () => void
+    compuertaRelectura = new Promise<void>((resolve) => { abrir = resolve })
+    botonGuardar().click()
+    await esperar(30)
+    // La relectura quedó en vuelo con la foto de una sola línea; llega un escaneo de la cola.
+    await escanear('NUEVO-1')
+    await esperar(30)
+    expect(document.body.querySelector('[data-qa="escanear-linea-envio-NUEVO-1"]')).not.toBeNull()
+    abrir()
+    await esperar(40)
+
+    expect(document.body.querySelector('[data-qa="escanear-linea-envio-NUEVO-1"]')).not.toBeNull()
   })
 
   it('si el PATCH falla, el error queda en el modal y la fila no cambia', async () => {
@@ -715,16 +827,17 @@ describe('escanear: montos de cada paquete', () => {
     await elegirRepartidor(w, 'r-1')
     lapiz('EN-RUTA')!.click()
     await esperar(30)
-    await cargarMontos(w, '3000', '1500')
+    await cargarMontos(w, '3000', 't-colina')
     botonGuardar().click()
     await esperar(30)
 
     expect(texto('escanear-montos-error')).toContain('El precio de envío admite como máximo 0 decimales.')
     expect(document.body.querySelector('[data-qa="escanear-montos-modal"]')).not.toBeNull()
     expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$2.500')
+    expect(texto('escanear-linea-tarifa-EN-RUTA')).toBe('Moto')
   })
 
-  it('Enter en un campo de monto no guarda: la pistola no puede escribir un precio', async () => {
+  it('Enter en el campo de precio no guarda: la pistola no puede escribir un precio', async () => {
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
       linea({ paqueteId: 'p-9', codigo: 'EN-RUTA' }),
     ])
@@ -732,13 +845,28 @@ describe('escanear: montos de cada paquete', () => {
     await elegirRepartidor(w, 'r-1')
     lapiz('EN-RUTA')!.click()
     await esperar(30)
-    await cargarMontos(w, '46123456789', '1000')
+    await cargarMontos(w, '46123456789', 't-auto')
     const input = document.body.querySelector<HTMLInputElement>('[data-qa="escanear-montos-envio"] input, input[data-qa="escanear-montos-envio"]')!
     input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
     await esperar(30)
 
     expect(llamadas.filter(l => l.method === 'PATCH')).toHaveLength(0)
     expect(llamadas.filter(l => l.method === 'POST')).toHaveLength(0)
+  })
+
+  it('al cerrar el modal el foco vuelve al campo de escaneo, no al lápiz', async () => {
+    hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA' }),
+    ])
+    const w = await montar()
+    await elegirRepartidor(w, 'r-1')
+    lapiz('EN-RUTA')!.click()
+    await esperar(30)
+    const cancelar = [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Cancelar')!
+    cancelar.click()
+    await esperar(60)
+
+    expect(document.activeElement).toBe(campo())
   })
 
   it('con la hoja rendida no hay lápiz: los montos no se pueden cambiar', async () => {

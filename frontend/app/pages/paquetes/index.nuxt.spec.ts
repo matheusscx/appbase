@@ -38,7 +38,8 @@ function paquete(parcial: Partial<PaqueteFila> & { id: string, codigo: string })
     remitenteNombre: null,
     cobroEnDestino: false,
     precioEnvio: '2500',
-    pagoRepartidor: '1000',
+    tarifaPagoId: null,
+    tarifaPagoNombre: null,
     estado: 'disponible',
     hojaRutaId: null,
     repartidorNombre: null,
@@ -51,15 +52,16 @@ type Llamada = { url: string, method: string, body?: Record<string, unknown> }
 
 let llamadas: Llamada[] = []
 let paquetesBackend: PaqueteFila[] = []
-let configuracion = { configurada: true, precioEnvioDefecto: '2500', pagoRepartidorDefecto: '1000' }
+let configuracion = { configurada: true, precioEnvioDefecto: '2500' }
+let tarifasBackend: { id: string, nombre: string, monto: string, esDefecto: boolean, activa: boolean }[] = []
 let diaNegocio: { horaCorte: number, diaNegocioHoy: string } | null = null
 let falloAsignar: string | null = null
 let falloDelete: string | null = null
 
 const repartidoresBackend = [
-  { id: 'r-1', nombre: 'Juan Pérez', telefono: null, activo: true },
-  { id: 'r-2', nombre: 'Ana Soto', telefono: null, activo: false },
-  { id: 'r-3', nombre: 'Beto Rojas', telefono: null, activo: true },
+  { id: 'r-1', nombre: 'Juan Pérez', telefono: null, activo: true, tarifaPagoId: null },
+  { id: 'r-2', nombre: 'Ana Soto', telefono: null, activo: false, tarifaPagoId: null },
+  { id: 'r-3', nombre: 'Beto Rojas', telefono: null, activo: true, tarifaPagoId: null },
 ]
 
 let puedeVerTerceros = true
@@ -78,6 +80,7 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/tenants/me')) {
       return diaNegocio ? Promise.resolve(diaNegocio) : Promise.reject(new Error('sin red'))
     }
+    if (url.includes('/tarifas-pago')) return Promise.resolve(tarifasBackend.map(t => ({ ...t })))
     if (url.includes('/repartidores')) return Promise.resolve(repartidoresBackend.map(r => ({ ...r })))
     if (url.includes('/terceros')) {
       return Promise.resolve([
@@ -182,7 +185,12 @@ beforeEach(() => {
     paquete({ id: 'p-3', codigo: 'PQ-3', estado: 'en_ruta', repartidorNombre: 'Juan Pérez' }),
     paquete({ id: 'p-4', codigo: 'PQ-4', estado: 'entregado', bloqueado: true, cobroEnDestino: true }),
   ]
-  configuracion = { configurada: true, precioEnvioDefecto: '2500', pagoRepartidorDefecto: '1000' }
+  configuracion = { configurada: true, precioEnvioDefecto: '2500' }
+  tarifasBackend = [
+    { id: 't-auto', nombre: 'Auto', monto: '1900', esDefecto: true, activa: true },
+    { id: 't-moto', nombre: 'Moto', monto: '1000', esDefecto: false, activa: true },
+    { id: 't-vieja', nombre: 'Vieja', monto: '500', esDefecto: false, activa: false },
+  ]
   diaNegocio = { horaCorte: 3, diaNegocioHoy: '2026-10-14' }
   falloAsignar = null
   falloDelete = null
@@ -404,20 +412,23 @@ describe('paquetes: alta y edición', () => {
     await esperar(40)
   }
 
-  it('sin valores por defecto, Nuevo paquete abre el drawer con el aviso y los montos vacíos, y no deja crear sin ellos', async () => {
-    configuracion = { configurada: false, precioEnvioDefecto: '0', pagoRepartidorDefecto: '0' }
+  const selectorTarifa = (w: Wrapper) => w.findAllComponents({ name: 'USelect' })
+    .find(s => (s.props('items') as { value: string | null }[]).some(i => i.value === 't-moto'))!
+
+  it('sin precio por defecto, Nuevo paquete abre el drawer con el aviso y el precio vacío, y no deja crear sin él', async () => {
+    configuracion = { configurada: false, precioEnvioDefecto: '0' }
     const wrapper = await montar()
 
     await abrirNuevo(wrapper)
 
     expect(wrapper.find('[data-qa="paquete-sin-configurar"]').exists()).toBe(true)
-    expect(montos(wrapper).map(m => m.props('modelValue'))).toEqual(['', ''])
+    expect(montos(wrapper).map(m => m.props('modelValue'))).toEqual([''])
     const crear = () => wrapper.findAll('button').find(b => b.text() === 'Crear')!
     await wrapper.find('input[placeholder="Lo que lee la pistola"]').setValue('PQ-9')
     expect(crear().attributes('disabled')).toBeDefined()
 
     await emitir(montos(wrapper)[0]!, '3000')
-    await emitir(montos(wrapper)[1]!, '1200')
+    await emitir(selectorTarifa(wrapper), 't-moto')
     expect(crear().attributes('disabled')).toBeUndefined()
     await enviar(wrapper)
 
@@ -427,32 +438,66 @@ describe('paquetes: alta y edición', () => {
       codigo: 'PQ-9',
       cobroEnDestino: false,
       precioEnvio: '3000',
-      pagoRepartidor: '1200',
+      tarifaPagoId: 't-moto',
     })
 
     wrapper.unmount()
   })
 
-  it('con valores por defecto, el alta los trae precargados y sin aviso', async () => {
+  it('sin ninguna tarifa por defecto, «Según repartidor» no alcanza para crear: hay que elegir una', async () => {
+    tarifasBackend = [{ id: 't-moto', nombre: 'Moto', monto: '1000', esDefecto: false, activa: true }]
+    const wrapper = await montar()
+    await abrirNuevo(wrapper)
+
+    const crear = () => wrapper.findAll('button').find(b => b.text() === 'Crear')!
+    await wrapper.find('input[placeholder="Lo que lee la pistola"]').setValue('PQ-9')
+    expect(crear().attributes('disabled')).toBeDefined()
+    await emitir(selectorTarifa(wrapper), 't-moto')
+    expect(crear().attributes('disabled')).toBeUndefined()
+
+    wrapper.unmount()
+  })
+
+  it('con valores por defecto, el alta trae el precio precargado, «Según repartidor» y sin aviso', async () => {
     const wrapper = await montar()
 
     await abrirNuevo(wrapper)
 
     expect(wrapper.find('[data-qa="paquete-sin-configurar"]').exists()).toBe(false)
-    expect(montos(wrapper).map(m => m.props('modelValue'))).toEqual(['2500', '1000'])
+    expect(montos(wrapper).map(m => m.props('modelValue'))).toEqual(['2500'])
+    // Los ítems: «Según repartidor» primero (value null, sin monto: el repartidor no se conoce) y solo las tarifas activas.
+    const items = selectorTarifa(wrapper).props('items') as { label: string, value: string | null }[]
+    expect(items).toEqual([
+      { label: 'Según repartidor', value: null },
+      { label: 'Auto $1.900', value: 't-auto' },
+      { label: 'Moto $1.000', value: 't-moto' },
+    ])
+    expect(selectorTarifa(wrapper).props('modelValue')).toBeNull()
 
     await wrapper.find('input[placeholder="Lo que lee la pistola"]').setValue(' PQ-10 ')
     await wrapper.find('input[placeholder="María González"]').setValue(' Pedro ')
     await enviar(wrapper)
 
     const post = llamadas.find(l => l.method === 'POST' && /\/paquetes$/.test(l.url))
+    // «Según repartidor» (null) no viaja: el servidor resuelve la tarifa.
     expect(post?.body).toEqual({
       codigo: 'PQ-10',
       destinatarioNombre: 'Pedro',
       cobroEnDestino: false,
       precioEnvio: '2500',
-      pagoRepartidor: '1000',
     })
+
+    wrapper.unmount()
+  })
+
+  it('la tabla muestra la tarifa del paquete o «Según repartidor»', async () => {
+    paquetesBackend[0] = paquete({ id: 'p-1', codigo: 'PQ-1', tarifaPagoId: 't-moto', tarifaPagoNombre: 'Moto' })
+    const wrapper = await montar()
+
+    const filas = wrapper.findAll('tbody tr').map(f => f.text())
+    expect(filas[0]).toContain('Moto')
+    expect(filas[1]).toContain('Según repartidor')
+    expect(wrapper.text()).not.toContain('Pago repartidor')
 
     wrapper.unmount()
   })
@@ -520,10 +565,25 @@ describe('paquetes: alta y edición', () => {
       nota: null,
       cobroEnDestino: false,
       precioEnvio: '2500',
-      pagoRepartidor: '1000',
+      tarifaPagoId: null,
     })
     // La respuesta se mergea en la fila: sin segundo GET.
     expect(getsPaquetes()).toHaveLength(getsAntes)
+
+    wrapper.unmount()
+  })
+
+  it('editar un paquete con tarifa propia la preselecciona; «Según repartidor» manda tarifaPagoId null', async () => {
+    paquetesBackend[0] = paquete({ id: 'p-1', codigo: 'PQ-1', tarifaPagoId: 't-moto', tarifaPagoNombre: 'Moto' })
+    const wrapper = await montar()
+
+    await wrapper.findAll('[title="Editar"]')[0]!.trigger('click')
+    await esperar()
+    expect(selectorTarifa(wrapper).props('modelValue')).toBe('t-moto')
+    await emitir(selectorTarifa(wrapper), null)
+    await enviar(wrapper)
+
+    expect(llamadas.find(l => l.method === 'PATCH')?.body).toMatchObject({ precioEnvio: '2500', tarifaPagoId: null })
 
     wrapper.unmount()
   })
@@ -586,7 +646,8 @@ describe('paquetes: alta y edición', () => {
     await esperar()
 
     expect(wrapper.find('[data-qa="paquete-bloqueado"]').text()).toBe('Ya se rindió: los montos no se pueden cambiar.')
-    expect(montos(wrapper).map(m => m.props('disabled'))).toEqual([true, true])
+    expect(montos(wrapper).map(m => m.props('disabled'))).toEqual([true])
+    expect(selectorTarifa(wrapper).props('disabled')).toBe(true)
     expect(wrapper.find('button[aria-label="Cobro en destino"]').attributes('disabled')).toBeDefined()
 
     await wrapper.find('input[placeholder="María González"]').setValue('Pedro')
@@ -596,7 +657,7 @@ describe('paquetes: alta y edición', () => {
     expect(patch?.url).toMatch(/\/paquetes\/p-4$/)
     expect(patch?.body).toMatchObject({ destinatarioNombre: 'Pedro' })
     expect(patch?.body).not.toHaveProperty('precioEnvio')
-    expect(patch?.body).not.toHaveProperty('pagoRepartidor')
+    expect(patch?.body).not.toHaveProperty('tarifaPagoId')
     expect(patch?.body).not.toHaveProperty('cobroEnDestino')
 
     wrapper.unmount()

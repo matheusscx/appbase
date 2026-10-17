@@ -8,6 +8,7 @@ import type {
   PaqueteFila,
   RepartidorFila,
   RespuestaEscaneo,
+  TarifaPagoFila,
 } from '~/types/paqueteria'
 
 // Admin-only: el backend va con `TenantAdminGuard` en todo el módulo.
@@ -42,13 +43,14 @@ interface Rechazo {
 
 const toast = useToast()
 const apiUrl = useRuntimeConfig().public.apiUrl
-const { textoNeto, lineasConCobro, rotuloEstadoLinea, colorEstadoLinea, fechaCorta } = usePaqueteria()
+const { textoNeto, lineasConCobro, rotuloEstadoLinea, colorEstadoLinea, fechaCorta, opcionesTarifa } = usePaqueteria()
 const { formatOficial } = useCurrency()
 const { diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
 
 // ── Contexto: repartidor, fecha, cobro en destino ─────────────────────────
 
 const repartidores = ref<RepartidorFila[]>([])
+const tarifas = ref<TarifaPagoFila[]>([])
 const repartidorId = ref<string | undefined>(undefined)
 const fecha = ref(hoyLocal())
 // Si el usuario ya eligió una fecha, el día de negocio que llega tarde no se la pisa.
@@ -174,6 +176,12 @@ onMounted(async () => {
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar repartidores'), color: 'error' })
+  }
+  try {
+    tarifas.value = await useApiFetch<TarifaPagoFila[]>(`${apiUrl}/tarifas-pago`)
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar las tarifas de pago'), color: 'error' })
   }
   await cargarDiaNegocio()
   if (!fechaElegida && diaNegocioHoy.value) fecha.value = diaNegocioHoy.value
@@ -334,16 +342,30 @@ async function quitar(linea: LineaHoja) {
 // tipee la pistola. Enter no guarda; solo el botón.
 const montosAbierto = ref(false)
 const montosLinea = ref<LineaHoja | null>(null)
-const montosForm = ref({ precioEnvio: '', pagoRepartidor: '' })
+// `tarifaPagoId` null = «Según repartidor»: el servidor resuelve la tarifa al pagar.
+const montosForm = ref({ precioEnvio: '', tarifaPagoId: null as string | null })
 const guardandoMontos = ref(false)
 const errorMontos = ref<string | null>(null)
 
 const montosEditables = computed(() => !!hoja.value && !hojaRendida.value)
 
+// Lo que se paga si el paquete no tiene tarifa propia: la del repartidor (aunque se haya
+// desactivado: el servidor la sigue pagando, `tarifa-resuelta.ts`), o la por defecto.
+const tarifaHeredada = computed(() => {
+  const propiaId = repartidores.value.find(r => r.id === repartidorId.value)?.tarifaPagoId
+  const propia = propiaId ? tarifas.value.find(t => t.id === propiaId) : undefined
+  return propia ?? tarifas.value.find(t => t.esDefecto && t.activa) ?? null
+})
+const tarifaOptions = computed(() =>
+  opcionesTarifa(tarifas.value, tarifaHeredada.value, montosForm.value.tarifaPagoId),
+)
+
 function abrirMontos(linea: LineaHoja) {
   if (!montosEditables.value) return
   montosLinea.value = linea
-  montosForm.value = { precioEnvio: linea.precioEnvio, pagoRepartidor: linea.pagoRepartidor }
+  // La propia del paquete, no la resuelta (`tarifaPagoId`): preseleccionar la resuelta fijaría
+  // como propia una que era heredada del repartidor.
+  montosForm.value = { precioEnvio: linea.precioEnvio, tarifaPagoId: linea.tarifaPaqueteId }
   errorMontos.value = null
   montosAbierto.value = true
 }
@@ -359,28 +381,19 @@ function alCerrarModalMontos(e: Event) {
   enfocar(true)
 }
 
-function ponerMontos(hojaId: string, paqueteId: string, precioEnvio: string, pagoRepartidor: string) {
-  if (hoja.value?.id !== hojaId) return
-  hoja.value = {
-    ...hoja.value,
-    lineas: hoja.value.lineas.map(l => l.paqueteId === paqueteId ? { ...l, precioEnvio, pagoRepartidor } : l),
-  }
-}
-
 async function guardarMontos() {
   const actual = hoja.value
   const linea = montosLinea.value
-  const { precioEnvio, pagoRepartidor } = montosForm.value
-  if (!actual || !linea || guardandoMontos.value || !precioEnvio || !pagoRepartidor) return
+  const { precioEnvio, tarifaPagoId } = montosForm.value
+  if (!actual || !linea || guardandoMontos.value || !precioEnvio) return
   guardandoMontos.value = true
   errorMontos.value = null
   marcarEnCambio(linea.paqueteId, true)
   try {
-    const guardado = await useApiFetch<PaqueteFila>(`${apiUrl}/paquetes/${linea.paqueteId}`, {
+    await useApiFetch<PaqueteFila>(`${apiUrl}/paquetes/${linea.paqueteId}`, {
       method: 'PATCH',
-      body: { precioEnvio, pagoRepartidor },
+      body: { precioEnvio, tarifaPagoId },
     })
-    ponerMontos(actual.id, linea.paqueteId, guardado.precioEnvio, guardado.pagoRepartidor)
     toast.add({ title: `Montos de ${linea.codigo} guardados`, color: 'success' })
     cerrarMontos()
   }
@@ -392,17 +405,16 @@ async function guardarMontos() {
     guardandoMontos.value = false
     marcarEnCambio(linea.paqueteId, false)
   }
-  // Los totales del servidor suman solo lo entregado: con entregados en la hoja, cambian.
-  if (actual.entregados > 0) {
-    // Si mientras tanto llegó una hoja más nueva (un escaneo de la cola), esta foto ya es vieja.
-    const secuencia = secuenciaHoja
-    try {
-      const releida = await useApiFetch<HojaRutaDetalle>(`${apiUrl}/hojas-ruta/${actual.id}`)
-      if (secuencia === secuenciaHoja) mostrarHoja(releida)
-    }
-    catch (e: unknown) {
-      toast.add({ title: apiErrorMsg(e, 'Los montos se guardaron, pero no se pudo actualizar la hoja'), color: 'warning' })
-    }
+  // El precio, la tarifa y el pago de la línea y los totales los resuelve el servidor (la regla
+  // paquete → repartidor → por defecto vive solo en el backend): la hoja se vuelve a leer siempre.
+  // Si mientras tanto llegó una hoja más nueva (un escaneo de la cola), esta foto ya es vieja.
+  const secuencia = secuenciaHoja
+  try {
+    const releida = await useApiFetch<HojaRutaDetalle>(`${apiUrl}/hojas-ruta/${actual.id}`)
+    if (secuencia === secuenciaHoja) mostrarHoja(releida)
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Los montos se guardaron, pero no se pudo actualizar la hoja'), color: 'warning' })
   }
 }
 
@@ -646,13 +658,22 @@ const iconoResultado = {
                       {{ formatOficial(linea.precioEnvio) }}
                     </dd>
                     <dt class="text-muted">
-                      Repartidor
+                      {{ linea.pagoEstimado ? 'Pago estimado' : 'Pago' }}
                     </dt>
                     <dd
                       class="text-right font-medium tabular-nums text-highlighted"
                       :data-qa="`escanear-linea-pago-${linea.codigo}`"
                     >
                       {{ formatOficial(linea.pagoRepartidor) }}
+                    </dd>
+                    <dt class="text-muted">
+                      Tarifa
+                    </dt>
+                    <dd
+                      class="text-right text-default"
+                      :data-qa="`escanear-linea-tarifa-${linea.codigo}`"
+                    >
+                      {{ linea.tarifaPagoNombre ?? 'Sin tarifa' }}
                     </dd>
                   </dl>
                   <UButton
@@ -726,12 +747,13 @@ const iconoResultado = {
             data-qa="escanear-montos-envio"
           />
         </UFormField>
-        <UFormField label="Pago al repartidor" description="Lo que se le paga si lo entrega.">
-          <MoneyInput
-            v-model="montosForm.pagoRepartidor"
-            oficial
-            class="w-48"
-            data-qa="escanear-montos-pago"
+        <UFormField label="Tarifa de pago" description="Lo que se le paga al repartidor si lo entrega.">
+          <USelect
+            v-model="montosForm.tarifaPagoId"
+            :items="tarifaOptions"
+            :placeholder="tarifaOptions[0]?.label"
+            class="w-full"
+            data-qa="escanear-montos-tarifa"
           />
         </UFormField>
         <UAlert
@@ -751,7 +773,7 @@ const iconoResultado = {
         </UButton>
         <UButton
           :loading="guardandoMontos"
-          :disabled="!montosForm.precioEnvio || !montosForm.pagoRepartidor"
+          :disabled="!montosForm.precioEnvio"
           data-qa="escanear-montos-guardar"
           @click="guardarMontos"
         >

@@ -69,6 +69,7 @@ interface FilaLinea {
   precio_envio: string;
   tarifa_pago_id: string | null;
   tarifa_pago_nombre: string | null;
+  tarifa_paquete_id: string | null;
   pago_repartidor: string;
   medio_cobro: MedioCobro | null;
   estado: EstadoLinea;
@@ -792,6 +793,7 @@ export class HojasRutaService {
       `SELECT p.paquete_id, p.codigo, p.destinatario_nombre, p.direccion, p.comuna,
               p.cobro_en_destino, p.precio_envio, l.estado, l.medio_cobro,
               x.tarifa_pago_id, t.nombre AS tarifa_pago_nombre,
+              p.tarifa_pago_id AS tarifa_paquete_id,
               CASE WHEN l.estado = 'entregado' THEN l.pago_repartidor
                    ELSE COALESCE(t.monto, 0::numeric(18,4)) END AS pago_repartidor
          FROM hoja_ruta_paquetes l
@@ -837,6 +839,7 @@ export class HojasRutaService {
           precioEnvio: l.precio_envio,
           tarifaPagoId: l.tarifa_pago_id,
           tarifaPagoNombre: l.tarifa_pago_nombre,
+          tarifaPaqueteId: l.tarifa_paquete_id,
           pagoRepartidor: l.pago_repartidor,
           pagoEstimado: l.estado !== 'entregado',
           medioCobro: l.medio_cobro,

@@ -19,7 +19,12 @@ function linea(codigo: string, estado: EstadoLinea, parcial: Partial<LineaHoja> 
     comuna: 'Providencia',
     cobroEnDestino: false,
     precioEnvio: '2500',
+    tarifaPagoId: 't-moto',
+    tarifaPagoNombre: 'Moto',
+    tarifaPaqueteId: null,
     pagoRepartidor: '1000',
+    pagoEstimado: estado !== 'entregado',
+    medioCobro: null,
     estado,
     ...parcial,
   }
@@ -39,6 +44,8 @@ function hojaCon(lineas: LineaHoja[], parcial: Partial<HojaRutaDetalle> = {}): H
     entregados: lineas.filter(l => l.estado === 'entregado').length,
     cobroDestino: 0,
     montoCobradoDestino: '0',
+    montoCobradoEfectivo: '0',
+    montoCobradoTransferencia: '0',
     montoPagoRepartidor: '0',
     montoTotalGeneral: '0',
     netoARendir: '0',
@@ -156,6 +163,21 @@ describe('detalle: carga y totales', () => {
     await montar()
 
     expect(qa('hoja-neto')!.textContent).toContain('Neto parcial')
+  })
+
+  it('cada línea muestra su tarifa y el pago: estimado mientras no se entrega, fijo después', async () => {
+    servidor = hojaCon([
+      linea('ML-1', 'en_ruta', { tarifaPagoNombre: 'Auto', pagoRepartidor: '1900' }),
+      linea('ML-2', 'entregado', { tarifaPagoNombre: 'Moto', pagoRepartidor: '1000' }),
+    ])
+    await montar()
+
+    expect(texto('hoja-linea-tarifa-ML-1')).toBe('Auto')
+    expect(texto('hoja-linea-pago-ML-1')).toBe('$1.900')
+    expect(texto('hoja-linea-ML-1')).toContain('Pago estimado')
+    expect(texto('hoja-linea-tarifa-ML-2')).toBe('Moto')
+    expect(texto('hoja-linea-pago-ML-2')).toBe('$1.000')
+    expect(texto('hoja-linea-ML-2')).not.toContain('Pago estimado')
   })
 
   it('si la hoja no carga, muestra el motivo y ninguna acción', async () => {
