@@ -1191,8 +1191,8 @@ un cambio de moneda válido. El gesto del formulario —vaciar y avisar— ya es
     ni escanear, aunque la oficina quiera delegarlo.
   - **Que el backend exija el contrato del módulo** — `Paquetería:Leer` solo lo lee el menú: un
     admin de un tenant que no la contrató usa la API igual (borde comercial, no de aislamiento).
-  - **Precio de envío por comuna** — hoy es un default por empresa con override por paquete (el
-    pago al repartidor, por su parte, ya sale de las tarifas).
+  - **Precio de envío por comuna** — hoy es una tarifa de envío por defecto por empresa más la tarifa que
+    puede llevar cada paquete (el pago al repartidor sale de sus propias tarifas).
   - **Importar CSV/Excel** — hoy se carga escaneando, uno a uno o por asignación masiva.
   - **API de Mercado Libre** — traer dirección y destinatario con el id del envío (el QR real
     trae solo `id`, `sender_id`, `hash_code` y `security_digit`, confirmado el 2026-10-16). Sin

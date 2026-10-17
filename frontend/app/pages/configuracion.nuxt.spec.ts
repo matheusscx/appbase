@@ -176,7 +176,7 @@ describe('menú de configuración agrupado', () => {
   })
 
   // Admin-only en el backend (`TenantAdminGuard`) y, además, solo si el tenant contrató el módulo.
-  it('el admin de un tenant que contrató Paquetería ve Repartidores y Valores por defecto', async () => {
+  it('el admin de un tenant que contrató Paquetería ve Repartidores y Tarifas', async () => {
     esAdmin = true
     permisos = ['Paquetería:Leer']
 

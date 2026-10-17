@@ -317,8 +317,8 @@ ascendente)**.
 
 **Demo Gestión de Paquetes** (Chile, CLP), con `admin@paquetes.cl` (admin del tenant, no
 superadmin) y Paquetería como único módulo. Tres tarifas de envío (**Estándar $10.000 por
-defecto**, Prioritario $14.000 y Premium $20.000; Prioritario y Premium solo en paquetes que no se
-entregaron en una hoja rendida), cuatro tarifas de pago
+defecto**, Prioritario $14.000 y Premium $20.000; Prioritario y Premium solo en paquetes sin ninguna
+entrega), cuatro tarifas de pago
 (Bicicleta $1.800, Moto $1.900, **Auto $1.900 por defecto**, Colina $4.000), 3 repartidores con la
 suya, 30 paquetes con códigos con forma de Mercado Libre (mezcla de pagados y con cobro en
 destino, cinco con Colina, algunos cobros por transferencia) y 8 hojas: la **semana de Juan**
@@ -330,7 +330,7 @@ también contrata Paquetería (ahí corren los e2e); *Demo Bodega* no, a propós
 donde el menú no la muestra. *Demo Restaurante* no trae tarifas de pago ni de envío en una base nueva (los e2e las crean): ahí
 crear o escanear un paquete es 400 hasta cargar una por defecto de cada una. En una base que ya
 existía antes de las tarifas de envío, la migración `PrecioEnLaLinea` le crea "Estándar" por
-defecto con el precio de la configuración que tenía (así que ahí sí hay una de envío). IDs en el bloque `PAQUETERIA` del seeder (502-599; 580-583 las tarifas de pago, 584-586 las de envío, 590-594 las hojas, 595 la entrega de plata).
+defecto con el precio de la configuración que tenía (así que ahí sí hay una de envío). En una base que ya existía (Railway), esa "Estándar" por defecto es la que creó la migración, con id al azar y no el 584 del seed; nada la referencia por id. IDs en el bloque `PAQUETERIA` del seeder (502-599; 580-583 las tarifas de pago, 584-586 las de envío, 590-594 las hojas, 595 la entrega de plata).
 
 ---
 
@@ -434,15 +434,17 @@ presentación en `composables/usePaqueteria.ts` y `useColaEscaneo.ts`.
   dirección si los tiene) con su interruptor *Cobra en destino* (cambia el paquete al instante,
   con rollback si el servidor lo rechaza) y *Quitar* mientras la línea sigue en ruta y la hoja
   está abierta. Cada fila muestra además el **precio del envío, el pago al repartidor** (estimado
-  mientras la línea no se entrega) **y la tarifa** del paquete, con un lápiz que abre un modal
-  para cambiar el precio y elegir otra tarifa (un `USelect`; *Según repartidor* la quita) solo
-  para ese paquete (`PATCH
-  /paquetes/:id`; la regla 7 sigue valiendo en el backend). Lo pidió el owner el 2026-10-16, solo
-  para esta pantalla (en el detalle de la hoja no se editan montos). El modal con botón —y Enter
-  que no guarda— es decisión de diseño: un campo de monto con el foco recibiría lo que tipee la
+  mientras la línea no se entrega) **y las tarifas** del paquete, con un lápiz que abre un modal
+  para elegir otra tarifa de envío (primera opción *Por defecto (…)*) y otra de pago (un `USelect`;
+  *Según repartidor* la quita) solo para ese paquete (`PATCH
+  /paquetes/:id`; la regla 7 sigue valiendo en el backend). No hay un monto que tipear: el
+  precio sale de la tarifa (regla 10b). Lo pidió el owner el 2026-10-16, solo
+  para esta pantalla (en el detalle de la hoja no se editan tarifas). El modal con botón —y Enter
+  que no guarda— es decisión de diseño: un campo con el foco recibiría lo que tipee la
   pistola. El lápiz aparece en toda línea de una hoja abierta, también `entregado` y
-  `no_entregado`, a diferencia de *Quitar* y del interruptor (solo `en_ruta`): corregir un monto
-  antes de rendir es justo el caso de una línea ya marcada. Con entregados en la hoja, después de
+  `no_entregado`, a diferencia de *Quitar* y del interruptor (solo `en_ruta`): cambiar la tarifa
+  antes de rendir es justo el caso de una línea ya marcada, y en una entregada la tarifa nueva
+  se resuelve de nuevo al guardar. Con entregados en la hoja, después de
   guardar se relee la hoja para los totales (descartada si mientras tanto llegó una más nueva).
   Una hoja rendida se muestra bloqueada, sin lápiz. El **neto a rendir no se muestra mientras
   se escanea**: solo cuando hay entregados y no queda nada en ruta (`textoResumenNeto`), porque
@@ -456,7 +458,7 @@ presentación en `composables/usePaqueteria.ts` y `useColaEscaneo.ts`.
   marcar entregas. Si el owner quiere ver "$ a cobrar si entrega todo" mientras escanea hace
   falta un campo nuevo del backend (anotado en fase 2).
 - **Paquetes** (`/paquetes`): tabla con búsqueda y filtros (incluido *datos por completar*);
-  *Nuevo paquete* con los montos precargados con los defaults; selección múltiple de disponibles
+  *Nuevo paquete* con selectores de tarifa de envío y de pago (la primera opción es la por defecto); selección múltiple de disponibles
   → *Asignar a repartidor*. El selector de *Remitente* solo aparece (y `GET /terceros` solo se
   pide) si el usuario tiene `Terceros:Leer`: en un tenant que solo contrató Paquetería sería un
   403 en cada carga.
@@ -475,9 +477,9 @@ presentación en `composables/usePaqueteria.ts` y `useColaEscaneo.ts`.
   el del servidor. **Planilla** (`/paquetes/rendiciones/:id`, sin layout para imprimir): una fila
   por día con el conteo por tarifa, el pago y el cobrado por medio, las entregas a cuenta y el
   saldo en grande.
-- **Configuración → Paquetería:** Repartidores (CRUD, activo/inactivo, tarifa propia) y Valores
-  por defecto (el precio de envío y, en la misma pantalla, las tarifas de pago: alta, edición y
-  cuál es la por defecto).
+- **Configuración → Paquetería:** Repartidores (CRUD, activo/inactivo, tarifa propia) y Tarifas
+  (`/configuracion/paqueteria`: las tarifas de envío arriba y las de pago debajo; en cada una
+  alta, edición, cuál es la por defecto y desactivar).
 
 ## Testing
 

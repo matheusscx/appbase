@@ -115,7 +115,7 @@ export function useMenuConfiguracion() {
           admin && permissionsStore.can('Paquetería', 'Leer')
           && e('Repartidores', 'i-lucide-bike', 'repartidores', 'Quién reparte tus paquetes.'),
           admin && permissionsStore.can('Paquetería', 'Leer')
-          && e('Valores por defecto', 'i-lucide-badge-dollar-sign', 'paqueteria', 'Los montos que se proponen al recibir un paquete.'),
+          && e('Tarifas', 'i-lucide-badge-dollar-sign', 'paqueteria', 'Las tarifas de envío y de pago al repartidor.'),
         ],
       },
     ]

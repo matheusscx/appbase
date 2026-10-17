@@ -234,7 +234,7 @@ Los criterios de reparto de propinas son `PARTES_IGUALES`, `VENTAS_NETAS`,
 | Pantalla | Quién | Qué se configura |
 |---|---|---|
 | **Repartidores** | Admin del tenant que contrató Paquetería | Nombre, teléfono, tarifa de pago propia (opcional) y activo; no se puede eliminar uno con hojas de ruta: se desactiva |
-| **Configuración → Paquetería** | Admin del tenant que contrató Paquetería | Dos tablas, una debajo de la otra: las **tarifas de envío** (lo que se cobra en destino) y las **tarifas de pago** al repartidor. En cada una: nombre, monto, activa y una por defecto. El paquete elige otra de envío (si no, la por defecto); el repartidor o el paquete pueden llevar la de pago suya. El precio y el pago se copian a la línea al entregar. Sin una tarifa de envío por defecto y una de pago por defecto no se pueden escanear paquetes nuevos |
+| **Configuración → Paquetería** | Admin del tenant que contrató Paquetería | Dos tablas, una debajo de la otra: las **tarifas de envío** (el precio del envío, se cobre o no en destino) y las **tarifas de pago** al repartidor. En cada una: nombre, monto, activa y una por defecto. El paquete elige otra de envío (si no, la por defecto); el repartidor o el paquete pueden llevar la de pago suya. El precio y el pago se copian a la línea al entregar. Sin una tarifa de envío por defecto y una de pago por defecto no se pueden escanear paquetes nuevos |
 
 El gate es `admin` **y** `Paquetería:Leer` (que en `mis-permisos` aparece si el tenant
 contrató el módulo, y también si un rol propio lo recibió en Roles): el backend de las dos es admin-only, y el `lee()` del resto de la página

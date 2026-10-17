@@ -5722,6 +5722,8 @@ export class SeederService implements OnApplicationBootstrap {
         paquetes.filter((p) => p.tarifaPagoId).map((p) => p.tarifaPagoId),
       ],
     );
+    // La de envío se excluye con cualquier entrega viva (no solo en hoja rendida): la línea ya
+    // fijó su precio y el paquete no debe mostrar una tarifa distinta.
     await this.db.query(
       `UPDATE paquetes p SET tarifa_envio_id = x.tarifa, actualizado_el = now()
          FROM unnest($2::uuid[], $3::uuid[]) AS x(id, tarifa)
@@ -5733,7 +5735,6 @@ export class SeederService implements OnApplicationBootstrap {
                                AND h.tenant_id = l.tenant_id AND h.eliminado_el IS NULL
              WHERE l.paquete_id = p.paquete_id AND l.tenant_id = p.tenant_id
                AND l.estado = 'entregado' AND l.eliminado_el IS NULL
-               AND h.estado = 'rendida'
           )`,
       [
         tenantId,

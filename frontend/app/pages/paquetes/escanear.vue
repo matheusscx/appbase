@@ -756,7 +756,7 @@ const iconoResultado = {
   >
     <template #body>
       <div class="space-y-4" data-qa="escanear-montos-modal">
-        <UFormField label="Tarifa de envío" description="Lo que se cobra por este envío. El precio se fija al entregar.">
+        <UFormField label="Tarifa de envío" description="Lo que se cobra por este envío. En una entrega de una hoja abierta, la tarifa nueva se aplica al guardar; al rendir la hoja ya no cambia.">
           <USelect
             v-model="montosForm.tarifaEnvioId"
             :items="tarifaEnvioOptions"
