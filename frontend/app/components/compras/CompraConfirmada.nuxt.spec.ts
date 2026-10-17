@@ -166,6 +166,29 @@ describe('CompraConfirmada — pago (spec § 8 y § 10, decisión 12)', () => {
     expect(w.find('[data-qa="compra-pagos-tabla"]').text()).toContain('Efectivo')
   })
 
+  it('06.6: cada pago vigente trae su "Anular pago" y abre el modal que dice qué pasa', async () => {
+    permisos = new Set(['Compras:Leer', 'Compras:Pagar'])
+    const w = await montar(compra({
+      estadoPago: 'pagada',
+      deuda: '0',
+      aplicado: '30000',
+      vencida: false,
+      pagos: [{
+        id: 'pago-1', proveedorId: 'p1', fecha: '2026-09-20', monto: '30000',
+        metodoPagoId: 'm1', metodoPagoNombre: 'Transferencia', referencia: null, cajaId: null,
+        estado: 'vigente', anuladoPor: null, anuladoEl: null, motivoAnulacion: null,
+        aplicaciones: [{ compraId: 'compra-1', monto: '30000' }], sobranteAFavor: '0',
+      }],
+    }))
+    const boton = w.find('[data-qa="compra-anular-pago-pago-1"]')
+    expect(boton.exists()).toBe(true)
+    await boton.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    const efectos = document.body.querySelector('[data-qa="anular-pago-efecto-deuda"]')
+    expect(efectos?.textContent).toContain('1 compra vuelve a deber')
+    expect(efectos?.textContent).toContain('30.000')
+  })
+
   it('sin Pagar, la sección de pago ni se muestra (aunque venga estadoPago)', async () => {
     permisos = new Set(['Compras:Leer'])
     const w = await montar(compra({ estadoPago: 'pagada', deuda: '0', vencida: false }))

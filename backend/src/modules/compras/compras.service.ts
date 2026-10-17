@@ -221,6 +221,15 @@ export interface PagoProveedorInfo {
   metodoPagoNombre: string | null;
   referencia: string | null;
   cajaId: string | null;
+  /**
+   * Estado y dueño de esa caja (`null` si el pago no fue en efectivo): la
+   * pantalla de anular dice con eso si la plata vuelve a la caja, no vuelve
+   * a ninguna (cerrada) o no se puede anular desde otro usuario (spec
+   * decisión 6). Solo se llenan en las lecturas; un pago recién hecho o
+   * anulado los trae `null`.
+   */
+  cajaEstado: string | null;
+  cajaUsuarioId: string | null;
   estado: 'vigente' | 'anulado' | null;
   anuladoPor: string | null;
   anuladoEl: Date | null;
@@ -2316,6 +2325,8 @@ export class ComprasService {
       metodo_pago_nombre: string | null;
       referencia: string | null;
       caja_id: string | null;
+      caja_estado: string | null;
+      caja_usuario_id: string | null;
       estado: EstadoPagoProveedor;
       anulado_por: string | null;
       anulado_el: Date | null;
@@ -2323,7 +2334,8 @@ export class ComprasService {
     }[] = await this.db.query(
       `SELECT DISTINCT pp.pago_proveedor_id, pp.proveedor_id, pp.fecha,
               pp.monto, pp.metodo_pago_id, mp.nombre AS metodo_pago_nombre,
-              pp.referencia, pp.caja_id, pp.estado, pp.anulado_por,
+              pp.referencia, pp.caja_id, c.estado AS caja_estado,
+              c.usuario_id AS caja_usuario_id, pp.estado, pp.anulado_por,
               pp.anulado_el, pp.motivo_anulacion
          FROM pago_proveedor_aplicaciones a
          JOIN pagos_proveedor pp ON pp.pago_proveedor_id = a.pago_proveedor_id
@@ -2331,6 +2343,8 @@ export class ComprasService {
          -- Sin "mp.eliminado_el IS NULL": mismo criterio que listarPagos,
          -- el método con el que se pagó es un dato histórico.
          LEFT JOIN metodos_pago mp ON mp.metodo_pago_id = pp.metodo_pago_id
+         LEFT JOIN cajas c ON c.caja_id = pp.caja_id AND c.tenant_id = pp.tenant_id
+                          AND c.eliminado_el IS NULL
         WHERE a.tenant_id = $1 AND a.compra_id = $2 AND a.eliminado_el IS NULL
           AND pp.eliminado_el IS NULL
         ORDER BY pp.fecha DESC, pp.pago_proveedor_id DESC`,
@@ -2373,6 +2387,8 @@ export class ComprasService {
         metodoPagoNombre: p.metodo_pago_nombre,
         referencia: p.referencia,
         cajaId: p.caja_id,
+        cajaEstado: p.caja_estado,
+        cajaUsuarioId: p.caja_usuario_id,
         estado: p.estado,
         anuladoPor: p.anulado_por,
         anuladoEl: p.anulado_el,
@@ -2398,6 +2414,8 @@ export class ComprasService {
       metodo_pago_nombre: string | null;
       referencia: string | null;
       caja_id: string | null;
+      caja_estado: string | null;
+      caja_usuario_id: string | null;
       estado: EstadoPagoProveedor;
       anulado_por: string | null;
       anulado_el: Date | null;
@@ -2405,6 +2423,7 @@ export class ComprasService {
     }[] = await this.db.query(
       `SELECT pp.pago_proveedor_id, pp.fecha, pp.monto, pp.metodo_pago_id,
               mp.nombre AS metodo_pago_nombre, pp.referencia, pp.caja_id,
+              c.estado AS caja_estado, c.usuario_id AS caja_usuario_id,
               pp.estado, pp.anulado_por, pp.anulado_el, pp.motivo_anulacion
          FROM pagos_proveedor pp
          -- Sin "mp.eliminado_el IS NULL" a propósito: el método con el que
@@ -2412,6 +2431,8 @@ export class ComprasService {
          -- nombrándolo aunque el método se retire después — mismo criterio
          -- que calcularEsperadoEfectivo/calcularArqueo en caja.service.ts.
          LEFT JOIN metodos_pago mp ON mp.metodo_pago_id = pp.metodo_pago_id
+         LEFT JOIN cajas c ON c.caja_id = pp.caja_id AND c.tenant_id = pp.tenant_id
+                          AND c.eliminado_el IS NULL
         WHERE pp.tenant_id = $1 AND pp.proveedor_id = $2
           AND pp.eliminado_el IS NULL
         ORDER BY pp.fecha DESC, pp.pago_proveedor_id DESC`,
@@ -2454,6 +2475,8 @@ export class ComprasService {
         metodoPagoNombre: p.metodo_pago_nombre,
         referencia: p.referencia,
         cajaId: p.caja_id,
+        cajaEstado: p.caja_estado,
+        cajaUsuarioId: p.caja_usuario_id,
         estado: p.estado,
         anuladoPor: p.anulado_por,
         anuladoEl: p.anulado_el,
@@ -2623,8 +2646,8 @@ export class ComprasService {
 
   /**
    * `GET /compras/por-pagar/:proveedorId` (spec § 8, `Pagar`): sus compras
-   * confirmadas con deuda o total desconocido, con estado y vencimiento; sus
-   * pagos vigentes con saldo a favor.
+   * confirmadas con deuda o total desconocido, con estado y vencimiento; todos
+   * sus pagos vigentes (para anularlos), con su saldo a favor.
    */
   async porPagarProveedor(
     tenantId: string,
@@ -2667,8 +2690,10 @@ export class ComprasService {
       // Solo con deuda o total desconocido (spec § 8): una `pagada` no entra.
       .filter((c) => c.deuda == null || new Decimal(c.deuda).gt(0));
 
+    // Todos los vigentes, no solo los que dejan saldo a favor: es desde esta
+    // lista que se anula un pago (auditoría UX 06.6, spec § 8).
     const pagos = (await this.listarPagos(tenantId, proveedorId)).filter(
-      (p) => p.estado === 'vigente' && new Decimal(p.sobranteAFavor).gt(0),
+      (p) => p.estado === 'vigente',
     );
 
     return { compras, pagos };
@@ -2970,6 +2995,8 @@ export class ComprasService {
       metodoPagoNombre: null,
       referencia: dto.referencia ?? null,
       cajaId,
+      cajaEstado: null,
+      cajaUsuarioId: null,
       estado: montoNuevo.gt(0) ? 'vigente' : null,
       anuladoPor: null,
       anuladoEl: null,
@@ -3362,6 +3389,8 @@ export class ComprasService {
       metodoPagoNombre: null,
       referencia: pago.referencia,
       cajaId: pago.caja_id,
+      cajaEstado: null,
+      cajaUsuarioId: null,
       estado: 'anulado',
       anuladoPor: usuarioId,
       anuladoEl: new Date(),

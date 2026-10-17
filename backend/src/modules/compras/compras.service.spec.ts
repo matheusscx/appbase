@@ -2548,6 +2548,87 @@ describe('ComprasService (pagar, spec compras-deuda-proveedor § 5 y § 11)', ()
     });
   });
 
+  describe('pagos de un proveedor para anular (auditoría UX 06.6, spec § 8)', () => {
+    function pagoInfo(
+      id: string,
+      estado: 'vigente' | 'anulado',
+      sobrante: string,
+    ) {
+      return {
+        id,
+        proveedorId: PROVEEDOR,
+        fecha: '2026-09-01T10:00:00.000Z',
+        monto: '1000.0000',
+        metodoPagoId: null,
+        metodoPagoNombre: null,
+        referencia: null,
+        cajaId: null,
+        cajaEstado: null,
+        cajaUsuarioId: null,
+        estado,
+        anuladoPor: null,
+        anuladoEl: null,
+        motivoAnulacion: null,
+        aplicaciones: [],
+        sobranteAFavor: sobrante,
+      };
+    }
+
+    it('porPagarProveedor devuelve TODOS los pagos vigentes, con o sin saldo a favor, y ningún anulado', async () => {
+      const interno = service as unknown as {
+        cfgTenant: () => Promise<unknown>;
+        hoyNegocio: () => Promise<string>;
+        comprasConfirmadasParaDeuda: () => Promise<unknown[]>;
+        listarPagos: () => Promise<unknown[]>;
+      };
+      jest.spyOn(interno, 'cfgTenant').mockResolvedValue(CFG_CLP);
+      jest.spyOn(interno, 'hoyNegocio').mockResolvedValue('2026-10-16');
+      jest.spyOn(interno, 'comprasConfirmadasParaDeuda').mockResolvedValue([]);
+      jest
+        .spyOn(interno, 'listarPagos')
+        .mockResolvedValue([
+          pagoInfo('p-agotado', 'vigente', '0.0000'),
+          pagoInfo('p-con-saldo', 'vigente', '50.0000'),
+          pagoInfo('p-anulado', 'anulado', '0.0000'),
+        ]);
+
+      const r = await service.porPagarProveedor(TENANT, PROVEEDOR);
+
+      expect(r.pagos.map((p) => p.id)).toEqual(['p-agotado', 'p-con-saldo']);
+    });
+
+    it('listarPagos trae el estado y el dueño de la caja del pago, sin una consulta por pago', async () => {
+      const query = jest.fn();
+      query
+        .mockResolvedValueOnce([
+          {
+            pago_proveedor_id: 'p-1',
+            fecha: new Date('2026-09-01T10:00:00.000Z'),
+            monto: '1000',
+            metodo_pago_id: 'm-1',
+            metodo_pago_nombre: 'Efectivo',
+            referencia: null,
+            caja_id: 'caja-1',
+            caja_estado: 'abierta',
+            caja_usuario_id: USUARIO,
+            estado: 'vigente',
+            anulado_por: null,
+            anulado_el: null,
+            motivo_anulacion: null,
+          },
+        ])
+        .mockResolvedValueOnce([]);
+      (service as unknown as { db: { query: jest.Mock } }).db.query = query;
+
+      const [pago] = await service.listarPagos(TENANT, PROVEEDOR);
+
+      expect(pago.cajaEstado).toBe('abierta');
+      expect(pago.cajaUsuarioId).toBe(USUARIO);
+      expect(query).toHaveBeenCalledTimes(2);
+      expect(query.mock.calls[0][0]).toMatch(/LEFT JOIN cajas/);
+    });
+  });
+
   describe('composición registrarPago (spike): conRastroDeRechazo(idempotencia.ejecutar(db.transaccion))', () => {
     it('llama conRastroDeRechazo, que envuelve idempotencia.ejecutar, con la operación "compras.pago"', async () => {
       const manager = crearManager();

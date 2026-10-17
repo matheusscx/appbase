@@ -88,6 +88,9 @@ export interface PagoProveedorInfo {
   metodoPagoNombre: string | null
   referencia: string | null
   cajaId: string | null
+  /** Estado y dueño de la caja de un pago en efectivo (`null` si no fue en efectivo). */
+  cajaEstado?: string | null
+  cajaUsuarioId?: string | null
   estado: 'vigente' | 'anulado' | null
   anuladoPor: string | null
   anuladoEl: string | null
@@ -555,7 +558,32 @@ export function useCompras() {
     return [c.tipoDocumentoNombre, c.folio].filter(Boolean).join(' ')
   }
 
+  /**
+   * Qué pasa al anular un pago (auditoría UX 06.6; spec compras-deuda-proveedor
+   * decisión 6): las compras que vuelven a deber, cuánto, el saldo a favor que
+   * se pierde y qué ocurre con la caja. `ajena`: la caja sigue abierta y es de
+   * otra persona, y el backend solo deja anular a su dueño (403).
+   */
+  function efectoAnularPago(
+    pago: Pick<PagoProveedorInfo, 'cajaId' | 'cajaEstado' | 'cajaUsuarioId' | 'aplicaciones' | 'sobranteAFavor'>,
+    usuarioId: string | null,
+  ) {
+    const deudaVuelve = pago.aplicaciones.reduce((acc, a) => acc.plus(a.monto), new Decimal(0))
+    let caja: 'sin_caja' | 'vuelve' | 'ajena' | 'cerrada' = 'sin_caja'
+    if (pago.cajaId) {
+      if (pago.cajaEstado !== 'abierta') caja = 'cerrada'
+      else caja = pago.cajaUsuarioId === usuarioId ? 'vuelve' : 'ajena'
+    }
+    return {
+      compras: new Set(pago.aplicaciones.map(a => a.compraId)).size,
+      deudaVuelve: deudaVuelve.toString(),
+      aFavorPerdido: new Decimal(pago.sobranteAFavor || 0).toString(),
+      caja,
+    }
+  }
+
   return {
+    efectoAnularPago,
     totalLinea,
     subtotal,
     totalConDescuento,

@@ -11,6 +11,7 @@ const {
   faltaAlgunPrecio,
   insigniaEstado,
   insigniaPago,
+  efectoAnularPago,
   estadoOptions,
   diferenciaCantidad,
   cuerpoCorreccion,
@@ -343,5 +344,45 @@ describe('proponerReparto — spec § 5.1 y § 10, decisión 2', () => {
 
   it('lo que sobra después de cubrir toda la deuda no se propone a ninguna compra (queda a favor)', () => {
     expect(proponerReparto([donPedroLunes], '0', '200000')).toEqual([{ compraId: 'c-lunes', monto: '120000' }])
+  })
+})
+
+describe('efectoAnularPago (auditoría UX 06.6)', () => {
+  const base = {
+    monto: '100000',
+    cajaId: null,
+    cajaEstado: null,
+    cajaUsuarioId: null,
+    aplicaciones: [
+      { compraId: 'c1', monto: '60000' },
+      { compraId: 'c2', monto: '30000' },
+    ],
+    sobranteAFavor: '10000',
+  }
+
+  it('cuenta las compras que vuelven a deber, lo que vuelve a deberse y el saldo a favor que se pierde', () => {
+    const e = efectoAnularPago(base, 'yo')
+    expect(e.compras).toBe(2)
+    expect(e.deudaVuelve).toBe('90000')
+    expect(e.aFavorPerdido).toBe('10000')
+  })
+
+  it('sin caja (transferencia): no toca ninguna caja', () => {
+    expect(efectoAnularPago(base, 'yo').caja).toBe('sin_caja')
+  })
+
+  it('efectivo con la caja abierta y propia: la plata vuelve a esa caja', () => {
+    const e = efectoAnularPago({ ...base, cajaId: 'k', cajaEstado: 'abierta', cajaUsuarioId: 'yo' }, 'yo')
+    expect(e.caja).toBe('vuelve')
+  })
+
+  it('efectivo con la caja abierta de otro: no se puede anular desde acá', () => {
+    const e = efectoAnularPago({ ...base, cajaId: 'k', cajaEstado: 'abierta', cajaUsuarioId: 'otro' }, 'yo')
+    expect(e.caja).toBe('ajena')
+  })
+
+  it('efectivo con la caja cerrada (o que ya no se encuentra): no vuelve plata a ninguna caja', () => {
+    expect(efectoAnularPago({ ...base, cajaId: 'k', cajaEstado: 'cerrada', cajaUsuarioId: 'otro' }, 'yo').caja).toBe('cerrada')
+    expect(efectoAnularPago({ ...base, cajaId: 'k' }, 'yo').caja).toBe('cerrada')
   })
 })

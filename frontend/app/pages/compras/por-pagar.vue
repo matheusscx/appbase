@@ -50,6 +50,7 @@ interface ProveedorDetalle {
 
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
+const authStore = useAuthStore()
 const { formatMonto, formatFecha } = useFormatters()
 const { insigniaPago, textoDeuda, montoEsPositivo, etiquetaDocumento } = useCompras()
 
@@ -258,7 +259,7 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
 
             <div class="mt-6 space-y-2">
               <h3 class="text-sm font-medium text-default">
-                Pagos con saldo a favor
+                Pagos vigentes
               </h3>
               <CrudTable :data="detalle.pagos" :columns="columnsPagos" data-qa="por-pagar-pagos">
                 <template #fecha-cell="{ row }">
@@ -284,10 +285,11 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
                   <div class="flex justify-end">
                     <UButton
                       v-if="row.original.estado === 'vigente' && row.original.id"
-                      size="xs"
+                      size="md"
+                      class="min-h-11"
                       variant="soft"
                       color="error"
-                      label="Anular"
+                      label="Anular pago"
                       :data-qa="`por-pagar-anular-${row.original.id}`"
                       @click="abrirAnular(row.original)"
                     />
@@ -295,7 +297,7 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
                 </template>
                 <template #empty>
                   <div class="py-6 text-center text-sm text-muted">
-                    No hay pagos con saldo a favor.
+                    No hay pagos vigentes.
                   </div>
                 </template>
               </CrudTable>
@@ -313,10 +315,9 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
         <ComprasAnularPagoModal
           v-if="pagoParaAnular?.id"
           v-model:open="anularOpen"
-          :pago-id="pagoParaAnular.id"
+          :pago="pagoParaAnular"
           :proveedor-nombre="seleccionado?.proveedorNombre || '—'"
-          :monto="pagoParaAnular.monto"
-          :fecha="pagoParaAnular.fecha"
+          :usuario-id="authStore.user?.id ?? null"
           @success="recargarTodo"
         />
       </div>

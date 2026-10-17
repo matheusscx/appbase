@@ -55,6 +55,8 @@ interface PagoProveedorInfo {
   monto: string;
   metodoPagoId: string | null;
   cajaId: string | null;
+  cajaEstado?: string | null;
+  cajaUsuarioId?: string | null;
   estado: string | null;
   aplicaciones: { compraId: string; monto: string }[];
   sobranteAFavor: string;
@@ -587,6 +589,74 @@ describe('Compras — pagar y anular un pago (e2e)', () => {
         { 'Idempotency-Key': randomUUID() },
       );
       expect(rePago.cajaId).toBe(cajaId);
+    });
+
+    it('un pago que cubrió la compra entera (sin saldo a favor) aparece en Por pagar y se anula desde ahí: la deuda vuelve y la plata vuelve a la caja (auditoría UX 06.6)', async () => {
+      const cajaId = await abrirOReusarCaja(tokenPaga);
+      const compraId = await compraConfirmada('130', tokenPaga);
+      const pago = await post<PagoProveedorInfo>(
+        '/api/compras/pagos',
+        {
+          proveedorId,
+          monto: '130',
+          metodoPagoId: efectivo.id,
+          aplicaciones: [{ compraId, monto: '130' }],
+        },
+        201,
+        tokenPaga,
+        { 'Idempotency-Key': randomUUID() },
+      );
+      expect(pago.sobranteAFavor).toBe('0.0000');
+
+      const antes = await get<{ pagos: PagoProveedorInfo[] }>(
+        `/api/compras/por-pagar/${proveedorId}`,
+        200,
+        tokenPaga,
+      );
+      const fila = antes.pagos.find((p) => p.id === pago.id);
+      expect(fila).toBeDefined();
+      expect(fila?.cajaEstado).toBe('abierta');
+      expect(fila?.aplicaciones).toEqual([
+        expect.objectContaining({ compraId }),
+      ]);
+      // El detalle de la compra también trae la caja, para el aviso del modal.
+      const detalleAntes = await get<{ pagos?: PagoProveedorInfo[] }>(
+        `/api/compras/${compraId}`,
+        200,
+        tokenPaga,
+      );
+      expect(detalleAntes.pagos?.[0]?.cajaEstado).toBe('abierta');
+
+      await post(
+        `/api/compras/pagos/${pago.id}/anular`,
+        { motivo: 'Un cero de más' },
+        201,
+        tokenPaga,
+      );
+
+      const despues = await get<{ pagos: PagoProveedorInfo[] }>(
+        `/api/compras/por-pagar/${proveedorId}`,
+        200,
+        tokenPaga,
+      );
+      expect(despues.pagos.some((p) => p.id === pago.id)).toBe(false);
+      const compra = await get<CompraConDeuda>(
+        `/api/compras/${compraId}`,
+        200,
+        tokenPaga,
+      );
+      expect(Number(compra.deuda)).toBe(130);
+
+      const movs = await get<PaginadoMovimientos>(
+        `/api/caja/${cajaId}/movimientos?pageSize=100`,
+        200,
+        token,
+      );
+      const reversas = movs.data.filter(
+        (m) =>
+          m.tipo === 'entrada' && /^Reversa pago a proveedor/.test(m.concepto),
+      );
+      expect(reversas.length).toBeGreaterThan(0);
     });
 
     it('anular ya anulado es 409', async () => {

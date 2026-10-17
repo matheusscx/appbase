@@ -28,12 +28,24 @@ const DETALLE_P1 = {
   pagos: [],
 }
 
+// Un pago que cubrió una compra entera: no deja saldo a favor y aun así se puede anular (06.6).
+const DETALLE_P2 = {
+  compras: [],
+  pagos: [{
+    id: 'pago-9', proveedorId: 'p2', fecha: '2026-09-20', monto: '88000',
+    metodoPagoId: 'm1', metodoPagoNombre: 'Transferencia', referencia: null,
+    cajaId: null, cajaEstado: null, cajaUsuarioId: null,
+    estado: 'vigente', anuladoPor: null, anuladoEl: null, motivoAnulacion: null,
+    aplicaciones: [{ compraId: 'c9', monto: '88000' }], sobranteAFavor: '0',
+  }],
+}
+
 mockNuxtImport('useToast', () => () => ({ add: vi.fn() }))
 mockNuxtImport('useApiFetch', () => (url: string) => {
   const ruta = url.split('/api').pop()!
   if (ruta === '/compras/por-pagar') return Promise.resolve(PROVEEDORES)
   if (ruta === '/compras/por-pagar/p1') return Promise.resolve(DETALLE_P1)
-  if (ruta === '/compras/por-pagar/p2') return Promise.resolve({ compras: [], pagos: [] })
+  if (ruta === '/compras/por-pagar/p2') return Promise.resolve(DETALLE_P2)
   if (ruta === '/compras/medios-pago') return Promise.resolve([{ id: 'm1', nombre: 'Efectivo', esEfectivo: true }])
   return Promise.reject(new Error(`ruta no mockeada: ${ruta}`))
 })
@@ -106,15 +118,26 @@ describe('compras/por-pagar', () => {
     expect(tabla).toContain('Factura 10')
   })
 
-  // 06.7: la tabla solo trae pagos con saldo a favor; "Sin pagos registrados" mentía.
-  it('06.7: la tabla de pagos se llama "Pagos con saldo a favor" y su vacío no dice que no hay pagos', async () => {
+  // 06.7 + 06.6: la tabla lista TODOS los pagos vigentes, no solo los que dejan saldo a favor.
+  it('06.7: la tabla de pagos se llama "Pagos vigentes" y su vacío no dice que no hay pagos hechos', async () => {
     const wrapper = await montar()
     await wrapper.findAll('tbody tr')[0]!.trigger('click')
     await new Promise(r => setTimeout(r, 20))
     const detalle = document.body.querySelector('[data-qa="por-pagar-detalle"]')!.textContent!
-    expect(detalle).toContain('Pagos con saldo a favor')
-    expect(detalle).toContain('No hay pagos con saldo a favor.')
+    expect(detalle).toContain('Pagos vigentes')
+    expect(detalle).toContain('No hay pagos vigentes.')
     expect(detalle).not.toContain('Sin pagos registrados')
+  })
+
+  it('06.6: un pago sin saldo a favor se puede anular desde su fila, y el modal dice qué pasa', async () => {
+    const wrapper = await montar()
+    await wrapper.findAll('tbody tr')[1]!.trigger('click')
+    await new Promise(r => setTimeout(r, 20))
+    const boton = document.body.querySelector<HTMLButtonElement>('[data-qa="por-pagar-anular-pago-9"]')!
+    expect(boton).toBeTruthy()
+    boton.click()
+    await new Promise(r => setTimeout(r, 30))
+    expect(document.body.querySelector('[data-qa="anular-pago-efecto-deuda"]')!.textContent).toContain('1 compra vuelve a deber $88.000')
   })
 
   // 06.18: sin deuda, el panel queda en "Al día" y "Pagar" no ofrece pagar lo que no se debe.

@@ -1,18 +1,19 @@
 <script setup lang="ts">
+import Decimal from 'decimal.js'
+import type { PagoProveedorInfo } from '~/composables/useCompras'
+
 /**
- * Anular un pago a proveedor (spec § 5.2 y § 10): con motivo. En efectivo
- * con la caja ya cerrada, anular no le devuelve plata a ninguna caja
- * (decisión 6) — la pantalla no sabe si la caja del día sigue abierta (mismo
- * límite que el aviso de "¿la pagaste ya?" en `[id].vue`: consultarlo pediría
- * un permiso de caja que quien paga puede no tener), así que el aviso es
- * genérico y siempre visible, no condicionado a un estado que no se puede
- * leer desde acá.
+ * Anular un pago a proveedor (auditoría UX 06.6; spec compras-deuda-proveedor
+ * § 5.2, § 10 y decisión 6): cualquier pago vigente, con motivo, diciendo qué
+ * va a pasar. Efectos: las compras que cubría vuelven a deber; en efectivo con
+ * la caja todavía abierta la plata vuelve a esa caja (y solo su dueño puede
+ * anular); con la caja cerrada no se toca ninguna caja.
  */
 const props = defineProps<{
-  pagoId: string
+  pago: PagoProveedorInfo
   proveedorNombre: string
-  monto: string
-  fecha: string | null
+  /** Quien anula: la caja abierta de otro no se puede anular (decisión 6). */
+  usuarioId: string | null
 }>()
 
 const emit = defineEmits<{ success: [] }>()
@@ -21,6 +22,11 @@ const open = defineModel<boolean>('open', { required: true })
 const { public: { apiUrl } } = useRuntimeConfig()
 const toast = useToast()
 const { formatMonto, formatFecha } = useFormatters()
+const { efectoAnularPago } = useCompras()
+
+const efecto = computed(() => efectoAnularPago(props.pago, props.usuarioId))
+/** La caja sigue abierta y es de otra persona: el backend contesta 403, así que ni se ofrece. */
+const bloqueado = computed(() => efecto.value.caja === 'ajena')
 
 const motivo = ref('')
 const enviando = ref(false)
@@ -29,13 +35,13 @@ watch(open, (v) => {
   if (v) motivo.value = ''
 })
 
-const motivoValido = computed(() => motivo.value.trim().length > 0)
+const motivoValido = computed(() => motivo.value.trim().length > 0 && !bloqueado.value)
 
 async function enviar() {
-  if (!motivoValido.value || enviando.value) return
+  if (!motivoValido.value || enviando.value || !props.pago.id) return
   enviando.value = true
   try {
-    await useApiFetch(`${apiUrl}/compras/pagos/${props.pagoId}/anular`, {
+    await useApiFetch(`${apiUrl}/compras/pagos/${props.pago.id}/anular`, {
       method: 'POST',
       body: { motivo: motivo.value.trim() },
     })
@@ -55,16 +61,42 @@ async function enviar() {
     <template #body>
       <div class="flex flex-col gap-4" data-qa="anular-pago">
         <p class="text-sm text-default" data-qa="anular-pago-resumen">
-          {{ formatMonto(monto) }} a <strong>{{ proveedorNombre }}</strong><template v-if="fecha"> del {{ formatFecha(fecha) }}</template>.
-          La deuda de las compras que cubría vuelve.
+          {{ formatMonto(pago.monto) }} a <strong>{{ proveedorNombre }}</strong><template v-if="pago.fecha"> del {{ formatFecha(pago.fecha) }}</template><template v-if="pago.metodoPagoNombre"> ({{ pago.metodoPagoNombre }})</template>.
         </p>
+        <ul class="list-disc space-y-1 pl-5 text-sm text-default" data-qa="anular-pago-efectos">
+          <li v-if="efecto.compras > 0" data-qa="anular-pago-efecto-deuda">
+            {{ efecto.compras === 1 ? '1 compra vuelve' : `${efecto.compras} compras vuelven` }} a deber {{ formatMonto(efecto.deudaVuelve) }}.
+          </li>
+          <li v-if="new Decimal(efecto.aFavorPerdido).gt(0)" data-qa="anular-pago-efecto-favor">
+            Se pierde el saldo a favor de {{ formatMonto(efecto.aFavorPerdido) }} que dejó este pago.
+          </li>
+          <li v-if="efecto.compras === 0 && new Decimal(efecto.aFavorPerdido).lte(0)">
+            No cubría ninguna compra.
+          </li>
+          <li v-if="efecto.caja === 'vuelve'" data-qa="anular-pago-efecto-caja">
+            {{ formatMonto(pago.monto) }} vuelven a tu caja abierta.
+          </li>
+          <li v-else-if="efecto.caja === 'sin_caja'" data-qa="anular-pago-efecto-caja">
+            No se mueve ninguna caja: el pago no fue en efectivo.
+          </li>
+        </ul>
         <UAlert
+          v-if="efecto.caja === 'cerrada'"
           color="warning"
           variant="subtle"
           icon="i-lucide-info"
-          title="Si fue en efectivo y tu caja de ese día ya está cerrada"
+          title="La caja de este pago ya está cerrada"
           description="No vuelve plata a ninguna caja: el cierre queda como quedó. Si el proveedor devuelve la plata, se anota como entrada manual en la caja de quien la recibe."
           data-qa="anular-pago-aviso-caja"
+        />
+        <UAlert
+          v-else-if="efecto.caja === 'ajena'"
+          color="error"
+          variant="subtle"
+          icon="i-lucide-lock"
+          title="Este pago salió de la caja abierta de otra persona"
+          description="Solo su dueño puede anularlo, mientras esa caja siga abierta."
+          data-qa="anular-pago-aviso-ajena"
         />
         <UFormField label="Motivo" required>
           <UTextarea

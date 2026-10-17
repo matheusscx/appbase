@@ -7,6 +7,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import { useMonedasStore } from '~/stores/monedas'
+import type { PagoProveedorInfo } from '~/composables/useCompras'
 import AnularPagoModal from './AnularPagoModal.vue'
 
 const llamadas: { url: string, method?: string, body?: unknown }[] = []
@@ -17,14 +18,25 @@ mockNuxtImport('useApiFetch', () => (url: string, opts?: { method?: string, body
   return Promise.resolve({})
 })
 
-async function abrir() {
+function pagoDe(o: Partial<PagoProveedorInfo> = {}): PagoProveedorInfo {
+  return {
+    id: 'pago-1', proveedorId: 'p1', fecha: '2026-09-20', monto: '80000',
+    metodoPagoId: 'm1', metodoPagoNombre: 'Efectivo', referencia: null,
+    cajaId: 'caja-1', cajaEstado: 'cerrada', cajaUsuarioId: 'otro',
+    estado: 'vigente', anuladoPor: null, anuladoEl: null, motivoAnulacion: null,
+    aplicaciones: [{ compraId: 'c1', monto: '80000' }], sobranteAFavor: '0',
+    ...o,
+  }
+}
+
+async function abrir(pago: PagoProveedorInfo = pagoDe()) {
   useMonedasStore().hydrate([{
     monedaId: 'clp-1', nombre: 'Peso Chileno', codigoIso: 'CLP', simbolo: '$', decimales: 0,
     separadorDecimal: ',', separadorMiles: '.', locale: 'es-CL', habilitada: true,
     esOficial: true, valorDelDia: null,
   }], 'tenant-1')
   const wrapper = await mountSuspended(AnularPagoModal, {
-    props: { pagoId: 'pago-1', proveedorNombre: 'Don Pedro', monto: '80000', fecha: '2026-09-20', open: true },
+    props: { pago, proveedorNombre: 'Don Pedro', usuarioId: 'yo', open: true },
   })
   await wrapper.setProps({ open: false })
   await wrapper.setProps({ open: true })
@@ -66,9 +78,38 @@ describe('AnularPagoModal', () => {
     ])
   })
 
-  it('el aviso de caja cerrada siempre está, sin condicionarse a nada que la pantalla no puede saber', async () => {
+  it('06.6: con la caja cerrada avisa que no vuelve plata a ninguna caja', async () => {
     await abrir()
     expect(document.body.querySelector('[data-qa="anular-pago-aviso-caja"]')).toBeTruthy()
+    expect(document.body.querySelector('[data-qa="anular-pago-efecto-caja"]')).toBeNull()
+  })
+
+  it('06.6: con la caja abierta y propia dice que la plata vuelve a tu caja, sin el aviso de cierre', async () => {
+    await abrir(pagoDe({ cajaEstado: 'abierta', cajaUsuarioId: 'yo' }))
+    expect(document.body.querySelector('[data-qa="anular-pago-efecto-caja"]')!.textContent).toContain('vuelven a tu caja abierta')
+    expect(document.body.querySelector('[data-qa="anular-pago-aviso-caja"]')).toBeNull()
+  })
+
+  it('06.6: con la caja abierta de otro avisa y no deja anular, ni con motivo', async () => {
+    await abrir(pagoDe({ cajaEstado: 'abierta', cajaUsuarioId: 'otro' }))
+    expect(document.body.querySelector('[data-qa="anular-pago-aviso-ajena"]')).toBeTruthy()
+    const textarea = document.body.querySelector('textarea[data-qa="anular-pago-motivo"]') as HTMLTextAreaElement
+    textarea.value = 'x'
+    textarea.dispatchEvent(new Event('input'))
+    await new Promise(r => setTimeout(r, 0))
+    expect(boton().disabled).toBe(true)
+  })
+
+  it('06.6: una transferencia solo devuelve la deuda: no toca ninguna caja', async () => {
+    await abrir(pagoDe({ cajaId: null, cajaEstado: null, cajaUsuarioId: null, metodoPagoNombre: 'Transferencia' }))
+    expect(document.body.querySelector('[data-qa="anular-pago-efecto-caja"]')!.textContent).toContain('No se mueve ninguna caja')
+    expect(document.body.querySelector('[data-qa="anular-pago-aviso-caja"]')).toBeNull()
+  })
+
+  it('06.6: dice cuántas compras vuelven a deber y el saldo a favor que se pierde', async () => {
+    await abrir(pagoDe({ aplicaciones: [{ compraId: 'c1', monto: '50000' }, { compraId: 'c2', monto: '20000' }], sobranteAFavor: '10000' }))
+    expect(document.body.querySelector('[data-qa="anular-pago-efecto-deuda"]')!.textContent).toContain('2 compras vuelven a deber $70.000')
+    expect(document.body.querySelector('[data-qa="anular-pago-efecto-favor"]')!.textContent).toContain('$10.000')
   })
 
   it('el resumen muestra el monto y el proveedor', async () => {

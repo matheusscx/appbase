@@ -225,7 +225,8 @@ paga", y lo que se le debe a cada proveedor es información del que paga.
   el saldo a favor; ordenada por vencido y después por lo que vence pronto. Una consulta con
   agregación, sin N+1. Sin deuda y sin saldo a favor, el proveedor no aparece.
 - **`GET /compras/por-pagar/:proveedorId`** (`Pagar`): sus compras confirmadas con deuda o
-  total desconocido, con estado y vencimiento; sus pagos vigentes con saldo a favor.
+  total desconocido, con estado y vencimiento; todos sus pagos vigentes, con o sin saldo a favor: desde esa lista se
+  anula un pago (auditoría UX 06.6, owner 2026-10-16; antes solo traía los que dejaban saldo a favor).
 - **`GET /compras/pagos?proveedorId=`** (`Pagar`): los pagos, con su caja y sus aplicaciones.
 - **`GET /compras` y `GET /compras/:id`** siguen con `Leer`, y **solo a quien además tiene
   `Pagar`** le suman los datos de pago: `estadoPago`, `deuda` y `vencida` en cada fila; total,
@@ -276,8 +277,10 @@ paga) para el Playwright y los 403 del de carga. Ids: los siguientes libres del 
 - **`PagarProveedorModal.vue`** (nuevo): monto, medio, referencia, el saldo a favor propuesto
   y el reparto propuesto (la más vieja primero), editable; lo que no se reparte queda a favor
   y la pantalla lo dice. Manda la clave con `useIntentoCobro` (pattern frontend § 18).
-- **Anular un pago:** desde el detalle del proveedor, con motivo; en efectivo con la caja
-  cerrada, el modal avisa que no vuelve plata a ninguna caja.
+- **Anular un pago:** cualquier pago vigente, desde su fila en Por pagar **y** en el detalle de
+  la compra (06.6, owner 2026-10-16), con motivo. El modal dice qué pasa: compras que vuelven a
+  deber, saldo a favor que se pierde y la caja (vuelve a la caja abierta propia; con la caja
+  cerrada no vuelve plata a ninguna; con la abierta de otro no deja anular).
 - **Listado de compras:** con `Pagar`, la insignia de pago (Pagada · Te faltan $X · Vencida ·
   Falta total) y su filtro; sin `Pagar`, ni la insignia ni el filtro.
 - Utilidades de presentación en `composables/useCompras.ts`; los montos, strings de punta a

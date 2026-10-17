@@ -23,6 +23,7 @@ const {
 } = useCompras()
 const { puedeActualizar } = usePermisosCrud('Compras')
 const permissionsStore = usePermissionsStore()
+const authStore = useAuthStore()
 // `Pagar` no es uno de los cuatro CRUD de `usePermisosCrud` (mismo molde que
 // `puedeAnular`, acá abajo): los datos de pago (spec § 8, decisión 12) son
 // SOLO de quien tiene `Compras:Pagar`, nunca de `Leer` a secas.
@@ -86,6 +87,13 @@ const lineaEnEdicion = ref<LineaCompra | null>(null)
 const corregirOpen = ref(false)
 const descuentoOpen = ref(false)
 const anularOpen = ref(false)
+const pagoParaAnular = ref<PagoProveedorInfo | null>(null)
+const anularPagoOpen = ref(false)
+
+function abrirAnularPago(p: PagoProveedorInfo) {
+  pagoParaAnular.value = p
+  anularPagoOpen.value = true
+}
 
 // ── Pagar desde el detalle (spec § 10) ───────────────────────────────────
 
@@ -141,6 +149,7 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
   { accessorKey: 'metodoPagoNombre', header: 'Medio' },
   { accessorKey: 'referencia', header: 'Referencia' },
   { accessorKey: 'estado', header: 'Estado' },
+  { id: 'acciones', header: '' },
 ]
 </script>
 
@@ -316,6 +325,20 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
             variant="subtle"
           />
         </template>
+        <template #acciones-cell="{ row }">
+          <div class="flex justify-end">
+            <UButton
+              v-if="row.original.estado === 'vigente' && row.original.id"
+              size="md"
+              class="min-h-11"
+              variant="soft"
+              color="error"
+              label="Anular pago"
+              :data-qa="`compra-anular-pago-${row.original.id}`"
+              @click="abrirAnularPago(row.original)"
+            />
+          </div>
+        </template>
       </CrudTable>
     </div>
 
@@ -357,6 +380,14 @@ const columnsPagos: TableColumn<PagoProveedorInfo>[] = [
       :ubicacion-nombre="compra.ubicacionNombre"
       :lineas="compra.lineas"
       @success="(c: CompraDetalle) => emit('actualizada', c)"
+    />
+    <ComprasAnularPagoModal
+      v-if="muestraPago && pagoParaAnular?.id"
+      v-model:open="anularPagoOpen"
+      :pago="pagoParaAnular"
+      :proveedor-nombre="compra.proveedorNombre || '—'"
+      :usuario-id="authStore.user?.id ?? null"
+      @success="recargarTrasPago"
     />
     <ComprasPagarProveedorModal
       v-if="puedeIniciarPago"

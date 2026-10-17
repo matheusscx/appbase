@@ -359,8 +359,8 @@ pago_proveedor_id` — con su unitario sobre el SQL (`compras.service.spec.ts`).
   favor — ordenada por vencido y después por lo que vence pronto. Sin deuda y sin saldo a favor,
   el proveedor no aparece.
 - **`GET /compras/por-pagar/:proveedorId`** (`Pagar`): sus compras confirmadas con deuda o total
-  desconocido (una `pagada` no entra), con estado derivado y vencimiento; sus pagos vigentes con
-  saldo a favor > 0.
+  desconocido (una `pagada` no entra), con estado derivado y vencimiento; todos sus pagos vigentes
+  (se anulan desde esa lista).
 - **`GET /compras` y `GET /compras/:id`** siguen con `Leer`. El controller resuelve `Pagar` (sin
   bloquear la ruta) y se lo pasa al service, que arma la respuesta con o sin la parte de pago:
   `estadoPago`, `deuda`, `deudaMinima` y `vencida` en cada fila del listado; además `aplicado` y
@@ -535,16 +535,26 @@ gatea con `Leer`"): acá la pregunta que importa es "¿puede pagar?", porque no 
 esta pantalla ofrezca a quien solo puede leer.
 
 Una fila por proveedor (`GET /compras/por-pagar`), con lo que se debe, lo vencido, lo que vence
-en 7 días y el saldo a favor; al tocar uno, sus compras abiertas y sus pagos vigentes con saldo
-a favor (`GET /compras/por-pagar/:proveedorId`), y el botón **Pagar**. Pagar o anular un pago
+en 7 días y el saldo a favor; al tocar uno, sus compras abiertas y **todos** sus pagos vigentes
+(`GET /compras/por-pagar/:proveedorId`), y el botón **Pagar**. Pagar o anular un pago
 recarga los dos (`recargarTodo`): la deuda y el saldo a favor cambiaron en los dos lados. La
 columna **Debe** de las compras abiertas usa `useCompras() → textoDeuda`: el monto si se conoce,
 "Al menos $X" con la `deudaMinima` de una `falta_precio`, o "falta el total" en una `falta_total`.
 
 La pantalla dice que se toca un proveedor para ver sus compras y pagar. Con el detalle cargado y
 sin compras abiertas, el panel queda en **"Al día"** y **Pagar** se apaga (06.18). La tabla de pagos
-se rotula **"Pagos con saldo a favor"** porque solo trae esos (06.7); anular cualquier pago vigente es
-un frente propio de plata (06.6, decidido, aún no construido).
+se rotula **"Pagos vigentes"** y trae todos, con o sin saldo a favor (06.6, 06.7): cada fila tiene
+**Anular pago**, igual que la tabla de pagos del detalle de la compra (`CompraConfirmada.vue`).
+
+**Anular un pago (06.6, decisión del owner 2026-10-16):** se puede anular **cualquier** pago vigente
+con motivo, desde su fila. El modal (`AnularPagoModal.vue`) dice antes qué va a pasar:
+cuántas compras vuelven a deber y cuánto, el saldo a favor que se pierde, y la caja
+(`useCompras().efectoAnularPago`): efectivo con la caja abierta y propia, la plata vuelve a esa
+caja; con la caja cerrada, no se toca ninguna caja (decisión 6); con la caja abierta de otra
+persona, el modal avisa y no deja anular (el backend contesta 403, solo su dueño puede); una
+transferencia no toca caja. Para eso `PagoProveedorInfo` trae `cajaEstado` y `cajaUsuarioId`
+(LEFT JOIN a `cajas` en `listarPagos` y `pagosQueCubren`). El endpoint
+`POST /compras/pagos/:id/anular` ya existía y no cambió.
 
 ### `components/compras/PagarProveedorModal.vue`
 
@@ -956,7 +966,7 @@ Todas bajo `JwtAuthGuard + TenantGuard + PermisosGuard`, con el `tenant_id` del 
 | `POST /compras/:id/anular` con `{ motivo }` | Anular |
 | `GET /compras/medios-pago`: los medios habilitados del tenant, con `esEfectivo` | Pagar |
 | `GET /compras/por-pagar`: una fila por proveedor con lo que se debe (ver [Confirmar con pago, el recorte y las lecturas de deuda](#confirmar-con-pago-el-recorte-y-las-lecturas-de-deuda-pieza-5-tarea-3)) | Pagar |
-| `GET /compras/por-pagar/:proveedorId`: sus compras con deuda y sus pagos con saldo a favor | Pagar |
+| `GET /compras/por-pagar/:proveedorId`: sus compras con deuda y todos sus pagos vigentes | Pagar |
 | `GET /compras/pagos?proveedorId=`: los pagos del proveedor, con sus aplicaciones | Pagar |
 | `POST /compras/pagos` (con `Idempotency-Key`) con `{ proveedorId, monto, metodoPagoId?, referencia?, aplicaciones }` (ver [Pagar y anular un pago](#pagar-y-anular-un-pago-pieza-5-tarea-2)) | Pagar |
 | `POST /compras/pagos/:id/anular` con `{ motivo }` | Pagar |
