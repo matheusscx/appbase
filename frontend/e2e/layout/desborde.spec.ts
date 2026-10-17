@@ -95,6 +95,8 @@ const RUTAS: Array<{ ruta: string; titulo: string }> = [
   { ruta: '/tienda', titulo: 'Tienda Online' },
   { ruta: '/inventario', titulo: 'Movimientos' },
   { ruta: '/salones', titulo: 'Salones' },
+  // 09.24: la tabla de soporte del superadmin (el usuario de los e2e lo es) a 768 px.
+  { ruta: '/admin', titulo: 'Administración' },
 ]
 
 const VIEWPORTS = [

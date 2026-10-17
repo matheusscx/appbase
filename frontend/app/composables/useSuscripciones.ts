@@ -141,6 +141,24 @@ export function useSuscripciones() {
     }
   }
 
+  /**
+   * La fecha del primer cobro recurrente, antes de suscribirse: la calcula el servidor con la
+   * misma función que el alta (09.9). Es un aviso, no un requisito: si falla devuelve `null`.
+   */
+  async function proximoCobro(query: {
+    itemId: string
+    diaMes?: number
+    diaSemana?: number
+  }): Promise<string | null> {
+    try {
+      const r = await useApiFetch<{ proximoCobro: string }>(`${apiUrl}/suscripciones/proximo-cobro`, { query })
+      return r.proximoCobro
+    }
+    catch {
+      return null
+    }
+  }
+
   async function cancelar(id: string) {
     if (mutando.has(id)) return
     const susc = suscripciones.value.find((s) => s.id === id)
@@ -186,5 +204,5 @@ export function useSuscripciones() {
 
   onMounted(cargar)
 
-  return { suscripciones, loading, error, sinPermiso, cargar, crear, cancelar, cambiarTarjeta }
+  return { suscripciones, loading, error, sinPermiso, cargar, crear, proximoCobro, cancelar, cambiarTarjeta }
 }

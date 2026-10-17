@@ -100,6 +100,10 @@ let retenerAlta = false
 let listaSuscripciones: unknown[] = []
 /** Tarjetas que devuelve `GET /online/medios-pago`. */
 let medios: unknown[] = []
+/** Cada query de `GET /suscripciones/proximo-cobro` (la fecha del primer cobro recurrente). */
+let consultasProximoCobro: Record<string, unknown>[] = []
+/** Si está puesto, `proximo-cobro` rechaza con esto (el aviso no debe frenar el alta). */
+let falloProximoCobro: unknown = null
 
 interface ToastSpec { title?: string, description?: string, color?: string }
 let toasts: ToastSpec[] = []
@@ -127,6 +131,11 @@ mockNuxtImport('useApiFetch', () => {
     if (typeof url !== 'string') return Promise.resolve([])
     const ruta = url.split('?')[0] ?? ''
 
+    if (ruta.endsWith('/suscripciones/proximo-cobro')) {
+      consultasProximoCobro.push((opts as { query?: Record<string, unknown> }).query ?? {})
+      if (falloProximoCobro) return Promise.reject(falloProximoCobro)
+      return Promise.resolve({ proximoCobro: '2026-11-05' })
+    }
     if (ruta.endsWith('/suscripciones')) {
       if ((opts as { method?: string } | undefined)?.method === 'POST') {
         altas.push(opts)
@@ -213,6 +222,8 @@ beforeEach(() => {
   retenerAlta = false
   proximaAlta = null
   cargasLista = 0
+  consultasProximoCobro = []
+  falloProximoCobro = null
   listaSuscripciones = []
   consulta = {}
   usuarioActivo = 'u1'
@@ -560,6 +571,43 @@ describe('tienda/suscripciones — el drawer dice cuándo se cobra (09.9)', () =
     await abrirDrawer(wrapper)
     await elegir(wrapper, SEMANAL.id)
     expect(textoDrawer()).toContain('Se cobra hoy')
+  })
+
+  it('dice el día del siguiente cobro, que calcula el servidor con el ítem y el día elegidos', async () => {
+    medios = [TARJETA]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, SEMANAL.id)
+    // Semanal: manda el día de la semana, no el del mes.
+    expect(consultasProximoCobro.at(-1)).toEqual({ itemId: SEMANAL.id, diaSemana: 1 })
+    const { formatFecha } = useFormatters()
+    expect(textoDrawer()).toContain(`El siguiente cobro es el ${formatFecha('2026-11-05')}`)
+  })
+
+  it('un quincenal manda el día del mes', async () => {
+    medios = [TARJETA]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, QUINCENAL.id)
+    expect(consultasProximoCobro.at(-1)).toEqual({ itemId: QUINCENAL.id, diaMes: 1 })
+  })
+
+  it('sin ítem elegido no hay fecha ni consulta', async () => {
+    medios = [TARJETA]
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    expect(consultasProximoCobro).toHaveLength(0)
+    expect(textoDrawer()).not.toContain('El siguiente cobro')
+  })
+
+  it('si la fecha no se pudo leer, el aviso se calla y el alta sigue disponible', async () => {
+    medios = [TARJETA]
+    falloProximoCobro = Object.assign(new Error('500'), { status: 500 })
+    const wrapper = await montar()
+    await abrirDrawer(wrapper)
+    await elegir(wrapper, SEMANAL.id)
+    expect(textoDrawer()).not.toContain('El siguiente cobro')
+    expect(toasts).toHaveLength(0)
   })
 })
 

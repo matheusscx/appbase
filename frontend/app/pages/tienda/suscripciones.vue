@@ -8,7 +8,7 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 
-const { suscripciones, loading, error, sinPermiso, cargar, cancelar, cambiarTarjeta, crear } =
+const { suscripciones, loading, error, sinPermiso, cargar, cancelar, cambiarTarjeta, crear, proximoCobro } =
   useSuscripciones()
 const {
   tarjetas,
@@ -203,6 +203,27 @@ const {
   asegurarVigente,
 } = useResultadoCalculado(() => calculoInput.value, { debounceMs: 250 })
 
+/**
+ * "El siguiente cobro es el …" antes de suscribirse (09.9). La fecha la calcula el servidor con la
+ * función del alta; la pantalla solo la pide cuando cambia el ítem o el día. `pedido` descarta la
+ * respuesta de una consulta vieja si la persona ya cambió de ítem o de día.
+ */
+const fechaProximoCobro = ref<string | null>(null)
+let pedidoProximoCobro = 0
+watch(
+  () => {
+    const item = itemSeleccionado.value
+    return item ? JSON.stringify({ itemId: item.id, ...diasDePayloadQuery(item) }) : null
+  },
+  async (clave) => {
+    const pedido = ++pedidoProximoCobro
+    fechaProximoCobro.value = null
+    if (!clave) return
+    const fecha = await proximoCobro(JSON.parse(clave))
+    if (pedido === pedidoProximoCobro) fechaProximoCobro.value = fecha
+  },
+)
+
 /** El total que se le va a cobrar. `null` mientras el cálculo no esté vigente. */
 const totalACobrar = computed(() =>
   calculoVigente.value ? (calculo.value?.totales.totalFinal ?? null) : null,
@@ -243,6 +264,13 @@ watch(itemSeleccionado, (item) => {
   const max = item.frecuencia === 'quincenal' ? 13 : 28
   if (form.value.diaMes > max) form.value.diaMes = 1
 })
+
+// Lo que el servidor necesita para fechar el cobro: solo el día que aplica a la frecuencia.
+function diasDePayloadQuery(item: ItemSuscribible): { diaMes?: number, diaSemana?: number } {
+  return item.frecuencia === 'semanal'
+    ? { diaSemana: form.value.diaSemana }
+    : { diaMes: form.value.diaMes }
+}
 
 // Días concretos según la frecuencia del item elegido (para POST e intención).
 function diasDePayload(item: ItemSuscribible): {
@@ -639,6 +667,9 @@ onMounted(async () => {
                   </div>
                   <p class="text-muted">
                     Se cobra hoy, al confirmar. Después se repite cada período.
+                  </p>
+                  <p v-if="fechaProximoCobro" class="text-muted">
+                    El siguiente cobro es el {{ formatFecha(fechaProximoCobro) }}.
                   </p>
                   <div v-if="calculo && calculoVigente" class="flex justify-between text-muted">
                     <span>Neto</span>

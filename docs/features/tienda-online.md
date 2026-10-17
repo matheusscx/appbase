@@ -335,6 +335,18 @@ Response (200): { "id": "uuid", "estado": "cancelada", "activaHasta": "2026-11-0
 `proximoCobro` es la fecha que el servidor guarda (la pantalla la muestra, nunca la calcula). Ver § "Las suscripciones no se pausan".
 
 ```
+GET /suscripciones/proximo-cobro?itemId=…&diaMes=10      (semanal: &diaSemana=1)
+
+Response (200): { "proximoCobro": "2026-11-10" }
+```
+
+Vista previa para el panel de alta ("El siguiente cobro es el …", auditoría UX 09.9): solo lectura,
+tenant del token, sin permiso extra (el mismo que el alta). Usa `calcularProximoCobro` y las mismas
+reglas día/frecuencia que `POST /suscripciones`, así que la fecha mostrada es la que se guarda;
+400 si el ítem no es una suscripción o falta el día que su frecuencia exige. Si la consulta falla,
+la pantalla calla el aviso y el alta sigue disponible.
+
+```
 ```
 
 ```

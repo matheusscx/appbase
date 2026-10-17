@@ -38,16 +38,23 @@ async function cargar() {
 
 onMounted(() => { void cargar() })
 
+/** Bajo `lg` (la tablet a 768 px) estas columnas no caben: se ocultan y el detalle de la fila las repite (09.24). */
+const soloDesdeLg = { class: { th: 'hidden lg:table-cell', td: 'hidden lg:table-cell' } }
+
 const columnas: TableColumn<BoletaConProblemaSoporte>[] = [
   { id: 'desplegar', header: '' },
   { accessorKey: 'tenant', header: 'Local' },
-  { id: 'razonSocial', header: 'Razón social' },
-  { id: 'ambiente', header: 'Ambiente' },
-  { id: 'tipo', header: 'Tipo' },
+  { id: 'razonSocial', header: 'Razón social', meta: soloDesdeLg },
+  { id: 'ambiente', header: 'Ambiente', meta: soloDesdeLg },
+  { id: 'tipo', header: 'Tipo', meta: soloDesdeLg },
   { accessorKey: 'folio', header: 'Folio' },
-  { id: 'emitida', header: 'Emitida' },
+  { id: 'emitida', header: 'Emitida', meta: soloDesdeLg },
   { id: 'estado', header: 'Estado' },
-  { accessorKey: 'intentos', header: 'Intentos', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  {
+    accessorKey: 'intentos',
+    header: 'Intentos',
+    meta: { class: { th: 'hidden lg:table-cell text-right', td: 'hidden lg:table-cell text-right' } },
+  },
 ]
 
 /** El SII manda el detalle sin forma fija: se muestra tal cual, indentado, para quien lo lee. */
@@ -124,6 +131,28 @@ const textoDetalle = (detalle: unknown) => JSON.stringify(detalle, null, 2)
           </template>
           <template #expanded="{ row }">
             <div class="space-y-2 p-2 text-sm" data-qa="soporte-detalle">
+              <dl class="grid grid-cols-2 gap-x-4 gap-y-1 text-default lg:hidden" data-qa="soporte-secundarios">
+                <dt class="text-muted">
+                  Razón social
+                </dt>
+                <dd>{{ row.original.razonSocial ?? '—' }}</dd>
+                <dt class="text-muted">
+                  Ambiente
+                </dt>
+                <dd>{{ etiquetaAmbiente(row.original.ambiente as AmbienteSii) ?? row.original.ambiente }}</dd>
+                <dt class="text-muted">
+                  Tipo
+                </dt>
+                <dd>{{ etiquetaTipoCorta(row.original.tipo) }}</dd>
+                <dt class="text-muted">
+                  Emitida
+                </dt>
+                <dd>{{ formatoFecha(row.original.emitidaEl) }}</dd>
+                <dt class="text-muted">
+                  Intentos
+                </dt>
+                <dd>{{ row.original.intentos }}</dd>
+              </dl>
               <p v-if="row.original.ultimoError" class="text-default">
                 <span class="font-medium">Último error:</span> {{ row.original.ultimoError }}
               </p>

@@ -797,7 +797,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [09.6](09-tienda-y-suscripciones.md) | P2 | La pantalla de resultado del pago deja callejones sin salida, sin reintento ni enlace — **hecho 2026-10-16** | agente |
 | ☑ | [09.7](09-tienda-y-suscripciones.md) | P2 | Al cancelar una suscripción, dos botones dicen "Cancelar" en el mismo modal — **hecho 2026-10-16** | agente |
 | ☑ | [09.8](09-tienda-y-suscripciones.md) | P2 | "Pausar" y "Reanudar" actúan al instante sin decir qué pasa con el cobro — **hecho 2026-10-17**: las suscripciones no se pausan (owner); se sacaron Pausar y Reanudar del backend y de las dos pantallas | owner |
-| ☐ | [09.9](09-tienda-y-suscripciones.md) | P2 | El selector muestra el neto ($30.000) y el total a cobrar es otro ($35.700) — **parcial 2026-10-16** (el selector ya no muestra el neto y el drawer dice "Se cobra hoy"; queda "el siguiente cobro es el …" antes de suscribirse, que pide un endpoint de vista previa del servidor) | agente |
+| ☑ | [09.9](09-tienda-y-suscripciones.md) | P2 | El selector muestra el neto ($30.000) y el total a cobrar es otro ($35.700) — **hecho 2026-10-17** (el selector no muestra el neto, el drawer dice "Se cobra hoy" y "El siguiente cobro es el …", fecha que calcula el servidor en `GET /suscripciones/proximo-cobro`) | agente |
 | ☑ | [09.10](09-tienda-y-suscripciones.md) | P2 | Los controles del carrito online miden 24 a 28 px y quitar es inmediato — **hecho 2026-10-16** | agente |
 | ☑ | [09.11](09-tienda-y-suscripciones.md) | P2 | Botones de ícono de la tienda sin nombre; la estrella solo cambia de color — **hecho 2026-10-16** | agente |
 | ☑ | [09.12](09-tienda-y-suscripciones.md) | P2 | Las tarjetas del catálogo de la tienda no se pueden usar con teclado — **hecho 2026-10-16** | agente |
@@ -812,7 +812,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [09.20](09-tienda-y-suscripciones.md) | P3 | La pasarela simulada redirige a /tienda sin decir por qué si la referencia es inválida — **hecho 2026-10-16** | agente |
 | ☑ | [09.21](09-tienda-y-suscripciones.md) | P3 | Los vacíos de tarjetas y suscripciones no dicen qué hacer — **hecho 2026-10-16** | agente |
 | ☑ | [09.23](09-tienda-y-suscripciones.md) | P3 | Suscripciones no busca por cliente y un filtro vacío dice "no hay suscripciones" — **hecho 2026-10-16** | agente |
-| ☐ | [09.24](09-tienda-y-suscripciones.md) | P3 | La pantalla del superadmin no muestra "cargando", ni reintento, ni menú de usuario — **parcial 2026-10-16** (cargando, "Volver a leer", menú de usuario y aria-expanded; quien entra a `/admin` sin ser superadmin ahora recibe un aviso al volver a Inicio; queda solo medir las nueve columnas a 768 px, sin superadmin para ver la pantalla (la tabla ya desplaza de lado dentro de su contenedor)) | agente |
+| ☑ | [09.24](09-tienda-y-suscripciones.md) | P3 | La pantalla del superadmin no muestra "cargando", ni reintento, ni menú de usuario — **hecho 2026-10-17** (cargando, "Volver a leer", menú de usuario y aria-expanded; aviso al volver a Inicio; bajo `lg` la tabla deja Local, Folio y Estado y el detalle de la fila trae razón social, ambiente, tipo, emitida e intentos; falta solo la medida en navegador con un superadmin) | agente |
 
 ## Lotes sugeridos
 

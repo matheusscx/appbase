@@ -7,6 +7,7 @@ import {
   ParseUUIDPipe,
   Patch,
   Post,
+  Query,
   Req,
   UseGuards,
 } from '@nestjs/common';
@@ -21,6 +22,7 @@ import type { JwtUser } from '../../common/interfaces/jwt-user.interface';
 import { SuscripcionesService } from './suscripciones.service';
 import { CreateSuscripcionDto } from './dto/create-suscripcion.dto';
 import { UpdateSuscripcionDto } from './dto/update-suscripcion.dto';
+import { ProximoCobroQueryDto } from './dto/proximo-cobro-query.dto';
 import { CambiarTarjetaDto } from './dto/cambiar-tarjeta.dto';
 
 @ApiTags('suscripciones')
@@ -78,6 +80,13 @@ export class SuscripcionesController {
   ) {
     const u = req.user as JwtUser;
     return this.suscripcionesService.crear(u.tenantId ?? '', u.id, dto, clave);
+  }
+
+  /** Solo lectura, mismo permiso que el alta: la fecha sale del servidor, no de la pantalla. */
+  @Get('proximo-cobro')
+  proximoCobro(@Req() req: Request, @Query() query: ProximoCobroQueryDto) {
+    const u = req.user as JwtUser;
+    return this.suscripcionesService.proximoCobro(u.tenantId ?? '', query);
   }
 
   @Get()

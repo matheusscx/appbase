@@ -27,6 +27,7 @@ import { TenantPasarelaService } from '../pasarela/services/tenant-pasarela.serv
 import { ProviderComunicacionError } from '../pasarela/providers/payment-provider.interface';
 import { IdempotenciaService } from '../idempotencia/idempotencia.service';
 import { huellaDe } from '../idempotencia/huella';
+import { ProximoCobroQueryDto } from './dto/proximo-cobro-query.dto';
 import { calcularProximoCobro } from './utils/proximo-cobro.util';
 
 const PASARELA_TOKENIZADA = 'oneclick';
@@ -288,6 +289,55 @@ export class SuscripcionesService {
     return new ConflictException(MENSAJE_COBRADO_SIN_TERMINAR);
   }
 
+  /** Las reglas cruzadas día/frecuencia: las comparten el alta y la vista previa de la fecha. */
+  private exigirDiaSegunFrecuencia(
+    frecuencia: string,
+    diaMes: number | undefined,
+    diaSemana: number | undefined,
+  ): void {
+    if (frecuencia === 'mensual' && diaMes == null) {
+      throw new BadRequestException(
+        'Las suscripciones mensuales requieren el día del mes (1-28)',
+      );
+    }
+    if (frecuencia === 'quincenal') {
+      if (diaMes == null || diaMes > 13) {
+        throw new BadRequestException(
+          'Las suscripciones quincenales requieren un día del mes entre 1 y 13',
+        );
+      }
+    }
+    if (frecuencia === 'semanal' && diaSemana == null) {
+      throw new BadRequestException(
+        'Las suscripciones semanales requieren el día de la semana',
+      );
+    }
+  }
+
+  /**
+   * La fecha del primer cobro recurrente, antes de suscribirse (auditoría UX 09.9). Misma
+   * función y mismas reglas que el alta; solo lectura, sin cobrar ni guardar nada.
+   */
+  async proximoCobro(
+    tenantId: string,
+    dto: ProximoCobroQueryDto,
+  ): Promise<{ proximoCobro: string }> {
+    const item = await this.itemsService.findOne(tenantId, dto.itemId);
+    if (item.tipo !== 'suscripcion') {
+      throw new BadRequestException('El item no es una suscripción');
+    }
+    const frecuencia = item.frecuencia as string;
+    this.exigirDiaSegunFrecuencia(frecuencia, dto.diaMes, dto.diaSemana);
+    return {
+      proximoCobro: calcularProximoCobro(
+        frecuencia,
+        new Date(),
+        dto.diaMes,
+        dto.diaSemana,
+      ),
+    };
+  }
+
   /**
    * Los chequeos del alta y lo que se cobra (pasos 1 a 6 de siempre). Corre en
    * tx0, después del reclamo: un rebote revierte la clave (ADR-026). Y otra vez
@@ -309,23 +359,7 @@ export class SuscripcionesService {
     const frecuencia = item.frecuencia as string;
 
     // 2. Día según frecuencia (el rango grueso lo valida el DTO; aquí las reglas cruzadas)
-    if (frecuencia === 'mensual' && dto.diaMes == null) {
-      throw new BadRequestException(
-        'Las suscripciones mensuales requieren el día del mes (1-28)',
-      );
-    }
-    if (frecuencia === 'quincenal') {
-      if (dto.diaMes == null || dto.diaMes > 13) {
-        throw new BadRequestException(
-          'Las suscripciones quincenales requieren un día del mes entre 1 y 13',
-        );
-      }
-    }
-    if (frecuencia === 'semanal' && dto.diaSemana == null) {
-      throw new BadRequestException(
-        'Las suscripciones semanales requieren el día de la semana',
-      );
-    }
+    this.exigirDiaSegunFrecuencia(frecuencia, dto.diaMes, dto.diaSemana);
 
     // 3. Oneclick debe estar activo en el tenant (decisión: sin Oneclick se bloquea)
     await this.assertOneclickActivo(tenantId);

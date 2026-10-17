@@ -270,4 +270,54 @@ describe('pages/admin — panel de soporte', () => {
     expect(wrapper.findComponent({ name: 'UserMenu' }).exists()).toBe(true)
     wrapper.unmount()
   })
+
+  // 09.24 (e): nueve columnas no entran a 768 px. Bajo `lg` quedan Local, Folio y Estado; el resto
+  // se oculta en la tabla y se ve en el detalle de la fila, así no se pierde información. (Las
+  // media queries no corren en happy-dom: se fijan las clases y el contenido del detalle.)
+  describe('a 768 px (09.24)', () => {
+    const SECUNDARIAS = ['Razón social', 'Ambiente', 'Tipo', 'Emitida', 'Intentos']
+    const PRINCIPALES = ['Local', 'Folio', 'Estado']
+
+    it('las columnas secundarias se ocultan bajo lg y las principales siguen siempre', async () => {
+      filas = [fila()]
+      const wrapper = await montar()
+      const ths = wrapper.findAll('thead th')
+      for (const titulo of SECUNDARIAS) {
+        const th = ths.find(t => t.text() === titulo)
+        expect(th, titulo).toBeTruthy()
+        expect(th!.classes(), titulo).toContain('hidden')
+        expect(th!.classes(), titulo).toContain('lg:table-cell')
+      }
+      for (const titulo of PRINCIPALES) {
+        const th = ths.find(t => t.text() === titulo)
+        expect(th, titulo).toBeTruthy()
+        expect(th!.classes(), titulo).not.toContain('hidden')
+      }
+      const celdas = wrapper.findAll('tbody tr').at(0)!.findAll('td')
+      expect(celdas.filter(c => c.classes().includes('hidden'))).toHaveLength(SECUNDARIAS.length)
+      wrapper.unmount()
+    })
+
+    it('el detalle de la fila repite lo oculto, solo bajo lg', async () => {
+      filas = [fila({ razonSocial: 'Almacén Paris SpA', folio: 77, intentos: 4, ambiente: 'certificacion', tipo: 41 })]
+      const wrapper = await montar()
+      await wrapper.find('[data-qa="soporte-desplegar"]').trigger('click')
+      await new Promise(r => setTimeout(r, 0))
+
+      const bloque = wrapper.find('[data-qa="soporte-secundarios"]')
+      expect(bloque.exists()).toBe(true)
+      expect(bloque.classes()).toContain('lg:hidden')
+      const texto = bloque.text()
+      expect(texto).toContain('Razón social')
+      expect(texto).toContain('Almacén Paris SpA')
+      expect(texto).toContain('Ambiente')
+      expect(texto).toContain('Tipo')
+      expect(texto).toContain('Exenta')
+      expect(texto).toContain('Emitida')
+      expect(texto).toContain('13-10-2026')
+      expect(texto).toContain('Intentos')
+      expect(texto).toContain('4')
+      wrapper.unmount()
+    })
+  })
 })
