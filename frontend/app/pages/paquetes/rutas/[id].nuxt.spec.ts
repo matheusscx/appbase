@@ -18,7 +18,11 @@ function linea(codigo: string, estado: EstadoLinea, parcial: Partial<LineaHoja> 
     direccion: 'Av. Los Leones 1234',
     comuna: 'Providencia',
     cobroEnDestino: false,
-    precioEnvio: '2500',
+    precioEnvio: '3000',
+    precioEstimado: estado !== 'entregado',
+    tarifaEnvioId: 'e-est',
+    tarifaEnvioNombre: 'Estándar',
+    tarifaEnvioPaqueteId: null,
     tarifaPagoId: 't-moto',
     tarifaPagoNombre: 'Moto',
     tarifaPaqueteId: null,
@@ -178,6 +182,32 @@ describe('detalle: carga y totales', () => {
     expect(texto('hoja-linea-tarifa-ML-2')).toBe('Moto')
     expect(texto('hoja-linea-pago-ML-2')).toBe('$1.000')
     expect(texto('hoja-linea-ML-2')).not.toContain('Pago estimado')
+  })
+
+  it('una línea en ruta muestra el precio del envío como estimado; una entregada, el fijo con su tarifa', async () => {
+    servidor = hojaCon([
+      linea('ML-1', 'en_ruta', { precioEnvio: '5000', tarifaEnvioNombre: 'Prioritario' }),
+      linea('ML-2', 'entregado', { precioEnvio: '3000', tarifaEnvioNombre: 'Estándar' }),
+    ])
+    await montar()
+
+    expect(texto('hoja-linea-ML-1')).toContain('Envío estimado')
+    expect(texto('hoja-linea-envio-ML-1')).toBe('$5.000')
+    expect(texto('hoja-linea-tarifa-envio-ML-1')).toBe('Prioritario')
+    expect(texto('hoja-linea-ML-2')).not.toContain('Envío estimado')
+    expect(texto('hoja-linea-envio-ML-2')).toBe('$3.000')
+    expect(texto('hoja-linea-tarifa-envio-ML-2')).toBe('Estándar')
+  })
+
+  it('un no entregado de una hoja rendida no muestra precio de envío ni tarifa', async () => {
+    servidor = hojaCon([
+      linea('ML-1', 'entregado'),
+      linea('ML-2', 'no_entregado', { precioEnvio: '0.0000', precioEstimado: false, tarifaEnvioId: null, tarifaEnvioNombre: null, pagoEstimado: false }),
+    ], { estado: 'rendida', rendidaEl: '2026-10-14T20:00:00.000Z' })
+    await montar()
+
+    expect(qa('hoja-linea-envio-ML-2')).toBeNull()
+    expect(texto('hoja-linea-ML-2')).not.toContain('Envío')
   })
 
   it('un no entregado de una hoja rendida no muestra "Pago estimado" ni pago alguno', async () => {

@@ -285,12 +285,19 @@ async function entregarTodos() {
                   {{ linea.direccion }}<template v-if="linea.comuna">, {{ linea.comuna }}</template>
                 </p>
                 <p class="text-xs tabular-nums text-muted">
-                  Envío {{ formatOficial(linea.precioEnvio) }}
+                  <template v-if="linea.estado === 'entregado' || linea.precioEstimado">
+                    {{ linea.precioEstimado ? 'Envío estimado' : 'Envío' }}
+                    <span :data-qa="`hoja-linea-envio-${linea.codigo}`">{{ formatOficial(linea.precioEnvio) }}</span>
+                    <template v-if="linea.tarifaEnvioNombre">
+                      · Tarifa de envío <span :data-qa="`hoja-linea-tarifa-envio-${linea.codigo}`">{{ linea.tarifaEnvioNombre }}</span>
+                    </template>
+                  </template>
                   <template v-if="linea.estado === 'entregado' || linea.pagoEstimado">
-                    · {{ linea.pagoEstimado ? 'Pago estimado' : 'Pago' }}
+                    <template v-if="linea.estado === 'entregado' || linea.precioEstimado"> · </template>
+                    {{ linea.pagoEstimado ? 'Pago estimado' : 'Pago' }}
                     <span :data-qa="`hoja-linea-pago-${linea.codigo}`">{{ formatOficial(linea.pagoRepartidor) }}</span>
                     <template v-if="linea.tarifaPagoNombre">
-                      · Tarifa <span :data-qa="`hoja-linea-tarifa-${linea.codigo}`">{{ linea.tarifaPagoNombre }}</span>
+                      · Tarifa de pago <span :data-qa="`hoja-linea-tarifa-${linea.codigo}`">{{ linea.tarifaPagoNombre }}</span>
                     </template>
                   </template>
                 </p>

@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js'
-import type { MedioCobro, EstadoHoja, EstadoLinea, EstadoPaquete, LineaHoja, TarifaPagoFila } from '~/types/paqueteria'
+import type { MedioCobro, EstadoHoja, EstadoLinea, EstadoPaquete, LineaHoja, TarifaEnvioFila, TarifaPagoFila } from '~/types/paqueteria'
 
 type ColorEstadoPaquete = 'neutral' | 'info' | 'success'
 type ColorEstadoLinea = 'info' | 'success' | 'warning'
@@ -105,20 +105,22 @@ export function usePaqueteria() {
   }
 
   /**
-   * Items de `USelect` para elegir la tarifa de pago de un paquete. La primera, con `value: null`,
-   * es «Según repartidor»: el servidor resuelve al pagar (la del repartidor o la por defecto), y
-   * entre paréntesis va la que valdría hoy (`heredada`). Después, las tarifas activas con su monto.
+   * Items de `USelect` para elegir la tarifa de un paquete (de pago o de envío: la forma es la
+   * misma). La primera, con `value: null`, es `rotuloBase` («Según repartidor» en el pago, «Por
+   * defecto» en el envío): el servidor resuelve al entregar, y entre paréntesis va la que valdría
+   * hoy (`heredada`). Después, las tarifas activas con su monto.
    * `actualId` mantiene visible una tarifa ya asignada que se desactivó después; sin eso el
    * selector quedaría en blanco y guardar la borraría sin que nadie lo pida.
    */
   function opcionesTarifa(
-    tarifas: TarifaPagoFila[],
-    heredada: TarifaPagoFila | null,
+    tarifas: (TarifaPagoFila | TarifaEnvioFila)[],
+    heredada: TarifaPagoFila | TarifaEnvioFila | null,
     actualId: string | null = null,
+    rotuloBase = 'Según repartidor',
   ): { label: string, value: string | null }[] {
-    const etiqueta = (t: TarifaPagoFila) => `${t.nombre} ${formatOficial(t.monto)}`
+    const etiqueta = (t: TarifaPagoFila | TarifaEnvioFila) => `${t.nombre} ${formatOficial(t.monto)}`
     return [
-      { label: heredada ? `Según repartidor (${etiqueta(heredada)})` : 'Según repartidor', value: null },
+      { label: heredada ? `${rotuloBase} (${etiqueta(heredada)})` : rotuloBase, value: null },
       ...tarifas.filter(t => t.activa || t.id === actualId).map(t => ({
         label: t.activa ? etiqueta(t) : `${etiqueta(t)} (inactiva)`,
         value: t.id,

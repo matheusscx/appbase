@@ -4,9 +4,9 @@ import { hoyLocal } from '~/composables/useVigenciaRegla'
 import type {
   EstadoPaquete,
   HojaRutaDetalle,
-  PaqueteConfiguracionRespuesta,
   PaqueteFila,
   RepartidorFila,
+  TarifaEnvioFila,
   TarifaPagoFila,
 } from '~/types/paqueteria'
 
@@ -22,7 +22,6 @@ interface Tercero {
 
 const toast = useToast()
 const apiUrl = useRuntimeConfig().public.apiUrl
-const { formatOficial } = useCurrency()
 const { rotuloEstadoPaquete, colorEstadoPaquete, fechaCorta, opcionesTarifa } = usePaqueteria()
 const { pageSize } = useUserPreferences()
 const { diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
@@ -125,19 +124,10 @@ function marcarTodos(marcar: boolean) {
 
 // ── Catálogos del formulario y del modal ──────────────────────────────────
 
-const config = ref<PaqueteConfiguracionRespuesta | null>(null)
 const terceros = ref<Tercero[]>([])
 const repartidores = ref<RepartidorFila[]>([])
 const tarifas = ref<TarifaPagoFila[]>([])
-
-async function cargarConfig() {
-  try {
-    config.value = await useApiFetch<PaqueteConfiguracionRespuesta>(`${apiUrl}/paquetes/configuracion`)
-  }
-  catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Error al cargar los valores por defecto'), color: 'error' })
-  }
-}
+const tarifasEnvio = ref<TarifaEnvioFila[]>([])
 
 async function cargarTerceros() {
   if (!puedeVerTerceros.value) return
@@ -167,9 +157,18 @@ async function cargarTarifas() {
   }
 }
 
+async function cargarTarifasEnvio() {
+  try {
+    tarifasEnvio.value = await useApiFetch<TarifaEnvioFila[]>(`${apiUrl}/tarifas-envio`)
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar las tarifas de envío'), color: 'error' })
+  }
+}
+
 onMounted(() => {
-  cargarConfig()
   cargarTarifas()
+  cargarTarifasEnvio()
   cargarTerceros()
   cargarRepartidores()
   cargarDiaNegocio()
@@ -190,25 +189,28 @@ const emptyForm = () => ({
   nota: '',
   remitenteTerceroId: undefined as string | undefined,
   cobroEnDestino: false,
-  precioEnvio: '',
+  // null = «Por defecto»: el servidor resuelve la tarifa de envío al entregar.
+  tarifaEnvioId: null as string | null,
   // null = «Según repartidor»: el servidor resuelve la tarifa al pagar.
   tarifaPagoId: null as string | null,
 })
 const form = ref(emptyForm())
 
-const configurada = computed(() => config.value?.configurada ?? true)
 const bloqueado = computed(() => editando.value?.bloqueado ?? false)
 const drawerTitle = computed(() => editando.value ? 'Editar paquete' : 'Nuevo paquete')
 const submitLabel = computed(() => editando.value ? 'Guardar' : 'Crear')
 
-// Sin precio por defecto guardado, un alta sin precio es 400: se pide tipearlo acá. Sin tarifa de
-// pago por defecto, lo mismo con «Según repartidor»: hay que elegir una tarifa.
-const precioRequerido = computed(() => !!editando.value || !configurada.value)
+// Sin tarifa por defecto, un alta con «Por defecto» (envío) o «Según repartidor» (pago) es 400: hay
+// que elegir una tarifa.
 const tarifaDefecto = computed(() => tarifas.value.find(t => t.esDefecto && t.activa) ?? null)
+const tarifaEnvioDefecto = computed(() => tarifasEnvio.value.find(t => t.esDefecto && t.activa) ?? null)
 const montosFaltan = computed(() =>
-  !bloqueado.value
-  && ((precioRequerido.value && form.value.precioEnvio === '')
-    || (!editando.value && !tarifaDefecto.value && form.value.tarifaPagoId === null)),
+  !bloqueado.value && !editando.value
+  && ((!tarifaDefecto.value && form.value.tarifaPagoId === null)
+    || (!tarifaEnvioDefecto.value && form.value.tarifaEnvioId === null)),
+)
+const tarifaEnvioOptions = computed(() =>
+  opcionesTarifa(tarifasEnvio.value, tarifaEnvioDefecto.value, form.value.tarifaEnvioId, 'Por defecto'),
 )
 // Sin monto en «Según repartidor»: acá el repartidor todavía no se conoce, y la por defecto
 // podría no ser la que se pague.
@@ -241,9 +243,6 @@ watch(drawerOpen, (open) => {
 
 function abrirCrear() {
   resetDrawer()
-  if (config.value?.configurada) {
-    form.value.precioEnvio = config.value.precioEnvioDefecto
-  }
   drawerOpen.value = true
 }
 
@@ -259,7 +258,7 @@ function abrirEditar(p: PaqueteFila) {
     nota: p.nota ?? '',
     remitenteTerceroId: p.remitenteTerceroId ?? undefined,
     cobroEnDestino: p.cobroEnDestino,
-    precioEnvio: p.precioEnvio,
+    tarifaEnvioId: p.tarifaEnvioId,
     tarifaPagoId: p.tarifaPagoId,
   }
   drawerOpen.value = true
@@ -290,7 +289,7 @@ async function guardar() {
       // Con la rendición hecha el backend rechaza cualquier cambio de montos o de cobro: ni se mandan.
       const montos = bloqueado.value
         ? {}
-        : { cobroEnDestino: f.cobroEnDestino, precioEnvio: f.precioEnvio, tarifaPagoId: f.tarifaPagoId }
+        : { cobroEnDestino: f.cobroEnDestino, tarifaEnvioId: f.tarifaEnvioId, tarifaPagoId: f.tarifaPagoId }
       const guardado = await useApiFetch<PaqueteFila>(`${apiUrl}/paquetes/${editando.value.id}`, {
         method: 'PATCH',
         body: { ...datos, ...remitenteCambio, ...montos },
@@ -304,7 +303,7 @@ async function guardar() {
           ...datos,
           remitenteTerceroId: remitente,
           cobroEnDestino: f.cobroEnDestino,
-          precioEnvio: f.precioEnvio || null,
+          tarifaEnvioId: f.tarifaEnvioId,
           tarifaPagoId: f.tarifaPagoId,
         }).filter(([, valor]) => valor !== null),
       )
@@ -441,7 +440,7 @@ const columns: TableColumn<PaqueteFila>[] = [
   { accessorKey: 'codigo', header: 'Código' },
   { id: 'destinatario', header: 'Destinatario' },
   { accessorKey: 'cobroEnDestino', header: 'Cobro en destino' },
-  { accessorKey: 'precioEnvio', header: 'Envío', meta: { class: { th: 'text-right', td: 'text-right' } } },
+  { id: 'tarifaEnvio', header: 'Tarifa de envío' },
   { id: 'tarifa', header: 'Tarifa de pago' },
   { accessorKey: 'estado', header: 'Estado' },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
@@ -579,8 +578,10 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
               <span v-else class="text-sm text-muted">—</span>
             </template>
 
-            <template #precioEnvio-cell="{ row }">
-              <span class="text-sm">{{ formatOficial(row.original.precioEnvio) }}</span>
+            <template #tarifaEnvio-cell="{ row }">
+              <span class="text-sm" :class="row.original.tarifaEnvioNombre ? 'text-default' : 'text-muted'">
+                {{ row.original.tarifaEnvioNombre ?? 'Por defecto' }}
+              </span>
             </template>
             <template #tarifa-cell="{ row }">
               <span class="text-sm" :class="row.original.tarifaPagoNombre ? 'text-default' : 'text-muted'">
@@ -665,11 +666,11 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
         @submit="guardar"
       >
         <UAlert
-          v-if="!editando && !configurada"
+          v-if="!editando && (!tarifaEnvioDefecto || !tarifaDefecto)"
           color="info"
           variant="subtle"
           icon="i-lucide-info"
-          title="Todavía no hay valores por defecto: escribe el precio de envío y elige la tarifa de pago de este paquete."
+          title="Todavía no hay una tarifa de envío y una de pago por defecto: elige la tarifa de este paquete o créalas en Configuración."
           data-qa="paquete-sin-configurar"
         />
 
@@ -720,13 +721,14 @@ const porCompletar = (p: PaqueteFila) => !p.destinatarioNombre || !p.direccion
           <UFormField label="Cobro en destino" description="El repartidor cobra el envío al entregar.">
             <USwitch v-model="form.cobroEnDestino" :disabled="bloqueado" aria-label="Cobro en destino" />
           </UFormField>
-          <UFormField label="Precio de envío">
-            <MoneyInput
-              v-model="form.precioEnvio"
-              oficial
+          <UFormField label="Tarifa de envío" description="Lo que se cobra por este envío. El precio se fija al entregar.">
+            <USelect
+              v-model="form.tarifaEnvioId"
+              :items="tarifaEnvioOptions"
+              :placeholder="tarifaEnvioOptions[0]?.label"
               :disabled="bloqueado"
-              class="w-48"
-              data-qa="paquete-precio-envio"
+              class="w-full"
+              data-qa="paquete-tarifa-envio"
             />
           </UFormField>
           <UFormField label="Tarifa de pago" description="Lo que se le paga al repartidor si lo entrega.">

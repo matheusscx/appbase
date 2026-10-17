@@ -185,6 +185,14 @@ describe('usePaqueteria', () => {
       const opciones = usePaqueteria().opcionesTarifa([auto, vieja], auto, 't-vieja')
       expect(opciones.at(-1)).toEqual({ label: 'Vieja $500 (inactiva)', value: 't-vieja' })
     })
+
+    it('para el envío la primera opción es «Por defecto» con la tarifa que valdría hoy, y vale null', () => {
+      const estandar = tarifa('e-est', 'Estándar', '3000', { esDefecto: true })
+      const { opcionesTarifa } = usePaqueteria()
+      expect(opcionesTarifa([estandar], estandar, null, 'Por defecto')[0])
+        .toEqual({ label: 'Por defecto (Estándar $3.000)', value: null })
+      expect(opcionesTarifa([], null, null, 'Por defecto')).toEqual([{ label: 'Por defecto', value: null }])
+    })
   })
 
   describe('rótulos y colores de estado', () => {

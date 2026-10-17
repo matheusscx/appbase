@@ -17,6 +17,11 @@ const repartidoresBackend = [
   { id: 'r-3', nombre: 'Beto Rojas', telefono: null, activo: true, tarifaPagoId: null },
 ]
 
+const tarifasEnvioBackend = [
+  { id: 'e-est', nombre: 'Estándar', monto: '3000', esDefecto: true, activa: true },
+  { id: 'e-pri', nombre: 'Prioritario', monto: '5000', esDefecto: false, activa: true },
+]
+
 const tarifasBackend = [
   { id: 't-auto', nombre: 'Auto', monto: '1900', esDefecto: true, activa: true },
   { id: 't-moto', nombre: 'Moto', monto: '1000', esDefecto: false, activa: true },
@@ -30,7 +35,11 @@ function linea(parcial: Partial<LineaHoja> & { paqueteId: string, codigo: string
     direccion: 'Av. Los Leones 1234',
     comuna: 'Providencia',
     cobroEnDestino: false,
-    precioEnvio: '2500',
+    precioEnvio: '3000',
+    precioEstimado: true,
+    tarifaEnvioId: 'e-est',
+    tarifaEnvioNombre: 'Estándar',
+    tarifaEnvioPaqueteId: null,
     tarifaPagoId: 't-moto',
     tarifaPagoNombre: 'Moto',
     tarifaPaqueteId: null,
@@ -97,6 +106,7 @@ mockNuxtImport('useApiFetch', () => {
     if (url.includes('/tenants/me')) {
       return diaNegocio ? { ...diaNegocio } : Promise.reject(new Error('sin red'))
     }
+    if (url.includes('/tarifas-envio')) return tarifasEnvioBackend.map(t => ({ ...t }))
     if (url.includes('/tarifas-pago')) return tarifasBackend.map(t => ({ ...t }))
     if (url.includes('/repartidores')) return repartidoresBackend.map(r => ({ ...r }))
     if (url.endsWith('/hojas-ruta/escanear')) {
@@ -137,14 +147,15 @@ mockNuxtImport('useApiFetch', () => {
       if (falloPatch) return Promise.reject({ data: { message: falloPatch } })
       // El servidor guarda y resuelve la tarifa de la línea (paquete → repartidor → por defecto).
       const paqueteId = url.split('/').pop()!
-      const { precioEnvio, tarifaPagoId } = opts!.body as { precioEnvio: string, tarifaPagoId: string | null }
+      const { tarifaEnvioId, tarifaPagoId } = opts!.body as { tarifaEnvioId: string | null, tarifaPagoId: string | null }
       for (const [clave, h] of Object.entries(hojasExistentes).filter(() => 'tarifaPagoId' in opts!.body!)) {
         const resuelta = tarifasBackend.find(t => t.id === (tarifaPagoId ?? repartidoresBackend.find(r => r.id === h.repartidorId)!.tarifaPagoId ?? 't-auto'))!
+        const envio = tarifasEnvioBackend.find(t => t.id === (tarifaEnvioId ?? 'e-est'))!
         hojasExistentes[clave] = {
           ...h,
           lineas: h.lineas.map(l => l.paqueteId !== paqueteId
             ? l
-            : { ...l, precioEnvio, tarifaPaqueteId: tarifaPagoId, tarifaPagoId: resuelta.id, tarifaPagoNombre: resuelta.nombre, pagoRepartidor: resuelta.monto }),
+            : { ...l, precioEnvio: envio.monto, tarifaEnvioPaqueteId: tarifaEnvioId, tarifaEnvioId: envio.id, tarifaEnvioNombre: envio.nombre, tarifaPaqueteId: tarifaPagoId, tarifaPagoId: resuelta.id, tarifaPagoNombre: resuelta.nombre, pagoRepartidor: resuelta.monto }),
         }
       }
       return { id: paqueteId, ...opts!.body }
@@ -671,7 +682,7 @@ describe('escanear: filas de la hoja', () => {
   })
 })
 
-describe('escanear: montos de cada paquete', () => {
+describe('escanear: tarifas de cada paquete', () => {
   const lapiz = (codigo: string) =>
     document.body.querySelector<HTMLButtonElement>(`[data-qa="escanear-linea-montos-${codigo}"]`)
   const texto = (qa: string) => document.body.querySelector(`[data-qa="${qa}"]`)?.textContent?.trim()
@@ -679,70 +690,75 @@ describe('escanear: montos de cada paquete', () => {
   const selectorTarifa = (w: Wrapper) => w.findAllComponents({ name: 'USelect' })
     .find(s => (s.props('items') as { value: string | null }[]).some(i => i.value === 't-colina'))!
 
-  async function cargarMontos(w: Wrapper, precioEnvio: string, tarifaPagoId?: string | null) {
-    await emitir(w.findAllComponents({ name: 'MoneyInput' })[0]!, precioEnvio)
+  const selectorEnvio = (w: Wrapper) => w.findAllComponents({ name: 'USelect' })
+    .find(s => (s.props('items') as { value: string | null }[]).some(i => i.value === 'e-pri'))!
+
+  async function cargarMontos(w: Wrapper, tarifaEnvioId: string | null, tarifaPagoId?: string | null) {
+    await emitir(selectorEnvio(w), tarifaEnvioId)
     if (tarifaPagoId !== undefined) await emitir(selectorTarifa(w), tarifaPagoId)
   }
 
   it('un no entregado de una hoja rendida no muestra pago ni tarifa', async () => {
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
-      linea({ paqueteId: 'p-8', codigo: 'ENTREGADO', estado: 'entregado', pagoEstimado: false, pagoRepartidor: '1000.0000' }),
-      linea({ paqueteId: 'p-9', codigo: 'FALLIDO', estado: 'no_entregado', pagoEstimado: false, pagoRepartidor: '0.0000', tarifaPagoId: null, tarifaPagoNombre: null }),
+      linea({ paqueteId: 'p-8', codigo: 'ENTREGADO', estado: 'entregado', pagoEstimado: false, precioEstimado: false, pagoRepartidor: '1000.0000' }),
+      linea({ paqueteId: 'p-9', codigo: 'FALLIDO', estado: 'no_entregado', pagoEstimado: false, precioEstimado: false, precioEnvio: '0.0000', tarifaEnvioId: null, tarifaEnvioNombre: null, pagoRepartidor: '0.0000', tarifaPagoId: null, tarifaPagoNombre: null }),
     ], { estado: 'rendida', rendidaEl: '2026-10-14T20:00:00.000Z' })
     const w = await montar()
     await elegirRepartidor(w, 'r-1')
 
     expect(texto('escanear-linea-pago-ENTREGADO')).toBe('$1.000')
     expect(texto('escanear-linea-tarifa-ENTREGADO')).toBe('Moto')
-    expect(texto('escanear-linea-envio-FALLIDO')).toBe('$2.500')
+    expect(texto('escanear-linea-envio-ENTREGADO')).toBe('$3.000')
+    expect(document.body.querySelector('[data-qa="escanear-linea-envio-FALLIDO"]')).toBeNull()
     expect(document.body.querySelector('[data-qa="escanear-linea-pago-FALLIDO"]')).toBeNull()
     expect(document.body.querySelector('[data-qa="escanear-linea-tarifa-FALLIDO"]')).toBeNull()
   })
 
-  it('cada fila muestra el precio del envío, la tarifa y el pago estimado', async () => {
+  it('cada fila muestra el envío y el pago como estimados mientras no se entrega', async () => {
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
-      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', precioEnvio: '2500.0000', pagoRepartidor: '1000.0000' }),
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', precioEnvio: '3000.0000', pagoRepartidor: '1000.0000' }),
     ])
     const w = await montar()
     await elegirRepartidor(w, 'r-1')
-    expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$2.500')
+    expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$3.000')
+    expect(document.body.querySelector('[data-qa="escanear-linea-envio-EN-RUTA"]')!.previousElementSibling!.textContent).toContain('Envío estimado')
     expect(texto('escanear-linea-pago-EN-RUTA')).toBe('$1.000')
     expect(texto('escanear-linea-tarifa-EN-RUTA')).toBe('Moto')
     expect(document.body.querySelector('[data-qa="escanear-linea-pago-EN-RUTA"]')!.previousElementSibling!.textContent).toContain('Pago estimado')
     void w
   })
 
-  it('el lápiz abre el modal con el precio y la tarifa propia del paquete; Guardar manda { precioEnvio, tarifaPagoId }', async () => {
-    // El backend devuelve los montos con la escala de la columna (numeric 18,4).
+  it('el lápiz abre el modal con las tarifas propias del paquete; Guardar manda { tarifaEnvioId, tarifaPagoId }', async () => {
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
-      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', precioEnvio: '2500.0000', pagoRepartidor: '1900', tarifaPagoId: 't-auto', tarifaPagoNombre: 'Auto', tarifaPaqueteId: 't-auto' }),
+      linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', precioEnvio: '3000.0000', pagoRepartidor: '1900', tarifaEnvioPaqueteId: 'e-est', tarifaPagoId: 't-auto', tarifaPagoNombre: 'Auto', tarifaPaqueteId: 't-auto' }),
     ])
     const w = await montar()
     await elegirRepartidor(w, 'r-1')
     lapiz('EN-RUTA')!.click()
     await esperar(30)
 
-    expect(w.findAllComponents({ name: 'MoneyInput' })[0]!.props('modelValue')).toBe('2500.0000')
-    expect(w.findAllComponents({ name: 'MoneyInput' })).toHaveLength(1)
+    // El precio no se tipea en ningún lado: solo se elige la tarifa.
+    expect(w.findAllComponents({ name: 'MoneyInput' })).toHaveLength(0)
+    expect(selectorEnvio(w).props('modelValue')).toBe('e-est')
     expect(selectorTarifa(w).props('modelValue')).toBe('t-auto')
-    await cargarMontos(w, '3000', 't-colina')
+    await cargarMontos(w, 'e-pri', 't-colina')
     botonGuardar().click()
     await esperar(30)
 
     const patch = llamadas.find(l => l.method === 'PATCH')!
     expect(patch.url.endsWith('/paquetes/p-9')).toBe(true)
-    expect(patch.body).toEqual({ precioEnvio: '3000', tarifaPagoId: 't-colina' })
-    expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$3.000')
+    expect(patch.body).toEqual({ tarifaEnvioId: 'e-pri', tarifaPagoId: 't-colina' })
+    expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$5.000')
     expect(texto('escanear-linea-tarifa-EN-RUTA')).toBe('Colina')
     expect(texto('escanear-linea-pago-EN-RUTA')).toBe('$2.500')
     // La línea sale de la hoja que se relee, no de una cuenta en la pantalla.
     const orden = llamadas.filter(l => l.method === 'PATCH' || /\/hojas-ruta\/[^/?]+$/.test(l.url))
     expect(orden.at(-1)).toMatchObject({ method: 'GET' })
     expect(orden.at(-1)!.url.endsWith('/hojas-ruta/h-r-1-2026-10-14')).toBe(true)
-    expect(toasts.some(t => t.title === 'Montos de EN-RUTA guardados')).toBe(true)
+    expect(toasts.some(t => t.title === 'Tarifas de EN-RUTA guardadas')).toBe(true)
   })
 
-  it('«Según repartidor» manda tarifaPagoId null y la fila queda con la heredada del repartidor', async () => {
+  it('«Por defecto» y «Según repartidor» mandan null y la fila queda con la heredada del repartidor', async () => {
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
       linea({ paqueteId: 'p-9', codigo: 'EN-RUTA', tarifaPagoId: 't-colina', tarifaPagoNombre: 'Colina', tarifaPaqueteId: 't-colina', pagoRepartidor: '2500' }),
     ])
@@ -753,11 +769,13 @@ describe('escanear: montos de cada paquete', () => {
     // La primera opción dice qué valdría hoy: la tarifa de Juan.
     const items = selectorTarifa(w).props('items') as { label: string, value: string | null }[]
     expect(items[0]).toEqual({ label: 'Según repartidor (Moto $1.000)', value: null })
-    await cargarMontos(w, '2500', null)
+    const itemsEnvio = selectorEnvio(w).props('items') as { label: string, value: string | null }[]
+    expect(itemsEnvio[0]).toEqual({ label: 'Por defecto (Estándar $3.000)', value: null })
+    await cargarMontos(w, null, null)
     botonGuardar().click()
     await esperar(30)
 
-    expect(llamadas.find(l => l.method === 'PATCH')!.body).toEqual({ precioEnvio: '2500', tarifaPagoId: null })
+    expect(llamadas.find(l => l.method === 'PATCH')!.body).toEqual({ tarifaEnvioId: null, tarifaPagoId: null })
     expect(texto('escanear-linea-tarifa-EN-RUTA')).toBe('Moto')
     expect(texto('escanear-linea-pago-EN-RUTA')).toBe('$1.000')
   })
@@ -786,9 +804,10 @@ describe('escanear: montos de cada paquete', () => {
     await esperar(30)
 
     expect(selectorTarifa(w).props('modelValue')).toBeNull()
+    expect(selectorEnvio(w).props('modelValue')).toBeNull()
     botonGuardar().click()
     await esperar(30)
-    expect(llamadas.find(l => l.method === 'PATCH')!.body).toEqual({ precioEnvio: '2500', tarifaPagoId: null })
+    expect(llamadas.find(l => l.method === 'PATCH')!.body).toEqual({ tarifaEnvioId: null, tarifaPagoId: null })
   })
 
   it('también con la hoja entregada se relee: el servidor re-resuelve el pago de una entrega', async () => {
@@ -799,7 +818,7 @@ describe('escanear: montos de cada paquete', () => {
     await elegirRepartidor(w, 'r-1')
     lapiz('ENTREGADO')!.click()
     await esperar(30)
-    await cargarMontos(w, '4000', 't-auto')
+    await cargarMontos(w, 'e-pri', 't-auto')
     botonGuardar().click()
     await esperar(40)
 
@@ -818,7 +837,7 @@ describe('escanear: montos de cada paquete', () => {
     await elegirRepartidor(w, 'r-1')
     lapiz('EN-RUTA')!.click()
     await esperar(30)
-    await cargarMontos(w, '3000', 't-auto')
+    await cargarMontos(w, 'e-pri', 't-auto')
     let abrir!: () => void
     compuertaRelectura = new Promise<void>((resolve) => { abrir = resolve })
     botonGuardar().click()
@@ -837,22 +856,22 @@ describe('escanear: montos de cada paquete', () => {
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
       linea({ paqueteId: 'p-9', codigo: 'EN-RUTA' }),
     ])
-    falloPatch = 'El precio de envío admite como máximo 0 decimales.'
+    falloPatch = 'La tarifa de envío no existe o está inactiva.'
     const w = await montar()
     await elegirRepartidor(w, 'r-1')
     lapiz('EN-RUTA')!.click()
     await esperar(30)
-    await cargarMontos(w, '3000', 't-colina')
+    await cargarMontos(w, 'e-pri', 't-colina')
     botonGuardar().click()
     await esperar(30)
 
-    expect(texto('escanear-montos-error')).toContain('El precio de envío admite como máximo 0 decimales.')
+    expect(texto('escanear-montos-error')).toContain('La tarifa de envío no existe o está inactiva.')
     expect(document.body.querySelector('[data-qa="escanear-montos-modal"]')).not.toBeNull()
-    expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$2.500')
+    expect(texto('escanear-linea-envio-EN-RUTA')).toBe('$3.000')
     expect(texto('escanear-linea-tarifa-EN-RUTA')).toBe('Moto')
   })
 
-  it('Enter en el campo de precio no guarda: la pistola no puede escribir un precio', async () => {
+  it('el modal no tiene campo de precio: nada que la pistola pueda escribir, y no guarda sin el botón', async () => {
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
       linea({ paqueteId: 'p-9', codigo: 'EN-RUTA' }),
     ])
@@ -860,11 +879,9 @@ describe('escanear: montos de cada paquete', () => {
     await elegirRepartidor(w, 'r-1')
     lapiz('EN-RUTA')!.click()
     await esperar(30)
-    await cargarMontos(w, '46123456789', 't-auto')
-    const input = document.body.querySelector<HTMLInputElement>('[data-qa="escanear-montos-envio"] input, input[data-qa="escanear-montos-envio"]')!
-    input.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }))
-    await esperar(30)
 
+    expect(w.findAllComponents({ name: 'MoneyInput' })).toHaveLength(0)
+    expect(document.body.querySelector('[data-qa="escanear-montos-modal"] input')).toBeNull()
     expect(llamadas.filter(l => l.method === 'PATCH')).toHaveLength(0)
     expect(llamadas.filter(l => l.method === 'POST')).toHaveLength(0)
   })
@@ -884,13 +901,13 @@ describe('escanear: montos de cada paquete', () => {
     expect(document.activeElement).toBe(campo())
   })
 
-  it('con la hoja rendida no hay lápiz: los montos no se pueden cambiar', async () => {
+  it('con la hoja rendida no hay lápiz: las tarifas no se pueden cambiar', async () => {
     hojasExistentes['r-1|2026-10-14'] = hojaDe('r-1', '2026-10-14', [
-      linea({ paqueteId: 'p-8', codigo: 'ENTREGADO', estado: 'entregado' }),
+      linea({ paqueteId: 'p-8', codigo: 'ENTREGADO', estado: 'entregado', precioEstimado: false }),
     ], { estado: 'rendida' })
     const w = await montar()
     await elegirRepartidor(w, 'r-1')
-    expect(texto('escanear-linea-envio-ENTREGADO')).toBe('$2.500')
+    expect(texto('escanear-linea-envio-ENTREGADO')).toBe('$3.000')
     expect(lapiz('ENTREGADO')).toBeNull()
     void w
   })

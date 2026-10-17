@@ -8,6 +8,7 @@ import type {
   PaqueteFila,
   RepartidorFila,
   RespuestaEscaneo,
+  TarifaEnvioFila,
   TarifaPagoFila,
 } from '~/types/paqueteria'
 
@@ -51,6 +52,7 @@ const { diaNegocioHoy, cargar: cargarDiaNegocio } = useDiaNegocio()
 
 const repartidores = ref<RepartidorFila[]>([])
 const tarifas = ref<TarifaPagoFila[]>([])
+const tarifasEnvio = ref<TarifaEnvioFila[]>([])
 const repartidorId = ref<string | undefined>(undefined)
 const fecha = ref(hoyLocal())
 // Si el usuario ya eligió una fecha, el día de negocio que llega tarde no se la pisa.
@@ -182,6 +184,12 @@ onMounted(async () => {
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al cargar las tarifas de pago'), color: 'error' })
+  }
+  try {
+    tarifasEnvio.value = await useApiFetch<TarifaEnvioFila[]>(`${apiUrl}/tarifas-envio`)
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'Error al cargar las tarifas de envío'), color: 'error' })
   }
   await cargarDiaNegocio()
   if (!fechaElegida && diaNegocioHoy.value) fecha.value = diaNegocioHoy.value
@@ -336,14 +344,15 @@ async function quitar(linea: LineaHoja) {
   }
 }
 
-// ── Montos de un paquete (override de los valores por defecto) ────────────
+// ── Tarifas de un paquete (override de las por defecto) ────────────
 
 // Se editan en un modal con botón, no en la fila: un campo de monto con el foco recibiría lo que
 // tipee la pistola. Enter no guarda; solo el botón.
 const montosAbierto = ref(false)
 const montosLinea = ref<LineaHoja | null>(null)
-// `tarifaPagoId` null = «Según repartidor»: el servidor resuelve la tarifa al pagar.
-const montosForm = ref({ precioEnvio: '', tarifaPagoId: null as string | null })
+// `tarifaEnvioId` null = «Por defecto» y `tarifaPagoId` null = «Según repartidor»: el servidor
+// resuelve las dos al entregar. El precio nunca se tipea.
+const montosForm = ref({ tarifaEnvioId: null as string | null, tarifaPagoId: null as string | null })
 const guardandoMontos = ref(false)
 const errorMontos = ref<string | null>(null)
 
@@ -356,6 +365,10 @@ const tarifaHeredada = computed(() => {
   const propia = propiaId ? tarifas.value.find(t => t.id === propiaId) : undefined
   return propia ?? tarifas.value.find(t => t.esDefecto && t.activa) ?? null
 })
+const tarifaEnvioDefecto = computed(() => tarifasEnvio.value.find(t => t.esDefecto && t.activa) ?? null)
+const tarifaEnvioOptions = computed(() =>
+  opcionesTarifa(tarifasEnvio.value, tarifaEnvioDefecto.value, montosForm.value.tarifaEnvioId, 'Por defecto'),
+)
 const tarifaOptions = computed(() =>
   opcionesTarifa(tarifas.value, tarifaHeredada.value, montosForm.value.tarifaPagoId),
 )
@@ -363,9 +376,9 @@ const tarifaOptions = computed(() =>
 function abrirMontos(linea: LineaHoja) {
   if (!montosEditables.value) return
   montosLinea.value = linea
-  // La propia del paquete, no la resuelta (`tarifaPagoId`): preseleccionar la resuelta fijaría
-  // como propia una que era heredada del repartidor.
-  montosForm.value = { precioEnvio: linea.precioEnvio, tarifaPagoId: linea.tarifaPaqueteId }
+  // La propia del paquete, no la resuelta (`tarifaPagoId`, `tarifaEnvioId`): preseleccionar la
+  // resuelta fijaría como propia una que era heredada.
+  montosForm.value = { tarifaEnvioId: linea.tarifaEnvioPaqueteId, tarifaPagoId: linea.tarifaPaqueteId }
   errorMontos.value = null
   montosAbierto.value = true
 }
@@ -384,21 +397,21 @@ function alCerrarModalMontos(e: Event) {
 async function guardarMontos() {
   const actual = hoja.value
   const linea = montosLinea.value
-  const { precioEnvio, tarifaPagoId } = montosForm.value
-  if (!actual || !linea || guardandoMontos.value || !precioEnvio) return
+  const { tarifaEnvioId, tarifaPagoId } = montosForm.value
+  if (!actual || !linea || guardandoMontos.value) return
   guardandoMontos.value = true
   errorMontos.value = null
   marcarEnCambio(linea.paqueteId, true)
   try {
     await useApiFetch<PaqueteFila>(`${apiUrl}/paquetes/${linea.paqueteId}`, {
       method: 'PATCH',
-      body: { precioEnvio, tarifaPagoId },
+      body: { tarifaEnvioId, tarifaPagoId },
     })
-    toast.add({ title: `Montos de ${linea.codigo} guardados`, color: 'success' })
+    toast.add({ title: `Tarifas de ${linea.codigo} guardadas`, color: 'success' })
     cerrarMontos()
   }
   catch (e: unknown) {
-    errorMontos.value = apiErrorMsg(e, 'No se pudieron guardar los montos')
+    errorMontos.value = apiErrorMsg(e, 'No se pudieron guardar las tarifas')
     return
   }
   finally {
@@ -414,7 +427,7 @@ async function guardarMontos() {
     if (secuencia === secuenciaHoja) mostrarHoja(releida)
   }
   catch (e: unknown) {
-    toast.add({ title: apiErrorMsg(e, 'Los montos se guardaron, pero no se pudo actualizar la hoja'), color: 'warning' })
+    toast.add({ title: apiErrorMsg(e, 'Las tarifas se guardaron, pero no se pudo actualizar la hoja'), color: 'warning' })
   }
 }
 
@@ -648,15 +661,17 @@ const iconoResultado = {
                 </div>
                 <div class="flex items-center gap-1">
                   <dl class="grid grid-cols-[auto_auto] gap-x-2 text-sm">
-                    <dt class="text-muted">
-                      Envío
-                    </dt>
-                    <dd
-                      class="text-right font-medium tabular-nums text-highlighted"
-                      :data-qa="`escanear-linea-envio-${linea.codigo}`"
-                    >
-                      {{ formatOficial(linea.precioEnvio) }}
-                    </dd>
+                    <template v-if="linea.estado === 'entregado' || linea.precioEstimado">
+                      <dt class="text-muted">
+                        {{ linea.precioEstimado ? 'Envío estimado' : 'Envío' }}
+                      </dt>
+                      <dd
+                        class="text-right font-medium tabular-nums text-highlighted"
+                        :data-qa="`escanear-linea-envio-${linea.codigo}`"
+                      >
+                        {{ formatOficial(linea.precioEnvio) }}
+                      </dd>
+                    </template>
                     <template v-if="linea.estado === 'entregado' || linea.pagoEstimado">
                       <dt class="text-muted">
                         {{ linea.pagoEstimado ? 'Pago estimado' : 'Pago' }}
@@ -685,7 +700,7 @@ const iconoResultado = {
                     variant="ghost"
                     size="sm"
                     :disabled="enCambio.has(linea.paqueteId)"
-                    :aria-label="`Editar montos de ${linea.codigo}`"
+                    :aria-label="`Editar tarifas de ${linea.codigo}`"
                     :data-qa="`escanear-linea-montos-${linea.codigo}`"
                     @click="abrirMontos(linea)"
                   />
@@ -734,18 +749,19 @@ const iconoResultado = {
 
   <UModal
     v-model:open="montosAbierto"
-    :title="montosLinea ? `Montos de ${montosLinea.codigo}` : 'Montos del paquete'"
-    description="Reemplazan los valores por defecto solo para este paquete."
+    :title="montosLinea ? `Tarifas de ${montosLinea.codigo}` : 'Tarifas del paquete'"
+    description="Reemplazan las tarifas por defecto solo para este paquete."
     :ui="shellUi.modal"
     :content="{ onCloseAutoFocus: alCerrarModalMontos }"
   >
     <template #body>
       <div class="space-y-4" data-qa="escanear-montos-modal">
-        <UFormField label="Precio de envío" description="Lo que se cobra por este envío.">
-          <MoneyInput
-            v-model="montosForm.precioEnvio"
-            oficial
-            class="w-48"
+        <UFormField label="Tarifa de envío" description="Lo que se cobra por este envío. El precio se fija al entregar.">
+          <USelect
+            v-model="montosForm.tarifaEnvioId"
+            :items="tarifaEnvioOptions"
+            :placeholder="tarifaEnvioOptions[0]?.label"
+            class="w-full"
             data-qa="escanear-montos-envio"
           />
         </UFormField>
@@ -775,11 +791,10 @@ const iconoResultado = {
         </UButton>
         <UButton
           :loading="guardandoMontos"
-          :disabled="!montosForm.precioEnvio"
           data-qa="escanear-montos-guardar"
           @click="guardarMontos"
         >
-          Guardar montos
+          Guardar tarifas
         </UButton>
       </AppModalFooter>
     </template>

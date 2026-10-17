@@ -1,8 +1,8 @@
 // @vitest-environment nuxt
 //
-// Configuración de Paquetería: el precio de envío por defecto (el aviso mientras no hay valores y
-// el PUT con un solo monto, como string) y las tarifas de pago al repartidor (crear, editar,
-// marcar por defecto, desactivar, eliminar, y que el 400 del backend quede a la vista).
+// Configuración de Paquetería: las dos tablas de tarifas, la de envío (lo que se cobra) y la de
+// pago al repartidor, con el mismo CRUD (crear, editar, marcar por defecto, desactivar, eliminar,
+// y que el 400 del backend quede a la vista), y el aviso mientras falta una tarifa por defecto.
 import { describe, it, expect, beforeEach } from 'vitest'
 import { mountSuspended, mockNuxtImport } from '@nuxt/test-utils/runtime'
 import Paqueteria from './paqueteria.vue'
@@ -11,8 +11,7 @@ interface Llamada { url: string, method: string, body?: Record<string, unknown> 
 interface Tarifa { id: string, nombre: string, monto: string, esDefecto: boolean, activa: boolean }
 
 let llamadas: Llamada[] = []
-let configurada = true
-let tarifas: Tarifa[] = []
+let listas: Record<'pago' | 'envio', Tarifa[]> = { pago: [], envio: [] }
 // Mensaje con el que el backend rechaza el próximo PATCH/DELETE de una tarifa.
 let rechazo: string | null = null
 
@@ -20,29 +19,24 @@ mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: Record<string, unknown> }) => {
     const method = opts?.method ?? 'GET'
     llamadas.push({ url, method, body: opts?.body })
-    if (url.includes('/tarifas-pago')) {
-      if (method !== 'GET' && rechazo) return Promise.reject({ data: { message: rechazo } })
-      if (method === 'POST') {
-        const nueva = { id: 't-nueva', esDefecto: false, activa: true, ...opts!.body } as Tarifa
-        tarifas = [...tarifas, nueva]
-        return Promise.resolve(nueva)
-      }
-      if (method === 'PATCH') {
-        const id = url.split('/').pop()
-        tarifas = tarifas.map(t => t.id === id ? { ...t, ...opts!.body } : t)
-        return Promise.resolve(tarifas.find(t => t.id === id))
-      }
-      if (method === 'DELETE') {
-        const id = url.split('/').pop()
-        tarifas = tarifas.filter(t => t.id !== id)
-        return Promise.resolve(undefined)
-      }
-      return Promise.resolve(tarifas.map(t => ({ ...t })))
+    const clave = url.includes('/tarifas-envio') ? 'envio' : 'pago'
+    if (method !== 'GET' && rechazo) return Promise.reject({ data: { message: rechazo } })
+    if (method === 'POST') {
+      const nueva = { id: 't-nueva', esDefecto: false, activa: true, ...opts!.body } as Tarifa
+      listas[clave] = [...listas[clave], nueva]
+      return Promise.resolve(nueva)
     }
-    if (method === 'PUT') {
-      return Promise.resolve({ configurada: true, ...opts!.body })
+    if (method === 'PATCH') {
+      const id = url.split('/').pop()
+      listas[clave] = listas[clave].map(t => t.id === id ? { ...t, ...opts!.body } : t)
+      return Promise.resolve(listas[clave].find(t => t.id === id))
     }
-    return Promise.resolve({ configurada, precioEnvioDefecto: '1500' })
+    if (method === 'DELETE') {
+      const id = url.split('/').pop()
+      listas[clave] = listas[clave].filter(t => t.id !== id)
+      return Promise.resolve(undefined)
+    }
+    return Promise.resolve(listas[clave].map(t => ({ ...t })))
   }
 })
 
@@ -91,79 +85,97 @@ async function emitir(comp: { vm: { $emit: (e: string, v: unknown) => void } }, 
   await esperar(0)
 }
 
-// El de la tarifa es el segundo: el primero es el precio de envío de arriba.
-const montoTarifa = (w: Wrapper) => w.findAllComponents({ name: 'MoneyInput' }).at(-1)!
 const escrituras = () => llamadas.filter(l => l.method !== 'GET')
-const formPrecio = (w: Wrapper) => w.findAll('form').find(f => f.attributes('id') !== 'tarifa-form')!
 
 beforeEach(() => {
   document.body.innerHTML = ''
   llamadas = []
-  configurada = true
   rechazo = null
-  tarifas = [
-    { id: 't-auto', nombre: 'Auto', monto: '1900', esDefecto: true, activa: true },
-    { id: 't-moto', nombre: 'Moto', monto: '1000', esDefecto: false, activa: true },
-  ]
+  listas = {
+    pago: [
+      { id: 't-auto', nombre: 'Auto', monto: '1900', esDefecto: true, activa: true },
+      { id: 't-moto', nombre: 'Moto', monto: '1000', esDefecto: false, activa: true },
+    ],
+    envio: [
+      { id: 'e-est', nombre: 'Estándar', monto: '3000', esDefecto: true, activa: true },
+      { id: 'e-pri', nombre: 'Prioritario', monto: '5000', esDefecto: false, activa: true },
+    ],
+  }
 })
 
-describe('configuracion/paqueteria: precio de envío por defecto', () => {
-  it('sin configurar avisa que no se puede escanear, y no lo dice una vez guardada', async () => {
-    configurada = false
+describe('configuracion/paqueteria: aviso de configuración', () => {
+  it('sin tarifa de envío por defecto avisa que no se puede escanear', async () => {
+    listas.envio = []
     const wrapper = await montar()
 
-    expect(wrapper.text()).toContain('Hasta que guardes el precio de envío y haya una tarifa de pago por defecto')
-
-    await formPrecio(wrapper).trigger('submit')
-    await esperar()
-
-    expect(llamadas.some(l => l.method === 'PUT')).toBe(true)
-    expect(wrapper.text()).not.toContain('Hasta que guardes')
+    expect(wrapper.text()).toContain('Hasta que haya una tarifa de envío y una tarifa de pago por defecto')
 
     wrapper.unmount()
   })
 
-  it('ya configurada no muestra el aviso', async () => {
+  it('sin tarifa de pago por defecto también avisa', async () => {
+    listas.pago = []
     const wrapper = await montar()
 
-    expect(wrapper.text()).not.toContain('Hasta que guardes')
+    expect(wrapper.find('[data-qa="paqueteria-sin-configurar"]').exists()).toBe(true)
 
     wrapper.unmount()
   })
 
-  it('el pago al repartidor ya no se configura acá: el PUT lleva solo el precio, como string', async () => {
+  it('con las dos por defecto no muestra el aviso, y ya no hay formulario de precio', async () => {
     const wrapper = await montar()
 
-    expect(wrapper.find('[data-qa="paqueteria-pago-repartidor"]').exists()).toBe(false)
-    await formPrecio(wrapper).trigger('submit')
-    await esperar()
+    expect(wrapper.find('[data-qa="paqueteria-sin-configurar"]').exists()).toBe(false)
+    expect(wrapper.find('[data-qa="paqueteria-precio-envio"]').exists()).toBe(false)
+    expect(llamadas.some(l => l.url.includes('/paquetes/configuracion'))).toBe(false)
 
-    const put = llamadas.find(l => l.method === 'PUT')
-    expect(put?.url).toMatch(/\/paquetes\/configuracion$/)
-    expect(put?.body).toEqual({ precioEnvioDefecto: '1500' })
+    wrapper.unmount()
+  })
+
+  it('la tabla de envío va arriba de la de pago', async () => {
+    const wrapper = await montar()
+
+    const texto = wrapper.text()
+    expect(texto.indexOf('Tarifas de envío')).toBeGreaterThan(-1)
+    expect(texto.indexOf('Tarifas de envío')).toBeLessThan(texto.indexOf('Tarifas de pago'))
 
     wrapper.unmount()
   })
 })
 
-describe('configuracion/paqueteria: tarifas de pago', () => {
+const casos = [
+  {
+    nombre: 'envío', clave: 'envio' as const, ruta: 'tarifas-envio', qa: 'tarifa-envio', formId: 'tarifa-envio-form',
+    placeholder: 'Estándar', defecto: 'Estándar', otra: 'Prioritario', otraId: 'e-pri', defectoId: 'e-est',
+    montoOtra: '5000', montoNuevo: '8000',
+  },
+  {
+    nombre: 'pago', clave: 'pago' as const, ruta: 'tarifas-pago', qa: 'tarifa', formId: 'tarifa-form',
+    placeholder: 'Moto', defecto: 'Auto', otra: 'Moto', otraId: 't-moto', defectoId: 't-auto',
+    montoOtra: '1000', montoNuevo: '2500',
+  },
+]
+
+describe.each(casos)('configuracion/paqueteria: tarifas de $nombre', (c) => {
   const abrirNueva = async (w: Wrapper) => {
-    await w.find('[data-qa="tarifa-nueva"]').trigger('click')
+    await w.find(`[data-qa="${c.qa}-nueva"]`).trigger('click')
     await esperar()
   }
   const enviarTarifa = async (w: Wrapper) => {
-    await w.find('form#tarifa-form').trigger('submit')
+    await w.find(`form#${c.formId}`).trigger('submit')
     await esperar(40)
   }
+  const monto = (w: Wrapper) => w.findComponent({ name: 'MoneyInput' })
+  const urlLista = new RegExp(`/${c.ruta}$`)
+  const urlFila = new RegExp(`/${c.ruta}/${c.otraId}$`)
 
   it('lista las tarifas con su monto y marca la por defecto', async () => {
     const wrapper = await montar()
 
-    expect(wrapper.text()).toContain('Auto')
-    expect(wrapper.text()).toContain('$1.900')
-    expect(wrapper.text()).toContain('$1.000')
-    expect(wrapper.find('[data-qa="tarifa-defecto-Auto"]').exists()).toBe(true)
-    expect(wrapper.find('[data-qa="tarifa-defecto-Moto"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain(c.defecto)
+    expect(wrapper.text()).toContain(c.otra)
+    expect(wrapper.find(`[data-qa="${c.qa}-defecto-${c.defecto}"]`).exists()).toBe(true)
+    expect(wrapper.find(`[data-qa="${c.qa}-defecto-${c.otra}"]`).exists()).toBe(false)
 
     wrapper.unmount()
   })
@@ -174,14 +186,14 @@ describe('configuracion/paqueteria: tarifas de pago', () => {
 
     const guardar = () => wrapper.findAll('button').find(b => b.text() === 'Crear')!
     expect(guardar().attributes('disabled')).toBeDefined()
-    await wrapper.find('input[placeholder="Moto"]').setValue('  Colina ')
-    await emitir(montoTarifa(wrapper), '2500')
+    await wrapper.find(`input[placeholder="${c.placeholder}"]`).setValue('  Colina ')
+    await emitir(monto(wrapper), c.montoNuevo)
     expect(guardar().attributes('disabled')).toBeUndefined()
     await enviarTarifa(wrapper)
 
     const post = llamadas.find(l => l.method === 'POST')
-    expect(post?.url).toMatch(/\/tarifas-pago$/)
-    expect(post?.body).toEqual({ nombre: 'Colina', monto: '2500' })
+    expect(post?.url).toMatch(urlLista)
+    expect(post?.body).toEqual({ nombre: 'Colina', monto: c.montoNuevo })
     expect(wrapper.text()).toContain('Colina')
 
     wrapper.unmount()
@@ -190,16 +202,16 @@ describe('configuracion/paqueteria: tarifas de pago', () => {
   it('editar precarga la fila y manda PATCH con nombre y monto', async () => {
     const wrapper = await montar()
 
-    await wrapper.find('[aria-label="Editar Moto"]').trigger('click')
+    await wrapper.find(`[aria-label="Editar ${c.otra}"]`).trigger('click')
     await esperar()
-    expect((wrapper.find('input[placeholder="Moto"]').element as HTMLInputElement).value).toBe('Moto')
-    expect(montoTarifa(wrapper).props('modelValue')).toBe('1000')
-    await emitir(montoTarifa(wrapper), '1200')
+    expect((wrapper.find(`input[placeholder="${c.placeholder}"]`).element as HTMLInputElement).value).toBe(c.otra)
+    expect(monto(wrapper).props('modelValue')).toBe(c.montoOtra)
+    await emitir(monto(wrapper), '1200')
     await enviarTarifa(wrapper)
 
     const patch = llamadas.find(l => l.method === 'PATCH')
-    expect(patch?.url).toMatch(/\/tarifas-pago\/t-moto$/)
-    expect(patch?.body).toEqual({ nombre: 'Moto', monto: '1200' })
+    expect(patch?.url).toMatch(urlFila)
+    expect(patch?.body).toEqual({ nombre: c.otra, monto: '1200' })
 
     wrapper.unmount()
   })
@@ -207,26 +219,27 @@ describe('configuracion/paqueteria: tarifas de pago', () => {
   it('«Hacer por defecto» manda { esDefecto: true } y la marca se muda', async () => {
     const wrapper = await montar()
 
-    expect(wrapper.find('[data-qa="tarifa-hacer-defecto-Auto"]').exists()).toBe(false)
-    await wrapper.find('[data-qa="tarifa-hacer-defecto-Moto"]').trigger('click')
+    expect(wrapper.find(`[data-qa="${c.qa}-hacer-defecto-${c.defecto}"]`).exists()).toBe(false)
+    await wrapper.find(`[data-qa="${c.qa}-hacer-defecto-${c.otra}"]`).trigger('click')
     await esperar(40)
 
     const patch = llamadas.find(l => l.method === 'PATCH')
-    expect(patch?.url).toMatch(/\/tarifas-pago\/t-moto$/)
+    expect(patch?.url).toMatch(urlFila)
     expect(patch?.body).toEqual({ esDefecto: true })
     // El mock del backend no quita la marca a la anterior: la pantalla pide la lista de nuevo.
-    expect(llamadas.filter(l => l.method === 'GET' && /\/tarifas-pago$/.test(l.url)).length).toBeGreaterThan(1)
+    expect(llamadas.filter(l => l.method === 'GET' && urlLista.test(l.url)).length).toBeGreaterThan(1)
 
     wrapper.unmount()
   })
 
   it('el interruptor desactiva con { activa: false } y reactiva con { activa: true }', async () => {
     const wrapper = await montar()
+    const boton = () => wrapper.find(`button[aria-label="Activa: ${c.otra}"]`)
 
-    await wrapper.find('button[aria-label="Activa: Moto"]').trigger('click')
+    await boton().trigger('click')
     await esperar(40)
-    expect(wrapper.find('button[aria-label="Activa: Moto"]').attributes('aria-checked')).toBe('false')
-    await wrapper.find('button[aria-label="Activa: Moto"]').trigger('click')
+    expect(boton().attributes('aria-checked')).toBe('false')
+    await boton().trigger('click')
     await esperar(40)
 
     expect(escrituras().map(l => l.body)).toEqual([{ activa: false }, { activa: true }])
@@ -238,11 +251,11 @@ describe('configuracion/paqueteria: tarifas de pago', () => {
     rechazo = 'La tarifa por defecto no se puede desactivar: elige otra primero.'
     const wrapper = await montar()
 
-    await wrapper.find('button[aria-label="Activa: Auto"]').trigger('click')
+    await wrapper.find(`button[aria-label="Activa: ${c.defecto}"]`).trigger('click')
     await esperar(40)
 
-    expect(wrapper.find('[data-qa="tarifa-error"]').text()).toContain(rechazo)
-    expect(wrapper.find('button[aria-label="Activa: Auto"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.find(`[data-qa="${c.qa}-error"]`).text()).toContain(rechazo)
+    expect(wrapper.find(`button[aria-label="Activa: ${c.defecto}"]`).attributes('aria-checked')).toBe('true')
 
     wrapper.unmount()
   })
@@ -251,14 +264,14 @@ describe('configuracion/paqueteria: tarifas de pago', () => {
     rechazo = 'La tarifa está en uso: desactívala en vez de eliminarla.'
     const wrapper = await montar()
 
-    await wrapper.find('[aria-label="Eliminar Moto"]').trigger('click')
+    await wrapper.find(`[aria-label="Eliminar ${c.otra}"]`).trigger('click')
     await esperar(30)
     const confirmar = [...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Eliminar')!
     confirmar.click()
     await esperar(40)
 
-    expect(document.body.querySelector('[data-qa="tarifa-error-eliminar"]')?.textContent).toContain(rechazo)
-    expect(wrapper.text()).toContain('Moto')
+    expect(document.body.querySelector(`[data-qa="${c.qa}-error-eliminar"]`)?.textContent).toContain(rechazo)
+    expect(wrapper.text()).toContain(c.otra)
 
     wrapper.unmount()
   })
@@ -266,14 +279,14 @@ describe('configuracion/paqueteria: tarifas de pago', () => {
   it('eliminar una tarifa libre manda DELETE y la saca de la lista', async () => {
     const wrapper = await montar()
 
-    await wrapper.find('[aria-label="Eliminar Moto"]').trigger('click')
+    await wrapper.find(`[aria-label="Eliminar ${c.otra}"]`).trigger('click')
     await esperar(30)
     ;[...document.body.querySelectorAll('button')].find(b => b.textContent?.trim() === 'Eliminar')!.click()
     await esperar(40)
 
     const del = llamadas.find(l => l.method === 'DELETE')
-    expect(del?.url).toMatch(/\/tarifas-pago\/t-moto$/)
-    expect(wrapper.find('[aria-label="Editar Moto"]').exists()).toBe(false)
+    expect(del?.url).toMatch(urlFila)
+    expect(wrapper.find(`[aria-label="Editar ${c.otra}"]`).exists()).toBe(false)
 
     wrapper.unmount()
   })
