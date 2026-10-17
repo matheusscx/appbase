@@ -94,7 +94,7 @@ describe('HojasRutaService', () => {
         [{ id: HOJA, estado: 'rendida' }],
       ]);
       await expect(escanear()).rejects.toThrow(
-        /ya está rendida: elegí otra fecha/,
+        /ya está rendida: elige otra fecha/,
       );
       await expect(escanear()).rejects.toBeInstanceOf(BadRequestException);
     });
@@ -148,10 +148,10 @@ describe('HojasRutaService', () => {
 
     it('sin ninguna tarifa y código nuevo → 400, y no crea el paquete', async () => {
       tarifas.exigirDefecto.mockRejectedValue(
-        new BadRequestException('Cargá al menos una tarifa de pago'),
+        new BadRequestException('Carga al menos una tarifa de pago'),
       );
       responder(hojaAbierta);
-      await expect(escanear()).rejects.toThrow(/Cargá al menos una tarifa/);
+      await expect(escanear()).rejects.toThrow(/Carga al menos una tarifa/);
       expect(sqls().some((s) => /INSERT INTO paquetes/.test(s))).toBe(false);
     });
 
@@ -861,7 +861,7 @@ describe('HojasRutaService', () => {
       responder(hojaDe());
       totales.mockResolvedValue(new Map([[HOJA, t({ enRuta: 2 })]]));
       await expect(exigir()).rejects.toThrow(
-        'Quedan 2 paquetes en ruta en la hoja del 15-10: marcalos entregados o no entregados antes de rendir.',
+        'Quedan 2 paquetes en ruta en la hoja del 15-10: márcalos entregados o no entregados antes de rendir.',
       );
     });
 

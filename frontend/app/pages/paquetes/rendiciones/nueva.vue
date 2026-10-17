@@ -294,7 +294,7 @@ onMounted(async () => {
 
         <CrudPageHeader
           title="Rendir a un repartidor"
-          description="Elegí las hojas que entran en la cuenta: un día, varios o la semana entera."
+          description="Elige las hojas que entran en la cuenta: un día, varios o la semana entera."
         />
 
         <UFormField label="Repartidor" class="w-full sm:w-72">
@@ -303,7 +303,7 @@ onMounted(async () => {
             :items="repartidorOptions"
             value-key="value"
             :search-input="false"
-            placeholder="Elegí un repartidor"
+            placeholder="Elige un repartidor"
             class="w-full"
             aria-label="Repartidor"
             data-qa="nueva-repartidor"
@@ -328,7 +328,7 @@ onMounted(async () => {
           class="rounded-lg border border-dashed border-default p-8 text-center text-sm text-muted"
           data-qa="nueva-sin-repartidor"
         >
-          Elegí un repartidor para ver lo que tiene sin rendir.
+          Elige un repartidor para ver lo que tiene sin rendir.
         </p>
 
         <template v-else>
@@ -365,7 +365,7 @@ onMounted(async () => {
                     No tiene paquetes: no hay nada que rendir.
                   </template>
                   <template v-else>
-                    Tiene {{ h.enRuta }} en ruta: marcalos para poder incluirla.
+                    Tiene {{ h.enRuta }} en ruta: márcalos para poder incluirla.
                   </template>
                 </p>
               </li>
@@ -458,7 +458,7 @@ onMounted(async () => {
               data-qa="nueva-error-previa"
             />
             <p v-else-if="!previa" class="text-sm text-muted" data-qa="nueva-totales-vacio">
-              {{ cargandoPrevia ? 'Calculando…' : 'Elegí al menos una hoja para ver el total.' }}
+              {{ cargandoPrevia ? 'Calculando…' : 'Elige al menos una hoja para ver el total.' }}
             </p>
             <template v-else>
               <p
@@ -515,7 +515,7 @@ onMounted(async () => {
             variant="subtle"
             icon="i-lucide-circle-alert"
             :title="errorRendir"
-            description="Revisá las hojas y las entregas de la lista: pueden haber cambiado."
+            description="Revisa las hojas y las entregas de la lista: pueden haber cambiado."
             data-qa="nueva-error-rendir"
           />
 

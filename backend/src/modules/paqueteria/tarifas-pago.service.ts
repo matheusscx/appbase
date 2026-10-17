@@ -84,12 +84,12 @@ export class TarifasPagoService {
       const esDefecto = dto.esDefecto ?? actual.es_defecto;
       if (actual.es_defecto && !esDefecto) {
         throw new BadRequestException(
-          'Elegí otra tarifa por defecto antes de quitarle el defecto a esta.',
+          'Elige otra tarifa por defecto antes de quitarle el defecto a esta.',
         );
       }
       if (actual.es_defecto && !activa) {
         throw new BadRequestException(
-          'Elegí otra tarifa por defecto antes de desactivar esta.',
+          'Elige otra tarifa por defecto antes de desactivar esta.',
         );
       }
       if (esDefecto && !activa) {
@@ -131,7 +131,7 @@ export class TarifasPagoService {
       const actual = await this.buscarBloqueada(tenantId, id);
       if (actual.es_defecto) {
         throw new BadRequestException(
-          'Elegí otra tarifa por defecto antes de eliminar esta.',
+          'Elige otra tarifa por defecto antes de eliminar esta.',
         );
       }
       const uso: { en_uso: boolean }[] = await this.db.query(
@@ -145,7 +145,7 @@ export class TarifasPagoService {
       );
       if (uso[0].en_uso) {
         throw new BadRequestException(
-          'La tarifa está en uso por un repartidor o un paquete: desactivala en vez de eliminarla.',
+          'La tarifa está en uso por un repartidor o un paquete: desactívala en vez de eliminarla.',
         );
       }
       await this.db.query(
@@ -201,7 +201,7 @@ export class TarifasPagoService {
   async exigirDefecto(tenantId: string): Promise<void> {
     if (!(await this.hayDefecto(tenantId))) {
       throw new BadRequestException(
-        'Cargá al menos una tarifa de pago (la primera queda por defecto) antes de cargar paquetes.',
+        'Carga al menos una tarifa de pago (la primera queda por defecto) antes de cargar paquetes.',
       );
     }
   }

@@ -268,7 +268,7 @@ export class HojasRutaService {
 
   private sinTarifaQuePagar(): BadRequestException {
     return new BadRequestException(
-      'No hay una tarifa de pago que aplicar a esta entrega: cargá una tarifa por defecto.',
+      'No hay una tarifa de pago que aplicar a esta entrega: carga una tarifa por defecto.',
     );
   }
 
@@ -544,7 +544,7 @@ export class HojasRutaService {
   ): Promise<{ id: string; fecha: string; totales: TotalesHoja }[]> {
     const ids = [...new Set(hojaIds)];
     if (!ids.length) {
-      throw new BadRequestException('Elegí al menos una hoja para rendir.');
+      throw new BadRequestException('Elige al menos una hoja para rendir.');
     }
     const hojas: {
       id: string;
@@ -578,7 +578,7 @@ export class HojasRutaService {
       const t = totales.get(h.id)!;
       if (t.enRuta > 0) {
         throw new BadRequestException(
-          `Quedan ${t.enRuta} paquetes en ruta en la hoja del ${diaMes(h.fecha)}: marcalos entregados o no entregados antes de rendir.`,
+          `Quedan ${t.enRuta} paquetes en ruta en la hoja del ${diaMes(h.fecha)}: márcalos entregados o no entregados antes de rendir.`,
         );
       }
       if (t.asignados === 0) {
@@ -606,7 +606,7 @@ export class HojasRutaService {
   ): Promise<void> {
     if (t.enRuta > 0) {
       throw new BadRequestException(
-        `Quedan ${t.enRuta} paquetes en ruta: marcalos entregados o no entregados antes de rendir.`,
+        `Quedan ${t.enRuta} paquetes en ruta: márcalos entregados o no entregados antes de rendir.`,
       );
     }
     const filas = unwrap<{ hoja_ruta_id: string }>(
@@ -911,7 +911,7 @@ export class HojasRutaService {
     const hoja = hojas[0];
     if (hoja.estado === 'rendida') {
       throw new BadRequestException(
-        'La hoja de ruta de ese día ya está rendida: elegí otra fecha.',
+        'La hoja de ruta de ese día ya está rendida: elige otra fecha.',
       );
     }
     return hoja;

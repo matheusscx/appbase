@@ -93,7 +93,7 @@ const columns: TableColumn<RendicionFila>[] = [
       <div class="w-full space-y-6" data-qa="rendiciones-pantalla">
         <CrudPageHeader
           title="Rendiciones"
-          description="Las cuentas cerradas con cada repartidor. Abrí una para ver la planilla e imprimirla."
+          description="Las cuentas cerradas con cada repartidor. Abre una para ver la planilla e imprimirla."
         >
           <template #actions>
             <UButton
@@ -143,7 +143,7 @@ const columns: TableColumn<RendicionFila>[] = [
             </template>
 
             <template #pago-cell="{ row }">
-              <span class="font-mono text-sm">{{ formatOficial(row.original.totales.montoPagoRepartidor) }}</span>
+              <span class="text-sm tabular-nums">{{ formatOficial(row.original.totales.montoPagoRepartidor) }}</span>
             </template>
 
             <template #saldo-cell="{ row }">
@@ -162,7 +162,7 @@ const columns: TableColumn<RendicionFila>[] = [
             <template #empty>
               <div class="py-10 text-center text-sm text-muted" data-qa="rendiciones-vacio">
                 <UIcon name="i-lucide-handshake" class="mx-auto mb-2 h-8 w-8 opacity-40" />
-                {{ desde && hasta ? 'No hay rendiciones en estas fechas.' : 'Elegí el rango de fechas para ver las rendiciones.' }}
+                {{ desde && hasta ? 'No hay rendiciones en estas fechas.' : 'Elige el rango de fechas para ver las rendiciones.' }}
               </div>
             </template>
           </UTable>

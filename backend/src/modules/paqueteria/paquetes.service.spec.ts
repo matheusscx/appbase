@@ -254,7 +254,7 @@ describe('PaquetesService', () => {
 
     it('sin ninguna tarifa cargada: 400 y no se inserta', async () => {
       tarifasMock.exigirDefecto.mockRejectedValue(
-        new BadRequestException('Cargá al menos una tarifa de pago'),
+        new BadRequestException('Carga al menos una tarifa de pago'),
       );
       await expect(
         service.create(TENANT, {
@@ -262,7 +262,7 @@ describe('PaquetesService', () => {
           cobroEnDestino: false,
           precioEnvio: '8000',
         }),
-      ).rejects.toThrow(/Cargá al menos una tarifa/);
+      ).rejects.toThrow(/Carga al menos una tarifa/);
       expect(db.query).not.toHaveBeenCalled();
     });
 

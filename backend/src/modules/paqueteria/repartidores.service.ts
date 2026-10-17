@@ -155,12 +155,12 @@ export class RepartidoresService {
         );
       if (hojas[0].tiene) {
         throw new BadRequestException(
-          'El repartidor tiene hojas de ruta: desactivalo en vez de eliminarlo.',
+          'El repartidor tiene hojas de ruta: desactívalo en vez de eliminarlo.',
         );
       }
       if (hojas[0].entregas) {
         throw new BadRequestException(
-          'El repartidor tiene entregas de plata: desactivalo en vez de eliminarlo.',
+          'El repartidor tiene entregas de plata: desactívalo en vez de eliminarlo.',
         );
       }
 

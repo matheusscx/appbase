@@ -424,12 +424,12 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       );
       expect(off.status).toBe(400);
       expect(JSON.stringify(off.body)).toContain(
-        'Elegí otra tarifa por defecto antes de',
+        'Elige otra tarifa por defecto antes de',
       );
       const del = await llamar('delete', `/api/tarifas-pago/${moto}`);
       expect(del.status).toBe(400);
       expect(JSON.stringify(del.body)).toContain(
-        'Elegí otra tarifa por defecto antes de',
+        'Elige otra tarifa por defecto antes de',
       );
       expect((await listar()).find((t) => t.id === moto)).toMatchObject({
         esDefecto: true,

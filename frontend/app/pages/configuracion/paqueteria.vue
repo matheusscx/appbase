@@ -191,7 +191,7 @@ async function eliminarTarifa(id: string) {
     await Promise.all([cargarTarifas(), releerConfigurada()])
   }
   catch (e: unknown) {
-    // «Está en uso: desactivala» se queda dentro del modal, junto al botón que la causó.
+    // «Está en uso: desactívala» se queda dentro del modal, junto al botón que la causó.
     errorEliminarTarifa.value = apiErrorMsg(e, 'Error al eliminar la tarifa')
   }
   finally {
@@ -317,7 +317,8 @@ onMounted(() => {
             label="Hacer por defecto"
             color="neutral"
             variant="ghost"
-            size="sm"
+            size="xl"
+            class="min-h-11"
             :disabled="enCambioTarifa.has(row.original.id)"
             :data-qa="`tarifa-hacer-defecto-${row.original.nombre}`"
             @click="hacerDefecto(row.original)"
@@ -329,6 +330,7 @@ onMounted(() => {
             title="Editar"
             :aria-label="`Editar ${row.original.nombre}`"
             @click="abrirEditarTarifa(row.original)"
+            class="size-11 justify-center"
           />
           <UButton
             icon="i-lucide-trash-2"
@@ -337,6 +339,7 @@ onMounted(() => {
             title="Eliminar"
             :aria-label="`Eliminar ${row.original.nombre}`"
             @click="pedirEliminarTarifa(row.original)"
+            class="size-11 justify-center"
           />
         </div>
       </template>
@@ -401,7 +404,7 @@ onMounted(() => {
     <CrudModal
       v-model:open="confirmTarifaOpen"
       title="Eliminar tarifa"
-      :message="`¿Eliminar la tarifa ${tarifaAEliminar?.nombre ?? ''}? Si está en uso por un repartidor o un paquete no se puede eliminar: desactivala.`"
+      :message="`¿Eliminar la tarifa ${tarifaAEliminar?.nombre ?? ''}? Si está en uso por un repartidor o un paquete no se puede eliminar: desactívala.`"
       :loading="eliminandoTarifa"
       @cancel="cancelarEliminarTarifa"
       @confirm="confirmTarifaId && eliminarTarifa(confirmTarifaId)"

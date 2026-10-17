@@ -108,7 +108,7 @@ describe('TarifasPagoService', () => {
       .mockResolvedValueOnce([])
       .mockResolvedValueOnce([fila()])
       .mockResolvedValueOnce([{ en_uso: true }]);
-    await expect(service.eliminar(TENANT, ID)).rejects.toThrow(/desactivala/);
+    await expect(service.eliminar(TENANT, ID)).rejects.toThrow(/desactívala/);
 
     db.query.mockReset();
     db.query

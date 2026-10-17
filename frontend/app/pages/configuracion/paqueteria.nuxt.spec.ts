@@ -235,7 +235,7 @@ describe('configuracion/paqueteria: tarifas de pago', () => {
   })
 
   it('desactivar la por defecto: el 400 del backend queda a la vista y la tarifa sigue activa', async () => {
-    rechazo = 'La tarifa por defecto no se puede desactivar: elegí otra primero.'
+    rechazo = 'La tarifa por defecto no se puede desactivar: elige otra primero.'
     const wrapper = await montar()
 
     await wrapper.find('button[aria-label="Activa: Auto"]').trigger('click')
@@ -248,7 +248,7 @@ describe('configuracion/paqueteria: tarifas de pago', () => {
   })
 
   it('eliminar una tarifa en uso deja el modal abierto con el motivo del backend', async () => {
-    rechazo = 'La tarifa está en uso: desactivala en vez de eliminarla.'
+    rechazo = 'La tarifa está en uso: desactívala en vez de eliminarla.'
     const wrapper = await montar()
 
     await wrapper.find('[aria-label="Eliminar Moto"]').trigger('click')
