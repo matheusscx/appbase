@@ -7,6 +7,7 @@ import {
   MaxLength,
   ValidateIf,
 } from 'class-validator';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 export class UpdateRepartidorDto {
   @ValidateIf((_o, v) => v !== undefined)
@@ -26,6 +27,7 @@ export class UpdateRepartidorDto {
 
   /** `null` le saca la tarifa; ausente la deja como está. */
   @IsOptional()
+  @IdEnMinusculas()
   @IsUUID()
   tarifaPagoId?: string | null;
 }

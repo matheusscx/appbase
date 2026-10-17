@@ -64,9 +64,6 @@ export class Paquete {
   @Column({ name: 'cobro_en_destino', type: 'boolean', default: false })
   cobroEnDestino: boolean;
 
-  @Column({ name: 'precio_envio', type: 'numeric', precision: 18, scale: 4 })
-  precioEnvio: string;
-
   /** Tarifa especial de este paquete (p. ej. "Colina"); reemplaza a la del repartidor. */
   @Column({ name: 'tarifa_pago_id', type: 'uuid', nullable: true })
   tarifaPagoId: string | null;

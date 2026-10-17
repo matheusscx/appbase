@@ -15,8 +15,12 @@ import { normalizarCodigoPaquete } from './codigo-paquete';
 import { CreatePaqueteDto } from './dto/create-paquete.dto';
 import { QueryPaquetesDto } from './dto/query-paquetes.dto';
 import { UpdatePaqueteDto } from './dto/update-paquete.dto';
-import { PaqueteConfiguracionService } from './paquete-configuracion.service';
-import { PAGO_RESUELTO_SQL } from './tarifa-resuelta';
+import {
+  PAGO_RESUELTO_SQL,
+  PRECIO_RESUELTO_SQL,
+  PRECIO_SOLO_SQL,
+} from './tarifa-resuelta';
+import { TarifasEnvioService } from './tarifas-envio.service';
 import { TarifasPagoService } from './tarifas-pago.service';
 import type { EstadoPaquete, PaqueteFila } from './paqueteria.types';
 
@@ -31,9 +35,10 @@ export interface PaqueteFilaRow {
   remitente_tercero_id: string | null;
   remitente_nombre: string | null;
   cobro_en_destino: boolean;
-  precio_envio: string;
   tarifa_pago_id: string | null;
   tarifa_pago_nombre: string | null;
+  tarifa_envio_id: string | null;
+  tarifa_envio_nombre: string | null;
   estado: EstadoPaquete;
   hoja_ruta_id: string | null;
   repartidor_nombre: string | null;
@@ -43,7 +48,8 @@ export interface PaqueteFilaRow {
 const COLUMNAS_PAQUETE_FILA = `
   SELECT p.paquete_id AS id, p.codigo, p.destinatario_nombre, p.destinatario_telefono,
          p.direccion, p.comuna, p.nota, p.remitente_tercero_id, t.nombre AS remitente_nombre,
-         p.cobro_en_destino, p.precio_envio, p.tarifa_pago_id, tp.nombre AS tarifa_pago_nombre,
+         p.cobro_en_destino, p.tarifa_pago_id, tp.nombre AS tarifa_pago_nombre,
+         p.tarifa_envio_id, te.nombre AS tarifa_envio_nombre,
          COALESCE(ruta.estado, 'disponible') AS estado,
          ruta.hoja_ruta_id, ruta.repartidor_nombre,
          (ruta.estado = 'entregado' AND ruta.hoja_estado = 'rendida') IS TRUE AS bloqueado`;
@@ -55,6 +61,8 @@ const FROM_PAQUETE_FILA = `
                         AND t.tenant_id = p.tenant_id AND t.eliminado_el IS NULL
     LEFT JOIN tarifas_pago tp ON tp.tarifa_pago_id = p.tarifa_pago_id
                              AND tp.tenant_id = p.tenant_id AND tp.eliminado_el IS NULL
+    LEFT JOIN tarifas_envio te ON te.tarifa_envio_id = p.tarifa_envio_id
+                              AND te.tenant_id = p.tenant_id AND te.eliminado_el IS NULL
     LEFT JOIN LATERAL (
       SELECT l.estado, l.hoja_ruta_id, h.estado AS hoja_estado, r.nombre AS repartidor_nombre
         FROM hoja_ruta_paquetes l
@@ -88,9 +96,10 @@ export const aFilaPaquete = (r: PaqueteFilaRow): PaqueteFila => ({
   remitenteTerceroId: r.remitente_tercero_id,
   remitenteNombre: r.remitente_nombre,
   cobroEnDestino: r.cobro_en_destino,
-  precioEnvio: r.precio_envio,
   tarifaPagoId: r.tarifa_pago_id,
   tarifaPagoNombre: r.tarifa_pago_nombre,
+  tarifaEnvioId: r.tarifa_envio_id,
+  tarifaEnvioNombre: r.tarifa_envio_nombre,
   estado: r.estado,
   hojaRutaId: r.hoja_ruta_id,
   repartidorNombre: r.repartidor_nombre,
@@ -104,8 +113,8 @@ const escaparLike = (texto: string) => texto.replace(/[\\%_]/g, '\\$&');
 export class PaquetesService {
   constructor(
     private readonly db: Db,
-    private readonly configuracion: PaqueteConfiguracionService,
     private readonly tarifas: TarifasPagoService,
+    private readonly tarifasEnvio: TarifasEnvioService,
   ) {}
 
   async findAll(
@@ -204,17 +213,23 @@ export class PaquetesService {
         // Sin tarifa propia se paga con la del repartidor o la por defecto: tiene que haber alguna.
         await this.tarifas.exigirDefecto(tenantId);
       }
-      // Solo se pide la configuración si falta el precio: con uno explícito no hace falta.
-      const defaults =
-        dto.precioEnvio === undefined
-          ? await this.configuracion.exigirDefaults(tenantId)
-          : null;
+      // Después de la de pago, el orden del módulo: cada tarifa se toma sin pedir nada después.
+      if (dto.tarifaEnvioId) {
+        await this.tarifasEnvio.exigirActivaDelTenant(
+          tenantId,
+          dto.tarifaEnvioId,
+          { bloquear: true },
+        );
+      } else {
+        // Sin tarifa propia se cobra con la por defecto: tiene que haberla (no hay paquetes a $0).
+        await this.tarifasEnvio.exigirDefecto(tenantId);
+      }
 
       const rows = unwrap<{ paquete_id: string }>(
         await this.db.query(
           `INSERT INTO paquetes
              (tenant_id, codigo, destinatario_nombre, destinatario_telefono, direccion,
-              comuna, nota, remitente_tercero_id, cobro_en_destino, precio_envio, tarifa_pago_id)
+              comuna, nota, remitente_tercero_id, cobro_en_destino, tarifa_pago_id, tarifa_envio_id)
            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
            ON CONFLICT (tenant_id, codigo) WHERE eliminado_el IS NULL DO NOTHING
            RETURNING paquete_id`,
@@ -228,8 +243,8 @@ export class PaquetesService {
             dto.nota ?? null,
             dto.remitenteTerceroId ?? null,
             dto.cobroEnDestino,
-            dto.precioEnvio ?? defaults!.precioEnvio,
             dto.tarifaPagoId ?? null,
+            dto.tarifaEnvioId ?? null,
           ],
         ),
       );
@@ -268,7 +283,7 @@ export class PaquetesService {
       );
       const actual = await this.filaPorId(tenantId, id);
       const tocaMontos =
-        dto.precioEnvio !== undefined ||
+        dto.tarifaEnvioId !== undefined ||
         dto.tarifaPagoId !== undefined ||
         dto.cobroEnDestino !== undefined;
       if (actual.bloqueado && tocaMontos) {
@@ -303,7 +318,6 @@ export class PaquetesService {
       }
       if (dto.cobroEnDestino !== undefined)
         poner('cobro_en_destino', dto.cobroEnDestino);
-      if (dto.precioEnvio !== undefined) poner('precio_envio', dto.precioEnvio);
       if (dto.tarifaPagoId !== undefined) {
         // Solo si cambia: el formulario reenvía la que ya tiene, y una tarifa que se desactivó
         // después no puede hacer fallar la edición de cualquier otro campo del paquete.
@@ -316,6 +330,20 @@ export class PaquetesService {
           });
         }
         poner('tarifa_pago_id', dto.tarifaPagoId);
+      }
+      if (dto.tarifaEnvioId !== undefined) {
+        // Igual que la de pago: solo si cambia, y después de ella (orden de bloqueo del módulo).
+        if (
+          dto.tarifaEnvioId !== null &&
+          dto.tarifaEnvioId !== actual.tarifaEnvioId
+        ) {
+          await this.tarifasEnvio.exigirActivaDelTenant(
+            tenantId,
+            dto.tarifaEnvioId,
+            { bloquear: true },
+          );
+        }
+        poner('tarifa_envio_id', dto.tarifaEnvioId);
       }
 
       if (sets.length === 0) return actual;
@@ -340,13 +368,17 @@ export class PaquetesService {
         throw e;
       }
       if (!rows.length) throw new NotFoundException('Paquete no encontrado');
-      // Solo si la tarifa cambia: el formulario reenvía todos los campos en cada PATCH, y re-resolver
-      // con la misma tarifa movería una entrega a un monto nuevo de la tarifa (RF1).
-      if (
+      // Solo la tarifa que cambia, y solo si cambia: el formulario reenvía todos los campos en cada
+      // PATCH, y re-resolver con la misma tarifa movería una entrega a un monto nuevo (RF1, RF3).
+      // Si cambiaron las dos, una sola sentencia; si una, solo esa mitad de la línea.
+      const cambioPago =
         dto.tarifaPagoId !== undefined &&
-        dto.tarifaPagoId !== actual.tarifaPagoId
-      ) {
-        await this.resolverPagoEntregado(tenantId, id);
+        dto.tarifaPagoId !== actual.tarifaPagoId;
+      const cambioPrecio =
+        dto.tarifaEnvioId !== undefined &&
+        dto.tarifaEnvioId !== actual.tarifaEnvioId;
+      if (cambioPago || cambioPrecio) {
+        await this.resolverEntregado(tenantId, id, cambioPago, cambioPrecio);
       }
       if (
         dto.cobroEnDestino !== undefined &&
@@ -359,22 +391,48 @@ export class PaquetesService {
   }
 
   /**
-   * Cambiar la tarifa de un paquete ya entregado, con su hoja todavía abierta, vuelve a resolver
-   * el pago de esa línea (es la forma de corregir un error). En una hoja rendida no llega: el
-   * paquete está `bloqueado` y `update` lo rechaza antes. La resolución es la de entregar
-   * (`tarifaResueltaSql`), no una copia: lo mismo que se fijaría hoy.
+   * Cambiar la tarifa de pago o la de envío de un paquete ya entregado, con su hoja todavía abierta,
+   * vuelve a resolver esa mitad de la línea (es la forma de corregir un error): el pago, el precio o
+   * las dos en UNA sentencia. En una hoja rendida no llega: el paquete está `bloqueado` y `update`
+   * lo rechaza antes. La resolución es la de entregar (`tarifaResueltaSql`,
+   * `tarifaEnvioResueltaSql`), no una copia: lo mismo que se fijaría hoy.
    */
-  private async resolverPagoEntregado(
+  private async resolverEntregado(
     tenantId: string,
     paqueteId: string,
+    pago: boolean,
+    precio: boolean,
   ): Promise<void> {
+    const sets: string[] = [];
+    if (pago) {
+      sets.push(
+        'tarifa_pago_id = tr.tarifa_pago_id',
+        'pago_repartidor = tr.monto',
+      );
+    }
+    if (precio) {
+      sets.push(
+        'tarifa_envio_id = te.tarifa_envio_id',
+        'precio_envio = te.monto',
+      );
+    }
+    const resuelto = pago
+      ? {
+          from: precio
+            ? `${PAGO_RESUELTO_SQL.from}, ${PRECIO_RESUELTO_SQL.from}`
+            : PAGO_RESUELTO_SQL.from,
+          donde: precio
+            ? `${PAGO_RESUELTO_SQL.donde} AND ${PRECIO_RESUELTO_SQL.donde}`
+            : PAGO_RESUELTO_SQL.donde,
+        }
+      : PRECIO_SOLO_SQL;
     await this.db.query(
       `UPDATE hoja_ruta_paquetes l
-          SET tarifa_pago_id = tr.tarifa_pago_id, pago_repartidor = tr.monto, actualizado_el = now()
-         FROM ${PAGO_RESUELTO_SQL.from}
+          SET ${sets.join(', ')}, actualizado_el = now()
+         FROM ${resuelto.from}
         WHERE l.paquete_id = $1 AND l.tenant_id = $2 AND l.estado = 'entregado'
           AND l.eliminado_el IS NULL AND h.estado = 'abierta'
-          AND ${PAGO_RESUELTO_SQL.donde}`,
+          AND ${resuelto.donde}`,
       [paqueteId, tenantId],
     );
   }

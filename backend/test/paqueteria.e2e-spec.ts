@@ -10,7 +10,6 @@ import { validacionGlobal } from '../src/common/pipes/validacion-global.pipe';
 import type {
   HojaRutaDetalle,
   HojaRutaFila,
-  PaqueteConfiguracionRespuesta,
   PaqueteFila,
   RepartidorFila,
   TarifaPagoFila,
@@ -129,6 +128,51 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
     tarifasDePrueba.clear();
   };
 
+  // Lo mismo para las tarifas de envío: crear un paquete o escanear uno nuevo exige una por
+  // defecto. Se piden por monto (la primera que se crea en un tenant queda por defecto, así que cada
+  // describe pide primero la de 10.000, el precio de siempre) y se marcan borradas con SQL.
+  const enviosDePrueba = new Map<string, string>();
+  const envioPorMonto = async (
+    monto: string,
+    token = tokenAdmin,
+  ): Promise<string> => {
+    const clave = `${token}:${monto}`;
+    const hecha = enviosDePrueba.get(clave);
+    if (hecha) return hecha;
+    const res = await llamar('post', '/api/tarifas-envio', token, {
+      nombre: `E2E envío ${monto} ${sufijoTarifas}`,
+      monto,
+    });
+    expect(res.status).toBe(201);
+    const id = (res.body as TarifaEnvioFila).id;
+    enviosDePrueba.set(clave, id);
+    return id;
+  };
+  /** Una tarifa de envío solo de este caso (nombre único), para poder cambiarle el monto sin tocar la de los demás. */
+  const envioPropio = async (
+    etiqueta: string,
+    monto: string,
+  ): Promise<TarifaEnvioFila> => {
+    const res = await llamar('post', '/api/tarifas-envio', tokenAdmin, {
+      nombre: `E2E ${etiqueta} ${sufijoTarifas}`,
+      monto,
+    });
+    expect(res.status).toBe(201);
+    const fila = res.body as TarifaEnvioFila;
+    enviosDePrueba.set(`propia:${etiqueta}:${sufijoTarifas}`, fila.id);
+    return fila;
+  };
+  const limpiarEnviosDePrueba = async () => {
+    if (!enviosDePrueba.size) return;
+    await app
+      .get(DataSource)
+      .query(
+        `UPDATE tarifas_envio SET eliminado_el = now() WHERE tarifa_envio_id = ANY($1)`,
+        [[...enviosDePrueba.values()]],
+      );
+    enviosDePrueba.clear();
+  };
+
   beforeAll(async () => {
     const moduleFixture: TestingModule = await Test.createTestingModule({
       imports: [AppModule],
@@ -166,6 +210,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       }
     } finally {
       await limpiarTarifasDePrueba();
+      await limpiarEnviosDePrueba();
       await app.close();
     }
     expect(fallos).toEqual([]);
@@ -173,8 +218,6 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
 
   it('el vendedor (no admin) recibe 403 en las rutas del módulo', async () => {
     for (const [metodo, ruta] of [
-      ['get', '/api/paquetes/configuracion'],
-      ['put', '/api/paquetes/configuracion'],
       ['get', '/api/tarifas-pago'],
       ['post', '/api/tarifas-pago'],
       ['get', '/api/tarifas-envio'],
@@ -202,84 +245,15 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
   });
 
   describe('configuración', () => {
-    // Estado único del tenant Paris: este describe lo deja siempre en 10000 (el valor del seed),
-    // así ningún otro spec ve otra cosa. El pago al repartidor ya no se configura acá: son las
-    // tarifas de pago, y `configurada` exige una por defecto.
-    it('PUT guarda y GET lo devuelve; sin tarifa por defecto no está configurada; un monto con decimales en CLP es 400', async () => {
-      const ok = await llamar(
-        'put',
-        '/api/paquetes/configuracion',
-        tokenAdmin,
-        { precioEnvioDefecto: '10000' },
+    // `paquete_configuracion` y `/paquetes/configuracion` se fueron con las tarifas de envío: el
+    // precio por defecto es la tarifa de envío por defecto.
+    it('GET y PUT /paquetes/configuracion ya no existen', async () => {
+      expect((await llamar('get', '/api/paquetes/configuracion')).status).toBe(
+        404,
       );
-      expect(ok.status).toBe(200);
-      expect(ok.body).toMatchObject({
-        configurada: false,
-        precioEnvioDefecto: '10000.0000',
-      });
-      expect(ok.body).not.toHaveProperty('pagoRepartidorDefecto');
-
-      await tarifaPorMonto('5000');
-      const leida = await llamar('get', '/api/paquetes/configuracion');
-      expect(leida.status).toBe(200);
-      expect(leida.body as PaqueteConfiguracionRespuesta).toEqual({
-        configurada: true,
-        precioEnvioDefecto: '10000.0000',
-      });
-
-      const malo = await llamar(
-        'put',
-        '/api/paquetes/configuracion',
-        tokenAdmin,
-        { precioEnvioDefecto: '10000.5' },
+      expect((await llamar('put', '/api/paquetes/configuracion')).status).toBe(
+        404,
       );
-      expect(malo.status).toBe(400);
-    });
-
-    it('el pago por defecto ya no es un campo de la configuración: mandarlo es 400', async () => {
-      const res = await llamar(
-        'put',
-        '/api/paquetes/configuracion',
-        tokenAdmin,
-        {
-          precioEnvioDefecto: '10000',
-          pagoRepartidorDefecto: '5000',
-        },
-      );
-      expect(res.status).toBe(400);
-    });
-
-    it('PUT sin uno de los campos, o con un monto negativo: 400', async () => {
-      const falta = await llamar(
-        'put',
-        '/api/paquetes/configuracion',
-        tokenAdmin,
-        {},
-      );
-      expect(falta.status).toBe(400);
-      const negativo = await llamar(
-        'put',
-        '/api/paquetes/configuracion',
-        tokenAdmin,
-        { precioEnvioDefecto: '-1' },
-      );
-      expect(negativo.status).toBe(400);
-    });
-
-    it('cada tenant tiene la suya: el segundo no ve los montos de Paris', async () => {
-      const paris = await llamar('get', '/api/paquetes/configuracion');
-      expect(paris.status).toBe(200);
-      expect((paris.body as PaqueteConfiguracionRespuesta).configurada).toBe(
-        true,
-      );
-
-      const ajena = await llamar(
-        'get',
-        '/api/paquetes/configuracion',
-        tokenSegundoTenant,
-      );
-      expect(ajena.status).toBe(200);
-      expect(ajena.body).not.toEqual(paris.body);
     });
   });
 
@@ -313,9 +287,11 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       return fila;
     };
 
-    // El describe de configuración dejó una tarifa de prueba en Paris: acá se parte de cero.
+    // Acá se parte de cero tarifas de PAGO en Paris, pero con una de envío por defecto: crear un
+    // paquete exige las dos, y lo que se prueba es la de pago.
     beforeAll(async () => {
       await limpiarTarifasDePrueba();
+      await envioPorMonto('10000');
     });
 
     afterAll(async () => {
@@ -341,7 +317,6 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       const alta = await llamar('post', '/api/paquetes', tokenAdmin, {
         codigo,
         cobroEnDestino: false,
-        precioEnvio: '8000',
       });
       expect(alta.status).toBe(400);
       expect((alta.body as { message: string }).message).toContain(
@@ -879,6 +854,21 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       expect(res.status).toBe(200);
       return res.body as TarifaEnvioFila[];
     };
+    const repartidores: string[] = [];
+    const nuevoRepartidor = async () => {
+      const res = await llamar('post', '/api/repartidores', tokenAdmin, {
+        nombre: `E2E envío ${sufijo} ${repartidores.length}`,
+      });
+      expect(res.status).toBe(201);
+      const fila = res.body as RepartidorFila;
+      repartidores.push(fila.id);
+      return fila;
+    };
+
+    // Se parte de cero tarifas de envío en Paris: las que dejaron los describes anteriores se van.
+    beforeAll(async () => {
+      await limpiarEnviosDePrueba();
+    });
 
     afterAll(async () => {
       const ds = app.get(DataSource);
@@ -888,10 +878,48 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           [paquetesIds],
         );
       }
+      for (const id of repartidores) {
+        await llamar('patch', `/api/repartidores/${id}`, tokenAdmin, {
+          activo: false,
+        });
+      }
       await ds.query(
         `UPDATE tarifas_envio SET eliminado_el = now() WHERE tarifa_envio_id = ANY($1)`,
         [tarifas],
       );
+    });
+
+    it('RF4: sin ninguna tarifa de envío cargada, crear o escanear un paquete nuevo es 400 y no deja nada', async () => {
+      await tarifaPorMonto('5000'); // la de pago no es lo que se prueba: que no sea ella la que frene
+      expect(await listar()).toEqual([]);
+      const codigo = `E2E-SIN-ENVIO-${sufijo}`;
+      const alta = await llamar('post', '/api/paquetes', tokenAdmin, {
+        codigo,
+        cobroEnDestino: false,
+      });
+      expect(alta.status).toBe(400);
+      expect((alta.body as { message: string }).message).toContain(
+        'tarifa de envío por defecto',
+      );
+      const rep = await nuevoRepartidor();
+      const escaneo = await llamar(
+        'post',
+        '/api/hojas-ruta/escanear',
+        tokenAdmin,
+        {
+          repartidorId: rep.id,
+          fecha: '2026-10-15',
+          codigo,
+          cobroEnDestino: false,
+        },
+      );
+      expect(escaneo.status).toBe(400);
+      expect((escaneo.body as { message: string }).message).toContain(
+        'tarifa de envío por defecto',
+      );
+      const l = await llamar('get', `/api/paquetes?q=${codigo}`);
+      expect(l.status).toBe(200);
+      expect((l.body as { data: PaqueteFila[] }).data).toEqual([]);
     });
 
     it('la primera tarifa de envío queda por defecto aunque no se pida; la segunda no', async () => {
@@ -1035,14 +1063,19 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       expect(paq.status).toBe(201);
       const paqId = (paq.body as PaqueteFila).id;
       paquetesIds.push(paqId);
-      // El paquete todavía no recibe la tarifa por la API (llega con el precio de la línea): se
-      // la pone SQL, que es lo que va a hacer la API.
-      await app
-        .get(DataSource)
-        .query(
-          `UPDATE paquetes SET tarifa_envio_id = $2 WHERE paquete_id = $1`,
-          [paqId, enPaq.id],
-        );
+      const asigna = await llamar(
+        'patch',
+        `/api/paquetes/${paqId}`,
+        tokenAdmin,
+        {
+          tarifaEnvioId: enPaq.id,
+        },
+      );
+      expect(asigna.status).toBe(200);
+      expect(asigna.body).toMatchObject({
+        tarifaEnvioId: enPaq.id,
+        tarifaEnvioNombre: enPaq.nombre,
+      });
       const delPaq = await llamar('delete', `/api/tarifas-envio/${enPaq.id}`);
       expect(delPaq.status).toBe(400);
       const off = await llamar(
@@ -1066,6 +1099,128 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       expect(
         (await llamar('delete', `/api/tarifas-envio/${libre.id}`)).status,
       ).toBe(404);
+    });
+
+    it('paquete: crear, escanear y editar con una tarifa de envío ajena, inactiva o inexistente es 400 y no escribe', async () => {
+      const ajena = await llamar(
+        'post',
+        '/api/tarifas-envio',
+        tokenSegundoTenant,
+        { nombre: `Ajena de paquete (${sufijo})`, monto: '700' },
+      );
+      expect(ajena.status).toBe(201);
+      tarifas.push((ajena.body as TarifaEnvioFila).id);
+      const inactiva = await nuevaTarifa({
+        nombre: `Inactiva paquete ${sufijo}`,
+        monto: '600',
+      });
+      expect(
+        (
+          await llamar(
+            'patch',
+            `/api/tarifas-envio/${inactiva.id}`,
+            tokenAdmin,
+            { activa: false },
+          )
+        ).status,
+      ).toBe(200);
+      const rep = await nuevoRepartidor();
+      const existente = await llamar('post', '/api/paquetes', tokenAdmin, {
+        codigo: `E2E-ENVIO-EDIT-${sufijo}`,
+        cobroEnDestino: false,
+      });
+      expect(existente.status).toBe(201);
+      const existenteId = (existente.body as PaqueteFila).id;
+      paquetesIds.push(existenteId);
+
+      for (const tarifaEnvioId of [
+        (ajena.body as TarifaEnvioFila).id,
+        inactiva.id,
+        '550e8400-e29b-41d4-a716-446655440998',
+      ]) {
+        const alta = await llamar('post', '/api/paquetes', tokenAdmin, {
+          codigo: `E2E-ENVIO-MALA-${sufijo}`,
+          cobroEnDestino: false,
+          tarifaEnvioId,
+        });
+        expect(alta.status).toBe(400);
+        const escaneo = await llamar(
+          'post',
+          '/api/hojas-ruta/escanear',
+          tokenAdmin,
+          {
+            repartidorId: rep.id,
+            fecha: '2026-10-15',
+            codigo: `E2E-ENVIO-MALA-${sufijo}`,
+            cobroEnDestino: false,
+            tarifaEnvioId,
+          },
+        );
+        expect(escaneo.status).toBe(400);
+        const edicion = await llamar(
+          'patch',
+          `/api/paquetes/${existenteId}`,
+          tokenAdmin,
+          { tarifaEnvioId },
+        );
+        expect(edicion.status).toBe(400);
+      }
+      expect(
+        (await llamar('get', `/api/paquetes?q=E2E-ENVIO-MALA-${sufijo}`)).body,
+      ).toMatchObject({ data: [] });
+      expect(
+        (await llamar('get', `/api/paquetes?q=E2E-ENVIO-EDIT-${sufijo}`)).body,
+      ).toMatchObject({
+        data: [
+          { id: existenteId, tarifaEnvioId: null, tarifaEnvioNombre: null },
+        ],
+      });
+    });
+
+    it('reenviar la misma tarifa de envío ya desactivada no bloquea editar otro campo del paquete', async () => {
+      const usada = await nuevaTarifa({
+        nombre: `Reenviada ${sufijo}`,
+        monto: '850',
+      });
+      const paq = await llamar('post', '/api/paquetes', tokenAdmin, {
+        codigo: `E2E-ENVIO-REENVIO-${sufijo}`,
+        cobroEnDestino: false,
+        tarifaEnvioId: usada.id,
+      });
+      expect(paq.status).toBe(201);
+      const paqId = (paq.body as PaqueteFila).id;
+      paquetesIds.push(paqId);
+      expect(
+        (
+          await llamar('patch', `/api/tarifas-envio/${usada.id}`, tokenAdmin, {
+            activa: false,
+          })
+        ).status,
+      ).toBe(200);
+      // El formulario reenvía todos los campos: la misma tarifa, ahora inactiva, no es un cambio.
+      const edita = await llamar(
+        'patch',
+        `/api/paquetes/${paqId}`,
+        tokenAdmin,
+        {
+          direccion: 'Alameda 100',
+          tarifaEnvioId: usada.id,
+        },
+      );
+      expect(edita.status).toBe(200);
+      expect(edita.body).toMatchObject({
+        direccion: 'Alameda 100',
+        tarifaEnvioId: usada.id,
+      });
+      // Y quitarla (null) vuelve a la por defecto.
+      const saca = await llamar('patch', `/api/paquetes/${paqId}`, tokenAdmin, {
+        tarifaEnvioId: null,
+      });
+      expect(saca.status).toBe(200);
+      expect(saca.body).toMatchObject({
+        tarifaEnvioId: null,
+        tarifaEnvioNombre: null,
+      });
     });
 
     it('aislamiento: el listado de un tenant no trae las del otro; la de otro tenant es 404; id no UUID es 400', async () => {
@@ -1293,15 +1448,9 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       return res;
     };
 
-    // No depende de otro describe: deja el precio en el valor del seed (10000) y pide la tarifa de 5.000.
+    // No depende de otro describe: pide la tarifa de envío de 10.000 (la por defecto) y la de pago de 5.000.
     beforeAll(async () => {
-      const res = await llamar(
-        'put',
-        '/api/paquetes/configuracion',
-        tokenAdmin,
-        { precioEnvioDefecto: '10000' },
-      );
-      expect(res.status).toBe(200);
+      await envioPorMonto('10000');
       await tarifaPorMonto('5000');
     });
 
@@ -1322,13 +1471,15 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       expect(fallos).toEqual([]);
     });
 
-    it('alta con solo el código: nace con el precio de la configuración, sin tarifa propia, y disponible', async () => {
+    it('alta con solo el código: sin tarifas propias (se cobra la de envío por defecto), y disponible', async () => {
       const res = await crear({ codigo: codigoNuevo(), cobroEnDestino: false });
       expect(res.status).toBe(201);
+      expect(res.body).not.toHaveProperty('precioEnvio');
       expect(res.body).toMatchObject({
-        precioEnvio: '10000.0000',
         tarifaPagoId: null,
         tarifaPagoNombre: null,
+        tarifaEnvioId: null,
+        tarifaEnvioNombre: null,
         estado: 'disponible',
         bloqueado: false,
         hojaRutaId: null,
@@ -1338,21 +1489,30 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       });
     });
 
-    it('alta con precio y tarifa propios: no copia el default y muestra el nombre de la tarifa', async () => {
+    it('alta con tarifas propias: las guarda y muestra el nombre de cada una', async () => {
       const colina = await tarifaPorMonto('4000');
+      const prioritario = await envioPorMonto('8000');
       const res = await crear({
         codigo: codigoNuevo(),
         cobroEnDestino: true,
-        precioEnvio: '8000',
+        tarifaEnvioId: prioritario,
         tarifaPagoId: colina,
       });
       expect(res.status).toBe(201);
       expect(res.body).toMatchObject({
-        precioEnvio: '8000.0000',
+        tarifaEnvioId: prioritario,
+        tarifaEnvioNombre: `E2E envío 8000 ${sufijoTarifas}`,
         tarifaPagoId: colina,
         tarifaPagoNombre: `E2E pago 4000 ${sufijoTarifas}`,
         cobroEnDestino: true,
       });
+      // El precio ya no es un campo del paquete: se resuelve al entregar. Mandarlo es 400.
+      const precio = await crear({
+        codigo: codigoNuevo(),
+        cobroEnDestino: false,
+        precioEnvio: '8000',
+      });
+      expect(precio.status).toBe(400);
       // El pago ya no es un campo del paquete: mandarlo es 400.
       const viejo = await crear({
         codigo: codigoNuevo(),
@@ -1419,12 +1579,12 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       const codigo = codigoNuevo();
       const mio = await crear({ codigo, cobroEnDestino: false });
       expect(mio.status).toBe(201);
-      // Montos propios: este test no deja configurado al segundo tenant (su tarifa se borra al final).
+      // Tarifas propias: este test no deja configurado al segundo tenant (se borran al final).
       const ajeno = await crear(
         {
           codigo,
           cobroEnDestino: false,
-          precioEnvio: '1000',
+          tarifaEnvioId: await envioPorMonto('1000', tokenSegundoTenant),
           tarifaPagoId: await tarifaPorMonto('500', tokenSegundoTenant),
         },
         tokenSegundoTenant,
@@ -1514,17 +1674,17 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       }
     });
 
-    it('PATCH con un monto con decimales en CLP: 400', async () => {
+    it('PATCH con precioEnvio (el campo que se fue): 400', async () => {
       const r = await crear({ codigo: codigoNuevo(), cobroEnDestino: false });
       expect(r.status).toBe(201);
       const id = (r.body as PaqueteFila).id;
       const res = await llamar('patch', `/api/paquetes/${id}`, tokenAdmin, {
-        precioEnvio: '10000.5',
+        precioEnvio: '10000',
       });
       expect(res.status).toBe(400);
     });
 
-    it.each([['cobroEnDestino'], ['precioEnvio'], ['codigo']])(
+    it.each([['cobroEnDestino'], ['codigo']])(
       'PATCH con %s null: 400 y el paquete queda igual',
       async (campo) => {
         const r = await crear({ codigo: codigoNuevo(), cobroEnDestino: false });
@@ -1681,7 +1841,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       expect(editar.status).toBe(404);
     });
 
-    it('id con forma no UUID: 400, no 500; y /paquetes/configuracion sigue siendo la configuración', async () => {
+    it('id con forma no UUID: 400, no 500', async () => {
       const res = await llamar(
         'patch',
         '/api/paquetes/no-es-uuid',
@@ -1689,9 +1849,6 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
         { nota: 'x' },
       );
       expect(res.status).toBe(400);
-      const config = await llamar('get', '/api/paquetes/configuracion');
-      expect(config.status).toBe(200);
-      expect(config.body).toHaveProperty('configurada');
     });
 
     it('alta sin código o con cobroEnDestino ausente: 400', async () => {
@@ -1770,15 +1927,9 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
     let rep: RepartidorFila;
     let otro: RepartidorFila;
 
-    // No depende de otro describe: deja el precio en el valor del seed (10000) y pide la tarifa de 5.000.
+    // No depende de otro describe: pide la tarifa de envío de 10.000 (la por defecto) y la de pago de 5.000.
     beforeAll(async () => {
-      const res = await llamar(
-        'put',
-        '/api/paquetes/configuracion',
-        tokenAdmin,
-        { precioEnvioDefecto: '10000' },
-      );
-      expect(res.status).toBe(200);
+      await envioPorMonto('10000');
       await tarifaPorMonto('5000');
       rep = await nuevoRepartidor();
       otro = await nuevoRepartidor();
@@ -1841,7 +1992,11 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       expect(cuerpo.hoja.lineas[0]).toMatchObject({
         codigo,
         cobroEnDestino: true,
+        // Sin tarifa en el paquete: la de envío por defecto, como estimado.
         precioEnvio: '10000.0000',
+        precioEstimado: true,
+        tarifaEnvioNombre: `E2E envío 10000 ${sufijoTarifas}`,
+        tarifaEnvioPaqueteId: null,
         // Sin tarifa en el paquete ni en el repartidor: la por defecto, como estimado.
         tarifaPagoNombre: `E2E pago 5000 ${sufijoTarifas}`,
         // La propia del paquete es otra cosa que la resuelta: este no tiene.
@@ -1950,7 +2105,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       const ajeno = await llamar('post', '/api/paquetes', tokenSegundoTenant, {
         codigo: codigoNuevo(),
         cobroEnDestino: false,
-        precioEnvio: '1000',
+        tarifaEnvioId: await envioPorMonto('1000', tokenSegundoTenant),
         tarifaPagoId: await tarifaPorMonto('500', tokenSegundoTenant),
       });
       expect(ajeno.status).toBe(201);
@@ -2186,6 +2341,8 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       const AYER = '2026-10-14';
       const uuidAjeno = '550e8400-e29b-41d4-a716-446655440999';
 
+      // `precioEnvio` y `pagoRepartidor` son los MONTOS de la tarifa de envío y de la de pago que
+      // se le asignan a cada paquete (ninguno es un campo del paquete: se resuelven de la tarifa).
       interface Spec {
         cantidad: number;
         cobroEnDestino: boolean;
@@ -2193,8 +2350,8 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
         pagoRepartidor: string;
       }
       /**
-       * Crea los paquetes con precio propio y la tarifa de pago del monto pedido (el pago ya no es un
-       * campo del paquete: se resuelve de la tarifa), y los asigna juntos a la hoja del repartidor.
+       * Crea los paquetes con la tarifa de envío y la de pago del monto pedido, y los asigna juntos
+       * a la hoja del repartidor.
        */
       const armar = async (
         repartidorId: string,
@@ -2208,7 +2365,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
             grupo.push(
               await crearPaquete({
                 cobroEnDestino: sp.cobroEnDestino,
-                precioEnvio: sp.precioEnvio,
+                tarifaEnvioId: await envioPorMonto(sp.precioEnvio),
                 tarifaPagoId: await tarifaPorMonto(sp.pagoRepartidor),
               }),
             );
@@ -2385,6 +2542,10 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
                   pagoRepartidor: '0.0000',
                   tarifaPagoId: null,
                   tarifaPagoNombre: null,
+                  precioEstimado: false,
+                  precioEnvio: '0.0000',
+                  tarifaEnvioId: null,
+                  tarifaEnvioNombre: null,
                 },
           ),
         );
@@ -2417,12 +2578,12 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           'patch',
           `/api/paquetes/${cobros[0].id}`,
           tokenAdmin,
-          { precioEnvio: '99999' },
+          { tarifaEnvioId: await envioPorMonto('99999') },
         );
         expect(edicion.status).toBe(400);
         expect(mensajeDe(edicion)).toContain('ya se rindió');
-        expect((await paquetePorCodigo(cobros[0].codigo)).precioEnvio).toBe(
-          '10000.0000',
+        expect((await paquetePorCodigo(cobros[0].codigo)).tarifaEnvioId).toBe(
+          await envioPorMonto('10000'),
         );
         // …pero completar la dirección sigue siendo posible
         const direccion = await llamar(
@@ -3447,6 +3608,590 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
         });
       });
 
+      describe('precio del envío (tarifa de envío fijada en la línea)', () => {
+        const patchEnvio = (id: string, cuerpo: object) =>
+          llamar('patch', `/api/tarifas-envio/${id}`, tokenAdmin, cuerpo);
+        const marcarMedio = (
+          hojaId: string,
+          paqueteId: string,
+          medio: string,
+        ) =>
+          llamar(
+            'patch',
+            `/api/hojas-ruta/${hojaId}/paquetes/${paqueteId}`,
+            tokenAdmin,
+            { estado: 'entregado', medioCobro: medio },
+          );
+        const precioDeLinea = async (hojaId: string, paqueteId: string) => {
+          const [fila] = await ds().query<
+            {
+              estado: string;
+              tarifa_envio_id: string | null;
+              precio_envio: string | null;
+            }[]
+          >(
+            `SELECT estado, tarifa_envio_id, precio_envio FROM hoja_ruta_paquetes
+              WHERE hoja_ruta_id = $1 AND paquete_id = $2 AND eliminado_el IS NULL`,
+            [hojaId, paqueteId],
+          );
+          return fila;
+        };
+
+        it('entregar fija el precio en este orden: la tarifa del paquete, si no la por defecto; en ruta se ve estimado', async () => {
+          const defecto = `E2E envío 10000 ${sufijoTarifas}`;
+          const prioritario = await envioPropio('orden prioritario', '14000');
+          const repartidor = await nuevoRepartidor();
+          const pPrioritario = await crearPaquete({
+            tarifaEnvioId: prioritario.id,
+          });
+          const pDefecto = await crearPaquete({});
+          const hoja = (
+            await asignar(repartidor.id, [pPrioritario.id, pDefecto.id])
+          ).body as HojaRutaDetalle;
+
+          // En ruta: lo que se cobraría hoy, marcado como estimado, y nada en los totales.
+          expect(lineaDe(hoja, pPrioritario.id)).toMatchObject({
+            precioEnvio: '14000.0000',
+            precioEstimado: true,
+            tarifaEnvioId: prioritario.id,
+            tarifaEnvioNombre: prioritario.nombre,
+            tarifaEnvioPaqueteId: prioritario.id,
+          });
+          expect(lineaDe(hoja, pDefecto.id)).toMatchObject({
+            precioEnvio: '10000.0000',
+            precioEstimado: true,
+            tarifaEnvioNombre: defecto,
+            tarifaEnvioPaqueteId: null,
+          });
+          expect(hoja.montoTotalGeneral).toBe('0.0000');
+          expect(await precioDeLinea(hoja.id, pPrioritario.id)).toMatchObject({
+            estado: 'en_ruta',
+            tarifa_envio_id: null,
+            precio_envio: null,
+          });
+
+          for (const p of [pPrioritario, pDefecto]) {
+            expect((await marcar(hoja.id, p.id, 'entregado')).status).toBe(200);
+          }
+          const d = await detalle(hoja.id);
+          // La del paquete REEMPLAZA a la por defecto: no se suman.
+          expect(lineaDe(d, pPrioritario.id)).toMatchObject({
+            precioEnvio: '14000.0000',
+            precioEstimado: false,
+            tarifaEnvioId: prioritario.id,
+          });
+          expect(lineaDe(d, pDefecto.id)).toMatchObject({
+            precioEnvio: '10000.0000',
+            precioEstimado: false,
+            tarifaEnvioNombre: defecto,
+          });
+          expect(d.montoTotalGeneral).toBe('24000.0000');
+          expect(await precioDeLinea(hoja.id, pPrioritario.id)).toMatchObject({
+            estado: 'entregado',
+            tarifa_envio_id: prioritario.id,
+            precio_envio: '14000.0000',
+          });
+        });
+
+        it('RF1: cambiar el monto de la tarifa después de entregar no mueve el precio ni el cobro ni los totales; lo que sigue en ruta sí muestra el nuevo; al rendir queda congelado', async () => {
+          const premium = await envioPropio('rf1 premium', '8000');
+          const repartidor = await nuevoRepartidor();
+          const [cobro, pagado, enRuta] = [
+            await crearPaquete({
+              cobroEnDestino: true,
+              tarifaEnvioId: premium.id,
+            }),
+            await crearPaquete({ tarifaEnvioId: premium.id }),
+            await crearPaquete({
+              cobroEnDestino: true,
+              tarifaEnvioId: premium.id,
+            }),
+          ];
+          const hoja = (
+            await asignar(repartidor.id, [cobro.id, pagado.id, enRuta.id])
+          ).body as HojaRutaDetalle;
+          expect((await marcar(hoja.id, cobro.id, 'entregado')).status).toBe(
+            200,
+          );
+          expect((await marcar(hoja.id, pagado.id, 'entregado')).status).toBe(
+            200,
+          );
+          const antes = await detalle(hoja.id);
+          expect(antes).toMatchObject({
+            montoCobradoDestino: '8000.0000',
+            montoTotalGeneral: '16000.0000',
+          });
+
+          expect((await patchEnvio(premium.id, { monto: '9500' })).status).toBe(
+            200,
+          );
+          const despues = await detalle(hoja.id);
+          expect(lineaDe(despues, cobro.id)).toMatchObject({
+            precioEnvio: '8000.0000',
+            precioEstimado: false,
+          });
+          expect(lineaDe(despues, pagado.id).precioEnvio).toBe('8000.0000');
+          expect(despues).toMatchObject({
+            montoCobradoDestino: '8000.0000',
+            montoCobradoEfectivo: '8000.0000',
+            montoTotalGeneral: '16000.0000',
+            netoARendir: antes.netoARendir,
+          });
+          expect(lineaDe(despues, enRuta.id)).toMatchObject({
+            precioEnvio: '9500.0000',
+            precioEstimado: true,
+          });
+          // Marcar de nuevo la entregada no la vuelve a resolver.
+          expect((await marcar(hoja.id, cobro.id, 'entregado')).status).toBe(
+            200,
+          );
+          expect((await detalle(hoja.id)).montoTotalGeneral).toBe('16000.0000');
+          // Lo entregado después toma el monto de ese momento.
+          expect((await marcar(hoja.id, enRuta.id, 'entregado')).status).toBe(
+            200,
+          );
+          expect(await detalle(hoja.id)).toMatchObject({
+            montoCobradoDestino: '17500.0000',
+            montoTotalGeneral: '25500.0000',
+          });
+          // Al rendir queda congelado, y un cambio posterior de la tarifa tampoco lo mueve.
+          expect((await rendir(hoja.id)).status).toBe(201);
+          expect((await patchEnvio(premium.id, { monto: '1' })).status).toBe(
+            200,
+          );
+          expect(await detalle(hoja.id)).toMatchObject({
+            estado: 'rendida',
+            montoCobradoDestino: '17500.0000',
+            montoTotalGeneral: '25500.0000',
+          });
+          expect(await congelado(hoja.id)).toMatchObject({
+            monto_total_general: '25500.0000',
+            monto_cobrado_destino: '17500.0000',
+          });
+        });
+
+        it('RF3: editar otro campo del paquete reenviando la MISMA tarifa de envío (o null → null) no mueve el precio de la línea entregada', async () => {
+          const premium = await envioPropio('rf3 premium', '8000');
+          const repartidor = await nuevoRepartidor();
+          const conTarifa = await crearPaquete({ tarifaEnvioId: premium.id });
+          const sinTarifa = await crearPaquete({});
+          const hoja = (
+            await asignar(repartidor.id, [conTarifa.id, sinTarifa.id])
+          ).body as HojaRutaDetalle;
+          for (const p of [conTarifa, sinTarifa]) {
+            expect((await marcar(hoja.id, p.id, 'entregado')).status).toBe(200);
+          }
+          const antes = await detalle(hoja.id);
+          expect(antes.montoTotalGeneral).toBe('18000.0000');
+
+          // Sube el monto de la del paquete y cambia la por defecto, con las entregas ya hechas.
+          expect((await patchEnvio(premium.id, { monto: '8800' })).status).toBe(
+            200,
+          );
+          const defecto = (
+            (await llamar('get', '/api/tarifas-envio'))
+              .body as TarifaEnvioFila[]
+          ).find((t) => t.esDefecto)!;
+          // Devuelve el monto de la por defecto aunque algo falle: el resto de los casos parte de 10.000.
+          try {
+            expect(
+              (await patchEnvio(defecto.id, { monto: '10300' })).status,
+            ).toBe(200);
+
+            const misma = await llamar(
+              'patch',
+              `/api/paquetes/${conTarifa.id}`,
+              tokenAdmin,
+              { tarifaEnvioId: premium.id, direccion: 'Av. Nueva 123' },
+            );
+            expect(misma.status).toBe(200);
+            const nulaNula = await llamar(
+              'patch',
+              `/api/paquetes/${sinTarifa.id}`,
+              tokenAdmin,
+              { tarifaEnvioId: null, direccion: 'Av. Nueva 456' },
+            );
+            expect(nulaNula.status).toBe(200);
+
+            const despues = await detalle(hoja.id);
+            expect(lineaDe(despues, conTarifa.id).precioEnvio).toBe(
+              '8000.0000',
+            );
+            expect(lineaDe(despues, sinTarifa.id).precioEnvio).toBe(
+              '10000.0000',
+            );
+            expect(despues.montoTotalGeneral).toBe('18000.0000');
+          } finally {
+            await patchEnvio(defecto.id, { monto: '10000' });
+          }
+        });
+
+        it('RF3: reenviar la MISMA tarifa en MAYÚSCULAS (de envío y de pago) tampoco mueve la línea entregada', async () => {
+          const premium = await envioPropio('rf3 mayus premium', '8000');
+          const colina = await tarifaPropia('rf3 mayus colina', '4000');
+          const repartidor = await nuevoRepartidor();
+          const p = await crearPaquete({
+            tarifaEnvioId: premium.id,
+            tarifaPagoId: colina.id,
+          });
+          const hoja = (await asignar(repartidor.id, [p.id]))
+            .body as HojaRutaDetalle;
+          expect((await marcar(hoja.id, p.id, 'entregado')).status).toBe(200);
+          expect(await detalle(hoja.id)).toMatchObject({
+            montoTotalGeneral: '8000.0000',
+            montoPagoRepartidor: '4000.0000',
+          });
+          expect((await patchEnvio(premium.id, { monto: '9900' })).status).toBe(
+            200,
+          );
+          expect(
+            (
+              await llamar(
+                'patch',
+                `/api/tarifas-pago/${colina.id}`,
+                tokenAdmin,
+                { monto: '4900' },
+              )
+            ).status,
+          ).toBe(200);
+          const res = await llamar(
+            'patch',
+            `/api/paquetes/${p.id}`,
+            tokenAdmin,
+            {
+              tarifaEnvioId: premium.id.toUpperCase(),
+              tarifaPagoId: colina.id.toUpperCase(),
+              direccion: 'Av. Mayúsculas 1',
+            },
+          );
+          expect(res.status).toBe(200);
+          expect(await detalle(hoja.id)).toMatchObject({
+            montoTotalGeneral: '8000.0000',
+            montoPagoRepartidor: '4000.0000',
+          });
+        });
+
+        it('cambiar la tarifa de envío del paquete con la línea entregada y la hoja abierta la vuelve a resolver; rendida, no; el pago no se toca', async () => {
+          const premium = await envioPropio('reresolver premium', '8000');
+          const colina = await tarifaPropia('reresolver envio colina', '4000');
+          const repartidor = await nuevoRepartidor();
+          const p = await crearPaquete({ tarifaPagoId: colina.id });
+          const hoja = (await asignar(repartidor.id, [p.id]))
+            .body as HojaRutaDetalle;
+          expect((await marcar(hoja.id, p.id, 'entregado')).status).toBe(200);
+          expect(await detalle(hoja.id)).toMatchObject({
+            montoTotalGeneral: '10000.0000',
+            montoPagoRepartidor: '4000.0000',
+          });
+          // Con el pago fijado, sube la de pago: SOLO el cambio de envío debe re-resolver el precio.
+          expect(
+            (
+              await llamar(
+                'patch',
+                `/api/tarifas-pago/${colina.id}`,
+                tokenAdmin,
+                {
+                  monto: '4700',
+                },
+              )
+            ).status,
+          ).toBe(200);
+
+          const pone = await llamar(
+            'patch',
+            `/api/paquetes/${p.id}`,
+            tokenAdmin,
+            { tarifaEnvioId: premium.id },
+          );
+          expect(pone.status).toBe(200);
+          const conPremium = await detalle(hoja.id);
+          expect(lineaDe(conPremium, p.id)).toMatchObject({
+            tarifaEnvioId: premium.id,
+            precioEnvio: '8000.0000',
+            precioEstimado: false,
+          });
+          expect(conPremium.montoTotalGeneral).toBe('8000.0000');
+          // El pago conserva lo fijado (4.000): no se re-resolvió con el monto nuevo (4.700).
+          expect(conPremium.montoPagoRepartidor).toBe('4000.0000');
+
+          const saca = await llamar(
+            'patch',
+            `/api/paquetes/${p.id}`,
+            tokenAdmin,
+            { tarifaEnvioId: null },
+          );
+          expect(saca.status).toBe(200);
+          expect((await detalle(hoja.id)).montoTotalGeneral).toBe('10000.0000');
+
+          expect((await rendir(hoja.id)).status).toBe(201);
+          const tarde = await llamar(
+            'patch',
+            `/api/paquetes/${p.id}`,
+            tokenAdmin,
+            { tarifaEnvioId: premium.id },
+          );
+          expect(tarde.status).toBe(400);
+          expect(mensajeDe(tarde)).toContain('ya se rindió');
+          expect((await detalle(hoja.id)).montoTotalGeneral).toBe('10000.0000');
+        });
+
+        it('cambiar las dos tarifas del paquete a la vez re-resuelve pago y precio de la línea entregada', async () => {
+          const premium = await envioPropio('ambas premium', '8000');
+          const colina = await tarifaPropia('ambas colina', '4000');
+          const repartidor = await nuevoRepartidor();
+          const p = await crearPaquete({});
+          const hoja = (await asignar(repartidor.id, [p.id]))
+            .body as HojaRutaDetalle;
+          expect((await marcar(hoja.id, p.id, 'entregado')).status).toBe(200);
+          const res = await llamar(
+            'patch',
+            `/api/paquetes/${p.id}`,
+            tokenAdmin,
+            { tarifaEnvioId: premium.id, tarifaPagoId: colina.id },
+          );
+          expect(res.status).toBe(200);
+          expect(await detalle(hoja.id)).toMatchObject({
+            montoTotalGeneral: '8000.0000',
+            montoPagoRepartidor: '4000.0000',
+          });
+        });
+
+        it('RF5: una línea no entregada de una hoja rendida no informa precio estimado; en una hoja abierta sí', async () => {
+          const repartidor = await nuevoRepartidor();
+          const [entregado, fallido] = [
+            await crearPaquete({}),
+            await crearPaquete({}),
+          ];
+          const hoja = (
+            await asignar(repartidor.id, [entregado.id, fallido.id])
+          ).body as HojaRutaDetalle;
+          expect(
+            (await marcar(hoja.id, entregado.id, 'entregado')).status,
+          ).toBe(200);
+          expect(
+            (await marcar(hoja.id, fallido.id, 'no_entregado')).status,
+          ).toBe(200);
+          expect(lineaDe(await detalle(hoja.id), fallido.id)).toMatchObject({
+            estado: 'no_entregado',
+            precioEstimado: true,
+            precioEnvio: '10000.0000',
+          });
+          expect((await rendir(hoja.id)).status).toBe(201);
+          const cerrada = await detalle(hoja.id);
+          expect(lineaDe(cerrada, fallido.id)).toMatchObject({
+            estado: 'no_entregado',
+            precioEstimado: false,
+            precioEnvio: '0.0000',
+            tarifaEnvioId: null,
+            tarifaEnvioNombre: null,
+          });
+          expect(lineaDe(cerrada, entregado.id)).toMatchObject({
+            precioEstimado: false,
+            precioEnvio: '10000.0000',
+          });
+          expect(await precioDeLinea(hoja.id, fallido.id)).toMatchObject({
+            estado: 'no_entregado',
+            tarifa_envio_id: null,
+            precio_envio: null,
+          });
+        });
+
+        it('volver a en_ruta o no_entregado limpia tarifa y precio; al volver a entregar se resuelven de nuevo', async () => {
+          const premium = await envioPropio('limpia premium', '8000');
+          const repartidor = await nuevoRepartidor();
+          const p = await crearPaquete({ tarifaEnvioId: premium.id });
+          const hoja = (await asignar(repartidor.id, [p.id]))
+            .body as HojaRutaDetalle;
+          expect((await marcar(hoja.id, p.id, 'entregado')).status).toBe(200);
+          for (const estado of ['en_ruta', 'no_entregado']) {
+            expect((await marcar(hoja.id, p.id, estado)).status).toBe(200);
+            expect(await precioDeLinea(hoja.id, p.id)).toMatchObject({
+              estado,
+              tarifa_envio_id: null,
+              precio_envio: null,
+            });
+            expect((await detalle(hoja.id)).montoTotalGeneral).toBe('0.0000');
+            expect((await marcar(hoja.id, p.id, 'entregado')).status).toBe(200);
+          }
+          expect(await precioDeLinea(hoja.id, p.id)).toMatchObject({
+            tarifa_envio_id: premium.id,
+            precio_envio: '8000.0000',
+          });
+        });
+
+        it('entregar-todos fija el precio de cada línea según su tarifa, en una sola sentencia con el pago', async () => {
+          const premium = await envioPropio('todos premium', '8000');
+          const repartidor = await nuevoRepartidor();
+          const a = await crearPaquete({
+            cobroEnDestino: true,
+            tarifaEnvioId: premium.id,
+          });
+          const b = await crearPaquete({ cobroEnDestino: true });
+          const hoja = (await asignar(repartidor.id, [a.id, b.id]))
+            .body as HojaRutaDetalle;
+          const todos = await llamar(
+            'post',
+            `/api/hojas-ruta/${hoja.id}/entregar-todos`,
+            tokenAdmin,
+            {},
+          );
+          expect(todos.status).toBe(200);
+          const d = todos.body as HojaRutaDetalle;
+          expect(lineaDe(d, a.id)).toMatchObject({
+            precioEnvio: '8000.0000',
+            tarifaEnvioId: premium.id,
+            precioEstimado: false,
+          });
+          expect(lineaDe(d, b.id)).toMatchObject({
+            precioEnvio: '10000.0000',
+            precioEstimado: false,
+          });
+          expect(d).toMatchObject({
+            montoCobradoDestino: '18000.0000',
+            montoTotalGeneral: '18000.0000',
+            montoPagoRepartidor: '10000.0000',
+          });
+        });
+
+        it('totales iguales con efectivo y con transferencia: el cobrado se parte, el total general no cambia', async () => {
+          const premium = await envioPropio('medios premium', '8000');
+          const armarHoja = async () => {
+            const repartidor = await nuevoRepartidor();
+            const paquetes = [
+              await crearPaquete({
+                cobroEnDestino: true,
+                tarifaEnvioId: premium.id,
+              }),
+              await crearPaquete({ cobroEnDestino: true }),
+            ];
+            const hoja = (
+              await asignar(
+                repartidor.id,
+                paquetes.map((p) => p.id),
+              )
+            ).body as HojaRutaDetalle;
+            return { hoja, paquetes };
+          };
+          const efectivo = await armarHoja();
+          for (const p of efectivo.paquetes) {
+            expect(
+              (await marcarMedio(efectivo.hoja.id, p.id, 'efectivo')).status,
+            ).toBe(200);
+          }
+          const transferencia = await armarHoja();
+          for (const p of transferencia.paquetes) {
+            expect(
+              (await marcarMedio(transferencia.hoja.id, p.id, 'transferencia'))
+                .status,
+            ).toBe(200);
+          }
+          const dEfectivo = await detalle(efectivo.hoja.id);
+          const dTransferencia = await detalle(transferencia.hoja.id);
+          expect(dEfectivo).toMatchObject({
+            montoCobradoDestino: '18000.0000',
+            montoCobradoEfectivo: '18000.0000',
+            montoCobradoTransferencia: '0.0000',
+            montoTotalGeneral: '18000.0000',
+          });
+          expect(dTransferencia).toMatchObject({
+            montoCobradoDestino: '18000.0000',
+            montoCobradoEfectivo: '0.0000',
+            montoCobradoTransferencia: '18000.0000',
+            montoTotalGeneral: '18000.0000',
+          });
+          expect(dEfectivo.netoARendir).toBe(dTransferencia.netoARendir);
+        });
+
+        it('KPIs y rendición suman el precio fijo de las líneas: un cambio posterior de la tarifa no los mueve', async () => {
+          const premium = await envioPropio('kpi premium', '8000');
+          const dia = '2026-09-07';
+          const repartidor = await nuevoRepartidor();
+          const [cobro, pagado] = [
+            await crearPaquete({
+              cobroEnDestino: true,
+              tarifaEnvioId: premium.id,
+            }),
+            await crearPaquete({ tarifaEnvioId: premium.id }),
+          ];
+          const hoja = (
+            await asignar(repartidor.id, [cobro.id, pagado.id], { fecha: dia })
+          ).body as HojaRutaDetalle;
+          expect(
+            (await marcarMedio(hoja.id, cobro.id, 'transferencia')).status,
+          ).toBe(200);
+          expect((await marcar(hoja.id, pagado.id, 'entregado')).status).toBe(
+            200,
+          );
+          const esperado = {
+            entregados: 2,
+            cobroDestino: 1,
+            montoCobradoDestino: '8000.0000',
+            montoCobradoTransferencia: '8000.0000',
+            montoTotalGeneral: '16000.0000',
+          };
+          const q = `desde=${dia}&hasta=${dia}&repartidorId=${repartidor.id}`;
+          expect(await resumen(q)).toMatchObject(esperado);
+
+          expect(
+            (await patchEnvio(premium.id, { monto: '12000' })).status,
+          ).toBe(200);
+          expect(await resumen(q)).toMatchObject(esperado);
+          const previaRes = await llamar(
+            'get',
+            `/api/rendiciones/previa?repartidorId=${repartidor.id}&hojaIds=${hoja.id}`,
+          );
+          expect(previaRes.status).toBe(200);
+          expect((previaRes.body as RendicionDetalle).totales).toMatchObject({
+            montoCobradoDestino: '8000.0000',
+            montoCobradoTransferencia: '8000.0000',
+            montoCobradoEfectivo: '0.0000',
+          });
+
+          const rendida = await rendirHojas(repartidor.id, [hoja.id]);
+          expect(rendida.status).toBe(201);
+          const r = rendida.body as RendicionDetalle;
+          expect(r.totales).toMatchObject({
+            entregados: 2,
+            montoCobradoDestino: '8000.0000',
+            montoCobradoTransferencia: '8000.0000',
+          });
+          expect(r.dias[0]).toMatchObject({
+            montoCobradoTransferencia: '8000.0000',
+          });
+          // Rendida: otro cambio de la tarifa y el resumen sigue igual (lee lo congelado).
+          expect((await patchEnvio(premium.id, { monto: '1' })).status).toBe(
+            200,
+          );
+          expect(await resumen(q)).toMatchObject(esperado);
+          expect(
+            (await llamar('get', `/api/rendiciones/${r.id}`)).body,
+          ).toMatchObject({ totales: r.totales });
+        });
+
+        it('los CHECK de la línea: entregada sin precio y precio sin entregar se rechazan en la base', async () => {
+          const repartidor = await nuevoRepartidor();
+          const p = await crearPaquete({});
+          const hoja = (await asignar(repartidor.id, [p.id]))
+            .body as HojaRutaDetalle;
+          const sinPrecio = ds().query(
+            `UPDATE hoja_ruta_paquetes SET estado = 'entregado', pago_repartidor = 1
+              WHERE hoja_ruta_id = $1 AND paquete_id = $2`,
+            [hoja.id, p.id],
+          );
+          await expect(sinPrecio).rejects.toThrow(
+            /chk_hoja_ruta_paquetes_precio/,
+          );
+          const sinEntregar = ds().query(
+            `UPDATE hoja_ruta_paquetes SET precio_envio = 1
+              WHERE hoja_ruta_id = $1 AND paquete_id = $2`,
+            [hoja.id, p.id],
+          );
+          await expect(sinEntregar).rejects.toThrow(
+            /chk_hoja_ruta_paquetes_precio/,
+          );
+        });
+      });
+
       describe('entregas de plata y rendición por repartidor', () => {
         const unaEntrega: Spec = {
           cantidad: 1,
@@ -4209,11 +4954,12 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
             ]);
             const [p] = grupos[0];
             expect((await marcar(hoja.id, p.id, 'entregado')).status).toBe(200);
+            const nueva = await envioPorMonto('12000');
 
             const rendicion = async () => rendir(hoja.id);
             const cambio = async () =>
               llamar('patch', `/api/paquetes/${p.id}`, tokenAdmin, {
-                precioEnvio: '12000',
+                tarifaEnvioId: nueva,
               });
             const { respuestas, esperando } = await correrCarrera(
               ds(),
@@ -4242,7 +4988,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
             expect(fila.estado).toBe('rendida');
             expect(fila.monto_total_general).toBe(montoFinal);
             expect(fila.monto_cobrado_destino).toBe(montoFinal);
-            expect((await paquetePorCodigo(p.codigo)).precioEnvio).toBe(
+            expect(lineaDe(await detalle(hoja.id), p.id).precioEnvio).toBe(
               montoFinal,
             );
           },
@@ -4528,7 +5274,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
       expect(juan.totales).toEqual(d.totales);
     });
 
-    it('trae sus tarifas de pago (Auto por defecto), repartidores con la suya y paquetes con Colina; la configuración queda completa', async () => {
+    it('trae sus tarifas de pago (Auto por defecto), repartidores con la suya, paquetes con Colina y tres tarifas de envío', async () => {
       const tarifas = await llamar('get', '/api/tarifas-pago', tokenDemo);
       expect(tarifas.status).toBe(200);
       expect(
@@ -4559,16 +5305,31 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
           (p) => p.tarifaPagoNombre === 'Colina',
         ),
       ).toHaveLength(5);
-      const config = await llamar(
-        'get',
-        '/api/paquetes/configuracion',
-        tokenDemo,
-      );
-      expect(config.status).toBe(200);
-      expect(config.body).toEqual({
-        configurada: true,
-        precioEnvioDefecto: '10000.0000',
-      });
+      // El envío se cobra con tres tarifas, Estándar por defecto; Prioritario y Premium van solo a
+      // paquetes que no están entregados en una hoja rendida (así las rendiciones no se mueven).
+      const envios = await llamar('get', '/api/tarifas-envio', tokenDemo);
+      expect(envios.status).toBe(200);
+      expect(
+        (envios.body as TarifaEnvioFila[]).map((t) => [
+          t.nombre,
+          t.monto,
+          t.esDefecto,
+        ]),
+      ).toEqual([
+        ['Estándar', '10000.0000', true],
+        ['Premium', '20000.0000', false],
+        ['Prioritario', '14000.0000', false],
+      ]);
+      const conEnvio = (paquetes.body as PaginatedResponse<PaqueteFila>).data
+        .filter((p) => p.tarifaEnvioNombre !== null)
+        .map((p) => p.tarifaEnvioNombre)
+        .sort();
+      expect(conEnvio).toEqual(['Premium', 'Prioritario', 'Prioritario']);
+      expect(
+        (paquetes.body as PaginatedResponse<PaqueteFila>).data
+          .filter((p) => p.tarifaEnvioNombre !== null)
+          .every((p) => p.estado !== 'entregado'),
+      ).toBe(true);
     });
 
     it('nace con lo que le da TenantsService.create: métodos de pago habilitados y los motivos fijos', async () => {
@@ -4616,7 +5377,7 @@ describe('Paquetería — configuración y repartidores (e2e)', () => {
            UNION ALL SELECT 'motivo_diferencia_caja', COUNT(*)::int FROM motivo_diferencia_caja
            UNION ALL SELECT 'motivo_diferencia_inventario', COUNT(*)::int FROM motivo_diferencia_inventario
            UNION ALL SELECT 'motivo_traslado', COUNT(*)::int FROM motivo_traslado
-           UNION ALL SELECT 'paquete_configuracion', COUNT(*)::int FROM paquete_configuracion
+           UNION ALL SELECT 'tarifas_envio', COUNT(*)::int FROM tarifas_envio
            UNION ALL SELECT 'tarifas_pago', COUNT(*)::int FROM tarifas_pago
            UNION ALL SELECT 'repartidores', COUNT(*)::int FROM repartidores
            UNION ALL SELECT 'paquetes', COUNT(*)::int FROM paquetes

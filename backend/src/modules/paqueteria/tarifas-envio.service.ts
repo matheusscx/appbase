@@ -124,6 +124,11 @@ export class TarifasEnvioService {
   /**
    * Soft delete. La por defecto no se borra, y una en uso por un paquete tampoco: hay que
    * desactivarla (sale de los selectores; las entregas ya marcadas guardan su precio).
+   *
+   * Solo se cuentan los PAQUETES, no las líneas de hoja (`hoja_ruta_paquetes.tarifa_envio_id`),
+   * igual que `tarifas_pago`: la FK no frena un soft delete, y la línea no depende de la tarifa
+   * (copió su precio al entregar; el nombre se lee sin filtro de borrado a propósito). Contar las
+   * líneas dejaría sin borrar para siempre toda tarifa que alguna vez cobró una entrega.
    */
   async eliminar(tenantId: string, id: string): Promise<{ success: true }> {
     return this.db.transaccion(async () => {
@@ -174,6 +179,27 @@ export class TarifasEnvioService {
     if (!rows.length || !rows[0].activa) {
       throw new BadRequestException(
         'La tarifa de envío no existe o está inactiva',
+      );
+    }
+  }
+
+  /**
+   * Para quien crea un paquete sin tarifa de envío propia: sin una por defecto no hay con qué
+   * cobrar el envío y se crearía un paquete que se entrega a $0. La por defecto no se borra ni se
+   * desactiva (`actualizar`, `eliminar`), así que si hay alguna tarifa hay una por defecto y esta
+   * lectura sin cerrojo no se desactualiza.
+   */
+  async exigirDefecto(tenantId: string): Promise<void> {
+    const rows: { hay: boolean }[] = await this.db.query(
+      `SELECT EXISTS (
+         SELECT 1 FROM tarifas_envio
+          WHERE tenant_id = $1 AND es_defecto AND eliminado_el IS NULL
+       ) AS hay`,
+      [tenantId],
+    );
+    if (!rows[0].hay) {
+      throw new BadRequestException(
+        'Carga una tarifa de envío por defecto en Configuración → Paquetería antes de cargar paquetes.',
       );
     }
   }

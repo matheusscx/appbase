@@ -24,9 +24,10 @@ const filaSql = (cambios: Partial<PaqueteFilaRow> = {}): PaqueteFilaRow => ({
   remitente_tercero_id: null,
   remitente_nombre: null,
   cobro_en_destino: false,
-  precio_envio: '10000.0000',
   tarifa_pago_id: null,
   tarifa_pago_nombre: null,
+  tarifa_envio_id: null,
+  tarifa_envio_nombre: null,
   estado: 'disponible',
   hoja_ruta_id: null,
   repartidor_nombre: null,
@@ -39,15 +40,18 @@ describe('PaquetesService', () => {
     query: jest.fn(),
     transaccion: jest.fn((cb: () => unknown) => cb()),
   };
-  const configMock = { exigirDefaults: jest.fn() };
   const tarifasMock = {
+    exigirActivaDelTenant: jest.fn(),
+    exigirDefecto: jest.fn(),
+  };
+  const envioMock = {
     exigirActivaDelTenant: jest.fn(),
     exigirDefecto: jest.fn(),
   };
   const service = new PaquetesService(
     db as never,
-    configMock as never,
     tarifasMock as never,
+    envioMock as never,
   );
 
   const sqlDe = (n: number) => db.query.mock.calls[n][0] as string;
@@ -56,14 +60,15 @@ describe('PaquetesService', () => {
   beforeEach(() => {
     db.query.mockReset();
     db.transaccion.mockClear();
-    configMock.exigirDefaults.mockReset();
     tarifasMock.exigirActivaDelTenant.mockReset().mockResolvedValue(undefined);
     tarifasMock.exigirDefecto.mockReset().mockResolvedValue(undefined);
+    envioMock.exigirActivaDelTenant.mockReset().mockResolvedValue(undefined);
+    envioMock.exigirDefecto.mockReset().mockResolvedValue(undefined);
   });
 
   describe('SELECT_PAQUETE_FILA', () => {
     it('cada tabla unida filtra tenant y borrado', () => {
-      for (const alias of ['t', 'tp', 'l', 'h', 'r']) {
+      for (const alias of ['t', 'tp', 'te', 'l', 'h', 'r']) {
         expect(SELECT_PAQUETE_FILA).toMatch(
           new RegExp(`${alias}\\.tenant_id = p\\.tenant_id`),
         );
@@ -191,10 +196,7 @@ describe('PaquetesService', () => {
   });
 
   describe('create', () => {
-    it('sin precio copia el default de la configuración, y sin tarifa exige que haya una por defecto', async () => {
-      configMock.exigirDefaults.mockResolvedValue({
-        precioEnvio: '10000',
-      });
+    it('sin tarifas propias exige que haya una por defecto de cada una y no copia ningún precio', async () => {
       db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
       db.query.mockResolvedValueOnce([filaSql()]);
       await service.create(TENANT, {
@@ -204,6 +206,7 @@ describe('PaquetesService', () => {
       expect(sqlDe(0)).toMatch(
         /ON CONFLICT \(tenant_id, codigo\) WHERE eliminado_el IS NULL\s+DO NOTHING/,
       );
+      expect(sqlDe(0)).not.toMatch(/precio_envio/);
       expect(paramsDe(0)).toEqual([
         TENANT,
         '461',
@@ -214,59 +217,71 @@ describe('PaquetesService', () => {
         null,
         null,
         false,
-        '10000',
+        null,
         null,
       ]);
       expect(tarifasMock.exigirDefecto).toHaveBeenCalledWith(TENANT);
+      expect(envioMock.exigirDefecto).toHaveBeenCalledWith(TENANT);
       expect(tarifasMock.exigirActivaDelTenant).not.toHaveBeenCalled();
+      expect(envioMock.exigirActivaDelTenant).not.toHaveBeenCalled();
     });
 
-    it('con precio explícito no exige la configuración', async () => {
-      db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
-      db.query.mockResolvedValueOnce([filaSql()]);
-      await service.create(TENANT, {
-        codigo: '461',
-        cobroEnDestino: true,
-        precioEnvio: '8000',
+    it('con tarifaPagoId y tarifaEnvioId las valida con cerrojo dentro de la transacción (pago, después envío) y las guarda', async () => {
+      const orden: string[] = [];
+      tarifasMock.exigirActivaDelTenant.mockImplementation(() => {
+        orden.push('pago');
+        return Promise.resolve();
       });
-      expect(configMock.exigirDefaults).not.toHaveBeenCalled();
-      expect(paramsDe(0).slice(-2)).toEqual(['8000', null]);
-    });
-
-    it('con tarifaPagoId la valida con cerrojo dentro de la transacción y la guarda', async () => {
+      envioMock.exigirActivaDelTenant.mockImplementation(() => {
+        orden.push('envio');
+        return Promise.resolve();
+      });
       db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
       db.query.mockResolvedValueOnce([filaSql()]);
       await service.create(TENANT, {
         codigo: '461',
         cobroEnDestino: false,
-        precioEnvio: '8000',
         tarifaPagoId: 'tarifa-1',
+        tarifaEnvioId: 'envio-1',
       });
       expect(db.transaccion).toHaveBeenCalledTimes(1);
+      expect(orden).toEqual(['pago', 'envio']);
       expect(tarifasMock.exigirActivaDelTenant).toHaveBeenCalledWith(
         TENANT,
         'tarifa-1',
         { bloquear: true },
       );
+      expect(envioMock.exigirActivaDelTenant).toHaveBeenCalledWith(
+        TENANT,
+        'envio-1',
+        { bloquear: true },
+      );
       expect(tarifasMock.exigirDefecto).not.toHaveBeenCalled();
-      expect(paramsDe(0).slice(-2)).toEqual(['8000', 'tarifa-1']);
+      expect(envioMock.exigirDefecto).not.toHaveBeenCalled();
+      expect(paramsDe(0).slice(-2)).toEqual(['tarifa-1', 'envio-1']);
     });
 
-    it('sin ninguna tarifa cargada: 400 y no se inserta', async () => {
+    it('sin ninguna tarifa de pago cargada: 400 y no se inserta', async () => {
       tarifasMock.exigirDefecto.mockRejectedValue(
         new BadRequestException('Carga al menos una tarifa de pago'),
       );
       await expect(
-        service.create(TENANT, {
-          codigo: '461',
-          cobroEnDestino: false,
-          precioEnvio: '8000',
-        }),
+        service.create(TENANT, { codigo: '461', cobroEnDestino: false }),
       ).rejects.toThrow(/Carga al menos una tarifa/);
       expect(db.query).not.toHaveBeenCalled();
     });
 
-    it('una tarifa ajena o inactiva: 400 y no se inserta', async () => {
+    it('sin tarifa de envío por defecto (RF4): 400 y no se inserta', async () => {
+      envioMock.exigirDefecto.mockRejectedValue(
+        new BadRequestException('Carga una tarifa de envío por defecto'),
+      );
+      await expect(
+        service.create(TENANT, { codigo: '461', cobroEnDestino: false }),
+      ).rejects.toThrow(/tarifa de envío por defecto/);
+      expect(db.query).not.toHaveBeenCalled();
+    });
+
+    it('una tarifa de pago o de envío ajena o inactiva: 400 y no se inserta', async () => {
       tarifasMock.exigirActivaDelTenant.mockRejectedValue(
         new BadRequestException('La tarifa de pago no existe o está inactiva'),
       );
@@ -274,27 +289,23 @@ describe('PaquetesService', () => {
         service.create(TENANT, {
           codigo: '461',
           cobroEnDestino: false,
-          precioEnvio: '8000',
           tarifaPagoId: 'ajena',
+        }),
+      ).rejects.toThrow(BadRequestException);
+      envioMock.exigirActivaDelTenant.mockRejectedValue(
+        new BadRequestException('La tarifa de envío no existe o está inactiva'),
+      );
+      await expect(
+        service.create(TENANT, {
+          codigo: '461',
+          cobroEnDestino: false,
+          tarifaEnvioId: 'ajena',
         }),
       ).rejects.toThrow(BadRequestException);
       expect(db.query).not.toHaveBeenCalled();
     });
 
-    it('sin configuración y sin montos: el 400 de la configuración sube y no se inserta', async () => {
-      configMock.exigirDefaults.mockRejectedValue(
-        new BadRequestException('Configurá los valores'),
-      );
-      await expect(
-        service.create(TENANT, { codigo: '461', cobroEnDestino: false }),
-      ).rejects.toThrow(BadRequestException);
-      expect(db.query).not.toHaveBeenCalled();
-    });
-
     it('código repetido: 409 con el código normalizado', async () => {
-      configMock.exigirDefaults.mockResolvedValue({
-        precioEnvio: '1',
-      });
       db.query.mockResolvedValueOnce([[], 0]);
       const intento = service.create(TENANT, {
         codigo: '{"id":"461"}',
@@ -382,7 +393,7 @@ describe('PaquetesService', () => {
 
     it('un paquete entregado en hoja rendida: 400 al tocar montos o cobro en destino', async () => {
       for (const dto of [
-        { precioEnvio: '1' },
+        { tarifaEnvioId: 'envio-1' },
         { tarifaPagoId: 'tarifa-1' },
         { cobroEnDestino: true },
       ]) {
@@ -444,6 +455,103 @@ describe('PaquetesService', () => {
       expect(tarifasMock.exigirActivaDelTenant).not.toHaveBeenCalled();
       expect(paramsDe(2)).toEqual([ID, TENANT, null]);
       expect(sqlDe(3)).toMatch(/SET tarifa_pago_id = tr\.tarifa_pago_id/);
+    });
+
+    it('cambiar SOLO la tarifa de envío valida con cerrojo, la guarda y re-resuelve solo el precio de la línea entregada', async () => {
+      bloqueoDeHoja();
+      db.query.mockResolvedValueOnce([filaSql()]);
+      db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
+      db.query.mockResolvedValueOnce([[], 0]); // la re-resolución
+      db.query.mockResolvedValueOnce([filaSql({ tarifa_envio_id: 'envio-1' })]);
+      await service.update(TENANT, ID, { tarifaEnvioId: 'envio-1' });
+      expect(envioMock.exigirActivaDelTenant).toHaveBeenCalledWith(
+        TENANT,
+        'envio-1',
+        { bloquear: true },
+      );
+      expect(tarifasMock.exigirActivaDelTenant).not.toHaveBeenCalled();
+      expect(sqlDe(2)).toMatch(/SET tarifa_envio_id = \$3/);
+      expect(sqlDe(3)).toMatch(
+        /SET tarifa_envio_id = te\.tarifa_envio_id, precio_envio = te\.monto/,
+      );
+      // La mitad del pago no se toca.
+      expect(sqlDe(3)).not.toMatch(/pago_repartidor/);
+      expect(sqlDe(3)).toMatch(/l\.estado = 'entregado'/);
+      expect(sqlDe(3)).toMatch(/h\.estado = 'abierta'/);
+      expect(sqlDe(3)).toMatch(/e1\.tarifa_envio_id = p\.tarifa_envio_id/);
+    });
+
+    it('cambiar SOLO la de pago no toca el precio de la línea', async () => {
+      bloqueoDeHoja();
+      db.query.mockResolvedValueOnce([filaSql()]);
+      db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
+      db.query.mockResolvedValueOnce([[], 0]);
+      db.query.mockResolvedValueOnce([filaSql({ tarifa_pago_id: 'tarifa-1' })]);
+      await service.update(TENANT, ID, { tarifaPagoId: 'tarifa-1' });
+      expect(sqlDe(3)).not.toMatch(/precio_envio|tarifas_envio/);
+    });
+
+    it('cambiar las dos resuelve pago y precio en UNA sentencia', async () => {
+      bloqueoDeHoja();
+      db.query.mockResolvedValueOnce([filaSql()]);
+      db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
+      db.query.mockResolvedValueOnce([[], 0]);
+      db.query.mockResolvedValueOnce([filaSql()]);
+      await service.update(TENANT, ID, {
+        tarifaPagoId: 'tarifa-1',
+        tarifaEnvioId: 'envio-1',
+      });
+      expect(db.query).toHaveBeenCalledTimes(5);
+      expect(sqlDe(3)).toMatch(/pago_repartidor = tr\.monto/);
+      expect(sqlDe(3)).toMatch(/precio_envio = te\.monto/);
+    });
+
+    it('reenviar la MISMA tarifa de envío (o null → null) no re-resuelve la línea entregada (RF3)', async () => {
+      for (const [actual, enviada] of [
+        ['envio-1', 'envio-1'],
+        [null, null],
+      ] as const) {
+        db.query.mockReset();
+        bloqueoDeHoja();
+        db.query.mockResolvedValueOnce([filaSql({ tarifa_envio_id: actual })]);
+        db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
+        db.query.mockResolvedValueOnce([filaSql({ tarifa_envio_id: actual })]);
+        await service.update(TENANT, ID, {
+          tarifaEnvioId: enviada,
+          direccion: 'x',
+        });
+        expect(db.query).toHaveBeenCalledTimes(4);
+        expect(envioMock.exigirActivaDelTenant).not.toHaveBeenCalled();
+        expect(
+          db.query.mock.calls.some((c) =>
+            /precio_envio = te\.monto/.test(c[0] as string),
+          ),
+        ).toBe(false);
+      }
+    });
+
+    it('quitar la tarifa de envío (null) no valida nada y re-resuelve el precio', async () => {
+      bloqueoDeHoja();
+      db.query.mockResolvedValueOnce([filaSql({ tarifa_envio_id: 'envio-1' })]);
+      db.query.mockResolvedValueOnce([[{ paquete_id: ID }], 1]);
+      db.query.mockResolvedValueOnce([[], 0]);
+      db.query.mockResolvedValueOnce([filaSql()]);
+      await service.update(TENANT, ID, { tarifaEnvioId: null });
+      expect(envioMock.exigirActivaDelTenant).not.toHaveBeenCalled();
+      expect(paramsDe(2)).toEqual([ID, TENANT, null]);
+      expect(sqlDe(3)).toMatch(/precio_envio = te\.monto/);
+    });
+
+    it('una tarifa de envío ajena o inactiva: 400 y no se escribe el paquete', async () => {
+      bloqueoDeHoja();
+      db.query.mockResolvedValueOnce([filaSql()]);
+      envioMock.exigirActivaDelTenant.mockRejectedValue(
+        new BadRequestException('La tarifa de envío no existe o está inactiva'),
+      );
+      await expect(
+        service.update(TENANT, ID, { tarifaEnvioId: 'ajena' }),
+      ).rejects.toThrow(BadRequestException);
+      expect(db.query).toHaveBeenCalledTimes(2);
     });
 
     it('una tarifa ajena o inactiva: 400 y no se escribe el paquete', async () => {

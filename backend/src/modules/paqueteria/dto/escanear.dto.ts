@@ -8,6 +8,7 @@ import {
 } from 'class-validator';
 import { EsFechaPura } from '../../../common/decorators/fecha-pura.decorator';
 import { MAX_ENTRADA_CODIGO } from '../codigo-paquete';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 export class EscanearDto {
   @IsUUID()
@@ -29,6 +30,13 @@ export class EscanearDto {
 
   /** Solo vale para un paquete que este escaneo crea; ausente = se paga con la del repartidor o la por defecto. */
   @IsOptional()
+  @IdEnMinusculas()
   @IsUUID()
   tarifaPagoId?: string;
+
+  /** Solo vale para un paquete que este escaneo crea; ausente = se cobra con la tarifa de envío por defecto. */
+  @IsOptional()
+  @IdEnMinusculas()
+  @IsUUID()
+  tarifaEnvioId?: string;
 }

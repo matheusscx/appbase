@@ -20,16 +20,19 @@ describe('HojasRutaService', () => {
     transaccion: jest.fn((cb: () => unknown) => cb()),
   };
   const repartidores = { exigirActivo: jest.fn() };
-  const configuracion = { exigirDefaults: jest.fn() };
   const tarifas = {
+    exigirActivaDelTenant: jest.fn(),
+    exigirDefecto: jest.fn(),
+  };
+  const tarifasEnvio = {
     exigirActivaDelTenant: jest.fn(),
     exigirDefecto: jest.fn(),
   };
   const service = new HojasRutaService(
     db as never,
     repartidores as never,
-    configuracion as never,
     tarifas as never,
+    tarifasEnvio as never,
   );
   const detalle = jest.spyOn(service, 'detalle');
   const detalleFalso = { id: HOJA } as HojaRutaDetalle;
@@ -79,11 +82,10 @@ describe('HojasRutaService', () => {
     db.query.mockReset();
     db.transaccion.mockClear();
     repartidores.exigirActivo.mockReset().mockResolvedValue({});
-    configuracion.exigirDefaults.mockReset().mockResolvedValue({
-      precioEnvio: '10000.0000',
-    });
     tarifas.exigirActivaDelTenant.mockReset().mockResolvedValue(undefined);
     tarifas.exigirDefecto.mockReset().mockResolvedValue(undefined);
+    tarifasEnvio.exigirActivaDelTenant.mockReset().mockResolvedValue(undefined);
+    tarifasEnvio.exigirDefecto.mockReset().mockResolvedValue(undefined);
     detalle.mockReset().mockResolvedValue(detalleFalso);
   });
 
@@ -113,15 +115,54 @@ describe('HojasRutaService', () => {
       expect(db.query).not.toHaveBeenCalled();
     });
 
-    it('sin configuración y código nuevo → 400 "Configurá los valores por defecto…"', async () => {
-      configuracion.exigirDefaults.mockRejectedValue(
+    it('sin tarifa de envío por defecto y código nuevo → 400 (RF4), y no crea el paquete', async () => {
+      tarifasEnvio.exigirDefecto.mockRejectedValue(
         new BadRequestException(
-          'Configurá los valores por defecto de Paquetería antes de cargar paquetes.',
+          'Carga una tarifa de envío por defecto en Configuración → Paquetería antes de cargar paquetes.',
         ),
       );
       responder(hojaAbierta);
-      await expect(escanear()).rejects.toThrow(/Configurá los valores/);
+      await expect(escanear()).rejects.toThrow(/tarifa de envío por defecto/);
       expect(sqls().some((s) => /INSERT INTO paquetes/.test(s))).toBe(false);
+    });
+
+    it('código nuevo con tarifaEnvioId: la valida con cerrojo, después de la de pago, y la guarda en el paquete', async () => {
+      const orden: string[] = [];
+      tarifas.exigirDefecto.mockImplementation(() => {
+        orden.push('pago');
+        return Promise.resolve();
+      });
+      tarifasEnvio.exigirActivaDelTenant.mockImplementation(() => {
+        orden.push('envio');
+        return Promise.resolve();
+      });
+      responder(
+        hojaAbierta,
+        [/INSERT INTO paquetes/, [[{ paquete_id: PAQUETE }], 1]],
+        lineasDelPaquete(),
+      );
+      await service.escanear(TENANT, {
+        repartidorId: REPARTIDOR,
+        fecha: FECHA,
+        codigo: '461',
+        cobroEnDestino: false,
+        tarifaEnvioId: 'envio-prioritario',
+      });
+      expect(orden).toEqual(['pago', 'envio']);
+      expect(tarifasEnvio.exigirActivaDelTenant).toHaveBeenCalledWith(
+        TENANT,
+        'envio-prioritario',
+        { bloquear: true },
+      );
+      expect(tarifasEnvio.exigirDefecto).not.toHaveBeenCalled();
+      const i = sqls().findIndex((s) => /INSERT INTO paquetes/.test(s));
+      expect(db.query.mock.calls[i][1]).toEqual([
+        TENANT,
+        '461',
+        false,
+        null,
+        'envio-prioritario',
+      ]);
     });
 
     it('paquete entregado → 409 "ya se entregó el 12-10"', async () => {
@@ -179,8 +220,8 @@ describe('HojasRutaService', () => {
         TENANT,
         '461',
         false,
-        '10000.0000',
         'tarifa-colina',
+        null,
       ]);
     });
 
@@ -201,7 +242,7 @@ describe('HojasRutaService', () => {
         TENANT,
         '461',
         true,
-        '10000.0000',
+        null,
         null,
       ]);
       expect(sqls().some((s) => /INSERT INTO hoja_ruta_paquetes/.test(s))).toBe(
@@ -518,12 +559,14 @@ describe('HojasRutaService', () => {
       );
     });
 
-    it('totales: el pago sale de la línea (no del paquete) y el cobrado se parte por medio', async () => {
+    it('totales: pago y precio salen de la línea (no del paquete) y el cobrado se parte por medio', async () => {
       responder();
       await service.totales(TENANT, [HOJA]);
       const sql = sqls()[0];
       expect(sql).toMatch(/SUM\(l\.pago_repartidor\)/);
       expect(sql).not.toMatch(/p\.pago_repartidor/);
+      expect(sql).toMatch(/SUM\(l\.precio_envio\)/);
+      expect(sql).not.toMatch(/p\.precio_envio/);
       expect(sql).toMatch(/medio_cobro = 'transferencia'/);
       expect(sql).toMatch(/medio_cobro IS DISTINCT FROM 'transferencia'/);
     });
@@ -641,6 +684,14 @@ describe('HojasRutaService', () => {
         )!;
         expect(update[0]).toMatch(/tarifa_pago_id = tr\.tarifa_pago_id/);
         expect(update[0]).toMatch(/pago_repartidor = tr\.monto/);
+        // El precio se fija en LA MISMA sentencia: paquete → por defecto, dentro del UPDATE.
+        expect(update[0]).toMatch(/tarifa_envio_id = te\.tarifa_envio_id/);
+        expect(update[0]).toMatch(/precio_envio = te\.monto/);
+        expect(update[0]).toMatch(/e1\.tarifa_envio_id = p\.tarifa_envio_id/);
+        expect(update[0]).toMatch(
+          /e2\.tenant_id = p\.tenant_id AND e2\.es_defecto/,
+        );
+        expect(update[0]).toMatch(/e1\.eliminado_el IS NULL/);
         // Paquete → repartidor → por defecto, todo dentro del UPDATE.
         expect(update[0]).toMatch(/t1\.tarifa_pago_id = p\.tarifa_pago_id/);
         expect(update[0]).toMatch(/t2\.tarifa_pago_id = r\.tarifa_pago_id/);
@@ -712,7 +763,7 @@ describe('HojasRutaService', () => {
         );
         expect(updates).toHaveLength(1);
         expect(updates[0][0]).toMatch(/SET medio_cobro = \$3/);
-        expect(updates[0][0]).not.toMatch(/tarifas_pago/);
+        expect(updates[0][0]).not.toMatch(/tarifas_pago|tarifas_envio/);
         expect(updates[0][1]).toEqual([TENANT, 'l1', 'transferencia']);
       });
 
@@ -723,7 +774,7 @@ describe('HojasRutaService', () => {
           /UPDATE hoja_ruta_paquetes/.test(c[0] as string),
         )!;
         expect(update[0]).toMatch(
-          /tarifa_pago_id = NULL, pago_repartidor = NULL,\s+medio_cobro = NULL/,
+          /tarifa_pago_id = NULL, pago_repartidor = NULL,\s+tarifa_envio_id = NULL, precio_envio = NULL,\s+medio_cobro = NULL/,
         );
       });
 
@@ -797,6 +848,7 @@ describe('HojasRutaService', () => {
         expect(updates[0]).toMatch(/l\.estado = 'en_ruta'/);
         expect(updates[0]).toMatch(/l\.eliminado_el IS NULL/);
         expect(updates[0]).toMatch(/pago_repartidor = tr\.monto/);
+        expect(updates[0]).toMatch(/precio_envio = te\.monto/);
         // Los cobros en destino quedan en efectivo; el resto sin medio.
         expect(updates[0]).toMatch(
           /medio_cobro = CASE WHEN p\.cobro_en_destino THEN 'efectivo' END/,

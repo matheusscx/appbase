@@ -10,8 +10,13 @@ import { unwrap } from '../../common/utils/pg-returning.util';
 import { normalizarCodigoPaquete } from './codigo-paquete';
 import { AsignarDto } from './dto/asignar.dto';
 import { EscanearDto } from './dto/escanear.dto';
-import { PaqueteConfiguracionService } from './paquete-configuracion.service';
-import { PAGO_RESUELTO_SQL, tarifaResueltaSql } from './tarifa-resuelta';
+import {
+  PAGO_RESUELTO_SQL,
+  PRECIO_RESUELTO_SQL,
+  tarifaEnvioResueltaSql,
+  tarifaResueltaSql,
+} from './tarifa-resuelta';
+import { TarifasEnvioService } from './tarifas-envio.service';
 import { TarifasPagoService } from './tarifas-pago.service';
 import type {
   EstadoHoja,
@@ -67,6 +72,9 @@ interface FilaLinea {
   comuna: string | null;
   cobro_en_destino: boolean;
   precio_envio: string;
+  tarifa_envio_id: string | null;
+  tarifa_envio_nombre: string | null;
+  tarifa_envio_paquete_id: string | null;
   tarifa_pago_id: string | null;
   tarifa_pago_nombre: string | null;
   tarifa_paquete_id: string | null;
@@ -175,8 +183,8 @@ export class HojasRutaService {
   constructor(
     private readonly db: Db,
     private readonly repartidores: RepartidoresService,
-    private readonly configuracion: PaqueteConfiguracionService,
     private readonly tarifas: TarifasPagoService,
+    private readonly tarifasEnvio: TarifasEnvioService,
   ) {}
 
   /**
@@ -202,9 +210,8 @@ export class HojasRutaService {
       let resultado: ResultadoEscaneo = 'asignado';
       let paqueteId = await this.bloquearPaquete(tenantId, codigo);
       if (!paqueteId) {
-        const defaults = await this.configuracion.exigirDefaults(tenantId);
-        // Último cerrojo, después de la hoja: `eliminar` toma la tarifa `FOR UPDATE` y no
-        // bloquea filas de ninguno de los otros, así que el orden no cierra ciclo.
+        // Últimos cerrojos, después de la hoja y en este orden (pago, envío): `eliminar` toma la
+        // tarifa `FOR UPDATE` y no bloquea filas de ninguno de los otros, así que no cierra ciclo.
         if (dto.tarifaPagoId) {
           await this.tarifas.exigirActivaDelTenant(tenantId, dto.tarifaPagoId, {
             bloquear: true,
@@ -212,9 +219,18 @@ export class HojasRutaService {
         } else {
           await this.tarifas.exigirDefecto(tenantId);
         }
+        if (dto.tarifaEnvioId) {
+          await this.tarifasEnvio.exigirActivaDelTenant(
+            tenantId,
+            dto.tarifaEnvioId,
+            { bloquear: true },
+          );
+        } else {
+          await this.tarifasEnvio.exigirDefecto(tenantId);
+        }
         const nuevo = unwrap<{ paquete_id: string }>(
           await this.db.query(
-            `INSERT INTO paquetes (tenant_id, codigo, cobro_en_destino, precio_envio, tarifa_pago_id)
+            `INSERT INTO paquetes (tenant_id, codigo, cobro_en_destino, tarifa_pago_id, tarifa_envio_id)
              VALUES ($1, $2, $3, $4, $5)
              ON CONFLICT (tenant_id, codigo) WHERE eliminado_el IS NULL DO NOTHING
              RETURNING paquete_id`,
@@ -222,8 +238,8 @@ export class HojasRutaService {
               tenantId,
               codigo,
               dto.cobroEnDestino,
-              defaults.precioEnvio,
               dto.tarifaPagoId ?? null,
+              dto.tarifaEnvioId ?? null,
             ],
           ),
         );
@@ -266,9 +282,10 @@ export class HojasRutaService {
     });
   }
 
-  private sinTarifaQuePagar(): BadRequestException {
+  /** Entregar fija pago Y precio en una sentencia: si a alguna de las dos no le resuelve tarifa, no se entrega. */
+  private sinTarifaQueAplicar(): BadRequestException {
     return new BadRequestException(
-      'No hay una tarifa de pago que aplicar a esta entrega: carga una tarifa por defecto.',
+      'No hay una tarifa de pago y una de envío que aplicar a esta entrega: carga una tarifa por defecto de cada una.',
     );
   }
 
@@ -349,8 +366,9 @@ export class HojasRutaService {
    * que se toma su cerrojo ANTES de mirar sus otras líneas: sin él, dos hojas podrían marcarlo
    * a la vez.
    *
-   * Pasar a `entregado` FIJA en la línea la tarifa y el pago que corresponden en ese momento
-   * (regla 10); volver a otro estado los limpia, y con ellos el medio de cobro. Marcar de nuevo
+   * Pasar a `entregado` FIJA en la línea las tarifas, el pago y el precio que corresponden en ese
+   * momento (reglas 10 y 10b, en UN `UPDATE`); volver a otro estado los limpia, y con ellos el
+   * medio de cobro. Marcar de nuevo
    * una línea que ya estaba entregada NO la vuelve a resolver (cambiar el monto de la tarifa no
    * mueve entregas hechas): solo cambia el medio de cobro si llegó uno.
    */
@@ -415,6 +433,7 @@ export class HojasRutaService {
           await this.db.query(
             `UPDATE hoja_ruta_paquetes
                 SET estado = $3, tarifa_pago_id = NULL, pago_repartidor = NULL,
+                    tarifa_envio_id = NULL, precio_envio = NULL,
                     medio_cobro = NULL, actualizado_el = now()
               WHERE tenant_id = $1 AND hoja_ruta_paquete_id = $2 AND eliminado_el IS NULL`,
             [tenantId, lineaId, estado],
@@ -432,10 +451,12 @@ export class HojasRutaService {
             await this.db.query(
               `UPDATE hoja_ruta_paquetes l
                   SET estado = 'entregado', tarifa_pago_id = tr.tarifa_pago_id,
-                      pago_repartidor = tr.monto, medio_cobro = $3, actualizado_el = now()
-                 FROM ${PAGO_RESUELTO_SQL.from}
+                      pago_repartidor = tr.monto, tarifa_envio_id = te.tarifa_envio_id,
+                      precio_envio = te.monto, medio_cobro = $3, actualizado_el = now()
+                 FROM ${PAGO_RESUELTO_SQL.from}, ${PRECIO_RESUELTO_SQL.from}
                 WHERE l.tenant_id = $1 AND l.hoja_ruta_paquete_id = $2 AND l.eliminado_el IS NULL
                   AND ${PAGO_RESUELTO_SQL.donde}
+                  AND ${PRECIO_RESUELTO_SQL.donde}
                 RETURNING l.hoja_ruta_paquete_id AS id`,
               [
                 tenantId,
@@ -444,7 +465,7 @@ export class HojasRutaService {
               ],
             ),
           );
-          if (!filas.length) throw this.sinTarifaQuePagar();
+          if (!filas.length) throw this.sinTarifaQueAplicar();
         }
       } catch (e) {
         // El índice único de `en_ruta` es la última defensa si dos marcados llegaran juntos.
@@ -461,7 +482,7 @@ export class HojasRutaService {
 
   /**
    * Solo pasa a `entregado` lo que sigue en ruta; un `no_entregado` ya marcado no se toca. El pago
-   * de todas las líneas se resuelve en UNA sentencia, y los cobros en destino quedan en efectivo
+   * y el precio de todas las líneas se resuelven en UNA sentencia, y los cobros en destino quedan en efectivo
    * (el medio se cambia en la fila). Si alguna no tiene tarifa que pagar, no se entrega ninguna.
    */
   async entregarTodos(
@@ -479,18 +500,20 @@ export class HojasRutaService {
         await this.db.query(
           `UPDATE hoja_ruta_paquetes l
               SET estado = 'entregado', tarifa_pago_id = tr.tarifa_pago_id,
-                  pago_repartidor = tr.monto,
+                  pago_repartidor = tr.monto, tarifa_envio_id = te.tarifa_envio_id,
+                  precio_envio = te.monto,
                   medio_cobro = CASE WHEN p.cobro_en_destino THEN 'efectivo' END,
                   actualizado_el = now()
-             FROM ${PAGO_RESUELTO_SQL.from}
+             FROM ${PAGO_RESUELTO_SQL.from}, ${PRECIO_RESUELTO_SQL.from}
             WHERE l.tenant_id = $1 AND l.hoja_ruta_id = $2 AND l.estado = 'en_ruta'
               AND l.eliminado_el IS NULL
               AND ${PAGO_RESUELTO_SQL.donde}
+              AND ${PRECIO_RESUELTO_SQL.donde}
             RETURNING l.hoja_ruta_paquete_id AS id`,
           [tenantId, hojaId],
         ),
       );
-      if (filas.length !== enRuta[0].n) throw this.sinTarifaQuePagar();
+      if (filas.length !== enRuta[0].n) throw this.sinTarifaQueAplicar();
       return this.detalle(tenantId, hojaId);
     });
   }
@@ -785,17 +808,22 @@ export class HojasRutaService {
     }
     const c = cabeceras[0];
 
-    // Entregada: lo que fijó al entregar. Las demás: lo que se pagaría hoy (`tarifaResueltaSql`, la
-    // misma regla que fija el pago), para que la pantalla lo muestre como estimado. La tarifa se
-    // lee SIN filtro de borrado a propósito: una entrega conserva el nombre de su tarifa aunque se
-    // haya borrado después (la línea guarda su monto y no depende de ella).
+    // Entregada: lo que fijó al entregar. Las demás: lo que se pagaría y se cobraría hoy
+    // (`tarifaResueltaSql` y `tarifaEnvioResueltaSql`, las mismas reglas que fijan pago y precio),
+    // para que la pantalla lo muestre como estimado. Las tarifas se leen SIN filtro de borrado a
+    // propósito: una entrega conserva el nombre de sus tarifas aunque se hayan borrado después (la
+    // línea guarda sus montos y no depende de ellas).
     const lineas: FilaLinea[] = await this.db.query(
       `SELECT p.paquete_id, p.codigo, p.destinatario_nombre, p.direccion, p.comuna,
-              p.cobro_en_destino, p.precio_envio, l.estado, l.medio_cobro,
+              p.cobro_en_destino, l.estado, l.medio_cobro,
               x.tarifa_pago_id, t.nombre AS tarifa_pago_nombre,
               p.tarifa_pago_id AS tarifa_paquete_id,
               CASE WHEN l.estado = 'entregado' THEN l.pago_repartidor
-                   ELSE COALESCE(t.monto, 0::numeric(18,4)) END AS pago_repartidor
+                   ELSE COALESCE(t.monto, 0::numeric(18,4)) END AS pago_repartidor,
+              x.tarifa_envio_id, te.nombre AS tarifa_envio_nombre,
+              p.tarifa_envio_id AS tarifa_envio_paquete_id,
+              CASE WHEN l.estado = 'entregado' THEN l.precio_envio
+                   ELSE COALESCE(te.monto, 0::numeric(18,4)) END AS precio_envio
          FROM hoja_ruta_paquetes l
          JOIN hojas_ruta h ON h.hoja_ruta_id = l.hoja_ruta_id
                           AND h.tenant_id = l.tenant_id AND h.eliminado_el IS NULL
@@ -805,10 +833,14 @@ export class HojasRutaService {
                         AND p.tenant_id = l.tenant_id AND p.eliminado_el IS NULL
          CROSS JOIN LATERAL (
            SELECT CASE WHEN l.estado = 'entregado' THEN l.tarifa_pago_id
-                       ELSE ${tarifaResueltaSql({ paquete: 'p', repartidor: 'r' })} END AS tarifa_pago_id
+                       ELSE ${tarifaResueltaSql({ paquete: 'p', repartidor: 'r' })} END AS tarifa_pago_id,
+                  CASE WHEN l.estado = 'entregado' THEN l.tarifa_envio_id
+                       ELSE ${tarifaEnvioResueltaSql('p')} END AS tarifa_envio_id
          ) x
          LEFT JOIN tarifas_pago t ON t.tarifa_pago_id = x.tarifa_pago_id
                                  AND t.tenant_id = l.tenant_id
+         LEFT JOIN tarifas_envio te ON te.tarifa_envio_id = x.tarifa_envio_id
+                                   AND te.tenant_id = l.tenant_id
         WHERE l.hoja_ruta_id = $1 AND l.tenant_id = $2 AND l.eliminado_el IS NULL
         ORDER BY l.creado_el DESC, l.hoja_ruta_paquete_id`,
       [hojaId, tenantId],
@@ -829,8 +861,9 @@ export class HojasRutaService {
       rendidaEl: c.rendida_el ? c.rendida_el.toISOString() : null,
       ...totales,
       lineas: lineas.map((l): LineaHoja => {
-        // En una hoja rendida, lo que no se entregó no se paga: ni monto, ni tarifa, ni estimación
-        // (la resuelta en vivo no es de nadie). Lo entregado y lo de una hoja abierta no cambian.
+        // En una hoja rendida, lo que no se entregó no se paga ni se cobra: ni monto, ni tarifa, ni
+        // estimación (la resuelta en vivo no es de nadie). Lo entregado y lo de una hoja abierta
+        // no cambian.
         const sinPago = c.estado === 'rendida' && l.estado !== 'entregado';
         return {
           paqueteId: l.paquete_id,
@@ -839,7 +872,11 @@ export class HojasRutaService {
           direccion: l.direccion,
           comuna: l.comuna,
           cobroEnDestino: l.cobro_en_destino,
-          precioEnvio: l.precio_envio,
+          precioEnvio: sinPago ? '0.0000' : l.precio_envio,
+          precioEstimado: l.estado !== 'entregado' && c.estado !== 'rendida',
+          tarifaEnvioId: sinPago ? null : l.tarifa_envio_id,
+          tarifaEnvioNombre: sinPago ? null : l.tarifa_envio_nombre,
+          tarifaEnvioPaqueteId: l.tarifa_envio_paquete_id,
           tarifaPagoId: sinPago ? null : l.tarifa_pago_id,
           tarifaPagoNombre: sinPago ? null : l.tarifa_pago_nombre,
           tarifaPaqueteId: l.tarifa_paquete_id,
@@ -868,11 +905,11 @@ export class HojasRutaService {
               COUNT(*) FILTER (WHERE l.estado = 'en_ruta')::int                           AS en_ruta,
               COUNT(*) FILTER (WHERE l.estado = 'entregado')::int                         AS entregados,
               COUNT(*) FILTER (WHERE l.estado = 'entregado' AND p.cobro_en_destino)::int  AS cobro_destino,
-              COALESCE(SUM(p.precio_envio) FILTER (WHERE l.estado = 'entregado' AND p.cobro_en_destino), 0::numeric(18,4)) AS monto_cobrado_destino,
-              COALESCE(SUM(p.precio_envio) FILTER (WHERE l.estado = 'entregado' AND p.cobro_en_destino AND l.medio_cobro IS DISTINCT FROM 'transferencia'), 0::numeric(18,4)) AS monto_cobrado_efectivo,
-              COALESCE(SUM(p.precio_envio) FILTER (WHERE l.estado = 'entregado' AND p.cobro_en_destino AND l.medio_cobro = 'transferencia'), 0::numeric(18,4))        AS monto_cobrado_transferencia,
+              COALESCE(SUM(l.precio_envio) FILTER (WHERE l.estado = 'entregado' AND p.cobro_en_destino), 0::numeric(18,4)) AS monto_cobrado_destino,
+              COALESCE(SUM(l.precio_envio) FILTER (WHERE l.estado = 'entregado' AND p.cobro_en_destino AND l.medio_cobro IS DISTINCT FROM 'transferencia'), 0::numeric(18,4)) AS monto_cobrado_efectivo,
+              COALESCE(SUM(l.precio_envio) FILTER (WHERE l.estado = 'entregado' AND p.cobro_en_destino AND l.medio_cobro = 'transferencia'), 0::numeric(18,4))        AS monto_cobrado_transferencia,
               COALESCE(SUM(l.pago_repartidor) FILTER (WHERE l.estado = 'entregado'), 0::numeric(18,4))                     AS monto_pago_repartidor,
-              COALESCE(SUM(p.precio_envio) FILTER (WHERE l.estado = 'entregado'), 0::numeric(18,4))                        AS monto_total_general
+              COALESCE(SUM(l.precio_envio) FILTER (WHERE l.estado = 'entregado'), 0::numeric(18,4))                        AS monto_total_general
          FROM hojas_ruta h
          LEFT JOIN hoja_ruta_paquetes l ON l.hoja_ruta_id = h.hoja_ruta_id
                                        AND l.tenant_id = h.tenant_id AND l.eliminado_el IS NULL

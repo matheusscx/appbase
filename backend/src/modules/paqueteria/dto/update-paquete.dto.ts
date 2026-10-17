@@ -1,19 +1,14 @@
 import {
   IsBoolean,
   IsNotEmpty,
-  IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
   ValidateIf,
 } from 'class-validator';
-import {
-  IsDecimalNoNegativo,
-  IsMontoPersistible,
-} from '../../../common/decorators/decimal-signo.decorator';
-import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { MAX_ENTRADA_CODIGO } from '../codigo-paquete';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 // PATCH: ausente = no tocar. Los campos NOT NULL usan `ValidateIf(v !== undefined)` para que
 // `null` sea 400 y no un "se ignora" (`IsOptional` dejaría pasar el null); los nullables
@@ -57,14 +52,14 @@ export class UpdatePaqueteDto {
   @IsBoolean()
   cobroEnDestino?: boolean;
 
-  @ValidateIf((_o, v) => v !== undefined)
-  @IsNumberString()
-  @IsDecimalNoNegativo()
-  @IsMontoPersistible()
-  @EsMontoCobrado()
-  precioEnvio?: string;
-
   @IsOptional()
+  @IdEnMinusculas()
   @IsUUID()
   tarifaPagoId?: string | null;
+
+  /** `null` la saca (vuelve a la por defecto); ausente no la toca. */
+  @IsOptional()
+  @IdEnMinusculas()
+  @IsUUID()
+  tarifaEnvioId?: string | null;
 }

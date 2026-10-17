@@ -138,4 +138,14 @@ describe('TarifasEnvioService', () => {
       service.exigirActivaDelTenant(TENANT, ID),
     ).resolves.toBeUndefined();
   });
+
+  it('exigirDefecto: 400 en tuteo si no hay una por defecto viva; ok si la hay', async () => {
+    db.query.mockResolvedValueOnce([{ hay: false }]);
+    await expect(service.exigirDefecto(TENANT)).rejects.toThrow(
+      /Carga una tarifa de envío por defecto/,
+    );
+    db.query.mockResolvedValueOnce([{ hay: true }]);
+    await expect(service.exigirDefecto(TENANT)).resolves.toBeUndefined();
+    expect(sqls()[0]).toMatch(/es_defecto AND eliminado_el IS NULL/);
+  });
 });

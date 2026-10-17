@@ -86,7 +86,6 @@ import { LiquidacionPropinasEvento } from '../modules/propinas/entities/liquidac
 import { TipoDocumentoTributario } from '../modules/ventas/entities/tipo-documento-tributario.entity';
 import { UmbralIdentidadPagador } from '../modules/ventas/entities/umbral-identidad-pagador.entity';
 import { Tercero } from '../modules/terceros/entities/tercero.entity';
-import { PaqueteConfiguracion } from '../modules/paqueteria/entities/paquete-configuracion.entity';
 import { Repartidor } from '../modules/paqueteria/entities/repartidor.entity';
 import { TarifaPago } from '../modules/paqueteria/entities/tarifa-pago.entity';
 import { TarifaEnvio } from '../modules/paqueteria/entities/tarifa-envio.entity';
@@ -238,7 +237,6 @@ export const ENTIDADES = [
   LiquidacionPropinasParticipante,
   LiquidacionPropinasFuente,
   LiquidacionPropinasEvento,
-  PaqueteConfiguracion,
   TarifaPago,
   TarifaEnvio,
   Repartidor,

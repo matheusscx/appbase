@@ -22,8 +22,6 @@ import { CreatePaqueteDto } from './dto/create-paquete.dto';
 import { UpdatePaqueteDto } from './dto/update-paquete.dto';
 import { QueryPaquetesDto } from './dto/query-paquetes.dto';
 
-// Registrado DESPUÉS de `PaqueteConfiguracionController` en el módulo: `paquetes/configuracion`
-// no puede caer en `paquetes/:id`.
 @UseGuards(JwtAuthGuard, TenantGuard, TenantAdminGuard)
 @Controller('paquetes')
 export class PaquetesController {

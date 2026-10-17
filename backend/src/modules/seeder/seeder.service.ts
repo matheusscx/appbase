@@ -66,7 +66,10 @@ import {
   fechaMenosDias,
 } from '../../common/utils/rango-fecha.util';
 import { RendicionesService } from '../paqueteria/rendiciones.service';
-import { tarifaResueltaSql } from '../paqueteria/tarifa-resuelta';
+import {
+  tarifaEnvioResueltaSql,
+  tarifaResueltaSql,
+} from '../paqueteria/tarifa-resuelta';
 
 /**
  * Tenant demo de Paquetería y todo lo que cuelga de él. Los usan varios métodos del
@@ -78,7 +81,7 @@ import { tarifaResueltaSql } from '../paqueteria/tarifa-resuelta';
  * bajo. 496-501 se dejan libres: 500 y 501 los usan como ids de mentira unos specs.
  * Reparto: 502-511 tenant/usuario/rol/módulo/contratos/caja/configuraciones,
  * 512-514 repartidores, 515-517 hojas, 520-549 paquetes (520 + índice),
- * 550-579 líneas de hoja (550 + índice del paquete), 580-583 tarifas de pago,
+ * 550-579 líneas de hoja (550 + índice del paquete), 580-583 tarifas de pago, 584-586 tarifas de envío,
  * 590-594 las otras cinco hojas de la semana de Juan, 595 su entrega de plata.
  */
 const uuidPaqueteria = (n: number): string =>
@@ -92,8 +95,6 @@ const PAQUETERIA = {
   tenantModuloPaquetesId: uuidPaqueteria(507),
   tenantModuloRestauranteId: uuidPaqueteria(508),
   cajaVirtualId: uuidPaqueteria(509),
-  configuracionPaquetesId: uuidPaqueteria(510),
-  configuracionRestauranteId: uuidPaqueteria(511),
 } as const;
 
 @Injectable()
@@ -5483,21 +5484,24 @@ export class SeederService implements OnApplicationBootstrap {
   }
 
   /**
-   * Los datos del demo de Paquetería, para que abra con números: el precio de envío por
-   * defecto de los dos tenants que la contratan y, solo en Demo Gestión de Paquetes,
-   * 4 tarifas de pago (Bicicleta, Moto, Auto por defecto y Colina), 3 repartidores con la
-   * suya, 30 paquetes (algunos con Colina) y 8 hojas: la semana de Juan (6 días, rendida
+   * Los datos del demo de Paquetería, para que abra con números, solo en Demo Gestión de
+   * Paquetes: 4 tarifas de pago (Bicicleta, Moto, Auto por defecto y Colina), 3 de envío
+   * (Estándar por defecto, Prioritario y Premium), 3 repartidores con la suya, 30 paquetes
+   * (algunos con Colina, tres con envío Prioritario o Premium) y 8 hojas: la semana de Juan (6 días, rendida
    * de una vez con una entrega de plata a cuenta), un día de María (rendido solo) y una
    * abierta hoy de Pedro. IDs fijos de `PAQUETERIA` (bloque 502-599): 512-514 repartidores,
    * 515-517 y 590-594 hojas, 520 + i los paquetes, 550 + i la línea del paquete i,
-   * 580-583 las tarifas, 595 la entrega de plata.
+   * 580-583 las tarifas de pago, 584-586 las de envío, 595 la entrega de plata.
    *
    * "Hoy" sale del mismo cálculo que `GET /tenants/me` (`diaNegocioEnZona`: zona y hora de
    * corte del tenant) y los días anteriores se restan sobre ese string; el día en el huso
    * de la sesión de Postgres (`CURRENT_DATE`) lo rechaza `dia-negocio.invariant.spec`.
    *
-   * El pago de cada entrega se resuelve con `tarifaResueltaSql`, la regla que usa entregar
-   * (paquete, repartidor, defecto), y se fija en la línea como lo hace `marcar`.
+   * El pago y el precio de cada entrega se resuelven con `tarifaResueltaSql` y
+   * `tarifaEnvioResueltaSql`, las reglas que usa entregar (pago: paquete, repartidor, defecto;
+   * envío: paquete, defecto), y se fijan en la línea como lo hace `marcar`. Las tres tarifas de
+   * envío van a paquetes que NO están entregados en una hoja rendida, así las rendiciones del
+   * demo siguen dando lo mismo que antes de que el envío tuviera tarifas.
    *
    * Las rendiciones no se escriben a mano: pasan por `RendicionesService.rendir`, la misma
    * ruta que usa la API, así lo congelado y lo calculado no pueden diferir. Por eso las
@@ -5512,23 +5516,7 @@ export class SeederService implements OnApplicationBootstrap {
    * que ya no corre en producción.
    */
   private async seedPaqueteria(): Promise<void> {
-    const PARIS = '550e8400-e29b-41d4-a716-446655440007';
     const { tenantId } = PAQUETERIA;
-    const PRECIO_ENVIO = '10000';
-
-    await this.db.query(
-      `INSERT INTO paquete_configuracion
-         (paquete_configuracion_id, tenant_id, precio_envio_defecto)
-       VALUES ($1, $2, $5), ($3, $4, $5)
-       ON CONFLICT DO NOTHING`,
-      [
-        PAQUETERIA.configuracionPaquetesId,
-        tenantId,
-        PAQUETERIA.configuracionRestauranteId,
-        PARIS,
-        PRECIO_ENVIO,
-      ],
-    );
 
     // Montos de la planilla del cliente. Auto es la por defecto (el índice único parcial exige
     // una sola); Colina es la especial que se elige por paquete.
@@ -5568,6 +5556,43 @@ export class SeederService implements OnApplicationBootstrap {
       ],
     );
     const [bicicleta, moto, auto, colina] = tarifas.map((t) => t.id);
+
+    // Lo que cobra el envío. Estándar es la por defecto (el mismo $10.000 de siempre).
+    const tarifasEnvio = [
+      {
+        id: uuidPaqueteria(584),
+        nombre: 'Estándar',
+        monto: '10000',
+        defecto: true,
+      },
+      {
+        id: uuidPaqueteria(585),
+        nombre: 'Prioritario',
+        monto: '14000',
+        defecto: false,
+      },
+      {
+        id: uuidPaqueteria(586),
+        nombre: 'Premium',
+        monto: '20000',
+        defecto: false,
+      },
+    ];
+    await this.db.query(
+      `INSERT INTO tarifas_envio (tarifa_envio_id, tenant_id, nombre, monto, es_defecto)
+       SELECT x.id, $1, x.nombre, x.monto, x.defecto
+         FROM unnest($2::uuid[], $3::text[], $4::numeric[], $5::boolean[])
+              AS x(id, nombre, monto, defecto)
+       ON CONFLICT DO NOTHING`,
+      [
+        tenantId,
+        tarifasEnvio.map((t) => t.id),
+        tarifasEnvio.map((t) => t.nombre),
+        tarifasEnvio.map((t) => t.monto),
+        tarifasEnvio.map((t) => t.defecto),
+      ],
+    );
+    const [, prioritario, premium] = tarifasEnvio.map((t) => t.id);
 
     const repartidores = [
       {
@@ -5623,6 +5648,9 @@ export class SeederService implements OnApplicationBootstrap {
     // llevan la tarifa especial Colina, y dos cobros en destino se pagaron por transferencia.
     const CON_COBRO_DESTINO = new Set([1, 12, 13, 15, 17, 19, 21, 23, 25, 26]);
     const CON_COLINA = new Set([3, 7, 15, 18, 24]);
+    // Ninguno está entregado en una hoja rendida: 27 está en ruta con Pedro, 28 y 29 sin hoja.
+    const ENVIO_PRIORITARIO = new Set([27, 28]);
+    const ENVIO_PREMIUM = new Set([29]);
     const POR_TRANSFERENCIA = new Set([17, 19]);
     const COMUNAS = [
       'Providencia',
@@ -5643,17 +5671,22 @@ export class SeederService implements OnApplicationBootstrap {
         comuna: completo ? COMUNAS[(i / 2) % COMUNAS.length] : null,
         cobroEnDestino: CON_COBRO_DESTINO.has(i),
         tarifaPagoId: CON_COLINA.has(i) ? colina : null,
+        tarifaEnvioId: ENVIO_PRIORITARIO.has(i)
+          ? prioritario
+          : ENVIO_PREMIUM.has(i)
+            ? premium
+            : null,
       };
     });
     await this.db.query(
       `INSERT INTO paquetes
          (paquete_id, tenant_id, codigo, destinatario_nombre, destinatario_telefono,
-          direccion, comuna, cobro_en_destino, precio_envio, tarifa_pago_id)
+          direccion, comuna, cobro_en_destino, tarifa_pago_id, tarifa_envio_id)
        SELECT x.id, $1, x.codigo, x.nombre, x.telefono, x.direccion, x.comuna,
-              x.cobro, $9::numeric, x.tarifa
+              x.cobro, x.tarifa, x.envio
          FROM unnest($2::uuid[], $3::text[], $4::text[], $5::text[], $6::text[],
-                     $7::text[], $8::boolean[], $10::uuid[])
-              AS x(id, codigo, nombre, telefono, direccion, comuna, cobro, tarifa)
+                     $7::text[], $8::boolean[], $9::uuid[], $10::uuid[])
+              AS x(id, codigo, nombre, telefono, direccion, comuna, cobro, tarifa, envio)
        ON CONFLICT DO NOTHING`,
       [
         tenantId,
@@ -5664,8 +5697,8 @@ export class SeederService implements OnApplicationBootstrap {
         paquetes.map((p) => p.direccion),
         paquetes.map((p) => p.comuna),
         paquetes.map((p) => p.cobroEnDestino),
-        PRECIO_ENVIO,
         paquetes.map((p) => p.tarifaPagoId),
+        paquetes.map((p) => p.tarifaEnvioId),
       ],
     );
     // Igual para los paquetes con Colina de un demo ya sembrado, salvo los entregados en una hoja
@@ -5687,6 +5720,25 @@ export class SeederService implements OnApplicationBootstrap {
         tenantId,
         paquetes.filter((p) => p.tarifaPagoId).map((p) => p.id),
         paquetes.filter((p) => p.tarifaPagoId).map((p) => p.tarifaPagoId),
+      ],
+    );
+    await this.db.query(
+      `UPDATE paquetes p SET tarifa_envio_id = x.tarifa, actualizado_el = now()
+         FROM unnest($2::uuid[], $3::uuid[]) AS x(id, tarifa)
+        WHERE p.paquete_id = x.id AND p.tenant_id = $1
+          AND p.tarifa_envio_id IS NULL AND p.eliminado_el IS NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM hoja_ruta_paquetes l
+              JOIN hojas_ruta h ON h.hoja_ruta_id = l.hoja_ruta_id
+                               AND h.tenant_id = l.tenant_id AND h.eliminado_el IS NULL
+             WHERE l.paquete_id = p.paquete_id AND l.tenant_id = p.tenant_id
+               AND l.estado = 'entregado' AND l.eliminado_el IS NULL
+               AND h.estado = 'rendida'
+          )`,
+      [
+        tenantId,
+        paquetes.filter((p) => p.tarifaEnvioId).map((p) => p.id),
+        paquetes.filter((p) => p.tarifaEnvioId).map((p) => p.tarifaEnvioId),
       ],
     );
 
@@ -5765,10 +5817,12 @@ export class SeederService implements OnApplicationBootstrap {
         await this.db.query(
           `INSERT INTO hoja_ruta_paquetes
              (hoja_ruta_paquete_id, tenant_id, hoja_ruta_id, paquete_id, estado,
-              tarifa_pago_id, pago_repartidor, medio_cobro)
+              tarifa_pago_id, pago_repartidor, tarifa_envio_id, precio_envio, medio_cobro)
            SELECT x.id, $1, $2, x.paquete, x.estado,
                   CASE WHEN x.estado = 'entregado' THEN tr.tarifa_pago_id END,
                   CASE WHEN x.estado = 'entregado' THEN tr.monto END,
+                  CASE WHEN x.estado = 'entregado' THEN te.tarifa_envio_id END,
+                  CASE WHEN x.estado = 'entregado' THEN te.monto END,
                   CASE WHEN x.estado = 'entregado' AND p.cobro_en_destino THEN x.medio END
              FROM unnest($3::uuid[], $4::uuid[], $5::text[], $6::text[])
                   AS x(id, paquete, estado, medio)
@@ -5781,6 +5835,9 @@ export class SeederService implements OnApplicationBootstrap {
              LEFT JOIN tarifas_pago tr
                     ON tr.tarifa_pago_id = ${tarifaResueltaSql({ paquete: 'p', repartidor: 'r' })}
                    AND tr.tenant_id = $1
+             LEFT JOIN tarifas_envio te
+                    ON te.tarifa_envio_id = ${tarifaEnvioResueltaSql('p')}
+                   AND te.tenant_id = $1
            ON CONFLICT DO NOTHING`,
           [
             tenantId,

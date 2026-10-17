@@ -5,6 +5,7 @@ import {
   IsUUID,
   MaxLength,
 } from 'class-validator';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 export class CreateRepartidorDto {
   @IsString()
@@ -18,6 +19,7 @@ export class CreateRepartidorDto {
   telefono?: string | null;
 
   @IsOptional()
+  @IdEnMinusculas()
   @IsUUID()
   tarifaPagoId?: string | null;
 }

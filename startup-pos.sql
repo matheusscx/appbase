@@ -3097,18 +3097,8 @@ ALTER TABLE "categorias"
 -- PAQUETERÍA (repartidores, paquetes y hojas de ruta)
 -- =============================================================
 
--- Precio de envío por defecto del tenant; un paquete lo copia al crearse. El pago al repartidor
--- son las tarifas_pago de abajo.
-CREATE TABLE paquete_configuracion (
-    paquete_configuracion_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    tenant_id               UUID NOT NULL REFERENCES tenants(tenant_id),
-    precio_envio_defecto    NUMERIC(18,4) NOT NULL,
-    creado_el               TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    actualizado_el          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    eliminado_el            TIMESTAMPTZ
-);
-CREATE UNIQUE INDEX uq_paquete_config_tenant
-    ON paquete_configuracion (tenant_id) WHERE eliminado_el IS NULL;
+-- Lo que se cobra por un envío son las tarifas_envio y lo que se le paga al repartidor, las
+-- tarifas_pago (más abajo): ya no hay un "precio por defecto" suelto por tenant.
 
 CREATE TABLE tarifas_pago (
     tarifa_pago_id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -3169,7 +3159,6 @@ CREATE TABLE paquetes (
     nota                  TEXT,
     remitente_tercero_id  UUID REFERENCES terceros(tercero_id),
     cobro_en_destino      BOOLEAN NOT NULL DEFAULT false,
-    precio_envio          NUMERIC(18,4) NOT NULL,
     tarifa_pago_id        UUID REFERENCES tarifas_pago(tarifa_pago_id),   -- tarifa especial; null = la del repartidor o la por defecto
     tarifa_envio_id       UUID REFERENCES tarifas_envio(tarifa_envio_id),  -- tarifa de envío; null = la por defecto al entregar
     creado_el             TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -3238,8 +3227,11 @@ CREATE TABLE hoja_ruta_paquetes (
     paquete_id           UUID NOT NULL REFERENCES paquetes(paquete_id),
     estado               VARCHAR(20) NOT NULL DEFAULT 'en_ruta',   -- 'en_ruta' | 'entregado' | 'no_entregado'
     -- Se fijan al marcar entregado (la tarifa y su monto de ese momento); null si no está entregada.
+    -- `tarifa_envio_id` queda null en una entrega anterior a las tarifas de envío (solo se conoce el precio).
     tarifa_pago_id       UUID REFERENCES tarifas_pago(tarifa_pago_id),
     pago_repartidor      NUMERIC(18,4),
+    tarifa_envio_id      UUID REFERENCES tarifas_envio(tarifa_envio_id),
+    precio_envio         NUMERIC(18,4),
     -- Cómo se pagó un cobro en destino; solo con 'entregado' y un paquete con cobro en destino
     -- (esto último lo valida el service: el cobro vive en paquetes).
     medio_cobro          VARCHAR(20),
@@ -3250,6 +3242,8 @@ CREATE TABLE hoja_ruta_paquetes (
         CHECK (medio_cobro IN ('efectivo', 'transferencia')),
     CONSTRAINT chk_hoja_ruta_paquetes_pago
         CHECK ((estado = 'entregado') = (pago_repartidor IS NOT NULL)),
+    CONSTRAINT chk_hoja_ruta_paquetes_precio
+        CHECK ((estado = 'entregado') = (precio_envio IS NOT NULL)),
     CONSTRAINT chk_hoja_ruta_paquetes_medio_entregado
         CHECK (medio_cobro IS NULL OR estado = 'entregado')
 );

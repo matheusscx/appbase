@@ -1,7 +1,6 @@
 import { Module } from '@nestjs/common';
 import { RepositoriosModule } from '../../common/db/repositorios.module';
 import { MonedasModule } from '../monedas/monedas.module';
-import { PaqueteConfiguracion } from './entities/paquete-configuracion.entity';
 import { TarifaPago } from './entities/tarifa-pago.entity';
 import { TarifaEnvio } from './entities/tarifa-envio.entity';
 import { Repartidor } from './entities/repartidor.entity';
@@ -12,8 +11,6 @@ import { HojaRuta } from './entities/hoja-ruta.entity';
 import { HojaRutaPaquete } from './entities/hoja-ruta-paquete.entity';
 import { HojasRutaController } from './hojas-ruta.controller';
 import { HojasRutaService } from './hojas-ruta.service';
-import { PaqueteConfiguracionController } from './paquete-configuracion.controller';
-import { PaqueteConfiguracionService } from './paquete-configuracion.service';
 import { PaquetesController } from './paquetes.controller';
 import { PaquetesService } from './paquetes.service';
 import { TarifasPagoController } from './tarifas-pago.controller';
@@ -30,7 +27,6 @@ import { RepartidoresService } from './repartidores.service';
 @Module({
   imports: [
     RepositoriosModule.forFeature([
-      PaqueteConfiguracion,
       TarifaPago,
       TarifaEnvio,
       Repartidor,
@@ -43,9 +39,7 @@ import { RepartidoresService } from './repartidores.service';
     // `@Body(EscalaMonedaPipe)` resuelve por `moduleRef.injectables`: sin esto el arranque se cae (backend.md § 3.1).
     MonedasModule,
   ],
-  // `paquetes/configuracion` antes que `paquetes/:id`: el orden de registro decide qué ruta gana.
   controllers: [
-    PaqueteConfiguracionController,
     TarifasPagoController,
     TarifasEnvioController,
     PaquetesController,
@@ -55,7 +49,6 @@ import { RepartidoresService } from './repartidores.service';
     RendicionesController,
   ],
   providers: [
-    PaqueteConfiguracionService,
     TarifasPagoService,
     TarifasEnvioService,
     PaquetesService,
@@ -65,7 +58,6 @@ import { RepartidoresService } from './repartidores.service';
     RendicionesService,
   ],
   exports: [
-    PaqueteConfiguracionService,
     TarifasPagoService,
     TarifasEnvioService,
     PaquetesService,

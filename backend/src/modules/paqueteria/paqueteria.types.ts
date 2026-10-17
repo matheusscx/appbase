@@ -5,13 +5,6 @@ export type EstadoHoja = 'abierta' | 'rendida';
 export type MedioCobro = 'efectivo' | 'transferencia';
 export type ResultadoEscaneo = 'asignado_nuevo' | 'asignado' | 'ya_escaneado';
 
-export interface PaqueteConfiguracionRespuesta {
-  // false = no se guardó el precio de envío por defecto o no hay una tarifa de pago por defecto:
-  // escanear y crear sin montos dan 400
-  configurada: boolean;
-  precioEnvioDefecto: string;
-}
-
 export interface RepartidorFila {
   id: string;
   nombre: string;
@@ -47,9 +40,10 @@ export interface PaqueteFila {
   remitenteTerceroId: string | null;
   remitenteNombre: string | null;
   cobroEnDestino: boolean;
-  precioEnvio: string;
   tarifaPagoId: string | null; // null = se paga con la del repartidor o la por defecto (regla 10)
   tarifaPagoNombre: string | null;
+  tarifaEnvioId: string | null; // null = se cobra con la por defecto (regla 10b)
+  tarifaEnvioNombre: string | null;
   estado: EstadoPaquete; // derivado de las líneas (docs/features/paqueteria.md, regla 2)
   hojaRutaId: string | null; // la hoja de la línea en_ruta / entregado
   repartidorNombre: string | null;
@@ -65,7 +59,7 @@ export interface TotalesHoja {
   montoCobradoEfectivo: string; // montoCobradoEfectivo + montoCobradoTransferencia = montoCobradoDestino
   montoCobradoTransferencia: string;
   montoPagoRepartidor: string;
-  montoTotalGeneral: string; // Σ precio_envio de todos los entregados
+  montoTotalGeneral: string; // Σ precio_envio de la LÍNEA de todos los entregados
   netoARendir: string; // cobrado − pago (puede ser negativo)
 }
 
@@ -85,7 +79,15 @@ export interface LineaHoja {
   direccion: string | null;
   comuna: string | null;
   cobroEnDestino: boolean;
+  // Entregada: lo fijado al entregar (`precioEnvio`, `tarifaEnvioId`). Si no: lo que se cobraría
+  // hoy (`precioEstimado`); en una hoja rendida, una línea no entregada viene con '0.0000', sin
+  // tarifa y `precioEstimado` false.
   precioEnvio: string;
+  precioEstimado: boolean;
+  tarifaEnvioId: string | null; // la resuelta (o la fijada); null en una entrega anterior a las tarifas
+  tarifaEnvioNombre: string | null;
+  // La del PAQUETE (su caso especial), no la resuelta: null = se cobra con la por defecto.
+  tarifaEnvioPaqueteId: string | null;
   // Entregada: lo fijado al entregar. Si no: lo que se pagaría hoy (`pagoEstimado`), que cambia
   // con la tarifa; null/0 si no hay ninguna que aplique.
   tarifaPagoId: string | null;

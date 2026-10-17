@@ -1,18 +1,13 @@
 import {
   IsBoolean,
   IsNotEmpty,
-  IsNumberString,
   IsOptional,
   IsString,
   IsUUID,
   MaxLength,
 } from 'class-validator';
-import {
-  IsDecimalNoNegativo,
-  IsMontoPersistible,
-} from '../../../common/decorators/decimal-signo.decorator';
-import { EsMontoCobrado } from '../../../common/decorators/escala-moneda.decorator';
 import { MAX_ENTRADA_CODIGO } from '../codigo-paquete';
+import { IdEnMinusculas } from '../../../common/decorators/id-en-minusculas.decorator';
 
 export class CreatePaqueteDto {
   /** Lo que entrega la pistola o se tipea: el service lo normaliza (`normalizarCodigoPaquete`). */
@@ -52,18 +47,17 @@ export class CreatePaqueteDto {
   @IsBoolean()
   cobroEnDestino: boolean;
 
-  // Ausentes = los defaults de la configuración, copiados al paquete
-  // (docs/features/paqueteria.md, regla 1).
+  // Ausente = se cobra con la tarifa de envío por defecto (docs/features/paqueteria.md, regla 10b):
+  // la del paquete es el caso especial. El precio NO viaja: lo resuelve el servidor al entregar.
   @IsOptional()
-  @IsNumberString()
-  @IsDecimalNoNegativo()
-  @IsMontoPersistible()
-  @EsMontoCobrado()
-  precioEnvio?: string;
+  @IdEnMinusculas()
+  @IsUUID()
+  tarifaEnvioId?: string | null;
 
   // Ausente = se paga con la tarifa del repartidor o la por defecto (docs/features/paqueteria.md,
   // regla 10): la del paquete es el caso especial.
   @IsOptional()
+  @IdEnMinusculas()
   @IsUUID()
   tarifaPagoId?: string | null;
 }
