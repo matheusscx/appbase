@@ -26,7 +26,11 @@ export default defineNuxtRouteMiddleware(async (to) => {
 
   // Rutas admin: guard propio. Verificar isSuperadmin.
   if (to.path.startsWith('/admin')) {
-    if (!isSuperadmin.value) return navigateTo('/')
+    if (!isSuperadmin.value) {
+      // Un rebote sin aviso se ve como "la pantalla se rompió" (09.24).
+      useToast().add({ title: 'Esa pantalla es solo para el equipo de Venka', color: 'warning' })
+      return navigateTo('/')
+    }
     return
   }
 

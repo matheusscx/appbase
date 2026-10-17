@@ -216,12 +216,12 @@ describe('zona "Hoy" — tamaño táctil', () => {
 })
 
 describe('zona "Hoy" — tarjetas como links reales', () => {
-  it('Ventas y Por cobrar son <a href="/ventas">, focuseables con Tab', async () => {
+  it('Ventas es <a href="/ventas"> y Por cobrar lleva a las ventas con saldo (04.10), focuseables con Tab', async () => {
     const wrapper = await montarHoy()
 
     const hrefs = wrapper.findAll('a').map(a => a.attributes('href'))
-    // Ventas y Por cobrar comparten destino (no hay reporte de ventas propio).
-    expect(hrefs.filter(h => h === '/ventas')).toHaveLength(2)
+    expect(hrefs.filter(h => h === '/ventas')).toHaveLength(1)
+    expect(hrefs.filter(h => h === '/ventas?porCobrar=true')).toHaveLength(1)
 
     wrapper.unmount()
   })

@@ -25,4 +25,11 @@ describe('AppDateInput — nombre del campo', () => {
     expect(w.find('label').exists()).toBe(false)
     expect(w.find('button[aria-label="Seleccionar fecha"]').exists()).toBe(true)
   })
+  // Auditoría UX 04.16: el ícono mide 20 px y es el único camino táctil al calendario.
+  it('el botón del calendario tiene un área de toque de 44 px (04.16)', async () => {
+    const w = await mountSuspended(AppDateInput, { props: { label: 'Desde' } })
+    const clases = w.find('button').classes().join(' ')
+    expect(clases).toContain('relative')
+    expect(clases).toContain('after:-inset-3')
+  })
 })

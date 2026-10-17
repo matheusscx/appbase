@@ -124,7 +124,13 @@ const AppDrawerStub = {
   `,
 }
 
-async function montar() {
+// La URL con la que se abre la pantalla. El middleware `auth` manda a /login a quien no tiene
+// sesión, así que la ruta real del test no es /ventas: se fija la que lee la pantalla.
+let queryUrl: Record<string, string> = {}
+mockNuxtImport('useRoute', () => () => ({ path: '/ventas', params: {}, query: queryUrl, fullPath: '/ventas' }))
+
+async function montar(query: Record<string, string> = {}) {
+  queryUrl = query
   const wrapper = await mountSuspended(VentasIndex, {
     attachTo: document.body,
     global: {
@@ -468,5 +474,42 @@ describe('ventas/index — parte en "Hoy" y busca por folio (01.28)', () => {
     const wrapper = await montar()
 
     expect(wrapper.text()).toContain('Todavía no hay ventas hoy.')
+  })
+})
+
+describe('ventas/index — llegar desde "Por cobrar" del Inicio (04.10)', () => {
+  const esperar = () => new Promise(r => setTimeout(r, 20))
+  const urlsListado = () => llamadas.filter(u => /\/ventas\?/.test(u) && !u.includes('/ventas/resumen'))
+  const botonQuitar = (w: Awaited<ReturnType<typeof montar>>) =>
+    w.findAll('button').find(b => b.text().includes('Por cobrar'))
+
+  it('con ?porCobrar=true la lista pide porCobrar, de cualquier fecha y sin estado', async () => {
+    await montar({ porCobrar: 'true' })
+    const primera = urlsListado()[0]!
+    expect(primera).toContain('porCobrar=true')
+    expect(primera).not.toContain('desde=')
+    expect(primera).not.toContain('hasta=')
+    expect(primera).not.toContain('estado=')
+  })
+
+  it('dice que es por cobrar y de cualquier fecha, y quitarlo vuelve a hoy', async () => {
+    const wrapper = await montar({ porCobrar: 'true' })
+    const quitar = botonQuitar(wrapper)
+    expect(quitar, 'el aviso del filtro').toBeTruthy()
+    expect(wrapper.text()).toContain('de cualquier fecha')
+
+    await quitar!.trigger('click')
+    await esperar()
+    const ultima = urlsListado().at(-1)!
+    expect(ultima).not.toContain('porCobrar')
+    expect(ultima).toContain(`desde=${hoyLocal()}`)
+    expect(botonQuitar(wrapper)).toBeFalsy()
+  })
+
+  it('sin la marca, la pantalla abre como siempre: hoy y sin aviso', async () => {
+    const wrapper = await montar()
+    expect(urlsListado()[0]).not.toContain('porCobrar')
+    expect(urlsListado()[0]).toContain(`desde=${hoyLocal()}`)
+    expect(botonQuitar(wrapper)).toBeFalsy()
   })
 })

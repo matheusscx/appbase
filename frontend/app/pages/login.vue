@@ -4,7 +4,9 @@ definePageMeta({ layout: false, middleware: 'invitado' })
 const store = useAuthStore()
 
 const state = reactive({
-  email: '',
+  // El correo lo manda la pantalla de elegir contraseña en el `state` de la navegación (08.3),
+  // nunca en la URL; la contraseña no viaja.
+  email: typeof window.history.state?.email === 'string' ? window.history.state.email : '',
   password: '',
   keepSession: false,
 })

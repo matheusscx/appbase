@@ -119,7 +119,7 @@ decisiones D1–D12). Lo que sigue es lo que cuenta cada número y el porqué.
   puede tenerlos (`cancelarUnaVez` rechaza la anulación con 400 si hay algún pago). Por eso
   el cobrado bruto no necesita un `JOIN` a `ventas` para excluirlas; lo devuelto se resta
   aparte.
-- **Por cobrar:** ventas `pendiente` o `pagada_parcial`, de **cualquier fecha** —es lo que
+- **Por cobrar:** (la tarjeta lleva a `/ventas?porCobrar=true`: las mismas ventas, de cualquier fecha, con su aviso para quitar el filtro) ventas `pendiente` o `pagada_parcial`, de **cualquier fecha** —es lo que
   se debe ahora, no lo que se vendió hoy—, sin las correcciones como filas. El saldo se
   calcula **por venta** con la expresión única de `saldo-venta.ts` (`total − Σ aplicado − Σ
   correcciones "no vuelve plata"`, con **piso en 0**: lo que queda a favor del cliente no es

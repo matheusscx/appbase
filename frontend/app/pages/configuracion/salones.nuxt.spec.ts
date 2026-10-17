@@ -200,6 +200,8 @@ function respuestaGet(incluirEliminados: boolean) {
 
 /** POST/PATCH de alta y edición (no layout ni restaurar): lo que la validación debe evitar. */
 let escrituras: string[] = []
+/** Si está puesto, la próxima escritura (POST/PATCH) la rechaza el servidor con estos mensajes. */
+let rechazoDeEscritura: string[] | null = null
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: unknown }) => {
@@ -207,6 +209,11 @@ mockNuxtImport('useApiFetch', () => {
     const method = opts?.method ?? 'GET'
     if ((method === 'POST' || method === 'PATCH') && !url.endsWith('/restaurar') && !url.endsWith('/layout')) {
       escrituras.push(`${method} ${url}`)
+      if (rechazoDeEscritura) {
+        const e = new Error('400') as Error & { data?: unknown }
+        e.data = { message: rechazoDeEscritura }
+        return Promise.reject(e)
+      }
     }
 
     // POST /salones/:id/restaurar — endpoint de SALONES, cascada acotada al
@@ -418,6 +425,7 @@ function reset() {
   deleteRetenido = null
   toasts = []
   escrituras = []
+  rechazoDeEscritura = null
   patchesLayout = []
   retenerLayout = false
   layoutEnVuelo = []
@@ -1215,6 +1223,38 @@ describe('salones — formularios validan, editar mesa sin doble clic, vacío co
 
     expect(escrituras).toEqual([])
     expect(errores('salon-form')).toEqual(['Escribe el nombre del salón, por ejemplo Terraza'])
+    wrapper.unmount()
+  })
+
+  it('si el servidor rechaza el nombre de la mesa, lo marca junto al campo, en español (07.2)', async () => {
+    const wrapper = await montar()
+    await wrapper.findAll('button').find(b => b.text().includes('Agregar mesa'))!.trigger('click')
+    await espera()
+    ;(document.querySelector('#mesa-form input') as HTMLInputElement).value = 'Mesa 9'
+    document.querySelector('#mesa-form input')!.dispatchEvent(new Event('input', { bubbles: true }))
+    rechazoDeEscritura = ['nombre must be longer than or equal to 1 characters']
+    await enviar('mesa-form')
+
+    expect(escrituras.length).toBe(1)
+    const marcados = errores('mesa-form')
+    expect(marcados).toHaveLength(1)
+    expect(marcados[0]).not.toMatch(/must be|characters/)
+    wrapper.unmount()
+  })
+
+  it('si el servidor rechaza el nombre del salón, lo marca junto al campo (07.2)', async () => {
+    const wrapper = await montar()
+    await wrapper.findAll('button').find(b => b.text().includes('Nuevo salón'))!.trigger('click')
+    await espera()
+    ;(document.querySelector('#salon-form input') as HTMLInputElement).value = 'Terraza'
+    document.querySelector('#salon-form input')!.dispatchEvent(new Event('input', { bubbles: true }))
+    rechazoDeEscritura = ['nombre must be longer than or equal to 1 characters']
+    await enviar('salon-form')
+
+    expect(escrituras.length).toBe(1)
+    const marcados = errores('salon-form')
+    expect(marcados).toHaveLength(1)
+    expect(marcados[0]).not.toMatch(/must be|characters/)
     wrapper.unmount()
   })
 

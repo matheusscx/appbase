@@ -60,7 +60,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☑ | [06.4](06-compras-y-terceros.md) | P1 | Al recargar "Nueva compra", el medio de pago sale vacío y el botón apagado — **hecho 2026-10-16** | medido | agente |
 | ☑ | [06.6](06-compras-y-terceros.md) | P1 | Un pago hecho no se puede anular desde la pantalla, salvo que sobre plata — **hecho 2026-10-16** | medido | owner |
 | ☑ | [07.1](07-configuracion.md) | P1 | En Configuración, la columna de acciones queda fuera de la tarjeta en 15 pantallas *(causa en 00.9)* — **hecho 2026-10-16** | medido | agente |
-| ☐ | [07.2](07-configuracion.md) | P1 | Los formularios de Configuración rechazan con avisos en inglés, sin marcar el campo *(es 00.11)* — *parcial 2026-10-16: traducción global y campos en Ítems, Impresoras, Descuentos, Recargos; faltan Salones/mesa e Impuestos (fiscal, frente aparte)* | medido | agente |
+| ☐ | [07.2](07-configuracion.md) | P1 | Los formularios de Configuración rechazan con avisos en inglés, sin marcar el campo *(es 00.11)* — *parcial 2026-10-16: traducción global y campos en Ítems, Impresoras, Descuentos, Recargos; Salones y mesa también marcan el rechazo del servidor junto al campo; falta solo Impuestos (fiscal, frente aparte)* | medido | agente |
 | ☑ | [08.1](08-ingreso-y-cuenta.md) | P1 | Equivocarse en la "contraseña actual" cierra la sesión y manda al login — **hecho 2026-10-16** (el servidor contesta 400 y no 401 a una contraseña actual equivocada; el token no se tocó) | medido | agente |
 | ☑ | [09.1](09-tienda-y-suscripciones.md) | P1 | Al volver de Webpay, "Agregar tarjeta" cobra el primer período sin confirmar — **hecho 2026-10-16** (reabre el panel; cobra solo con el clic) | código | owner |
 | ☑ | [09.2](09-tienda-y-suscripciones.md) | P1 | Al volver de Webpay el carrito se vacía, aunque el aviso dice lo contrario — **hecho 2026-10-16** | medido + código | agente |
@@ -631,17 +631,17 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [04.7](04-inicio-y-reportes.md) | P2 | Si Inicio falla, las tarjetas dicen "Cargando" y "Sin conexión" a la vez — **hecho 2026-10-16** | agente |
 | ☑ | [04.8](04-inicio-y-reportes.md) | P2 | Un usuario sin permisos ve Inicio con "Bienvenido", "Ahora" y nada más — **hecho 2026-10-16** | agente |
 | ☑ | [04.9](04-inicio-y-reportes.md) | P2 | Inicio muestra cantidades crudas ("2.0000") y plurales mal ("1 mermas") — **hecho 2026-10-16** | agente |
-| ☐ | [04.10](04-inicio-y-reportes.md) | P2 | Las tarjetas de Inicio llevan a listas completas, no a lo que prometen — **parcial 2026-10-16** (Cierres con descuadre va a `/cajas/pendientes-revision`; falta Por cobrar → ventas pendientes y parciales: `/ventas` filtra por un solo estado y necesita un filtro múltiple en esa pantalla, de otro grupo) | agente + owner |
+| ☑ | [04.10](04-inicio-y-reportes.md) | P2 | Las tarjetas de Inicio llevan a listas completas, no a lo que prometen — **hecho 2026-10-16** (Cierres con descuadre va a `/cajas/pendientes-revision`; Por cobrar va a `/ventas?porCobrar=true`: `GET /ventas` aprendió el filtro con la regla de la tarjeta y la pantalla lo muestra con un aviso que se quita) | agente + owner |
 | ☑ | [04.11](04-inicio-y-reportes.md) | P2 | En Inicio todas las cifras pesan igual: Vendido y Cobrado no destacan — **hecho 2026-10-16** | agente + owner |
 | ☑ | [04.12](04-inicio-y-reportes.md) | P2 | "Actualizado" repetido cinco veces empuja "Hoy" bajo el pliegue — **hecho 2026-10-16** *(ver 00.1)* | agente |
 | ☑ | [04.13](04-inicio-y-reportes.md) | P2 | La tarjeta de cierres no muestra cuántos descuadres graves siguen sin revisar — **hecho 2026-10-16** | agente |
 | ☑ | [04.17](04-inicio-y-reportes.md) | P2 | En /desfases el botón "Después" no hace nada — **hecho 2026-10-16** | agente |
 | ☑ | [04.18](04-inicio-y-reportes.md) | P2 | Si /desfases falla, la tabla dice "Sin costos desfasados", como si todo estuviera al día — **hecho 2026-10-16** | agente |
 | ☑ | [04.19](04-inicio-y-reportes.md) | P2 | Si Varianza falla salen tres avisos iguales y la tabla dice "ningún producto" — **hecho 2026-10-16** | agente |
-| ☐ | [04.21](04-inicio-y-reportes.md) | P2 | La gráfica de Varianza distingue series solo por color y el ámbar no se lee — **parcial 2026-10-16** (el ámbar ya contrasta por el lote 0 y la gráfica trae una tabla para lector de pantalla; falta el valor visible en la barra para tablet) *(ver 00.8)* | agente |
+| ☑ | [04.21](04-inicio-y-reportes.md) | P2 | La gráfica de Varianza distingue series solo por color y el ámbar no se lee — **hecho 2026-10-16** (el ámbar contrasta por el lote 0 y la tabla de valores de la gráfica ahora está a la vista, con el color de cada serie: sirve en la tablet y sin mouse) *(ver 00.8)* | agente |
 | ☑ | [04.14](04-inicio-y-reportes.md) | P3 | La tarjeta Cajas no dice cuántas hay abiertas ni desde qué hora — **hecho 2026-10-16** | agente |
 | ☑ | [04.15](04-inicio-y-reportes.md) | P3 | Ctrl/Cmd+clic en una tarjeta de Inicio no abre pestaña nueva — **hecho 2026-10-16** | agente |
-| ☐ | [04.16](04-inicio-y-reportes.md) | P3 | En la tablet, "Actualizar" y los enlaces de Pérdidas miden 16 a 24 px — **parcial 2026-10-16** ("Actualizar" y los enlaces de Pérdidas a 44 px, casillas de Desfases con área de 44 px e interruptor de Varianza; quedan el ícono de calendario de `AppDateInput` y el "i" de `DiaNegocioNota`, componentes compartidos por toda la app) | agente |
+| ☑ | [04.16](04-inicio-y-reportes.md) | P3 | En la tablet, "Actualizar" y los enlaces de Pérdidas miden 16 a 24 px — **hecho 2026-10-16** ("Actualizar" y los enlaces de Pérdidas a 44 px, casillas de Desfases e interruptor de Varianza, y el ícono de calendario de `AppDateInput` y el botón "i" de `AppInfoButton` con área de toque de 44 px sin mover el diseño) | agente |
 | ☑ | [04.20](04-inicio-y-reportes.md) | P3 | Jerga en la tabla de Varianza y columnas clave fuera de vista a 768 — **hecho 2026-10-16** | agente + owner |
 | ☑ | [04.22](04-inicio-y-reportes.md) | P3 | "Costos desfasados" repite el mismo texto dos veces y escribe "items" sin tilde — **hecho 2026-10-16** | agente |
 | ☑ | [04.23](04-inicio-y-reportes.md) | P3 | Voseo en Inicio y Reportes *(lote 00.3)* — **hecho 2026-10-16** | agente |
@@ -738,7 +738,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [07.20](07-configuracion.md) | P2 | Usuarios no permite quitar a alguien del local, aunque el sistema sabe hacerlo — **hecho 2026-10-16** | owner |
 | ☑ | [07.21](07-configuracion.md) | P2 | "Crear" usuario queda gris sin decir qué falta y un correo malo no se marca — **hecho 2026-10-16** | agente |
 | ☑ | [07.22](07-configuracion.md) | P2 | Quien no es administrador y abre una pantalla de admin vuelve a Perfil sin aviso — **hecho 2026-10-16** | agente |
-| ☐ | [07.23](07-configuracion.md) | P2 | En desarrollo, el menú de Configuración muestra el ícono de otra entrada — *2026-10-16: no reproducible sin navegador; el `npm run build` pasa y los íconos son `i-lucide-*` correctos. Queda por mirar a ojo en el dev server* | agente |
+| ☐ | [07.23](07-configuracion.md) | P2 | En desarrollo, el menú de Configuración muestra el ícono de otra entrada — *2026-10-16: no reproducible sin navegador; el `npm run build` pasa y los íconos son `i-lucide-*` correctos. Revisado de nuevo 2026-10-16: los 29 nombres de ícono del menú existen en el set `lucide` instalado y la lista no mezcla entradas; la causa sería la generación de la máscara CSS del ícono en el dev server (`@nuxt/icon`). Queda por mirar a ojo en el dev server* | agente |
 | ☑ | [07.24](07-configuracion.md) | P3 | El panel de un rol fijo no muestra los permisos que da — **hecho 2026-10-16** | agente |
 | ☑ | [07.25](07-configuracion.md) | P3 | Las insignias de Configuración miden 8 a 10 px de texto — **hecho 2026-10-16** (resuelto por los lotes 01.17 y 05.17: ninguna insignia baja de 12 px) | agente |
 | ☑ | [07.26](07-configuracion.md) | P3 | Los botones de fila de Configuración miden 28 a 32 px y están pegados — **hecho 2026-10-16** | agente |
@@ -760,7 +760,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
 | ☑ | [08.2](08-ingreso-y-cuenta.md) | P2 | Los errores de registro y de Mi cuenta salen en inglés y con nombres internos *(parte en 00.11)* — **hecho 2026-10-16** (mensajes en español en los DTO de registro, perfil y cambio de contraseña; el barrido de los demás DTO de la app queda fuera de este grupo) | agente |
-| ☐ | [08.3](08-ingreso-y-cuenta.md) | P2 | "Guardar y entrar" manda al login y hay que escribir la contraseña de nuevo | agente — *parcial 2026-10-16: el botón dice "Guardar contraseña" y el aviso "Contraseña guardada"; volver a escribir la contraseña sigue, porque entrar solo exige emitir tokens (invariante 4), pendiente del owner* |
+| ☐ | [08.3](08-ingreso-y-cuenta.md) | P2 | "Guardar y entrar" manda al login y hay que escribir la contraseña de nuevo | agente — *parcial 2026-10-16: el botón dice "Guardar contraseña" y el aviso "Contraseña guardada"; el login ya llega con el correo puesto (en el `state` de la navegación, no en la URL); volver a escribir la contraseña sigue, porque entrar solo exige emitir tokens (invariante 4), pendiente del owner* |
 | ☑ | [08.4](08-ingreso-y-cuenta.md) | P2 | Un link vencido no deja pedir otro desde ahí y está en voseo — **hecho 2026-10-16** | agente |
 | ☑ | [08.5](08-ingreso-y-cuenta.md) | P2 | Tras registrarse, la pantalla dice "Si ese correo no tenía cuenta…" sin nombrar el correo — **hecho 2026-10-16** | agente |
 | ☑ | [08.6](08-ingreso-y-cuenta.md) | P2 | La invitación no dice a qué empresa te están sumando — **hecho 2026-10-16** (la consulta de la invitación devuelve la empresa) | agente |
@@ -805,14 +805,14 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [09.14](09-tienda-y-suscripciones.md) | P2 | Sin permiso, la tienda deja armar un carrito entero y falla recién al pagar — **hecho 2026-10-16** (Pagar, Agregar tarjeta, quitar y marcar preferida; Pausar, Cancelar y Cambiar tarjeta no exigen permiso en el backend, así que no hay 403 que anticipar) | agente |
 | ☑ | [09.15](09-tienda-y-suscripciones.md) | P2 | Jerga en tienda y suscripciones: "tenant", "pasarela con tokenización (Oneclick)" — **hecho 2026-10-16** | agente |
 | ☑ | [09.16](09-tienda-y-suscripciones.md) | P2 | A 768 el carrito de la tienda queda bajo el catálogo, lejos de "Pagar" — **hecho 2026-10-16** | agente |
-| ☐ | [09.22](09-tienda-y-suscripciones.md) | P2 | La suscripción a medias queda guardada en el navegador sin caducidad ni usuario — **parcial 2026-10-16** (la intención lleva usuario, local y hora y caduca a la hora; el "no cobrar sin el clic" se cerró con 09.1 el 2026-10-16) | agente |
+| ☑ | [09.22](09-tienda-y-suscripciones.md) | P2 | La suscripción a medias queda guardada en el navegador sin caducidad ni usuario — **hecho 2026-10-16** (la intención lleva usuario, local y hora y caduca a la hora; el retorno de Webpay no cobra: reabre el panel y el cobro sale con el clic, 09.1) | agente |
 | ☑ | [09.17](09-tienda-y-suscripciones.md) | P3 | El carrito online muestra "Descuentos -$0" y el total no destaca — **hecho 2026-10-16** | agente |
 | ☑ | [09.18](09-tienda-y-suscripciones.md) | P3 | Voseo en tienda y suscripciones *(lote 00.3)* — **hecho 2026-10-16** | agente |
 | ☑ | [09.19](09-tienda-y-suscripciones.md) | P3 | El menú de Tienda Online corta los nombres y tiene dos "Suscripciones" casi iguales — **hecho 2026-10-16** | owner |
 | ☑ | [09.20](09-tienda-y-suscripciones.md) | P3 | La pasarela simulada redirige a /tienda sin decir por qué si la referencia es inválida — **hecho 2026-10-16** | agente |
 | ☑ | [09.21](09-tienda-y-suscripciones.md) | P3 | Los vacíos de tarjetas y suscripciones no dicen qué hacer — **hecho 2026-10-16** | agente |
 | ☑ | [09.23](09-tienda-y-suscripciones.md) | P3 | Suscripciones no busca por cliente y un filtro vacío dice "no hay suscripciones" — **hecho 2026-10-16** | agente |
-| ☐ | [09.24](09-tienda-y-suscripciones.md) | P3 | La pantalla del superadmin no muestra "cargando", ni reintento, ni menú de usuario — **parcial 2026-10-16** (cargando, "Volver a leer", menú de usuario y aria-expanded; quedan las nueve columnas a 768 px, sin superadmin para medir, y el aviso en Inicio al entrar sin permiso, que vive en el middleware de todos) | agente |
+| ☐ | [09.24](09-tienda-y-suscripciones.md) | P3 | La pantalla del superadmin no muestra "cargando", ni reintento, ni menú de usuario — **parcial 2026-10-16** (cargando, "Volver a leer", menú de usuario y aria-expanded; quien entra a `/admin` sin ser superadmin ahora recibe un aviso al volver a Inicio; queda solo medir las nueve columnas a 768 px, sin superadmin para ver la pantalla (la tabla ya desplaza de lado dentro de su contenedor)) | agente |
 
 ## Lotes sugeridos
 

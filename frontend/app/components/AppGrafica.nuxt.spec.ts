@@ -157,11 +157,13 @@ describe('AppGrafica', () => {
   })
 
   // Auditoría UX 04.21: el valor de cada barra estaba solo en el tooltip, que aparece con el mouse.
-  it('con datos, una tabla para lector de pantalla trae el valor de cada serie por categoría', async () => {
+  it('con datos, una tabla VISIBLE trae el valor de cada serie por categoría: sirve en la tablet, sin mouse', async () => {
     const wrapper = await montar({})
     const tabla = wrapper.find('table[data-qa="grafica-tabla"]')
     expect(tabla.exists()).toBe(true)
-    expect(tabla.classes()).toContain('sr-only')
+    expect(tabla.classes()).not.toContain('sr-only')
+    // Cada valor lleva el color de su serie: sin él, distinguirlas dependería de leer el nombre.
+    expect(tabla.findAll('tbody tr')[0]!.findAll('[data-qa="grafica-muestra"]')).toHaveLength(2)
     const filas = tabla.findAll('tbody tr')
     expect(filas).toHaveLength(2)
     expect(filas[0]!.text()).toContain('Harina')

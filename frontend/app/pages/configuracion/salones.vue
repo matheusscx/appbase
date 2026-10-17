@@ -278,6 +278,7 @@ async function guardarSalon() {
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar el salón'), color: 'error' })
+    marcar(apiFieldErrors(e))
   }
   finally {
     savingSalon.value = false
@@ -458,6 +459,7 @@ async function guardarMesa() {
   }
   catch (e: unknown) {
     toast.add({ title: apiErrorMsg(e, 'Error al guardar la mesa'), color: 'error' })
+    marcar(apiFieldErrors(e))
   }
   finally {
     savingMesa.value = false

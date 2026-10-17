@@ -26,6 +26,9 @@ const props = withDefaults(
 
 const emit = defineEmits<{ 'update:modelValue': [value: string] }>()
 
+// El ícono mide 20 px: el área de toque llega a 44 sin mover nada del campo (04.16).
+const AREA_TACTIL = 'relative after:absolute after:-inset-3 after:content-[\'\']'
+
 const UFormField = resolveComponent('UFormField')
 // Con `label` la raíz es un componente: el listener de QA va al elemento real.
 const rootEl = ref<HTMLElement | { $el: HTMLElement } | null>(null)
@@ -98,7 +101,7 @@ onBeforeUnmount(() => {
             :aria-label="label ? `Seleccionar la fecha ${label}` : 'Seleccionar fecha'"
             tabindex="-1"
             :disabled="disabled"
-            :class="ui.trailingIcon()"
+            :class="[ui.trailingIcon(), AREA_TACTIL]"
           />
           <template #content>
             <UCalendar

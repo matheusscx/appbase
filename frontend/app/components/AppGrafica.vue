@@ -126,27 +126,37 @@ const alto = computed(() => Math.max(160, props.categorias.length * 32 + 40))
         </span>
       </div>
 
-      <!-- El número de cada barra, para teclado y lector de pantalla: el tooltip solo aparece con el
-           mouse (auditoría UX 04.21). La gráfica se esconde del lector para no leerlo dos veces. -->
-      <table data-qa="grafica-tabla" class="sr-only">
-        <caption>Valores de la gráfica</caption>
+      <!-- El número de cada barra, a la vista: el tooltip solo aparece con el mouse, y en la tablet o con
+           teclado el valor no existía (auditoría UX 04.21). Cada valor lleva el color de su serie. La
+           gráfica se esconde del lector para no leerlo dos veces. -->
+      <table data-qa="grafica-tabla" class="w-full text-sm">
+        <caption class="sr-only">Valores de la gráfica</caption>
         <thead>
-          <tr>
-            <th scope="col">
+          <tr class="text-left text-xs text-muted">
+            <th scope="col" class="py-1 pr-3 font-medium">
               Producto
             </th>
-            <th v-for="s in series" :key="s.nombre" scope="col">
+            <th v-for="s in series" :key="s.nombre" scope="col" class="py-1 pr-3 font-medium">
               {{ s.nombre }}
             </th>
           </tr>
         </thead>
         <tbody>
-          <tr v-for="f in filas" :key="f.indice">
-            <th scope="row">
+          <tr v-for="f in filas" :key="f.indice" class="border-t border-default">
+            <th scope="row" class="py-1.5 pr-3 text-left font-medium text-default">
               {{ f.categoria }}
             </th>
-            <td v-for="(v, i) in f.valores" :key="i">
-              {{ series[i]!.nombre }}: {{ formato(v, f.indice) }}
+            <td v-for="(v, i) in f.valores" :key="i" class="py-1.5 pr-3 text-default">
+              <span class="inline-flex items-center gap-1.5">
+                <span
+                  data-qa="grafica-muestra"
+                  aria-hidden="true"
+                  class="inline-block h-2.5 w-2.5 rounded-sm"
+                  :style="{ backgroundColor: colorDe(series[i]!.color) }"
+                />
+                <span class="sr-only">{{ series[i]!.nombre }}:</span>
+                {{ formato(v, f.indice) }}
+              </span>
             </td>
           </tr>
         </tbody>

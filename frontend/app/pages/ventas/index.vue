@@ -78,6 +78,9 @@ const rangoEsHoy = computed(() => filtroDesde.value === hoy.value && filtroHasta
 // Es exacto, y un folio puede ser de cualquier día: mientras hay uno, el rango no se aplica a la lista.
 const folioTexto = ref('')
 const filtroFolio = ref<string | undefined>()
+// "Por cobrar" del Inicio (04.10): las ventas con saldo, de cualquier fecha. Llega por la URL y,
+// mientras está, manda sobre el estado y el rango (como el folio): una deuda vieja sigue siendo deuda.
+const filtroPorCobrar = ref(route.query.porCobrar === 'true')
 let esperaFolio: ReturnType<typeof setTimeout> | null = null
 watch(folioTexto, (texto) => {
   if (esperaFolio) clearTimeout(esperaFolio)
@@ -94,11 +97,12 @@ const rangoParams = computed(() => ({
 }))
 
 const listFilters = computed(() => ({
-  estado: filtroEstado.value,
+  estado: filtroPorCobrar.value ? undefined : filtroEstado.value,
+  porCobrar: filtroPorCobrar.value ? 'true' : undefined,
   canal: filtroCanal.value,
   documento: filtroDocumento.value,
   folio: filtroFolio.value,
-  ...(filtroFolio.value ? {} : rangoParams.value),
+  ...(filtroFolio.value || filtroPorCobrar.value ? {} : rangoParams.value),
 }))
 
 const { items: ventas, meta, page, loading, error, sinPermiso, fetch: fetchVentas } =
@@ -150,11 +154,12 @@ const canalOptions = [
 ]
 
 const hayFiltrosActivos = computed(() =>
-  !!filtroEstado.value || !!filtroCanal.value || !!filtroDocumento.value || !!filtroFolio.value || !rangoEsHoy.value,
+  filtroPorCobrar.value || !!filtroEstado.value || !!filtroCanal.value || !!filtroDocumento.value || !!filtroFolio.value || !rangoEsHoy.value,
 )
 
 // "Limpiar" vuelve a como abre la pantalla: hoy, sin nada más.
 function limpiarFiltros() {
+  filtroPorCobrar.value = false
   filtroEstado.value = undefined
   filtroCanal.value = undefined
   filtroDocumento.value = undefined
@@ -336,10 +341,20 @@ const columns: TableColumn<VentaResumen>[] = [
         <AppRangoFechas
           v-model:desde="filtroDesde"
           v-model:hasta="filtroHasta"
-          :disabled="!!filtroFolio"
+          :disabled="!!filtroFolio || filtroPorCobrar"
           qa="ventas-rango"
         />
         <div class="flex flex-wrap items-center gap-3">
+          <UButton
+            v-if="filtroPorCobrar"
+            label="Por cobrar, de cualquier fecha"
+            trailing-icon="i-lucide-x"
+            color="warning"
+            variant="subtle"
+            class="min-h-11"
+            aria-label="Por cobrar, de cualquier fecha. Quitar este filtro"
+            @click="() => { filtroPorCobrar = false }"
+          />
           <UInput
             v-model="folioTexto"
             icon="i-lucide-search"
@@ -360,6 +375,7 @@ const columns: TableColumn<VentaResumen>[] = [
           <USelect
             v-model="filtroEstado"
             :items="estadoOptions"
+            :disabled="filtroPorCobrar"
             placeholder="Estado"
             class="w-48"
           />

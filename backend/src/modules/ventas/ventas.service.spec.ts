@@ -5247,6 +5247,22 @@ describe('VentasService', () => {
         expect(paramsDe(llamada)).toContain('1234');
       });
 
+      it('porCobrar filtra por estado y saldo con la regla de la tarjeta del Inicio, y manda sobre `estado`', async () => {
+        await service.listar(
+          TENANT_ID,
+          { porCobrar: true, estado: EstadoVenta.PAGADA },
+          'u-test',
+          true,
+        );
+        const llamada = consultaDeListado();
+        const sql = sqlDe(llamada);
+        expect(sql).toContain("v.estado IN ('pendiente', 'pagada_parcial')");
+        expect(sql).toContain('v.venta_referencia_id IS NULL');
+        expect(sql).toContain('> 0');
+        expect(sql).not.toContain('v.estado = $');
+        expect(paramsDe(llamada)).not.toContain(EstadoVenta.PAGADA);
+      });
+
       it('el resumen respeta el mismo rango: las tarjetas cuentan lo que la lista muestra', async () => {
         dataSourceMock.query.mockImplementation((sql: string) => {
           if (sql.includes('zona_horaria')) return Promise.resolve([DIA]);

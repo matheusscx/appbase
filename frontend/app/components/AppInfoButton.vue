@@ -17,7 +17,7 @@ defineProps<{
       variant="ghost"
       size="xs"
       square
-      class="-my-1 text-muted hover:text-default"
+      class="relative -my-1 text-muted hover:text-default after:absolute after:-inset-2.5 after:content-['']"
       :aria-label="ariaLabel ?? `Más información: ${title}`"
       @click.stop="() => { open = true }"
     />

@@ -4622,7 +4622,14 @@ export class VentasService {
       paramIdx = params.length + 1;
     }
 
-    if (query.estado) {
+    if (query.porCobrar) {
+      // La regla de la tarjeta "Por cobrar" del Inicio (`resumen-negocio.service.ts`):
+      // el mismo saldo único, sin las correcciones, así el número que se toca y la
+      // lista a la que se llega cuentan lo mismo. Sin parámetros: valores fijos.
+      filters += ` AND v.estado IN ('pendiente', 'pagada_parcial')
+        AND v.venta_referencia_id IS NULL
+        AND ${saldoDeVentaSql('v')} > 0`;
+    } else if (query.estado) {
       filters += ` AND v.estado = $${paramIdx++}`;
       params.push(query.estado);
     }

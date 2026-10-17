@@ -16,6 +16,8 @@ const { estado } = vi.hoisted(() => ({
 
 mockNuxtImport('useRoute', () => () => ({ path: estado.path, params: { token: 'tk' } }))
 mockNuxtImport('$fetch', () => () => estado.consulta())
+const { irA } = vi.hoisted(() => ({ irA: vi.fn() }))
+mockNuxtImport('navigateTo', () => irA)
 
 async function montar() {
   const wrapper = await mountSuspended(Invitacion)
@@ -24,6 +26,7 @@ async function montar() {
 }
 
 beforeEach(() => {
+  irA.mockClear()
   estado.path = '/invitacion/tk'
   estado.consulta = () => Promise.resolve({ correo: 'ana@tulocal.cl', tenant: 'Almacén Los Andes' })
 })
@@ -120,5 +123,17 @@ describe('invitación — qué dice y qué ofrece', () => {
     const pedir = wrapper.findAll('a').find(a => a.text() === 'Pedir otro link')
     expect(pedir?.attributes('href')).toBe('/forgot-password')
     expect(wrapper.text()).not.toContain('quien te invitó')
+  })
+})
+
+describe('invitación — al guardar, el login ya trae el correo (08.3)', () => {
+  it('lleva al login con el correo de la invitación, para que solo falte la contraseña', async () => {
+    const wrapper = await montar()
+    const campos = wrapper.findAll('input[type="password"]')
+    await campos[0]!.setValue('claveNueva123')
+    await campos[1]!.setValue('claveNueva123')
+    await wrapper.find('form').trigger('submit')
+    await new Promise(r => setTimeout(r, 20))
+    expect(irA).toHaveBeenCalledWith({ path: '/login', state: { email: 'ana@tulocal.cl' } })
   })
 })

@@ -522,7 +522,7 @@ anotado de un documento de la máquina o de afuera (`venta_documentos.numero`), 
 vigentes. La pantalla parte en "Hoy"; con un folio escrito no aplica el rango a la lista (el folio
 puede ser de otro día) y lo deja inactivo.
 
-Lista paginada de ventas del tenant autenticado. Query params: `page` (default 1), `pageSize` (default 15, max 100), `estado`, `canal`, `documento`, `desde`/`hasta` y `folio`. La respuesta incluye campos enriquecidos por fila: `montoPagado` (suma de pagos menos vuelto), `saldo` (la expresión única del saldo, no `total − montoPagado`; una corrección da 0) y el resumen de quién emitió (`emisores`, `tieneDuplicado`).
+Lista paginada de ventas del tenant autenticado. Query params: `page` (default 1), `pageSize` (default 15, max 100), `estado`, `canal`, `documento`, `desde`/`hasta`, `folio` y `porCobrar`. Con `porCobrar=true` la lista trae lo que la tarjeta "Por cobrar" del Inicio cuenta —`pendiente` o `pagada_parcial` con saldo, sin las correcciones— y manda sobre `estado`; la pantalla, que llega ahí por `/ventas?porCobrar=true`, no aplica el rango (una deuda vieja sigue siendo deuda). La respuesta incluye campos enriquecidos por fila: `montoPagado` (suma de pagos menos vuelto), `saldo` (la expresión única del saldo, no `total − montoPagado`; una corrección da 0) y el resumen de quién emitió (`emisores`, `tieneDuplicado`).
 
 ```
 GET /api/ventas?page=1&pageSize=15&estado=pendiente&canal=fisico&documento=sin_numero

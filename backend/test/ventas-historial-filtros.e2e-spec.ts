@@ -34,6 +34,7 @@ describe('Historial de ventas: rango de fechas y folio (e2e)', () => {
   let token: string;
   let caja: CajaAbierta;
   let ventaId: string;
+  let ventaParcialId: string;
   const folio = String(Date.now()).slice(-9);
 
   const get = (ruta: string) =>
@@ -108,6 +109,25 @@ describe('Historial de ventas: rango de fechas y folio (e2e)', () => {
       });
     expect(resVenta.status).toBe(201);
     ventaId = (resVenta.body as { id: string }).id;
+
+    // Una venta con abono: queda `pagada_parcial`, con saldo por cobrar.
+    const resParcial = await request(app.getHttpServer())
+      .post('/api/ventas')
+      .set('Idempotency-Key', randomUUID())
+      .set('Authorization', `Bearer ${token}`)
+      .send({
+        lineas: [{ itemId, cantidad: '1' }],
+        pagos: [
+          {
+            metodoPagoId: DEBITO_ID,
+            monto: '400',
+            numeroDocumento: `${folio}1`,
+            claseDocumento: 'voucher',
+          },
+        ],
+      });
+    expect(resParcial.status).toBe(201);
+    ventaParcialId = (resParcial.body as { id: string }).id;
   }, 60000);
 
   afterAll(async () => {
@@ -192,5 +212,24 @@ describe('Historial de ventas: rango de fechas y folio (e2e)', () => {
     expect(lista.status).toBe(400);
     const resumen = await get('/api/ventas/resumen?hasta=ayer');
     expect(resumen.status).toBe(400);
+  });
+
+  it('porCobrar trae las ventas con saldo (la regla de la tarjeta del Inicio) y deja fuera las pagadas', async () => {
+    const res = await get('/api/ventas?porCobrar=true&pageSize=100');
+    expect(res.status).toBe(200);
+    const ids = (res.body as Paginated).data.map((v) => v.id);
+    expect(ids).toContain(ventaParcialId);
+    expect(ids).not.toContain(ventaId);
+
+    // Sin la marca, la lista no se filtra por saldo.
+    const sin = await get('/api/ventas?porCobrar=false&pageSize=100');
+    expect(sin.status).toBe(200);
+    expect((sin.body as Paginated).data.map((v) => v.id)).toContain(ventaId);
+  });
+
+  it('porCobrar con un valor que no es booleano se trata como falso, no como error', async () => {
+    const res = await get('/api/ventas?porCobrar=si&pageSize=100');
+    expect(res.status).toBe(200);
+    expect((res.body as Paginated).data.map((v) => v.id)).toContain(ventaId);
   });
 });

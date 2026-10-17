@@ -8,14 +8,17 @@ import type { PorCobrar } from '~/types/resumen-negocio'
 defineProps<{ porCobrar: PorCobrar }>()
 
 const { formatMonto } = useFormatters()
+
+// Las ventas con saldo, de cualquier fecha: lo que la tarjeta promete (04.10).
+const DESTINO = '/ventas?porCobrar=true'
 </script>
 
 <template>
   <UCard
     as="a"
-    href="/ventas"
+    :href="DESTINO"
     class="cursor-pointer transition hover:ring-2 hover:ring-primary-500"
-    @click="seguirEnlaceInterno($event, '/ventas')"
+    @click="seguirEnlaceInterno($event, DESTINO)"
   >
     <template #header>
       <div class="flex items-center justify-between gap-2">

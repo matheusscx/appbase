@@ -105,7 +105,9 @@ async function guardar() {
       body: { contrasena: form.value.contrasena },
     })
     toast.add({ title: 'Contraseña guardada. Ya puedes entrar.', color: 'success' })
-    await navigateTo('/login')
+    // El correo ya se conoce: el login lo trae puesto y solo falta la contraseña (08.3). Va en el
+    // `state` de la navegación, no en la URL: un correo en el query string queda en el historial.
+    await navigateTo(correo.value ? { path: '/login', state: { email: correo.value } } : '/login')
   }
   catch (e: unknown) {
     error.value = apiErrorMsg(e, 'No se pudo guardar la contraseña')

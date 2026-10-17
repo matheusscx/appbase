@@ -1,4 +1,12 @@
-import { IsEnum, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
+import { Transform } from 'class-transformer';
+import {
+  IsBoolean,
+  IsEnum,
+  IsIn,
+  IsOptional,
+  IsString,
+  MaxLength,
+} from 'class-validator';
 import { EsFechaOTimestamp } from '../../../common/decorators/fecha-pura.decorator';
 import { PaginationQueryDto } from '../../../common/dto/pagination-query.dto';
 import { EstadoVenta } from '../entities/venta.entity';
@@ -57,6 +65,16 @@ export class QueryVentasDto extends PaginationQueryDto {
   @IsOptional()
   @IsEnum(EstadoVenta)
   estado?: EstadoVenta;
+
+  /**
+   * Lo que se debe ahora: la misma regla de la tarjeta "Por cobrar" del Inicio
+   * (pendientes o parciales con saldo, sin las correcciones). Ignora el estado
+   * que se mande junto: una venta con saldo es una de esas dos.
+   */
+  @IsOptional()
+  @Transform(({ value }) => value === 'true' || value === true)
+  @IsBoolean()
+  porCobrar?: boolean;
 
   @IsOptional()
   @IsIn(['fisico', 'online'])
