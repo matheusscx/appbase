@@ -74,11 +74,48 @@ Hoy son tres:
 
 ## 1. Mecánico — no hay nada que preguntar ni diseñar
 
+- [ ] **`rutFiscal` no tiene etiqueta en `ETIQUETAS` de `frontend/app/utils/api-error.ts`** (frontend;
+  anotado el 2026-10-17 al cerrar 06.16). El error junto al campo sale bien; solo el texto del
+  toast de respaldo nombra el campo en crudo. Agregar `rutFiscal: 'RUT fiscal'`.
+- [ ] **Dos razones sociales del seeder tienen un RUT con dígito verificador inválido**
+  (`seeder.service.ts`, `76.123.456-7` y `96.654.390-9`, ~l. 5212 y 5221; anotado el 2026-10-17).
+  No pasan por el DTO, así que hoy no fallan; corregirlos a RUT válidos para que el demo no muestre
+  datos que la pantalla de Terceros rechazaría.
+- [ ] **La pantalla de Terceros no puede borrar un RUT** (frontend, preexistente; anotado el
+  2026-10-17): `terceros.vue` manda `form.rut || undefined`, y omitir conserva. Para borrarlo tiene
+  que mandar `null` cuando el campo quedó vacío en una edición (el backend ya lo acepta y lo prueba
+  `terceros-rut.e2e-spec.ts`).
+- [ ] **La vista previa del próximo cobro no mira si el plan está activo** (backend, 09.9; anotado el
+  2026-10-17): `GET /suscripciones/proximo-cobro` da una fecha para un ítem inactivo que el alta
+  después rechaza con 400. Aplicar el mismo chequeo de `activo` que `leerAlta`.
+- [ ] **La guarda que descarta una respuesta vieja de `proximoCobro` no tiene test**
+  (`pages/tienda/suscripciones.vue`, `pedidoProximoCobro`; anotado el 2026-10-17). Un test que
+  cambie de plan con la primera respuesta todavía en vuelo y afirme que gana la segunda.
+
 ## 2. Medir primero — no es una pregunta para el owner
 
 Lo que va acá es lo que se resuelve abriendo un archivo, corriendo algo o mirando la base:
 sale de esta sección hacia la 1 (si el arreglo resulta obvio) o hacia la 4 (si lo medido
 destapa una decisión que no es mía).
+
+- [ ] **La lista de cuentas de una mesa cae entera si una cuenta tiene datos corruptos** (backend,
+  02.12; anotado el 2026-10-17 por la revisión). `totalesDeCuentas` deja en `null` el total de una
+  cuenta que da `HttpException`, pero otra excepción (p. ej. `reglas_congeladas` malformado) tira
+  `GET /mesas/:id/cuentas` entero. Medir si existe algún camino real que deje ese dato malformado; si
+  existe, atrapar por cuenta. Además, un tenant sin moneda oficial ya no puede listar las cuentas
+  (antes listaba y fallaba al calcular).
+- [ ] **"Pagos vigentes" de Por pagar lista todo el historial del proveedor, sin tope** (06.6; anotado
+  el 2026-10-17). Medir con un proveedor de cientos de pagos; si pesa, paginar o limitar a los
+  últimos.
+- [ ] **El desglose "de eso, $X los cobró Ana" suma solo entradas** (02.2, `cobradoPorGarzones`;
+  anotado el 2026-10-17). Una nota de crédito en efectivo es una salida aparte y no se descuenta del
+  monto del garzón. Medir si en el local eso confunde el arqueo antes de decidir si se descuenta.
+- [ ] **"Ya salió a las 21:14" es la hora de la última salida de la cuenta, no de cada plato** (02.5;
+  anotado el 2026-10-17). `enviada_el` se pisa con cada envío de la línea y la reimpresión toma el
+  máximo. La copia puede incluir platos que salieron antes. Ver si en el uso confunde.
+- [ ] **El turno que se preselecciona usa el reloj del dispositivo, no la zona del tenant** (02.16;
+  anotado el 2026-10-17). En una tablet con la hora mal puesta o en otra zona elige otro turno; se
+  puede cambiar a mano. Medir si el frontend ya conoce la zona del tenant para usarla.
 
 - [ ] **En la mesa, cada línea agregada pide `GET /items` dos veces** (frontend, salones;
   **medido, causa no investigada**). Lo midió el frente de rate limiting el 2026-10-13 con
@@ -445,6 +482,19 @@ Cada entrada lleva su pregunta concreta adentro y mientras no se conteste **no s
 elegir por cuenta propia una regla de negocio no documentada es justo lo que `CLAUDE.md`
 prohíbe.
 
+- [ ] **El garzón cobra con la caja del local: cuatro bordes que la regla no dijo** (02.2, hecho el
+  2026-10-17 en `f46faf6d`; preguntas que dejó el frente). **Las preguntas para el owner:**
+  1. Una caja propia que está cuadrándose (`en_conciliacion`) no cuenta: el cobro de mesa sigue las
+     reglas del local y entra en otra caja abierta. ¿Está bien?
+  2. La tendencia de descuadres sigue cargando el faltante a la cajera aunque el efectivo lo haya
+     traído un garzón. ¿Hay que descontarlo?
+  3. ¿La boleta dice "Cobró: Ana"? Hoy no (el detalle está en el cierre y el arqueo).
+  4. ¿El demo deja el cajón "Mostrador" de Paris como caja principal? Hoy el seed no marca ninguna.
+- [ ] **"1.250" sin coma se sigue leyendo 1,25 en la cantidad de una compra** (06.2; anotado el
+  2026-10-17). Con coma, los puntos son de miles ("1.250,5" = 1250,5); sin coma no se toca, porque en
+  Chile el punto es de miles pero el sistema siempre lo leyó decimal. **La pregunta para el owner:**
+  ¿"1.250" es mil doscientos cincuenta (y "1.5" pasa a ser un error), o se queda como está?
+
 - [ ] **Un `REFUND` marcado "Sin nota de crédito" cuya venta ya está corregida entera por otras
   notas no tiene salida** (backend + producto; anotado el 2026-10-04 al cerrar "Generar nota",
   [`resueltos.md`](resueltos.md); **solo si aparece en uso real** — hoy no se construye, lo decidió
@@ -470,6 +520,14 @@ propia antes de escribir código. Encararlas es brainstorm → spec → plan, nu
 
 Los proyectos de funcionalidad nueva se mudaron a [`desarrollo-nuevo.md`](desarrollo-nuevo.md)
 el 2026-10-06. Acá quedan los que corrigen algo que ya existe.
+
+- [ ] **Lo fiscal que dejó la auditoría UX 2026-10-16** (sesión propia, `CLAUDE.md` § Lo fiscal va
+  solo; anotado el 2026-10-17). Son los tres únicos hallazgos abiertos de la auditoría
+  ([README](auditoria-ux/2026-10-16/README.md)):
+  - **02.10:** la cuenta de la mesa suma sin IVA, el total lleva IVA y nadie explica la diferencia
+    ("Neto · IVA" sobre el total). Incluye el IVA de la precuenta en pantalla (02.7).
+  - **07.14:** para crear un IVA de 19 % hay que escribir 0.19.
+  - **07.2 (lo que falta):** los errores junto al campo en la pantalla de Impuestos.
 
 ℹ️ Si algún día se evalúa cambiar el ORM, el candidato es MikroORM (resuelve el contexto
 transaccional nativo, con ALS — [ADR-020](../adr/020-contexto-transaccional-als.md));
