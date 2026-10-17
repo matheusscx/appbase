@@ -36,6 +36,7 @@ const UNIDADES_CATALOGO = [
 
 const TENANT = 'tenant-uuid';
 const USUARIO = 'usuario-uuid';
+const CAJA_DEL_LOCAL_ID = 'caja-del-local-uuid';
 const MESA = 'mesa-uuid';
 const CUENTA = 'cuenta-uuid';
 const ITEM = 'item-uuid';
@@ -132,6 +133,11 @@ describe('SalonesService', () => {
    * solo QUÉ le pasa `cerrarCuenta` (la huella, sin el PIN).
    */
   let idempotencia: { ejecutar: jest.Mock };
+  let caja: {
+    conRastroDeRechazo: jest.Mock;
+    resolverCajaDeCobroDeMesa: jest.Mock;
+    cajasParaCobroDeMesa: jest.Mock;
+  };
   let garzones: { resolverGarzonActuante: jest.Mock };
   let sesiones: {
     assertSesionAbierta: jest.Mock;
@@ -317,6 +323,14 @@ describe('SalonesService', () => {
         operar(),
       ),
     };
+    caja = {
+      conRastroDeRechazo: jest.fn(
+        (_tenantId: string, fn: () => Promise<unknown>) => fn(),
+      ),
+      // La caja del cobro de mesa la resuelven las reglas del local (02.2).
+      resolverCajaDeCobroDeMesa: jest.fn().mockResolvedValue(CAJA_DEL_LOCAL_ID),
+      cajasParaCobroDeMesa: jest.fn(),
+    };
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         SalonesService,
@@ -338,11 +352,7 @@ describe('SalonesService', () => {
         { provide: IdempotenciaService, useValue: idempotencia },
         {
           provide: CajaService,
-          useValue: {
-            conRastroDeRechazo: jest.fn(
-              (_tenantId: string, fn: () => Promise<unknown>) => fn(),
-            ),
-          },
+          useValue: caja,
         },
       ],
     }).compile();
@@ -4617,6 +4627,17 @@ describe('SalonesService', () => {
       expect(dtoEnviado.canal).toBe('fisico');
       expect(dtoEnviado.lineas).toEqual([{ itemId: ITEM, cantidad: '2' }]);
       expect(cuentaEnviada).toBe(CUENTA);
+      // 02.2: la caja del cobro la dan las reglas del local, con el tenant y el
+      // usuario del token, y viaja por el parámetro interno (8º), no por el DTO.
+      expect(caja.resolverCajaDeCobroDeMesa).toHaveBeenCalledWith(
+        TENANT,
+        USUARIO,
+        undefined,
+      );
+      expect(ventas.crearEnTransaccion.mock.calls[0][7]).toBe(
+        CAJA_DEL_LOCAL_ID,
+      );
+      expect(dtoEnviado).not.toHaveProperty('cajaId');
       expect(congeladas[0].personalizacion).toEqual({
         omitidos: [ING],
         extras: [],
@@ -4796,6 +4817,72 @@ describe('SalonesService', () => {
       });
     });
 
+    it('la caja que mandó el garzón va a las reglas del local, con el usuario del token', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+        garzonResponsableId: GARZON_RESPONSABLE,
+      });
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '1', unidadIds: [] },
+      ]);
+      manager.query.mockResolvedValue([]);
+      ventas.crearEnTransaccion.mockResolvedValue({ id: 'venta-1' });
+
+      await service.cerrarCuenta(
+        TENANT,
+        USUARIO,
+        CUENTA,
+        { garzonId: GARZON, pin: PIN, pagos: [], cajaId: 'caja-elegida' },
+        CLAVE,
+      );
+
+      expect(caja.resolverCajaDeCobroDeMesa).toHaveBeenCalledWith(
+        TENANT,
+        USUARIO,
+        'caja-elegida',
+      );
+    });
+
+    it('sin caja donde cobrar, la cuenta no se cierra ni se crea la venta', async () => {
+      manager.findOne.mockResolvedValue({
+        id: CUENTA,
+        tenantId: TENANT,
+        estado: EstadoCuenta.ABIERTA,
+        garzonResponsableId: GARZON_RESPONSABLE,
+      });
+      manager.find.mockResolvedValue([
+        { itemId: ITEM, cantidad: '1', unidadIds: [] },
+      ]);
+      caja.resolverCajaDeCobroDeMesa.mockRejectedValueOnce(
+        new BadRequestException(
+          'No hay ninguna caja abierta en el local. Avísale a la cajera.',
+        ),
+      );
+
+      await expect(
+        service.cerrarCuenta(
+          TENANT,
+          USUARIO,
+          CUENTA,
+          { garzonId: GARZON, pin: PIN, pagos: [] },
+          CLAVE,
+        ),
+      ).rejects.toThrow('Avísale a la cajera');
+      expect(ventas.crearEnTransaccion).not.toHaveBeenCalled();
+      expect(manager.save).not.toHaveBeenCalled();
+    });
+
+    it('cajaDelLocal delega en las reglas con el tenant y el usuario del token', async () => {
+      caja.cajasParaCobroDeMesa.mockResolvedValueOnce({ modo: 'ninguna' });
+
+      await expect(service.cajaDelLocal(TENANT, USUARIO)).resolves.toEqual({
+        modo: 'ninguna',
+      });
+      expect(caja.cajasParaCobroDeMesa).toHaveBeenCalledWith(TENANT, USUARIO);
+    });
+
     it('pasa propinaCierreMesa con el monto y el garzón responsable', async () => {
       const cuenta = {
         id: CUENTA,
@@ -4848,6 +4935,9 @@ describe('SalonesService', () => {
         CUENTA,
         // El sexto: la foto de cada línea (canal interno, 2026-08-31).
         expect.any(Array),
+        undefined,
+        // El octavo: la caja del cobro, resuelta por las reglas del local.
+        CAJA_DEL_LOCAL_ID,
       );
     });
 
@@ -4902,6 +4992,9 @@ describe('SalonesService', () => {
         CUENTA,
         // El sexto: la foto de cada línea (canal interno, 2026-08-31).
         expect.any(Array),
+        undefined,
+        // El octavo: la caja del cobro, resuelta por las reglas del local.
+        CAJA_DEL_LOCAL_ID,
       );
     });
 
@@ -6666,6 +6759,15 @@ describe('SalonesService', () => {
         clave: CLAVE,
         operacion: 'cuenta.cerrar',
       });
+    });
+
+    it('la caja elegida mueve la huella: el mismo cobro contra otra caja es otra operación', async () => {
+      const { huella } = await solicitudDe(base);
+      const conCaja = await solicitudDe({ ...base, cajaId: 'caja-a' } as never);
+      expect(conCaja.huella).not.toBe(huella);
+      expect(
+        (await solicitudDe({ ...base, cajaId: 'caja-b' } as never)).huella,
+      ).not.toBe(conCaja.huella);
     });
 
     it('el PIN no mueve la huella: su hash se revertiría por fuerza bruta', async () => {

@@ -106,6 +106,13 @@ export interface CajonDisponible {
   fondoSugerido: string | null
 }
 
+/** Efectivo de una caja que cobró un garzón en las mesas: "de eso, $X los cobró Ana" (02.2). */
+export interface CobradoPorGarzon {
+  garzonId: string
+  nombre: string
+  monto: string
+}
+
 export interface ArqueoLinea {
   metodoPagoId: string | null
   nombre: string
@@ -223,6 +230,8 @@ export const useCajaStore = defineStore('caja', () => {
   const cajonesDisponibles = ref<CajonDisponible[]>([])
   const arqueo = ref<ArqueoLinea[]>([])
   const arqueoCiego = ref(false)
+  /** `null` = el modo ciego lo retiene (desglosar el efectivo revelaría parte del esperado). */
+  const cobradoPorGarzones = ref<CobradoPorGarzon[] | null>(null)
   const motivos = ref<MotivoDiferencia[]>([])
   const testigos = ref<TestigoEstado[]>([])
   const loadingActiva = ref(false)
@@ -354,11 +363,14 @@ export const useCajaStore = defineStore('caja', () => {
   }
 
   async function cargarArqueo(cajaId: string): Promise<void> {
-    const res = await useApiFetch<{ ciego: boolean, lineas: ArqueoLinea[] }>(
+    // El desglose es de una caja: si leer la siguiente falla, no queda el de la anterior (02.2).
+    cobradoPorGarzones.value = null
+    const res = await useApiFetch<{ ciego: boolean, lineas: ArqueoLinea[], cobradoPorGarzones?: CobradoPorGarzon[] | null }>(
       `${config.public.apiUrl}/caja/${cajaId}/arqueo`,
     )
     arqueo.value = res.lineas
     arqueoCiego.value = res.ciego
+    cobradoPorGarzones.value = res.cobradoPorGarzones ?? null
   }
 
   async function cargarArqueoCiego(): Promise<boolean> {
@@ -549,6 +561,7 @@ export const useCajaStore = defineStore('caja', () => {
     cajonesDisponibles,
     arqueo,
     arqueoCiego,
+    cobradoPorGarzones,
     motivos,
     testigos,
     loadingActiva,

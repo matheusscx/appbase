@@ -9,6 +9,7 @@ const props = defineProps<{
 }>()
 
 const perms = usePermissionsStore()
+const cajaStore = useCajaStore()
 const cierreDrawerOpen = ref(false)
 
 const enConciliacion = computed(() => props.caja.estado === 'en_conciliacion')
@@ -61,6 +62,7 @@ const puedeFinalizar = computed(() => enConciliacion.value && !props.readonly)
         :lineas="arqueo"
         :puede-justificar="perms.esAdmin && caja.estado === 'cerrada'"
         :caja-id="caja.id"
+        :cobrado-por-garzones="cajaStore.cobradoPorGarzones"
       />
     </UCard>
 

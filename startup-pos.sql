@@ -1915,11 +1915,17 @@ CREATE TABLE "cajones" (
   -- Fondo con el que suele abrirse el cajón: la apertura lo precarga (se edita).
   -- NULL = sin fondo sugerido.
   "fondo_sugerido" NUMERIC(18,4),
+  -- La caja donde entran los cobros de mesa del garzón (02.2). A lo sumo una viva por tenant.
+  "principal"      BOOLEAN       NOT NULL DEFAULT FALSE,
   "creado_el"      TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "actualizado_el" TIMESTAMPTZ   NOT NULL DEFAULT NOW(),
   "eliminado_el"   TIMESTAMPTZ,
   "eliminado_por"  UUID          REFERENCES usuarios("usuario_id")
 );
+
+CREATE UNIQUE INDEX "ux_cajones_principal_por_tenant"
+  ON "cajones" ("tenant_id")
+  WHERE "principal" = true AND "eliminado_el" IS NULL;
 
 -- Ver la nota de `uq_recargos_tenant_nombre_vivo`: misma regla.
 CREATE UNIQUE INDEX "ux_cajones_tenant_nombre"

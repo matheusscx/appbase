@@ -12,6 +12,7 @@ import {
   formatCantidadAnulacion,
   type SalonConMesas,
   type MesaResumen,
+  type CajaDelLocal,
   type CuentaDetalle,
   type CuentaLineaDetalle,
   type CuentaAnulacionDetalle,
@@ -961,7 +962,45 @@ const selectedSalon = computed(() =>
 const salonItems = computed(() =>
   salones.value.map(s => ({ label: s.nombre, value: s.id })),
 )
-const tieneCaja = computed(() => cajaStore.activa !== null)
+// Dónde se cobra la mesa (02.2): las cajas son del local, no del garzón. La pantalla lo pregunta al
+// servidor (`GET /salones/caja-del-local`, `Salones:Operar`) porque el garzón no tiene `MiCaja` y
+// `cajaStore.activa` le da 403. Si esa lectura falla (nadie la dejó sin permiso, pero una red caída sí),
+// queda `null` y rige lo de siempre —la caja propia—; el servidor resuelve y valida igual al cobrar.
+const cajaLocal = ref<CajaDelLocal | null>(null)
+const cajaElegidaId = ref<string | undefined>(undefined)
+async function cargarCajaDelLocal() {
+  try {
+    cajaLocal.value = await salonesApi.cajaDelLocal()
+  }
+  catch {
+    cajaLocal.value = null
+  }
+  // La caja que se eligió puede haberse cerrado mientras tanto: no se manda una que ya no está.
+  if (cajaElegidaId.value && !cajaLocal.value?.cajas.some(c => c.cajaId === cajaElegidaId.value)) {
+    cajaElegidaId.value = undefined
+  }
+}
+// Al abrir una cuenta se vuelve a leer: la pantalla puede llevar horas abierta y las cajas cambian.
+watch(() => activeCuenta.value?.id, (id) => {
+  if (id) void cargarCajaDelLocal()
+})
+const tieneCaja = computed(() => cajaLocal.value ? cajaLocal.value.modo !== 'ninguna' : cajaStore.activa !== null)
+const hayQueElegirCaja = computed(() => cajaLocal.value?.modo === 'elegir')
+const cajasParaElegir = computed(() =>
+  (cajaLocal.value?.cajas ?? []).map(c => ({
+    label: c.cajero ? `${c.cajon ?? 'Caja'} (${c.cajero})` : (c.cajon ?? 'Caja'),
+    value: c.cajaId,
+  })),
+)
+const faltaElegirCaja = computed(() => hayQueElegirCaja.value && !cajaElegidaId.value)
+// Sin la caja propia de por medio, el garzón necesita saber a qué máquina llevar la plata.
+const textoCajaDeCobro = computed(() => {
+  const l = cajaLocal.value
+  if (!l || (l.modo !== 'principal' && l.modo !== 'unica')) return null
+  const caja = l.cajas.find(c => c.cajaId === l.cajaId)
+  if (!caja) return null
+  return `Se cobra en ${caja.cajon ?? 'la caja del local'}${caja.cajero ? `, de ${caja.cajero}` : ''}.`
+})
 const totalFinal = computed(() => resultado.value?.totales.totalFinal ?? '0')
 // Una línea cuyo ítem se borró del catálogo hace fallar el cálculo entero: el
 // motor resuelve los ítems contra el catálogo vivo y devuelve 404. Sin esto la
@@ -1037,6 +1076,9 @@ async function abrirCobro() {
   const cuenta = activeCuenta.value
   const mesa = selectedMesa.value
   if (!cuenta) return
+  // Las cajas se abren y cierran durante el turno: se vuelve a mirar antes de cobrar. Sin `await`:
+  // el total de abajo es la espera larga, y el servidor valida la caja igual al cerrar.
+  void cargarCajaDelLocal()
   abriendoCobro.value = true
   cobroPedidoId.value = cuenta.id
   try {
@@ -1325,7 +1367,7 @@ onMounted(async () => {
   // El vínculo va en el mismo `Promise.all` y no en una llamada aparte: es una
   // más de las cargas iniciales, y encadenarla sumaría un round trip antes de
   // que la pantalla sirva.
-  const [, , , , , vinculo, miPin] = await Promise.all([
+  const [, , , , , , vinculo, miPin] = await Promise.all([
     // ⚠️ Con `catch` propio, por el mismo motivo que `miVinculo` más abajo, y
     // medido en el smoke de navegador del testigo (2026-08-13): `GET
     // /caja/activa` pide `MiCaja:Leer`, y **un garzón no lo tiene**. Ese 403
@@ -1337,6 +1379,7 @@ onMounted(async () => {
     // Una caja que no se puede leer no es un error de esta pantalla: el garzón
     // no cobra desde acá.
     cajaStore.cargarActiva().catch(() => null),
+    cargarCajaDelLocal(),
     cargarSalones(),
     cargarCatalogo(),
     unidadesStore.ensureLoaded(),
@@ -3317,10 +3360,14 @@ async function cerrarCuentaConPin(
       })
       return
     }
+    // Capturado ANTES del POST: la proyección local (`aplicarCobroLocal`) es la de la caja propia, y si
+    // el cobro entró en la del local ese número no se mueve (02.2).
+    const cobroEnCajaPropia = cajaLocal.value === null || cajaLocal.value.modo === 'propia'
     const { boleta, repetida } = await salonesApi.cerrarCuenta(
       cuentaCerrada.id,
       {
         ...credencialGarzon(garzonId, pin),
+        ...(hayQueElegirCaja.value && cajaElegidaId.value ? { cajaId: cajaElegidaId.value } : {}),
         pagos,
         tipoDocumentoId: tipoDocumentoPorDefecto(tiposDocumento.value),
         ...(cobro.customer ? { customer: cobro.customer } : {}),
@@ -3377,12 +3424,14 @@ async function cerrarCuentaConPin(
     // `aplicarCobroLocal` (`ventas/pos.vue` y `VentaDetalleDrawer.vue`).
     const targetCobro = new Decimal(boleta.totales.totalFinal).plus(tipMonto)
     const neto = Decimal.min(bruto, targetCobro).toFixed(4)
-    cajaStore.aplicarCobroLocal(neto, pagosConMonto.length)
+    if (cobroEnCajaPropia) cajaStore.aplicarCobroLocal(neto, pagosConMonto.length)
     // Lo que se PINTA se condiciona, igual que en cancelar: sacarlo de donde
     // esté sería una expulsión si mientras tanto abrió otra cuenta.
     if (activeCuenta.value?.id === cuentaCerrada.id) volverACuentas()
   }
   catch (e: unknown) {
+    // Un 400 por la caja (se cerró, se abrió la principal) es que la pantalla quedó vieja: se vuelve a leer.
+    void cargarCajaDelLocal()
     if (!intentoCobro.mostrarSiCobroConOtrosDatos(e, ambitoCobro))
       toastErrorOperativo(e, 'Error al cerrar la cuenta')
   }
@@ -3931,10 +3980,34 @@ async function imprimirBoletaDelCierre(boleta: BoletaVenta) {
                   color="warning"
                   variant="soft"
                   icon="i-lucide-triangle-alert"
-                  title="Sin caja abierta"
-                  description="Necesitas una caja física abierta para cobrar."
+                  title="No hay caja abierta"
+                  description="No hay ninguna caja abierta en el local. Avísale a la cajera."
                   class="mb-3"
+                  data-qa="sin-caja"
                 />
+                <UFormField
+                  v-else-if="hayQueElegirCaja"
+                  label="Caja donde cobras"
+                  help="Hay más de una caja abierta: elige a cuál entra esta plata."
+                  class="mb-3"
+                  data-qa="elegir-caja"
+                >
+                  <USelect
+                    v-model="cajaElegidaId"
+                    :items="cajasParaElegir"
+                    placeholder="Elige una caja"
+                    size="xl"
+                    class="w-full min-h-11"
+                    aria-label="Caja donde cobras"
+                  />
+                </UFormField>
+                <p
+                  v-else-if="textoCajaDeCobro"
+                  class="mb-3 text-sm text-muted"
+                  data-qa="caja-de-cobro"
+                >
+                  {{ textoCajaDeCobro }}
+                </p>
                 <div class="mb-2 flex gap-2">
                   <UButton
                     color="neutral"
@@ -4003,7 +4076,7 @@ async function imprimirBoletaDelCierre(boleta: BoletaVenta) {
                     size="xl"
                     class="min-h-11 flex-1 justify-center"
                     :loading="abriendoCobro || submitting"
-                    :disabled="activeCuenta.lineas.length === 0 || !tieneCaja || cuentaConItemEliminado"
+                    :disabled="activeCuenta.lineas.length === 0 || !tieneCaja || faltaElegirCaja || cuentaConItemEliminado"
                     @click="abrirCobro"
                   >
                     Cerrar y cobrar

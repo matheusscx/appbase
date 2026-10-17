@@ -2688,6 +2688,15 @@ export class SalonesService {
   }
 
   /**
+   * En qué caja se cobraría una mesa ahora mismo, para que la pantalla avise o
+   * pida elegir antes de armar el cobro. Es informativa: `cerrarCuenta` resuelve
+   * de nuevo con las mismas reglas y es quien manda.
+   */
+  cajaDelLocal(tenantId: string, usuarioId: string) {
+    return this.cajaService.cajasParaCobroDeMesa(tenantId, usuarioId);
+  }
+
+  /**
    * Cierra la cuenta generando la venta real (canal físico → requiere caja
    * abierta). Venta + cierre de cuenta ocurren en una sola transacción vía
    * VentasService.crearEnTransaccion, para que ambos commiteen juntos.
@@ -2728,6 +2737,9 @@ export class SalonesService {
     const huella = huellaDe('cuenta.cerrar', {
       cuentaId,
       garzonId: dto.garzonId,
+      // La caja elegida es parte de lo que se pidió: el mismo cobro contra otra
+      // caja es otra operación, no un reintento (02.2).
+      cajaId: dto.cajaId,
       pagos: dto.pagos,
       tipoDocumentoId: dto.tipoDocumentoId,
       customer: dto.customer,
@@ -2789,6 +2801,15 @@ export class SalonesService {
               'Transferí la cuenta a alguien en turno para poder cobrarla.',
           );
         }
+
+        // Dónde entra el cobro lo deciden las reglas del local, no el JWT: el
+        // garzón no tiene caja propia (02.2). Va antes de cargar ítems y precios
+        // para que "no hay caja abierta" falle sin haber hecho trabajo.
+        const cajaDeCobroId = await this.cajaService.resolverCajaDeCobroDeMesa(
+          tenantId,
+          usuarioId,
+          dto.cajaId,
+        );
 
         // Los tres, no solo el que se cobra: `@IsNumberString()` acepta el signo
         // menos, y aunque `targetCobro` use únicamente `propinaMonto` —así que un
@@ -2877,6 +2898,8 @@ export class SalonesService {
             reglasCongeladas: l.reglasCongeladas,
             consumoCongelado: l.consumoCongelado,
           })),
+          undefined,
+          cajaDeCobroId,
         );
 
         cuenta.estado = EstadoCuenta.CERRADA;

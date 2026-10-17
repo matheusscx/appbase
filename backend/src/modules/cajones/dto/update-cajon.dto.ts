@@ -28,6 +28,12 @@ export class UpdateCajonDto {
   @IsBoolean()
   activo?: boolean;
 
+  // Marca (o desmarca) la caja principal del local, donde entran los cobros de
+  // mesa del garzón (02.2). Marcar una desmarca la anterior; omitir la conserva.
+  @ValidateIf((_o, v) => v !== undefined)
+  @IsBoolean()
+  principal?: boolean;
+
   // `null` SÍ es un pedido con sentido acá: quita el fondo sugerido. Omitir la
   // clave lo conserva (`undefined`); es la única columna nullable del cajón.
   @IsOptional()

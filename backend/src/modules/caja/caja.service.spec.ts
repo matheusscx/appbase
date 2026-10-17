@@ -115,7 +115,9 @@ describe('CajaService', () => {
       transaction: jest.fn((cb: (m: typeof managerMock) => Promise<unknown>) =>
         cb(managerMock),
       ),
-      query: jest.fn(),
+      // Default `[]`: `obtenerArqueo` suma el desglose "cobrado por garzones"
+      // con una query más, y los tests que miran otra cosa no la mockean.
+      query: jest.fn().mockResolvedValue([]),
     };
     intentoRechazadoRepo.create.mockReset().mockImplementation((x) => x);
     intentoRechazadoRepo.save.mockReset().mockResolvedValue(undefined);
@@ -963,6 +965,239 @@ describe('CajaService', () => {
     });
   });
 
+  describe('cobro de mesa: a qué caja entra (02.2)', () => {
+    const USUARIO_COBRA = 'dddddddd-0000-0000-0000-000000000004';
+    const fila = (
+      cajaId: string,
+      usuarioId: string | null,
+      opts: { principal?: boolean; cajon?: string } = {},
+    ) => ({
+      caja_id: cajaId,
+      usuario_id: usuarioId,
+      cajon: opts.cajon ?? `Cajón ${cajaId}`,
+      principal: opts.principal ?? false,
+      cajero_nombre: 'Marta',
+      cajero_apellido: 'Rojas',
+    });
+
+    it('lee las cajas físicas abiertas del tenant del token, sin en_conciliacion, en una query', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await service.cajasParaCobroDeMesa(TENANT_ID, USUARIO_COBRA);
+
+      expect(dataSource.query).toHaveBeenCalledTimes(1);
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        string[],
+      ];
+      expect(params).toEqual([TENANT_ID]);
+      expect(sql).toContain("c.tipo = 'fisica'");
+      expect(sql).toContain("c.estado = 'abierta'");
+      expect(sql).toContain('c.eliminado_el IS NULL');
+      expect(sql).toContain('c.tenant_id = $1');
+    });
+
+    it('propia: quien cobra tiene caja abierta, cobra en la suya aunque haya principal', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        fila('caja-p', 'otro', { principal: true }),
+        fila('caja-mia', USUARIO_COBRA),
+      ]);
+
+      const r = await service.cajasParaCobroDeMesa(TENANT_ID, USUARIO_COBRA);
+
+      expect(r.modo).toBe('propia');
+      expect(r.cajaId).toBe('caja-mia');
+    });
+
+    it('principal: la sesión abierta del cajón principal, aunque haya otras abiertas', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        fila('caja-a', 'u-a'),
+        fila('caja-p', 'u-p', { principal: true }),
+        fila('caja-b', 'u-b'),
+      ]);
+
+      const r = await service.cajasParaCobroDeMesa(TENANT_ID, USUARIO_COBRA);
+
+      expect(r.modo).toBe('principal');
+      expect(r.cajaId).toBe('caja-p');
+    });
+
+    it('unica: sin principal abierta y una sola caja abierta, esa', async () => {
+      dataSource.query.mockResolvedValueOnce([fila('caja-a', 'u-a')]);
+
+      const r = await service.cajasParaCobroDeMesa(TENANT_ID, USUARIO_COBRA);
+
+      expect(r.modo).toBe('unica');
+      expect(r.cajaId).toBe('caja-a');
+    });
+
+    it('elegir: sin principal abierta y más de una abierta, no hay destino', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        fila('caja-a', 'u-a'),
+        fila('caja-b', 'u-b'),
+      ]);
+
+      const r = await service.cajasParaCobroDeMesa(TENANT_ID, USUARIO_COBRA);
+
+      expect(r.modo).toBe('elegir');
+      expect(r.cajaId).toBeNull();
+      expect(r.cajas.map((c) => c.cajaId)).toEqual(['caja-a', 'caja-b']);
+      expect(r.cajas[0].cajero).toBe('Marta Rojas');
+    });
+
+    it('ninguna: sin cajas abiertas', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+
+      const r = await service.cajasParaCobroDeMesa(TENANT_ID, USUARIO_COBRA);
+
+      expect(r).toEqual({ modo: 'ninguna', cajaId: null, cajas: [] });
+    });
+
+    it('ninguna abierta: 400 que le dice al garzón qué hacer', async () => {
+      dataSource.query.mockResolvedValueOnce([]);
+
+      await expect(
+        service.resolverCajaDeCobroDeMesa(TENANT_ID, USUARIO_COBRA),
+      ).rejects.toThrow(
+        'No hay ninguna caja abierta en el local. Avísale a la cajera.',
+      );
+    });
+
+    it('con una sola caja abierta resuelve sin pedir nada', async () => {
+      dataSource.query.mockResolvedValueOnce([fila('caja-a', 'u-a')]);
+
+      await expect(
+        service.resolverCajaDeCobroDeMesa(TENANT_ID, USUARIO_COBRA),
+      ).resolves.toBe('caja-a');
+    });
+
+    it('más de una y sin elegir: 400 que pide elegir', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        fila('caja-a', 'u-a'),
+        fila('caja-b', 'u-b'),
+      ]);
+
+      await expect(
+        service.resolverCajaDeCobroDeMesa(TENANT_ID, USUARIO_COBRA),
+      ).rejects.toThrow('elige en cuál se cobra');
+    });
+
+    it('elige una caja abierta del local: la usa', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        fila('caja-a', 'u-a'),
+        fila('caja-b', 'u-b'),
+      ]);
+
+      await expect(
+        service.resolverCajaDeCobroDeMesa(TENANT_ID, USUARIO_COBRA, 'caja-b'),
+      ).resolves.toBe('caja-b');
+    });
+
+    it('elige una caja que no está entre las abiertas del tenant: 400, nunca se confía en el id', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        fila('caja-a', 'u-a'),
+        fila('caja-b', 'u-b'),
+      ]);
+
+      await expect(
+        service.resolverCajaDeCobroDeMesa(
+          TENANT_ID,
+          USUARIO_COBRA,
+          'caja-de-otro-tenant',
+        ),
+      ).rejects.toThrow('Esa caja no está abierta en el local');
+    });
+
+    it('con principal abierta, mandar otra caja es 400 y no se obedece en silencio', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        fila('caja-p', 'u-p', { principal: true }),
+        fila('caja-b', 'u-b'),
+      ]);
+
+      await expect(
+        service.resolverCajaDeCobroDeMesa(TENANT_ID, USUARIO_COBRA, 'caja-b'),
+      ).rejects.toThrow('cambiaron');
+    });
+
+    it('con principal abierta, mandar esa misma caja es válido', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        fila('caja-p', 'u-p', { principal: true }),
+        fila('caja-b', 'u-b'),
+      ]);
+
+      await expect(
+        service.resolverCajaDeCobroDeMesa(TENANT_ID, USUARIO_COBRA, 'caja-p'),
+      ).resolves.toBe('caja-p');
+    });
+
+    it('quien tiene caja propia no puede mandar la de otro', async () => {
+      dataSource.query.mockResolvedValueOnce([
+        fila('caja-mia', USUARIO_COBRA),
+        fila('caja-b', 'u-b'),
+      ]);
+
+      await expect(
+        service.resolverCajaDeCobroDeMesa(TENANT_ID, USUARIO_COBRA, 'caja-b'),
+      ).rejects.toThrow(BadRequestException);
+    });
+  });
+
+  describe('obtenerArqueo: cobrado por garzones (02.2)', () => {
+    it('caja abierta sin ciego: trae el desglose por garzón con el monto a 4 decimales', async () => {
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'abierta',
+      });
+      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([]);
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValueOnce(false);
+      dataSource.query.mockResolvedValueOnce([
+        { garzon_id: 'g-ana', nombre: 'Ana', monto: '38500' },
+      ]);
+
+      const res = await service.obtenerArqueo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        false,
+      );
+
+      expect(res.cobradoPorGarzones).toEqual([
+        { garzonId: 'g-ana', nombre: 'Ana', monto: '38500.0000' },
+      ]);
+      const [sql, params] = dataSource.query.mock.calls[0] as [
+        string,
+        string[],
+      ];
+      expect(params).toEqual([CAJA_ID, TENANT_ID]);
+      // Solo el garzón que NO es el dueño de la caja: la cajera que cobra en la
+      // suya no es plata "que trajo un garzón".
+      expect(sql).toContain('g.usuario_id IS DISTINCT FROM c.usuario_id');
+      expect(sql).toContain('cu.garzon_cierre_id');
+      expect(sql).toContain("m.tipo = 'entrada'");
+      expect(sql).toContain('m.eliminado_el IS NULL');
+    });
+
+    it('modo ciego: retiene el desglose (revelaría parte del esperado) y ni lo consulta', async () => {
+      cajaRepo.findOne.mockResolvedValueOnce({
+        ...mockCajaAbierta,
+        estado: 'abierta',
+      });
+      jest.spyOn(service, 'calcularArqueo').mockResolvedValueOnce([]);
+      jest.spyOn(service, 'getArqueoCiego').mockResolvedValueOnce(true);
+
+      const res = await service.obtenerArqueo(
+        TENANT_ID,
+        USUARIO_ID,
+        CAJA_ID,
+        false,
+      );
+
+      expect(res.ciego).toBe(true);
+      expect(res.cobradoPorGarzones).toBeNull();
+      expect(dataSource.query).not.toHaveBeenCalled();
+    });
+  });
+
   describe('obtenerArqueo', () => {
     const previewEfectivo: LineaArqueo[] = [
       {
@@ -1122,7 +1357,11 @@ describe('CajaService', () => {
         { metodoPagoId: null, motivoDiferenciaId: 'm1' },
       ]);
 
-      expect(res).toEqual({ ciego: false, lineas: [] });
+      expect(res).toEqual({
+        ciego: false,
+        lineas: [],
+        cobradoPorGarzones: [],
+      });
       expect(motivosService.assertMotivoValido).toHaveBeenCalledWith(
         managerMock,
         TENANT_ID,

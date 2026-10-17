@@ -429,3 +429,23 @@ describe('useCajaStore — resumen ciego', () => {
     expect(store.resumenTurno?.ciego).toBe(false)
   })
 })
+
+// 02.2: el desglose "de eso, $X los cobró Ana" es de UNA caja. Si leer el arqueo de otra falla,
+// no puede quedar a la vista el de la anterior.
+describe('cargarArqueo — desglose de lo cobrado por garzones', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia())
+    mockApiFetch.mockReset()
+  })
+
+  it('si falla la lectura de la siguiente caja, no queda el desglose de la anterior', async () => {
+    const store = useCajaStore()
+    mockApiFetch.mockResolvedValueOnce({ ciego: false, lineas: [], cobradoPorGarzones: [{ garzonId: 'g1', nombre: 'Ana', monto: '38500.0000' }] })
+    await store.cargarArqueo('caja-1')
+    expect(store.cobradoPorGarzones).toHaveLength(1)
+
+    mockApiFetch.mockRejectedValueOnce(new Error('Failed to fetch'))
+    await expect(store.cargarArqueo('caja-2')).rejects.toThrow()
+    expect(store.cobradoPorGarzones).toBeNull()
+  })
+})

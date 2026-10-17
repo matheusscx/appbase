@@ -510,6 +510,17 @@ async function confirmarCierre() {
                 · Contado {{ l.contado != null ? formatMonto(l.contado) : '—' }}
               </span>
             </div>
+            <!-- Lo que cobraron garzones en las mesas; el modo ciego lo retiene (`null`). -->
+            <template v-if="l.esEfectivo && cajaStore.cobradoPorGarzones?.length">
+              <p
+                v-for="g in cajaStore.cobradoPorGarzones"
+                :key="g.garzonId"
+                class="text-xs text-muted"
+                data-qa="cobrado-por-garzon"
+              >
+                De eso, {{ formatMonto(g.monto) }} los cobró {{ g.nombre }}
+              </p>
+            </template>
             <div class="flex justify-between text-sm font-semibold">
               <span class="text-default">Diferencia</span>
               <span

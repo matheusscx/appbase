@@ -1,10 +1,22 @@
 # Plan: el garzón cobra la mesa con la caja abierta del local
 
-**Status:** Draft (análisis; nada construido, esperando respuestas del owner)
+**Status:** Implementado 2026-10-17 (ver «Respuestas del owner y qué se construyó»)
 **Date:** 2026-10-16
 **Owner:** owner (hallazgo 02.2 de la auditoría UX; decisión en `docs/agent/auditoria-ux/2026-10-16/decisiones.md`, fila 02.2)
 
 Regla del owner: *"1 local con 1 caja y 2 garzones, el cajero abre la caja, el garzón debería poder cobrar, sería a la caja del POS; el garzón va, busca la máquina y cobra en la mesa."* Hoy no puede y es un error.
+
+## Respuestas del owner y qué se construyó (2026-10-17)
+
+Fuente: `docs/agent/auditoria-ux/2026-10-16/decisiones.md` § Segunda tanda. Las respuestas **reemplazan** las recomendadas de P1-P8 donde difieren:
+
+- **Caja principal** (nueva, no estaba en el plan): `cajones.principal` (una por tenant, índice único parcial; la marca el admin en Configuración → Cajas). Un cobro de mesa entra en su sesión abierta.
+- **P1/P2 (varias o ninguna abierta):** sin principal abierta, entra en otra caja abierta; con más de una **elige el garzón** (`cajaId` validado por el servidor); con ninguna no se cobra: «No hay ninguna caja abierta en el local. Avísale a la cajera.»
+- **P8:** quien cobra y tiene caja propia **abierta** cobra en la suya (la principal es para quien no tiene). Una caja propia `en_conciliacion` no cuenta como abierta: cae en las reglas del local.
+- **P3:** el efectivo cuenta en el esperado de esa caja y el arqueo lo detalla («de eso, $X los cobró Ana»).
+- **P4/P5/P6/P7:** sin cambios (propina como hoy; quien cobró = `cuentas.garzon_cierre_id`, sin columna nueva; `Salones:Operar`, sin permiso nuevo; cerrar la caja con mesas abiertas no se bloquea, la mesa espera otra caja).
+- **Tareas:** T1 `cajasParaCobroDeMesa`/`resolverCajaDeCobroDeMesa` + `cajaDestinoId` interno ✓; T2 `cerrarCuenta` + huella con `cajaId` ✓; T3 `GET /salones/caja-del-local` ✓; T4 desglose en el arqueo ✓ (**sin** «Cobró: …» en la boleta: la boleta es fiscal-adjacente y el owner pidió el detalle en el cierre/arqueo); T5 N/A (sin permiso nuevo); T6 frontend ✓ (selector fuera de `CobroModal`, en el panel de la cuenta); T7 docs ✓.
+- **Consumidores revisados:** ver `docs/features/gestion-cajas.md` § «El garzón cobra con la caja del local».
 
 ---
 
@@ -101,13 +113,13 @@ Diseño (a confirmar con P1-P3 y P8, **no fijar más hasta que el owner conteste
 
 Tareas (checkboxes):
 
-- [ ] **T1 (backend, depende de P2/P8): `cajasDelLocal` + `cajaDestinoId` interno en `crearEnTransaccion`.** Contrato: sin `cajaDestinoId`, igual que hoy; con él, misma validación de estado y mismo lock. Tests unitarios del service (caja inexistente, en conciliación, de otro tenant) y e2e.
-- [ ] **T2 (backend, depende de P1): `cerrarCuenta` resuelve la caja** según P8/P1/P2, huella con `cajaId`. e2e en `backend/test/` (partir de un `salones-*.e2e-spec.ts` existente; garzón propio creado en el spec, **no** usar a Ana, memoria `e2e-garzon-del-seed-se-pisa`): (a) garzón sin caja propia y una caja abierta del cajero → cobra, `pagos.caja_id` = caja del cajero, esperado del cajero sube, `garzon_cierre_id` = garzón; (b) ninguna caja → 400 con el texto nuevo; (c) dos cajas sin `cajaId` → 400 / con `cajaId` ajeno al tenant → 404/400; (d) caja del local `en_conciliacion` → no se ofrece; (e) cajero con caja propia sigue cobrando en la suya; (f) reintento con la misma `Idempotency-Key` reproduce.
-- [ ] **T3 (backend): `GET /salones/caja-del-local`** con `@RequiresPermiso('Salones','Operar')`, `TenantGuard`, sin esperado. e2e de 403 con un usuario sin `Salones:Operar` y de aislamiento por tenant.
-- [ ] **T4 (backend, depende de P3/P5): desglose "cobrado por garzones" en el arqueo y la boleta ("Cobró: …").** Una query agregada; test que afirma sobre la forma del SQL con DB real, no mockeada (memoria `mock-de-db-no-ve-la-forma-del-sql`), y que el modo ciego no filtra el esperado.
-- [ ] **T5 (solo si P6-B): permiso `Salones:Cobrar`.** Sembrar `moduloAppPermiso` con el siguiente id libre, asignarlo al rol Salón y encargado; guard en `/cerrar`. Sin backfill (sin datos productivos).
-- [ ] **T6 (frontend, depende de T3):** en `pages/salones/index.vue` reemplazar `tieneCaja` por la respuesta de `caja-del-local` (o por la caja propia). Aviso nuevo: "No hay caja abierta en el local. Avisale al cajero para poder cobrar." Con ≥2 cajas y P1-A, selector de caja en el modal de cobro. No llamar `aplicarCobroLocal` cuando se cobró en caja ajena (la proyección local es de la caja propia). Antes de escribir: skills `nuxt-ui` y `frontend-design`; tokens semánticos; botones de 44 px. Specs unitarios del flujo y Playwright de salones con el rol real de garzón (memoria `probar-pantallas-con-el-rol-real`).
-- [ ] **T7 (docs, mismo commit que cada tarea):** `docs/features/gestion-cajas.md` (regla nueva y el "la caja es el registro de autoría" matizado para ventas de mesa), `docs/features/salones-mesas.md` (líneas 47 y 208: "requiere caja física abierta"), `docs/PRODUCTO.md`, `docs/ESTADO.md`, y `ventas.md` si cambia la lectura de autoría.
+- [x] **T1 (backend, depende de P2/P8): `cajasDelLocal` + `cajaDestinoId` interno en `crearEnTransaccion`.** Contrato: sin `cajaDestinoId`, igual que hoy; con él, misma validación de estado y mismo lock. Tests unitarios del service (caja inexistente, en conciliación, de otro tenant) y e2e.
+- [x] **T2 (backend, depende de P1): `cerrarCuenta` resuelve la caja** según P8/P1/P2, huella con `cajaId`. e2e en `backend/test/` (partir de un `salones-*.e2e-spec.ts` existente; garzón propio creado en el spec, **no** usar a Ana, memoria `e2e-garzon-del-seed-se-pisa`): (a) garzón sin caja propia y una caja abierta del cajero → cobra, `pagos.caja_id` = caja del cajero, esperado del cajero sube, `garzon_cierre_id` = garzón; (b) ninguna caja → 400 con el texto nuevo; (c) dos cajas sin `cajaId` → 400 / con `cajaId` ajeno al tenant → 404/400; (d) caja del local `en_conciliacion` → no se ofrece; (e) cajero con caja propia sigue cobrando en la suya; (f) reintento con la misma `Idempotency-Key` reproduce.
+- [x] **T3 (backend): `GET /salones/caja-del-local`** con `@RequiresPermiso('Salones','Operar')`, `TenantGuard`, sin esperado. e2e de 403 con un usuario sin `Salones:Operar` y de aislamiento por tenant.
+- [x] **T4 (backend, depende de P3/P5): desglose "cobrado por garzones" en el arqueo y la boleta ("Cobró: …").** Una query agregada; test que afirma sobre la forma del SQL con DB real, no mockeada (memoria `mock-de-db-no-ve-la-forma-del-sql`), y que el modo ciego no filtra el esperado.
+- [x] **T5 (solo si P6-B): permiso `Salones:Cobrar`.** Sembrar `moduloAppPermiso` con el siguiente id libre, asignarlo al rol Salón y encargado; guard en `/cerrar`. Sin backfill (sin datos productivos).
+- [x] **T6 (frontend, depende de T3):** en `pages/salones/index.vue` reemplazar `tieneCaja` por la respuesta de `caja-del-local` (o por la caja propia). Aviso nuevo: "No hay caja abierta en el local. Avisale al cajero para poder cobrar." Con ≥2 cajas y P1-A, selector de caja en el modal de cobro. No llamar `aplicarCobroLocal` cuando se cobró en caja ajena (la proyección local es de la caja propia). Antes de escribir: skills `nuxt-ui` y `frontend-design`; tokens semánticos; botones de 44 px. Specs unitarios del flujo y Playwright de salones con el rol real de garzón (memoria `probar-pantallas-con-el-rol-real`).
+- [x] **T7 (docs, mismo commit que cada tarea):** `docs/features/gestion-cajas.md` (regla nueva y el "la caja es el registro de autoría" matizado para ventas de mesa), `docs/features/salones-mesas.md` (líneas 47 y 208: "requiere caja física abierta"), `docs/PRODUCTO.md`, `docs/ESTADO.md`, y `ventas.md` si cambia la lectura de autoría.
 
 ---
 

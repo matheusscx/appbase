@@ -5,7 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { In, Repository } from 'typeorm';
+import { In, IsNull, Repository } from 'typeorm';
 import { Db } from '../../common/db/db.service';
 import {
   errorDeColisionNombre,
@@ -103,7 +103,19 @@ export class CajonesService {
         await this.asegurarSinSesionAbierta(tenantId, id, 'desactivar');
       }
       cajon.activo = dto.activo;
+      // Un cajón desactivado no se puede abrir: dejarlo como principal sería una
+      // marca que nunca recibe cobros.
+      if (dto.activo === false) cajon.principal = false;
     }
+    if (dto.principal !== undefined) {
+      if (dto.principal && !cajon.activo) {
+        throw new BadRequestException(
+          'Un cajón desactivado no puede ser la caja principal',
+        );
+      }
+      cajon.principal = dto.principal;
+    }
+    if (dto.principal === true) return this.guardarComoPrincipal(cajon);
     return traducirColisionDeNombre(this.cajonRepo.save(cajon), () =>
       this.validarNombreUnico(tenantId, cajon.nombre, id),
     );
@@ -117,7 +129,9 @@ export class CajonesService {
     // pueden quedar a medias y dejar una fila borrada sin autor.
     await this.cajonRepo.update(
       { id, tenantId },
-      { eliminadoPor: usuarioId, eliminadoEl: new Date() },
+      // `principal: false` en la misma escritura: la marca de un cajón borrado
+      // no tiene que seguir apareciendo en lecturas que no filtran el borrado.
+      { eliminadoPor: usuarioId, eliminadoEl: new Date(), principal: false },
     );
   }
 
@@ -232,6 +246,32 @@ export class CajonesService {
     });
 
     return ids;
+  }
+
+  /**
+   * Desmarca la principal anterior y marca esta en una sola transacción: entre
+   * las dos escrituras el tenant no queda con dos ni —para quien lee en
+   * paralelo— sin ninguna. `ux_cajones_principal_por_tenant` es el backstop si
+   * dos PATCH sobre cajones distintos corren a la vez.
+   */
+  private async guardarComoPrincipal(cajon: Cajon): Promise<Cajon> {
+    try {
+      return await this.db.transaccion(async (manager) => {
+        await manager.update(
+          Cajon,
+          { tenantId: cajon.tenantId, principal: true, eliminadoEl: IsNull() },
+          { principal: false },
+        );
+        return manager.save(Cajon, cajon);
+      });
+    } catch (e) {
+      if ((e as { code?: string }).code === '23505') {
+        throw new ConflictException(
+          'Otra caja se marcó como principal al mismo tiempo; vuelve a intentarlo.',
+        );
+      }
+      throw e;
+    }
   }
 
   private async validarNombreUnico(

@@ -41,7 +41,7 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☑ | [00.11](00-transversal.md) | P1 | Los errores del servidor salen en inglés, con nombres internos, sin marcar el campo *(ver 06.2, 07.2, 08.2)* — **hecho 2026-10-16** (`apiErrorMsg` traduce el texto del validador en todas las pantallas; el campo marcado va en las de este lote) | medido | agente |
 | ☑ | [01.1](01-pos-y-ventas.md) | P1 | Tras cobrar, el carrito vendido sigue en pantalla 5 a 10 s y borra lo que agregas — **hecho 2026-10-16** | medido | agente |
 | ☑ | [01.2](01-pos-y-ventas.md) | P1 | El cobro trae la propina de 10% ya sumada, y el carrito no la muestra — **hecho 2026-10-16** | medido | owner |
-| ☐ | [02.2](02-salones-y-mesas.md) | P1 | Garzón y encargado no pueden cobrar mesas y el aviso pide abrir caja | medido | owner |
+| ☑ | [02.2](02-salones-y-mesas.md) | P1 | Garzón y encargado no pueden cobrar mesas y el aviso pide abrir caja — **hecho 2026-10-17** (las cajas son del local: el cobro de mesa entra en la principal, si no en otra abierta, el garzón elige si hay varias, y quien tiene caja propia cobra en la suya) | agente |
 | ☑ | [02.3](02-salones-y-mesas.md) | P1 | En tablet, los botones de la cuenta son chicos y quitan productos sin querer — **hecho 2026-10-16** | medido | agente |
 | ☑ | [02.4](02-salones-y-mesas.md) | P1 | La cuenta no muestra qué líneas salieron a cocina y cuáles no — **hecho 2026-10-16** | medido | agente |
 | ☑ | [02.5](02-salones-y-mesas.md) | P1 | Si la comanda no se imprime, la línea queda "enviada" y no se reimprime — **hecho 2026-10-16** (botón "Reimprimir comanda" con confirmación y hora; copia marcada COPIA, sin reclamar) | medido en parte | owner |

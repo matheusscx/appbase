@@ -347,6 +347,16 @@ let propinaMock = { porcentajeSugerido: '0.1', habilitado: true }
  * salió": es "cerró la otra".
  */
 let cierresDeCuenta: string[] = []
+/**
+ * Lo que contesta `GET /salones/caja-del-local` (02.2). Por defecto, quien abre la pantalla tiene su
+ * caja abierta (`propia`): es lo que modelan los tests de siempre, con `GET /caja/activa` abierta.
+ */
+const CAJA_DEL_LOCAL_PROPIA = {
+  modo: 'propia',
+  cajaId: 'caja-1',
+  cajas: [{ cajaId: 'caja-1', cajon: 'Mostrador', cajero: 'Marta Rojas', principal: false, propia: true }],
+}
+let cajaDelLocalMock: Record<string, unknown> = CAJA_DEL_LOCAL_PROPIA
 /** El body de cada uno: con qué propina se cerró. Ver el test de la propina. */
 let bodiesDeCierre: Record<string, unknown>[] = []
 /** La `Idempotency-Key` de cada `POST /cuentas/:id/cerrar`, en orden. */
@@ -708,6 +718,9 @@ mockNuxtImport('useApiFetch', () => {
     if (ruta.endsWith('/caja/activa')) {
       return Promise.resolve({ id: 'caja-1', estado: 'abierta' })
     }
+    if (ruta.endsWith('/salones/caja-del-local')) {
+      return Promise.resolve(cajaDelLocalMock)
+    }
 
     // El teclado de PIN resuelve al garzón contra el backend ANTES de emitir
     // `confirm`: sin esto el flujo nunca llega a abrir la cuenta.
@@ -1051,6 +1064,7 @@ function reiniciarMock() {
   turnosMock = [{ id: 'turno-1', nombre: 'Mañana', horaInicio: '00:00', horaFin: '23:59', activo: true }]
   bodiesIniciarSesion = []
   propinaMock = { porcentajeSugerido: '0.1', habilitado: true }
+  cajaDelLocalMock = CAJA_DEL_LOCAL_PROPIA
   cierresDeCuenta = []
   bodiesDeCierre = []
   clavesDeCierre = []
@@ -5171,6 +5185,132 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(cierresDeCuenta).toEqual(['cuenta-9'])
     // $10.000 de saldo inicial + $3.000 que entraron de verdad.
     expect(caja.resumenTurno?.saldoEsperado).toBe('13000.0000')
+  })
+
+  describe('02.2: el garzón cobra con la caja del local', () => {
+    const caja = (cajaId: string, cajon: string, cajero: string, principal = false) =>
+      ({ cajaId, cajon, cajero, principal, propia: false })
+
+    async function abrirCuentaConPedido() {
+      catalogoItemsMock = [producto('3.0000', '1.0000')]
+      cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+      useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+      const wrapper = await montar()
+      await abrirLaCuenta(wrapper)
+      await esperar(400)
+      wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!.vm.$emit('change', {
+        presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000',
+      })
+      await esperar(20)
+      return wrapper
+    }
+
+    it('sin ninguna caja abierta avisa qué hacer y no deja cobrar', async () => {
+      cajaDelLocalMock = { modo: 'ninguna', cajaId: null, cajas: [] }
+
+      await abrirCuentaConPedido()
+
+      const aviso = drawerMesa()!.querySelector('[data-qa="sin-caja"]')
+      expect(aviso?.textContent).toContain('No hay ninguna caja abierta en el local. Avísale a la cajera.')
+      expect(botonEn(drawerMesa(), 'Cerrar y cobrar')?.disabled).toBe(true)
+    })
+
+    it('con la principal abierta dice dónde se cobra, y cobra sin pedir elegir', async () => {
+      cajaDelLocalMock = {
+        modo: 'principal',
+        cajaId: 'caja-p',
+        cajas: [caja('caja-p', 'Barra', 'Marta Rojas', true), caja('caja-b', 'Terraza', 'Pedro Soto')],
+      }
+
+      const wrapper = await abrirCuentaConPedido()
+
+      expect(drawerMesa()!.querySelector('[data-qa="caja-de-cobro"]')?.textContent).toContain('Se cobra en Barra, de Marta Rojas.')
+      expect(drawerMesa()!.querySelector('[data-qa="elegir-caja"]')).toBeNull()
+      await abrirYConfirmarElCobro(wrapper)
+      await esperar(20)
+      await tipearPin()
+      await esperar(300)
+      expect(cierresDeCuenta).toEqual(['cuenta-9'])
+      // El garzón no manda caja: la decide el servidor.
+      expect(bodiesDeCierre[0]).not.toHaveProperty('cajaId')
+    })
+
+    it('cobrar en la caja del local no mueve la proyección de la caja propia', async () => {
+      const store = useCajaStore()
+      store.resumenTurno = {
+        ciego: false,
+        saldoInicial: '10000.0000',
+        totalEntradas: '0.0000',
+        totalSalidas: '0.0000',
+        saldoEsperado: '10000.0000',
+        totalMovimientos: 0,
+      }
+      cajaDelLocalMock = { modo: 'unica', cajaId: 'caja-b', cajas: [caja('caja-b', 'Terraza', 'Pedro Soto')] }
+
+      const wrapper = await abrirCuentaConPedido()
+      await abrirYConfirmarElCobro(wrapper)
+      await esperar(20)
+      await tipearPin()
+      await esperar(300)
+
+      expect(cierresDeCuenta).toEqual(['cuenta-9'])
+      expect(store.resumenTurno?.saldoEsperado).toBe('10000.0000')
+    })
+
+    describe('con más de una caja abierta y ninguna principal', () => {
+      beforeEach(() => {
+        cajaDelLocalMock = {
+          modo: 'elegir',
+          cajaId: null,
+          cajas: [caja('caja-a', 'Barra', 'Marta Rojas'), caja('caja-b', 'Terraza', 'Pedro Soto')],
+        }
+      })
+
+      const selector = (wrapper: Awaited<ReturnType<typeof montar>>) =>
+        wrapper.findAllComponents({ name: 'USelect' }).find(c => c.props('placeholder') === 'Elige una caja')
+
+      it('pide elegir y no deja cobrar hasta que se elige', async () => {
+        const wrapper = await abrirCuentaConPedido()
+
+        expect(drawerMesa()!.querySelector('[data-qa="elegir-caja"]')).toBeTruthy()
+        expect(selector(wrapper)?.props('items')).toEqual([
+          { label: 'Barra (Marta Rojas)', value: 'caja-a' },
+          { label: 'Terraza (Pedro Soto)', value: 'caja-b' },
+        ])
+        expect(botonEn(drawerMesa(), 'Cerrar y cobrar')?.disabled).toBe(true)
+
+        selector(wrapper)!.vm.$emit('update:modelValue', 'caja-b')
+        await esperar(20)
+        expect(botonEn(drawerMesa(), 'Cerrar y cobrar')?.disabled).toBe(false)
+      })
+
+      it('manda la caja elegida al cerrar la cuenta', async () => {
+        const wrapper = await abrirCuentaConPedido()
+        selector(wrapper)!.vm.$emit('update:modelValue', 'caja-b')
+        await esperar(20)
+
+        await abrirYConfirmarElCobro(wrapper)
+        await esperar(20)
+        await tipearPin()
+        await esperar(300)
+
+        expect(cierresDeCuenta).toEqual(['cuenta-9'])
+        expect(bodiesDeCierre[0]).toMatchObject({ cajaId: 'caja-b' })
+      })
+    })
+
+    it('quien tiene caja propia cobra sin elegir ni avisos, y su proyección sí se mueve', async () => {
+      const wrapper = await abrirCuentaConPedido()
+
+      expect(drawerMesa()!.querySelector('[data-qa="sin-caja"]')).toBeNull()
+      expect(drawerMesa()!.querySelector('[data-qa="elegir-caja"]')).toBeNull()
+      expect(drawerMesa()!.querySelector('[data-qa="caja-de-cobro"]')).toBeNull()
+      await abrirYConfirmarElCobro(wrapper)
+      await esperar(20)
+      await tipearPin()
+      await esperar(300)
+      expect(bodiesDeCierre[0]).not.toHaveProperty('cajaId')
+    })
   })
 
   it('un producto pesable en la boleta imprime la cantidad real, no redondeada a entero', async () => {

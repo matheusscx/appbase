@@ -743,12 +743,23 @@ export class VentasService {
      * plata. Solo `OnlineCallbackHandler` lo pasa (vía `crear`).
      */
     ventaCongelada?: VentaCongelada,
+    /**
+     * La caja donde entra el cobro, ya resuelta por las reglas del local
+     * (`CajaService.resolverCajaDeCobroDeMesa`): el cobro de una mesa no sale de
+     * la caja de quien cobra sino de la del local (02.2). Parámetro y no DTO: es
+     * el servidor quien elige la caja; un `cajaId` del body ya se validó contra
+     * las cajas abiertas del tenant antes de llegar acá. Sin él, la caja es la
+     * activa de `usuarioId`, como siempre. El `FOR UPDATE` de más abajo revalida tenant y estado
+     * `abierta`. Solo `salones.cerrarCuenta` lo pasa.
+     */
+    cajaDestinoId?: string,
   ) {
     const canal = dto.canal ?? 'fisico';
 
     // 1. Verificar caja abierta (física para canal presencial, virtual para online)
-    const caja =
-      canal === 'online'
+    const caja = cajaDestinoId
+      ? { id: cajaDestinoId, estado: 'abierta' }
+      : canal === 'online'
         ? await this.cajaService.findVirtual(tenantId)
         : await this.cajaService.findActiva(tenantId, usuarioId);
     if (!caja) {

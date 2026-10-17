@@ -188,6 +188,32 @@ F5, logout, y el supervisor en el historial). Mutantes en
 
 ---
 
+## El garzón cobra con la caja del local (02.2)
+
+Regla del owner (2026-10-17): **las cajas son del local, no del garzón**. Un cobro de mesa entra en
+la sesión abierta de la caja **principal**; si no está abierta, en otra caja abierta; con más de una
+el garzón elige; con ninguna no se cobra. Quien cobra y tiene su propia caja abierta (una cajera)
+cobra en la suya. Las reglas, el endpoint y la validación del `cajaId` están en
+[salones-mesas.md](salones-mesas.md#cierre-de-cuenta--venta-atómico). Permiso:
+`Salones:Operar`, el mismo de siempre.
+
+- **El efectivo cuenta en el esperado de esa caja**, como cualquier cobro: si el garzón no le entregó
+  la plata a la cajera, el descuadre es real. Y **cae en la cajera dueña de la caja**: la tendencia de
+  descuadres no descuenta lo del garzón; el desglose existe para que el encargado vea de quién es.
+- **El arqueo lo detalla**: `GET /caja/:id/arqueo` devuelve `cobradoPorGarzones: [{ garzonId, nombre,
+  monto }]` (efectivo, entradas netas de vuelto; una query `movimientos_caja → cuentas.venta_id →
+  garzones`). Solo el garzón que **no** es el dueño de la caja (`g.usuario_id IS DISTINCT FROM
+  c.usuario_id`): la cajera que cobra una mesa en la suya no es plata que trajo un garzón. En **modo
+  ciego** el desglose se retiene (`null`) mientras la caja está abierta, porque revelaría parte del
+  esperado; el admin y las cajas ya cerradas lo ven. Lo muestran el drawer de cierre y el arqueo del
+  detalle.
+- **Autoría = dueño de la caja, matizada**: `ventas` y `pagos` siguen sin guardar quién los hizo; la
+  venta de mesa aparece en el historial y en `filtroDeMisCajas` de la cajera dueña (que puede
+  reimprimir su boleta). El garzón no ve ventas ni reimprime (sin `Ventas`, y la reimpresión exige
+  caja propia abierta). Quién cobró sale de `cuentas.garzon_cierre_id`.
+- No cambia: abono a deuda, devolución de NC en efectivo y movimientos manuales siguen exigiendo caja
+  propia. El rastro de «el esperado no cabe» queda a nombre de quien intentó cobrar.
+
 ## Definición de cajones (Configuración → Cajas)
 
 **Sub-proyecto 1 de 3** del refactor general de caja (ver roadmap §9 de la
@@ -213,6 +239,7 @@ términos indistintamente.
 | `tenant_id` | UUID | FK tenants, NOT NULL | Del token — nunca del body |
 | `nombre` | TEXT | NOT NULL | Único por tenant (ver regla abajo) |
 | `activo` | BOOLEAN | NOT NULL, default `true` | Desactivar sin borrar |
+| `principal` | BOOLEAN | NOT NULL, default `false` | La caja donde entran los cobros de mesa del garzón (02.2). A lo sumo una viva por tenant (`ux_cajones_principal_por_tenant`, índice único parcial); marcar una desmarca la anterior en la misma transacción. `PATCH /cajones/:id { principal }` con `Cajas:Actualizar`. Desactivar o borrar el cajón le quita la marca; uno desactivado no se puede marcar |
 | `fondo_sugerido` | NUMERIC(18,4) | nullable | Con cuánto suele abrirse el cajón (auditoría UX 03.28, 2026-10-16). `NULL` = sin fondo sugerido. Es plata: escala de la moneda oficial, sin negativos y con el techo de la columna, como el saldo inicial. **Solo precarga la apertura**: el saldo inicial real sigue siendo `AbrirCajaDto.saldoInicial`, y no cambia la cuadratura ni el esperado |
 | `creado_el` | TIMESTAMPTZ | NOT NULL | |
 | `actualizado_el` | TIMESTAMPTZ | NOT NULL | |

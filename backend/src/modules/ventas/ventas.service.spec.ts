@@ -984,6 +984,72 @@ describe('VentasService', () => {
       );
     });
 
+    describe('con la caja del cobro ya resuelta (cobro de mesa del garzón, 02.2)', () => {
+      const CAJA_DEL_LOCAL = 'caja-del-local-uuid';
+      const cobrarEnCajaDelLocal = () =>
+        service.crearEnTransaccion(
+          buildManagerMock() as never,
+          TENANT_ID,
+          USUARIO_ID,
+          baseDto,
+          'cuenta-1',
+          undefined,
+          undefined,
+          CAJA_DEL_LOCAL,
+        );
+
+      it('no busca la caja de quien cobra: el garzón no tiene una', async () => {
+        cajaService.findActiva.mockResolvedValueOnce(null);
+
+        await cobrarEnCajaDelLocal();
+
+        expect(cajaService.findActiva).not.toHaveBeenCalled();
+      });
+
+      it('bloquea ESA caja con el tenant del token y la venta y el pago quedan en ella', async () => {
+        await cobrarEnCajaDelLocal();
+
+        expect(cajaService.bloquearCajaAbierta).toHaveBeenCalledWith(
+          expect.anything(),
+          CAJA_DEL_LOCAL,
+          TENANT_ID,
+        );
+        expect(pagosServiceMock.registrar).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ cajaId: CAJA_DEL_LOCAL }),
+        );
+      });
+
+      it('si la caja ya no está abierta, el lock la rechaza y no se escribe nada', async () => {
+        cajaService.bloquearCajaAbierta.mockRejectedValueOnce(
+          new ForbiddenException('Caja no encontrada o no está abierta'),
+        );
+
+        await expect(cobrarEnCajaDelLocal()).rejects.toThrow(
+          ForbiddenException,
+        );
+        expect(pagosServiceMock.registrar).not.toHaveBeenCalled();
+      });
+
+      it('sin ella, la caja sigue siendo la activa de quien cobra (los demás llamadores)', async () => {
+        await service.crearEnTransaccion(
+          buildManagerMock() as never,
+          TENANT_ID,
+          USUARIO_ID,
+          baseDto,
+        );
+
+        expect(cajaService.findActiva).toHaveBeenCalledWith(
+          TENANT_ID,
+          USUARIO_ID,
+        );
+        expect(pagosServiceMock.registrar).toHaveBeenCalledWith(
+          expect.anything(),
+          expect.objectContaining({ cajaId: CAJA_ID }),
+        );
+      });
+    });
+
     it('congela bases de venta al crear', async () => {
       calculoPreciosService.calcular.mockResolvedValueOnce({
         ...mockResultadoVenta,

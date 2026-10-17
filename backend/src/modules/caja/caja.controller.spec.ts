@@ -449,9 +449,11 @@ describe('CajaController', () => {
         .spyOn(rbacService, 'userHasPermiso')
         .mockResolvedValueOnce(false) // MiCaja:Leer
         .mockResolvedValueOnce(true); // Cajas:Leer
-      jest
-        .spyOn(cajaService, 'obtenerArqueo')
-        .mockResolvedValueOnce({ ciego: false, lineas: [] });
+      jest.spyOn(cajaService, 'obtenerArqueo').mockResolvedValueOnce({
+        ciego: false,
+        lineas: [],
+        cobradoPorGarzones: [],
+      });
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       await controller.arqueo(req, 'caja1');
       expect(cajaService.obtenerArqueo).toHaveBeenCalledWith(
@@ -468,7 +470,11 @@ describe('CajaController', () => {
       jest.spyOn(rbacService, 'userIsTenantAdmin').mockResolvedValue(true);
       const obtener = jest
         .spyOn(cajaService, 'obtenerArqueo')
-        .mockResolvedValue({ ciego: false, lineas: [] });
+        .mockResolvedValue({
+          ciego: false,
+          lineas: [],
+          cobradoPorGarzones: [],
+        });
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       await controller.arqueo(req, 'caja1');
       expect(obtener).toHaveBeenCalledWith('t1', 'u1', 'caja1', true, true);
@@ -479,7 +485,11 @@ describe('CajaController', () => {
       const isAdmin = jest.spyOn(rbacService, 'userIsTenantAdmin');
       const obtener = jest
         .spyOn(cajaService, 'obtenerArqueo')
-        .mockResolvedValue({ ciego: false, lineas: [] });
+        .mockResolvedValue({
+          ciego: false,
+          lineas: [],
+          cobradoPorGarzones: [],
+        });
       const req = {
         user: { id: 'u1', tenantId: 't1', esSuperadmin: true },
       } as any;
@@ -516,9 +526,11 @@ describe('CajaController', () => {
       const dto = {
         lineas: [{ metodoPagoId: null, motivoDiferenciaId: 'm1' }],
       } as any;
-      jest
-        .spyOn(cajaService, 'justificarDiferencias')
-        .mockResolvedValue({ ciego: false, lineas: [] });
+      jest.spyOn(cajaService, 'justificarDiferencias').mockResolvedValue({
+        ciego: false,
+        lineas: [],
+        cobradoPorGarzones: [],
+      });
       const req = { user: { id: 'u1', tenantId: 't1' } } as any;
       const res = await controller.justificarDiferencias(req, 'caja1', dto);
       expect(cajaService.justificarDiferencias).toHaveBeenCalledWith(
@@ -526,7 +538,7 @@ describe('CajaController', () => {
         'caja1',
         dto.lineas,
       );
-      expect(res).toEqual({ ciego: false, lineas: [] });
+      expect(res).toEqual({ ciego: false, lineas: [], cobradoPorGarzones: [] });
     });
   });
 

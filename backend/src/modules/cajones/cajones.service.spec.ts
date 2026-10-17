@@ -1,3 +1,4 @@
+import { IsNull } from 'typeorm';
 import { Test, type TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import {
@@ -43,6 +44,7 @@ describe('CajonesService', () => {
   };
   let cajaRepo: { count: jest.Mock };
   let manager: {
+    update: jest.Mock;
     softDelete: jest.Mock;
     save: jest.Mock;
     create: jest.Mock;
@@ -78,6 +80,7 @@ describe('CajonesService', () => {
     utRepo = { count: jest.fn() };
     cajaRepo = { count: jest.fn() };
     manager = {
+      update: jest.fn(() => Promise.resolve({ affected: 1 })),
       softDelete: jest.fn(() => Promise.resolve({ affected: 1 })),
       save: jest.fn((row: unknown) => Promise.resolve(row)),
       create: jest.fn((_entity: unknown, data: Record<string, unknown>) => ({
@@ -177,7 +180,11 @@ describe('CajonesService', () => {
     // un detalle opcional de `eliminadoPor`.
     expect(repo.update).toHaveBeenCalledWith(
       { id: 'x', tenantId: TENANT },
-      { eliminadoPor: USUARIO_ID, eliminadoEl: expect.any(Date) },
+      {
+        eliminadoPor: USUARIO_ID,
+        eliminadoEl: expect.any(Date),
+        principal: false,
+      },
     );
   });
 
@@ -187,6 +194,89 @@ describe('CajonesService', () => {
       service.remove(TENANT, USUARIO_ID, 'x'),
     ).rejects.toBeInstanceOf(NotFoundException);
     expect(repo.update).not.toHaveBeenCalled();
+  });
+
+  describe('caja principal (02.2)', () => {
+    const cajon = (extra: Record<string, unknown> = {}) => ({
+      id: 'x',
+      tenantId: TENANT,
+      nombre: 'Mostrador',
+      activo: true,
+      principal: false,
+      ...extra,
+    });
+
+    it('marcar principal desmarca la anterior del tenant y marca esta, en una transacción', async () => {
+      repo.findOne.mockResolvedValue(cajon());
+      manager.save.mockImplementationOnce((_e: unknown, row: unknown) =>
+        Promise.resolve(row),
+      );
+
+      const res = await service.update(TENANT, 'x', { principal: true });
+
+      expect(dataSource.transaction).toHaveBeenCalledTimes(1);
+      expect(manager.update).toHaveBeenCalledWith(
+        Cajon,
+        { tenantId: TENANT, principal: true, eliminadoEl: IsNull() },
+        { principal: false },
+      );
+      expect(manager.save).toHaveBeenCalledWith(
+        Cajon,
+        expect.objectContaining({ id: 'x', principal: true }),
+      );
+      // Primero se desmarca, después se marca: al revés el índice único parcial
+      // vería dos principales a la vez.
+      expect(manager.update.mock.invocationCallOrder[0]).toBeLessThan(
+        manager.save.mock.invocationCallOrder[0],
+      );
+      expect(res).toMatchObject({ principal: true });
+    });
+
+    it('un cajón desactivado no puede ser la principal (400)', async () => {
+      repo.findOne.mockResolvedValue(cajon({ activo: false }));
+
+      await expect(
+        service.update(TENANT, 'x', { principal: true }),
+      ).rejects.toBeInstanceOf(BadRequestException);
+      expect(dataSource.transaction).not.toHaveBeenCalled();
+    });
+
+    it('desmarcar no abre transacción ni toca a los demás', async () => {
+      repo.findOne.mockResolvedValue(cajon({ principal: true }));
+
+      const res = await service.update(TENANT, 'x', { principal: false });
+
+      expect(res).toMatchObject({ principal: false });
+      expect(manager.update).not.toHaveBeenCalled();
+    });
+
+    it('desactivar la principal le quita la marca', async () => {
+      repo.findOne.mockResolvedValue(cajon({ principal: true }));
+      cajaRepo.count.mockResolvedValue(0);
+
+      const res = await service.update(TENANT, 'x', { activo: false });
+
+      expect(res).toMatchObject({ activo: false, principal: false });
+    });
+
+    it('omitir `principal` lo conserva', async () => {
+      repo.findOne.mockResolvedValue(cajon({ principal: true }));
+
+      const res = await service.update(TENANT, 'x', { nombre: 'Barra' });
+
+      expect(res).toMatchObject({ nombre: 'Barra', principal: true });
+    });
+
+    it('dos marcados a la vez: el índice único se traduce a 409, no a 500', async () => {
+      repo.findOne.mockResolvedValue(cajon());
+      manager.save.mockRejectedValueOnce(
+        Object.assign(new Error('dup'), { code: '23505' }),
+      );
+
+      await expect(
+        service.update(TENANT, 'x', { principal: true }),
+      ).rejects.toBeInstanceOf(ConflictException);
+    });
   });
 
   describe('restaurar', () => {

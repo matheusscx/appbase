@@ -1,11 +1,13 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
-import type { ArqueoLinea } from '~/stores/caja'
+import type { ArqueoLinea, CobradoPorGarzon } from '~/stores/caja'
 
 const props = defineProps<{
   lineas: ArqueoLinea[]
   puedeJustificar?: boolean
   cajaId?: string
+  /** Del efectivo, lo que cobraron garzones en las mesas (02.2). `null`/vacío = no se muestra. */
+  cobradoPorGarzones?: CobradoPorGarzon[] | null
 }>()
 
 const { formatMonto } = useFormatters()
@@ -174,6 +176,16 @@ async function guardar() {
           </tr>
         </tbody>
       </table>
+    </div>
+
+    <div
+      v-if="cobradoPorGarzones?.length"
+      class="space-y-1 rounded-lg bg-muted p-3 text-sm text-default"
+      data-qa="cobrado-por-garzones"
+    >
+      <p v-for="g in cobradoPorGarzones" :key="g.garzonId">
+        De eso, <span class="font-medium tabular-nums">{{ formatMonto(g.monto) }}</span> los cobró {{ g.nombre }}
+      </p>
     </div>
 
     <div v-if="habilitarEdicion" class="flex justify-end">

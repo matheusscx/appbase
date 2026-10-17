@@ -85,6 +85,50 @@ export interface CajaTurnoResumen {
   totalMovimientos: number | null;
 }
 
+/** Efectivo de una caja que cobró un garzón en las mesas (monto en moneda oficial). */
+export interface CobradoPorGarzon {
+  garzonId: string;
+  nombre: string;
+  monto: string;
+}
+
+/** Una caja física abierta del local, tal como la ve quien cobra una mesa. */
+export interface CajaDeCobroDeMesa {
+  cajaId: string;
+  /** Nombre del cajón (Configuración → Cajas). */
+  cajon: string | null;
+  /** Quién la abrió. Sin saldos ni esperado: el cierre ciego los retiene. */
+  cajero: string | null;
+  principal: boolean;
+  /** Es la del usuario del token. */
+  propia: boolean;
+}
+
+export type ModoCajaDeCobroDeMesa =
+  | 'propia'
+  | 'principal'
+  | 'unica'
+  | 'elegir'
+  | 'ninguna';
+
+export interface CajasParaCobroDeMesa {
+  modo: ModoCajaDeCobroDeMesa;
+  /** La caja que reciben las reglas; `null` si hay que elegir o no hay ninguna. */
+  cajaId: string | null;
+  cajas: CajaDeCobroDeMesa[];
+}
+
+export interface ArqueoDeCaja {
+  ciego: boolean;
+  lineas: LineaArqueo[];
+  /**
+   * Del efectivo de esta caja, lo que cobraron garzones en las mesas (02.2): "de
+   * eso, $X los cobró Ana". `null` = retenido por el modo ciego (desglosar el
+   * efectivo revelaría parte del esperado).
+   */
+  cobradoPorGarzones: CobradoPorGarzon[] | null;
+}
+
 export interface LineaArqueo {
   metodoPagoId: string | null;
   nombre: string;
@@ -395,6 +439,125 @@ export class CajaService {
     });
   }
 
+  /**
+   * **A qué caja entra el cobro de una mesa** (02.2, owner 2026-10-17). Las
+   * cajas son del local, no del garzón: quien cobra la mesa no necesita una
+   * propia. Una sola query trae las cajas físicas abiertas del tenant (nunca
+   * `en_conciliacion`: no admite ventas) y de ahí sale el modo, en este orden:
+   *
+   * 1. `propia` — quien cobra tiene una caja suya abierta (una cajera): cobra en
+   *    la suya, como siempre.
+   * 2. `principal` — la sesión abierta del cajón que el admin marcó principal.
+   * 3. `unica` — no hay principal abierta y hay una sola caja abierta.
+   * 4. `elegir` — no hay principal abierta y hay más de una: elige quien cobra.
+   * 5. `ninguna` — no hay ninguna abierta: la mesa espera a la cajera.
+   *
+   * `usuarioId` es el del JWT. En un dispositivo compartido (tótem) es la cuenta
+   * del tótem, que nunca tiene caja: cae en 2-5 y el garzón que cobra queda en
+   * `cuentas.garzon_cierre_id`.
+   */
+  async cajasParaCobroDeMesa(
+    tenantId: string,
+    usuarioId: string,
+  ): Promise<CajasParaCobroDeMesa> {
+    const rows: {
+      caja_id: string;
+      usuario_id: string | null;
+      cajon: string | null;
+      principal: boolean;
+      cajero_nombre: string | null;
+      cajero_apellido: string | null;
+    }[] = await this.db.query(
+      `SELECT c.caja_id,
+              c.usuario_id,
+              cj.nombre AS cajon,
+              COALESCE(cj.principal, false) AS principal,
+              u.nombre AS cajero_nombre,
+              u.apellido AS cajero_apellido
+         FROM cajas c
+         -- El cajón y el cajero solo ponen el nombre y la marca: si ya no están
+         -- vivos la caja abierta sigue recibiendo cobros, así que no se descarta.
+         LEFT JOIN cajones cj ON cj.cajon_id = c.cajon_id
+                AND cj.tenant_id = c.tenant_id AND cj.eliminado_el IS NULL
+         LEFT JOIN usuarios u ON u.usuario_id = c.usuario_id
+                AND u.eliminado_el IS NULL
+        WHERE c.tenant_id = $1
+          AND c.tipo = 'fisica'
+          AND c.estado = 'abierta'
+          AND c.eliminado_el IS NULL
+        ORDER BY c.fecha_apertura ASC, c.caja_id ASC`,
+      [tenantId],
+    );
+
+    const cajas: CajaDeCobroDeMesa[] = rows.map((r) => ({
+      cajaId: r.caja_id,
+      cajon: r.cajon,
+      cajero:
+        [r.cajero_nombre, r.cajero_apellido].filter(Boolean).join(' ') || null,
+      principal: r.principal,
+      propia: r.usuario_id === usuarioId,
+    }));
+
+    const propia = cajas.find((c) => c.propia);
+    if (propia) return { modo: 'propia', cajaId: propia.cajaId, cajas };
+    const principal = cajas.find((c) => c.principal);
+    if (principal) {
+      return { modo: 'principal', cajaId: principal.cajaId, cajas };
+    }
+    if (cajas.length === 0) return { modo: 'ninguna', cajaId: null, cajas };
+    if (cajas.length === 1) {
+      return { modo: 'unica', cajaId: cajas[0].cajaId, cajas };
+    }
+    return { modo: 'elegir', cajaId: null, cajas };
+  }
+
+  /**
+   * La caja donde entra el cobro de una mesa, o el 400 que dice qué hacer. El
+   * `cajaIdElegido` viene del body y **no se confía**: se contrasta con las
+   * cajas abiertas del tenant (el del token). Solo hay elección cuando el modo
+   * es `elegir`; en cualquier otro, mandar una caja distinta de la que las
+   * reglas dan es un 400 ("la pantalla quedó vieja") y no se obedece en
+   * silencio: si la principal se abrió mientras el garzón elegía, el cobro no
+   * puede caer en una caja que él no tiene a mano.
+   *
+   * Llamarla dentro de la transacción del cobro: `crearEnTransaccion` toma después
+   * el `FOR UPDATE` de la caja y revalida que siga abierta.
+   */
+  async resolverCajaDeCobroDeMesa(
+    tenantId: string,
+    usuarioId: string,
+    cajaIdElegido?: string,
+  ): Promise<string> {
+    const { modo, cajaId, cajas } = await this.cajasParaCobroDeMesa(
+      tenantId,
+      usuarioId,
+    );
+    if (modo === 'ninguna') {
+      throw new BadRequestException(
+        'No hay ninguna caja abierta en el local. Avísale a la cajera.',
+      );
+    }
+    if (modo === 'elegir') {
+      if (!cajaIdElegido) {
+        throw new BadRequestException(
+          'Hay más de una caja abierta en el local: elige en cuál se cobra.',
+        );
+      }
+      if (!cajas.some((c) => c.cajaId === cajaIdElegido)) {
+        throw new BadRequestException(
+          'Esa caja no está abierta en el local. Elige otra.',
+        );
+      }
+      return cajaIdElegido;
+    }
+    if (cajaIdElegido && cajaIdElegido !== cajaId) {
+      throw new BadRequestException(
+        'Las cajas del local cambiaron mientras cobrabas. Vuelve a abrir el cobro.',
+      );
+    }
+    return cajaId!;
+  }
+
   async findVirtual(tenantId: string): Promise<Caja | null> {
     return this.cajaRepo.findOne({
       where: {
@@ -695,6 +858,52 @@ export class CajaService {
   }
 
   /**
+   * El efectivo de la caja que cobraron garzones en las mesas, por garzón (02.2).
+   * Una sola agregación `movimientos_caja → cuentas.venta_id → garzones`; lectura,
+   * sin columna nueva: quién cobró cada mesa ya está en `cuentas.garzon_cierre_id`.
+   *
+   * Solo cuenta el garzón que **no** es el dueño de la caja
+   * (`g.usuario_id IS DISTINCT FROM c.usuario_id`): una cajera que también
+   * atiende mesas y cobra en la suya no es "plata que trajo un garzón". Un
+   * garzón sin cuenta (PIN en el tótem) tiene `usuario_id` NULL y cuenta siempre.
+   * Entradas netas del vuelto, como el esperado; el arqueo siempre las muestra
+   * brutas de devoluciones (una NC en efectivo es una salida aparte).
+   */
+  private async cobradoPorGarzones(
+    cajaId: string,
+    tenantId: string,
+  ): Promise<CobradoPorGarzon[]> {
+    const rows: { garzon_id: string; nombre: string; monto: string }[] =
+      await this.db.query(
+        `SELECT g.garzon_id, g.nombre, SUM(m.monto) AS monto
+           FROM movimientos_caja m
+           JOIN cajas c ON c.caja_id = m.caja_id AND c.tenant_id = $2
+           -- Igual que en calcularEsperadoEfectivo: NO se filtra mp.eliminado_el.
+           -- es_efectivo es intrínseco al método del movimiento histórico.
+           JOIN metodos_pago mp ON mp.metodo_pago_id = m.metodo_pago_id
+           JOIN cuentas cu ON cu.venta_id = m.venta_id AND cu.tenant_id = $2
+                AND cu.eliminado_el IS NULL
+           -- Sin filtrar g.eliminado_el: el nombre de quien cobró es un hecho
+           -- de esa venta, y un garzón dado de baja después no la desdibuja.
+           JOIN garzones g ON g.garzon_id = cu.garzon_cierre_id
+                AND g.tenant_id = $2
+          WHERE m.caja_id = $1
+            AND m.eliminado_el IS NULL
+            AND m.tipo = 'entrada'
+            AND COALESCE(mp.es_efectivo, false) = true
+            AND g.usuario_id IS DISTINCT FROM c.usuario_id
+          GROUP BY g.garzon_id, g.nombre
+          ORDER BY SUM(m.monto) DESC, g.nombre ASC`,
+        [cajaId, tenantId],
+      );
+    return rows.map((r) => ({
+      garzonId: r.garzon_id,
+      nombre: r.nombre,
+      monto: new Decimal(r.monto).toFixed(4),
+    }));
+  }
+
+  /**
    * Config del modo ciego por tenant (columna tenants.arqueo_ciego). Lectura y
    * escritura por query raw parametrizada; tenant del token; filtra soft-delete.
    */
@@ -727,7 +936,7 @@ export class CajaService {
     cajaId: string,
     tieneVerTodas: boolean,
     esAdmin = false,
-  ): Promise<{ ciego: boolean; lineas: LineaArqueo[] }> {
+  ): Promise<ArqueoDeCaja> {
     const caja = await this.verificarAccesoCaja(
       tenantId,
       usuarioId,
@@ -750,9 +959,14 @@ export class CajaService {
           lineas: lineas
             .filter((l) => l.esEfectivo || l.requiereConteo)
             .map((l) => ({ ...l, esperado: null })),
+          cobradoPorGarzones: null,
         };
       }
-      return { ciego: false, lineas };
+      return {
+        ciego: false,
+        lineas,
+        cobradoPorGarzones: await this.cobradoPorGarzones(cajaId, tenantId),
+      };
     }
 
     const rows: {
@@ -794,6 +1008,7 @@ export class CajaService {
 
     return {
       ciego: false,
+      cobradoPorGarzones: await this.cobradoPorGarzones(cajaId, tenantId),
       lineas: rows.map((r) => ({
         metodoPagoId: r.metodo_pago_id,
         nombre: r.nombre ?? 'Efectivo',
@@ -909,7 +1124,7 @@ export class CajaService {
       motivoDiferenciaId?: string;
       comentarioDiferencia?: string;
     }[],
-  ): Promise<{ ciego: boolean; lineas: LineaArqueo[] }> {
+  ): Promise<ArqueoDeCaja> {
     await this.db.transaccion(async (manager) => {
       const caja = await manager.findOne(Caja, {
         where: { id: cajaId, tenantId, eliminadoEl: IsNull() },

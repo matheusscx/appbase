@@ -118,6 +118,7 @@ onMounted(async () => {
               :lineas="cajaStore.arqueo"
               :puede-justificar="perms.esAdmin"
               :caja-id="cajaId"
+              :cobrado-por-garzones="cajaStore.cobradoPorGarzones"
             />
           </UCard>
         </div>

@@ -27,6 +27,7 @@ interface CajonFake {
   eliminadoEl: string | null
   eliminadoPorNombre: string | null
   fondoSugerido?: string | null
+  principal?: boolean
 }
 
 function cajon(over: Partial<CajonFake> = {}): CajonFake {
@@ -661,6 +662,59 @@ describe('configuracion/cajas — fondo sugerido', () => {
     await guardar(wrapper)
     expect(escrituras[0]!.method).toBe('POST')
     expect(escrituras[0]!.body).toEqual({ nombre: 'Terraza' })
+    wrapper.unmount()
+  })
+})
+
+describe('configuracion/cajas — caja principal (02.2)', () => {
+  beforeEach(() => {
+    cajonesBackend = [
+      cajon({ id: 'c-barra', nombre: 'Barra', principal: true }),
+      cajon({ id: 'c-terraza', nombre: 'Terraza' }),
+      cajon({ id: 'c-vieja', nombre: 'Vieja', activo: false }),
+      eliminado({ id: 'c-borrada', nombre: 'Borrada' }),
+    ]
+    reset()
+  })
+
+  const botonesMarcar = (w: Awaited<ReturnType<typeof montar>>) =>
+    w.findAll('button').filter(b => b.text().trim() === 'Marcar principal')
+
+  it('la principal lleva su marca y las demás activas ofrecen marcarse; la inactiva no', async () => {
+    const wrapper = await montar()
+
+    expect(wrapper.findAllComponents({ name: 'UBadge' }).filter(b => b.text().trim() === 'Principal')).toHaveLength(1)
+    expect(botonesMarcar(wrapper).map(b => b.attributes('aria-label'))).toEqual([
+      'Marcar Terraza como caja principal',
+    ])
+    wrapper.unmount()
+  })
+
+  it('marcar manda `principal: true` a ESA caja y la marca pasa a ella sin recargar', async () => {
+    const wrapper = await montar()
+
+    await botonesMarcar(wrapper)[0]!.trigger('click')
+    await new Promise(r => setTimeout(r, 30))
+
+    expect(escrituras).toHaveLength(1)
+    expect(escrituras[0]).toMatchObject({
+      method: 'PATCH',
+      url: expect.stringContaining('/cajones/c-terraza'),
+      body: { principal: true },
+    })
+    // Terraza es ahora la principal; Barra ofrece volver a serlo.
+    expect(botonesMarcar(wrapper).map(b => b.attributes('aria-label'))).toEqual([
+      'Marcar Barra como caja principal',
+    ])
+    wrapper.unmount()
+  })
+
+  it('sin `Cajas:Actualizar` el botón existe pero apagado', async () => {
+    permisos = ['Cajas:Leer']
+    esAdmin = false
+    const wrapper = await montar()
+
+    expect(botonesMarcar(wrapper)[0]!.attributes('disabled')).toBeDefined()
     wrapper.unmount()
   })
 })

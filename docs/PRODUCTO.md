@@ -1074,7 +1074,7 @@ Cada paso aplica sobre el resultado acumulado del paso anterior. El tenant puede
 ### 10. Procesamiento de ventas (transaccional)
 
 Dos canales diferenciados:
-- **Físico** — requiere caja abierta manualmente por el usuario
+- **Físico** — requiere caja abierta manualmente por el usuario. **Excepción, el cobro de una mesa (owner, 2026-10-17):** las cajas son del local; el garzón no necesita una propia. El cobro entra en la caja principal del local si está abierta, si no en otra caja abierta (el garzón elige si hay varias), y sin ninguna abierta no se cobra. Quien tiene caja propia abierta cobra en la suya. Detalle: `docs/features/gestion-cajas.md`
 - **Online** — pago inmediato, se asigna automáticamente a la caja virtual del tenant
 
 La venta lleva un campo `canal` (`'fisico'` | `'online'`) que determina el flujo y permite filtrar reportes.

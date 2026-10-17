@@ -44,7 +44,8 @@ módulo modela esa operación reusando el motor de ventas/cobro existente.
 - Incluido: CRUD de salones y mesas, plano con posiciones libres `(x, y)`, forma
   (redonda/cuadrada/rectangular) y tamaño (pequeña/mediana/grande/extra grande) de
   mesa, múltiples cuentas abiertas por mesa, agregar/quitar/editar líneas, cancelar
-  cuenta, cerrar cuenta → venta (canal `fisico`, requiere caja abierta).
+  cuenta, cerrar cuenta → venta (canal `fisico`; entra en una caja abierta **del local**, no
+  necesariamente la de quien cobra: ver [Cerrar cuenta](#cierre-de-cuenta--venta-atómico)).
 - NO incluido (futuro): mover/unir cuentas entre mesas, capacidad (nº comensales),
   reservas.
 
@@ -205,7 +206,27 @@ mapea las `cuenta_lineas` a
 `LineaVentaDto[]`, arma un `CreateVentaDto` con `canal: 'fisico'` y llama a
 **`VentasService.crearEnTransaccion(manager, tenantId, usuarioId, dto)`** dentro de la
 misma transacción. Así la venta y el cambio de estado de la cuenta commitean juntos.
-Requiere caja física abierta (lo valida `crearEnTransaccion`).
+Requiere una caja física abierta **del local**, pero no la del garzón (owner, 2026-10-17, auditoría
+UX 02.2): las cajas son del local y las manejan las cajeras; el garzón lleva el punto a la mesa y
+cobra ahí. `cerrarCuenta` resuelve la caja con `CajaService.resolverCajaDeCobroDeMesa` (tenant y
+usuario del token, dentro de la transacción) y se la pasa a `crearEnTransaccion` por el parámetro
+interno `cajaDestinoId` (nunca por el DTO), que sigue tomando `bloquearCajaAbierta`. En orden:
+
+1. **Propia**: quien cobra tiene una caja suya abierta (una cajera) → cobra en la suya.
+2. **Principal**: la sesión abierta del cajón marcado principal (Configuración → Cajas; una por tenant).
+3. **Única**: sin principal abierta y una sola caja abierta → esa.
+4. **Elegir**: sin principal abierta y más de una → el garzón elige; el body trae `cajaId`, que el
+   servidor valida contra las cajas abiertas del tenant (400 si no está) y que, fuera de este caso,
+   solo se acepta si coincide con lo que las reglas dan (la pantalla quedó vieja → 400).
+5. **Ninguna** → 400 «No hay ninguna caja abierta en el local. Avísale a la cajera.» y la cuenta sigue abierta.
+
+Una caja `en_conciliacion` no cuenta (no admite ventas). La huella de idempotencia suma el `cajaId`.
+`GET /salones/caja-del-local` (`Salones:Operar`) devuelve `{ modo, cajaId, cajas[] }` con nombre del
+cajón y de la cajera —nunca saldos ni esperado— para que la pantalla avise o pida elegir; el garzón
+no tiene `MiCaja`, así que `GET /caja/activa` le da 403. Quien cobró queda en `cuentas.garzon_cierre_id`
+(sin columna nueva); el arqueo de la caja lo desglosa: «de eso, $X los cobró Ana» (ver
+[gestión de cajas](gestion-cajas.md#el-garzón-cobra-con-la-caja-del-local-02-2)). La proyección local
+de la caja (`aplicarCobroLocal`) solo se mueve cuando se cobró en la caja propia.
 
 ### Fusión de cuentas
 

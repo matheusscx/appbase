@@ -316,6 +316,28 @@ export interface CerrarCuentaBody {
   propinaMonto?: string
   propinaSugerida?: string
   propinaPorcentajeSugerido?: string
+  /**
+   * Solo cuando el local tiene más de una caja abierta y ninguna es la principal
+   * (`CajaDelLocal.modo === 'elegir'`). El servidor lo valida; no es una orden.
+   */
+  cajaId?: string
+}
+
+/**
+ * En qué caja se cobraría una mesa ahora (02.2). Sin saldos ni esperado: el
+ * garzón no los ve. `modo` decide qué muestra la pantalla:
+ * `propia`/`principal`/`unica` cobran solas, `elegir` pide la caja, `ninguna` avisa.
+ */
+export interface CajaDelLocal {
+  modo: 'propia' | 'principal' | 'unica' | 'elegir' | 'ninguna'
+  cajaId: string | null
+  cajas: {
+    cajaId: string
+    cajon: string | null
+    cajero: string | null
+    principal: boolean
+    propia: boolean
+  }[]
 }
 
 // `BoletaVenta` vive en `~/types/boleta` (tercera copia extraída — ver el
@@ -586,6 +608,9 @@ export function useSalones() {
       { method: 'POST', body, headers: cabecera },
     )
 
+  const cajaDelLocal = () =>
+    useApiFetch<CajaDelLocal>(`${apiUrl}/salones/caja-del-local`)
+
   const transferirCuenta = (cuentaId: string, garzonId: string, pin: string) =>
     useApiFetch<CuentaDetalle>(`${apiUrl}/cuentas/${cuentaId}/transferir`, {
       method: 'POST',
@@ -651,6 +676,7 @@ export function useSalones() {
     cancelarCuenta,
     cancelarCuentaConMotivo,
     cerrarCuenta,
+    cajaDelLocal,
     transferirCuenta,
     transferirCuentaAdmin,
     listarAsignaciones,

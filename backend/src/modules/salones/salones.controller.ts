@@ -60,6 +60,17 @@ export class SalonesController {
     return this.salonesService.listarSalonesOperacion(u.tenantId ?? '');
   }
 
+  // ── Caja donde se cobra la mesa (02.2). Ruta ESTÁTICA, con el permiso de
+  // operar el salón: el garzón no tiene `MiCaja`, así que `GET /caja/activa` le
+  // da 403 y la pantalla no sabía si podía cobrar. Solo dice DÓNDE (nombre del
+  // cajón y de la cajera); nunca saldos ni esperado — el cierre ciego los retiene.
+  @Get('caja-del-local')
+  @RequiresPermiso('Salones', 'Operar')
+  cajaDelLocal(@Req() req: Request) {
+    const u = req.user as JwtUser;
+    return this.salonesService.cajaDelLocal(u.tenantId ?? '', u.id);
+  }
+
   // ── Ocupación del salón (dashboard de inicio, spec
   // `2026-09-18-dashboard-inicio-design.md` § 5.2). Ruta ESTÁTICA, declarada
   // antes de cualquier `@Get(':id...')` de este controller (invariante 6 de

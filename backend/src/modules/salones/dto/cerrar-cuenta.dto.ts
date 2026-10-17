@@ -41,6 +41,16 @@ export class CerrarCuentaDto extends CredencialGarzonOpcionalDto {
   @Type(() => CustomerVentaDto)
   customer?: CustomerVentaDto;
 
+  /**
+   * La caja donde se cobra, **solo** cuando el local tiene más de una abierta y
+   * ninguna es la principal (02.2): lo elige quien cobra. No es una orden: el
+   * servidor lo contrasta con las cajas abiertas del tenant y rechaza (400) lo
+   * que no esté o lo que las reglas no permitan elegir.
+   */
+  @IsOptional()
+  @IsUUID()
+  cajaId?: string;
+
   /** Monto de propina cobrado (0 = sin propina). Default 0 si se omite. */
   @IsOptional()
   @IsNumberString()

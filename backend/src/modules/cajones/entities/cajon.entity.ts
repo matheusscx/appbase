@@ -23,6 +23,13 @@ import {
 // Lo que sí se declara acá es solo el NOMBRE, con `synchronize: false`: sin
 // columnas, para que `migration:generate` no lo proponga borrar (ADR-030).
 @Index('ux_cajones_tenant_nombre', { synchronize: false })
+// Una sola principal por tenant, entre las vivas: backstop duro bajo concurrencia
+// (el service desmarca la anterior en la misma transacción, pero dos PATCH
+// simultáneos sobre cajones distintos no competirían por nada sin este índice).
+@Index('ux_cajones_principal_por_tenant', ['tenantId'], {
+  unique: true,
+  where: '"principal" = true AND "eliminado_el" IS NULL',
+})
 @Entity('cajones')
 export class Cajon {
   @PrimaryGeneratedColumn('uuid', { name: 'cajon_id' })
@@ -49,6 +56,13 @@ export class Cajon {
     nullable: true,
   })
   fondoSugerido: string | null;
+
+  // El cajón donde entran los cobros de mesa del garzón (02.2, owner 2026-10-17):
+  // las cajas son del local, no del garzón. A lo sumo uno por tenant, lo marca el
+  // admin en Configuración → Cajas. Si su sesión no está abierta, el cobro cae en
+  // otra caja abierta del local (`CajaService.cajasParaCobroDeMesa`).
+  @Column({ type: 'boolean', default: false })
+  principal: boolean;
 
   @CreateDateColumn({ name: 'creado_el', type: 'timestamptz' })
   creadoEl: Date;

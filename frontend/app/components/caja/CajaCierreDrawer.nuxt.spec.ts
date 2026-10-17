@@ -20,6 +20,7 @@ const cajaStoreMock = reactive<{
   arqueoCiego: boolean
   motivos: unknown[]
   arqueo: unknown[]
+  cobradoPorGarzones: { garzonId: string, nombre: string, monto: string }[] | null
   testigos: { id: string, estado: string }[]
   detalle: {
     id: string
@@ -39,6 +40,7 @@ const cajaStoreMock = reactive<{
   arqueoCiego: false,
   motivos: [],
   arqueo: [],
+  cobradoPorGarzones: null,
   testigos: [],
   detalle: null,
   activa: null,
@@ -451,5 +453,39 @@ describe('CajaCierreDrawer — confirmar el conteo antes de enviarlo', () => {
       lineas: [{ metodoPagoId: null, montoContado: '45000' }],
       comentario: undefined,
     })
+  })
+})
+
+describe('CajaCierreDrawer — lo que cobraron los garzones (02.2)', () => {
+  async function montarConDesglose(cobrado: typeof cajaStoreMock.cobradoPorGarzones) {
+    const wrapper = await montarEnConciliacionForzada('ya hay comentario')
+    cajaStoreMock.cobradoPorGarzones = cobrado
+    await flushPromises()
+    return wrapper
+  }
+
+  it('bajo el efectivo dice cuánto cobró cada garzón', async () => {
+    const wrapper = await montarConDesglose([
+      { garzonId: 'g-ana', nombre: 'Ana', monto: '38500.0000' },
+      { garzonId: 'g-luis', nombre: 'Luis', monto: '12000.0000' },
+    ])
+
+    const lineas = wrapper.findAll('[data-qa="cobrado-por-garzon"]').map(l => l.text().replace(/\s/g, ' '))
+    expect(lineas).toEqual([
+      expect.stringMatching(/^De eso, \$\s?38\.500 los cobró Ana$/),
+      expect.stringMatching(/^De eso, \$\s?12\.000 los cobró Luis$/),
+    ])
+  })
+
+  it('en modo ciego el servidor lo retiene (null) y no se muestra nada', async () => {
+    const wrapper = await montarConDesglose(null)
+
+    expect(wrapper.find('[data-qa="cobrado-por-garzon"]').exists()).toBe(false)
+  })
+
+  it('sin cobros de garzones no hay línea', async () => {
+    const wrapper = await montarConDesglose([])
+
+    expect(wrapper.find('[data-qa="cobrado-por-garzon"]').exists()).toBe(false)
   })
 })

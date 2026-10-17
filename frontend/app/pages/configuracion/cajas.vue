@@ -10,6 +10,8 @@ interface Cajon {
   eliminadoPorNombre?: string | null
   /** Con cuánto suele abrirse la caja (NUMERIC como texto); `null` = sin fondo sugerido. */
   fondoSugerido?: string | null
+  /** La caja donde entran los cobros de mesa del garzón (02.2). A lo sumo una por local. */
+  principal?: boolean
 }
 
 interface Member {
@@ -37,6 +39,7 @@ const editingId = ref<string | null>(null)
 const confirmDeleteId = ref<string | null>(null)
 const confirmModalOpen = ref(false)
 const toggling = reactive(new Set<string>())
+const marcandoPrincipal = ref<string | null>(null)
 const arqueoCiego = ref(false)
 const savingArqueoCiego = ref(false)
 const cajaStore = useCajaStore()
@@ -168,6 +171,9 @@ async function toggleActivo(c: Cajon, conDeshacer = true) {
   toggling.add(c.id)
   const prev = c.activo
   c.activo = !prev
+  const eraPrincipal = !!c.principal
+  // Desactivar la principal le quita la marca (el servidor hace lo mismo): una caja que no se puede abrir no recibe cobros.
+  if (!c.activo) c.principal = false
   try {
     await useApiFetch(`${apiUrl}/cajones/${c.id}`, { method: 'PATCH', body: { activo: c.activo } })
     const titulo = c.activo ? 'Caja activada' : 'Caja desactivada'
@@ -176,10 +182,31 @@ async function toggleActivo(c: Cajon, conDeshacer = true) {
   }
   catch (e: unknown) {
     c.activo = prev
+    c.principal = eraPrincipal
     toast.add({ title: apiErrorMsg(e, 'Error al actualizar'), color: 'error' })
   }
   finally {
     toggling.delete(c.id)
+  }
+}
+
+/**
+ * Marca esta caja como la principal del local: ahí entran los cobros de mesa del garzón. Marcar una
+ * desmarca la anterior (el servidor lo hace en una transacción); acá se refleja lo mismo en la lista.
+ */
+async function marcarPrincipal(c: Cajon) {
+  if (c.eliminadoEl || !c.activo || marcandoPrincipal.value) return
+  marcandoPrincipal.value = c.id
+  try {
+    await useApiFetch(`${apiUrl}/cajones/${c.id}`, { method: 'PATCH', body: { principal: true } })
+    for (const otra of cajones.value) otra.principal = otra.id === c.id
+    toast.add({ title: `${c.nombre} es ahora la caja principal`, color: 'success' })
+  }
+  catch (e: unknown) {
+    toast.add({ title: apiErrorMsg(e, 'No se pudo marcar la caja principal'), color: 'error' })
+  }
+  finally {
+    marcandoPrincipal.value = null
   }
 }
 
@@ -366,6 +393,7 @@ onMounted(async () => {
 const columns: TableColumn<Cajon>[] = [
   { accessorKey: 'nombre', header: 'Nombre' },
   { accessorKey: 'fondoSugerido', header: 'Fondo sugerido' },
+  { id: 'principal', header: 'Principal' },
   { id: 'activo', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
   { id: 'acciones', header: '', meta: { class: { th: 'text-right', td: 'text-right' } } },
 ]
@@ -375,7 +403,7 @@ const columns: TableColumn<Cajon>[] = [
   <div class="space-y-6">
     <CrudPageHeader
       title="Cajas"
-      description="Cajas físicas del local (Mostrador, Delivery, Barra…)."
+      description="Cajas físicas del local (Mostrador, Delivery, Barra…). La principal es donde entran los cobros que hacen los garzones en la mesa."
     >
       <template #actions>
         <div class="flex items-center gap-4">
@@ -430,6 +458,30 @@ const columns: TableColumn<Cajon>[] = [
           {{ formatMonto(row.original.fondoSugerido) }}
         </span>
         <span v-else class="text-muted">—</span>
+      </template>
+
+      <template #principal-cell="{ row }">
+        <UBadge
+          v-if="row.original.principal"
+          color="success"
+          variant="subtle"
+          icon="i-lucide-star"
+          label="Principal"
+        />
+        <UButton
+          v-else-if="!row.original.eliminadoEl && row.original.activo"
+          color="neutral"
+          variant="ghost"
+          size="sm"
+          class="min-h-11"
+          :loading="marcandoPrincipal === row.original.id"
+          :disabled="!puedeActualizar || marcandoPrincipal !== null"
+          :aria-label="`Marcar ${row.original.nombre} como caja principal`"
+          :title="puedeActualizar ? undefined : motivoSinPermiso('Actualizar', 'Cajas')"
+          @click="marcarPrincipal(row.original)"
+        >
+          Marcar principal
+        </UButton>
       </template>
 
       <template #activo-cell="{ row }">
