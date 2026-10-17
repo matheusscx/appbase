@@ -10,7 +10,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
-import { elegirEnSelector, rondaDePin } from '../support/ui'
+import { elegirEnSelector, elegirPropinaSugerida, rondaDePin } from '../support/ui'
 
 /**
  * Un cobro que se repite no se registra dos veces
@@ -124,6 +124,7 @@ test('POS: confirmar de nuevo después de un corte no crea otra venta', async ({
   await page.locator(`[data-qa="item-catalogo-${item.id}"]`).click()
   await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
+  await elegirPropinaSugerida(cobro)
 
   // 1. El primer Confirmar: entra en el servidor, pero el navegador ve un error.
   await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
@@ -192,6 +193,7 @@ test('Salón: volver a cobrar una mesa después de un corte reproduce el cierre,
     // 1. El primer cierre entra en el servidor; el navegador ve un error.
     await page.getByRole('button', { name: 'Cerrar y cobrar' }).click()
     const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
+    await elegirPropinaSugerida(cobro)
     await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
     await rondaDePin(page, conPin)
     const primera = await respuestaDelPrimero()
@@ -201,6 +203,9 @@ test('Salón: volver a cobrar una mesa después de un corte reproduce el cierre,
       r => /\/cuentas\/[^/]+\/cerrar$/.test(r.url()) && r.request().method() === 'POST',
     )
     await page.getByRole('button', { name: 'Cerrar y cobrar' }).click()
+    // El modal reabre sin propina: el garzón la vuelve a elegir, igual que la primera vez. Con otra
+    // propina sería otro cobro (422 "otros datos"), no el mismo reintento.
+    await elegirPropinaSugerida(cobro)
     await cobro.getByRole('button', { name: 'Confirmar venta' }).click()
     await rondaDePin(page, conPin)
     const respuesta = await reintento

@@ -39,8 +39,8 @@ Hay un P0 y 27 P1. Los P0 van arriba. "Conf." es cómo se supo: **medido** con l
 | ☑ | [02.1](02-salones-y-mesas.md) | P0 | Liquidar propinas paga el período del formulario, no el de la vista previa — **hecho 2026-10-16** | código | agente |
 | ☑ | [00.10](00-transversal.md) | P1 | Una línea incompleta se descarta al guardar y el aviso dice que guardó todo *(ver 05.2, 06.1)* — **hecho 2026-10-16** | medido | agente |
 | ☑ | [00.11](00-transversal.md) | P1 | Los errores del servidor salen en inglés, con nombres internos, sin marcar el campo *(ver 06.2, 07.2, 08.2)* — **hecho 2026-10-16** (`apiErrorMsg` traduce el texto del validador en todas las pantallas; el campo marcado va en las de este lote) | medido | agente |
-| ☐ | [01.1](01-pos-y-ventas.md) | P1 | Tras cobrar, el carrito vendido sigue en pantalla 5 a 10 s y borra lo que agregas | medido | agente |
-| ☐ | [01.2](01-pos-y-ventas.md) | P1 | El cobro trae la propina de 10% ya sumada, y el carrito no la muestra | medido | owner |
+| ☑ | [01.1](01-pos-y-ventas.md) | P1 | Tras cobrar, el carrito vendido sigue en pantalla 5 a 10 s y borra lo que agregas — **hecho 2026-10-16** | medido | agente |
+| ☑ | [01.2](01-pos-y-ventas.md) | P1 | El cobro trae la propina de 10% ya sumada, y el carrito no la muestra — **hecho 2026-10-16** | medido | owner |
 | ☐ | [02.2](02-salones-y-mesas.md) | P1 | Garzón y encargado no pueden cobrar mesas y el aviso pide abrir caja | medido | owner |
 | ☑ | [02.3](02-salones-y-mesas.md) | P1 | En tablet, los botones de la cuenta son chicos y quitan productos sin querer — **hecho 2026-10-16** | medido | agente |
 | ☑ | [02.4](02-salones-y-mesas.md) | P1 | La cuenta no muestra qué líneas salieron a cocina y cuáles no — **hecho 2026-10-16** | medido | agente |
@@ -520,11 +520,11 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 
 | ¿Entra? | # | Sev | Título | Decide |
 |---|---|---|---|---|
-| ☐ | [01.3](01-pos-y-ventas.md) | P2 | Pagar menos del total no avisa que queda saldo y no hay billetes rápidos | agente + owner |
-| ☐ | [01.4](01-pos-y-ventas.md) | P2 | Cambiar la propina pisa el efectivo que la cajera ya había tecleado | agente |
-| ☐ | [01.5](01-pos-y-ventas.md) | P2 | Tras cobrar no queda en pantalla el vuelto ni el total | agente |
-| ☐ | [01.6](01-pos-y-ventas.md) | P2 | "Total a pagar" y "Vuelto" se ven del mismo tamaño que el resto | agente |
-| ☐ | [01.7](01-pos-y-ventas.md) | P2 | Los botones del cobro miden menos de 44 px y cuestan con el dedo | agente |
+| ☑ | [01.3](01-pos-y-ventas.md) | P2 | Pagar menos del total no avisa que queda saldo y no hay billetes rápidos — **hecho 2026-10-16** | agente + owner |
+| ☑ | [01.4](01-pos-y-ventas.md) | P2 | Cambiar la propina pisa el efectivo que la cajera ya había tecleado — **hecho 2026-10-16** | agente |
+| ☑ | [01.5](01-pos-y-ventas.md) | P2 | Tras cobrar no queda en pantalla el vuelto ni el total — **hecho 2026-10-16** | agente |
+| ☑ | [01.6](01-pos-y-ventas.md) | P2 | "Total a pagar" y "Vuelto" se ven del mismo tamaño que el resto — **hecho 2026-10-16** | agente |
+| ☑ | [01.7](01-pos-y-ventas.md) | P2 | Los botones del cobro miden menos de 44 px y cuestan con el dedo — **hecho 2026-10-16** | agente |
 | ☑ | [01.8](01-pos-y-ventas.md) | P2 | Botones de solo ícono y selectores no tienen nombre para el lector de pantalla — **hecho 2026-10-16** | agente |
 | ☑ | [01.9](01-pos-y-ventas.md) | P2 | Las tarjetas del catálogo no se pueden usar con teclado — **hecho 2026-10-16** | agente |
 | ☑ | [01.10](01-pos-y-ventas.md) | P2 | Si el catálogo no carga, el aviso es jerga y el panel dice "no hay ítems" — **hecho 2026-10-16** | agente |
@@ -536,7 +536,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [01.16](01-pos-y-ventas.md) | P2 | Entrar a Órdenes sin permiso muestra una lista vacía en vez de "sin permiso" — **hecho 2026-10-16** | agente |
 | ☑ | [01.17](01-pos-y-ventas.md) | P2 | La insignia "Pagada" y las cifras de estado no tienen contraste suficiente — **hecho 2026-10-16** *(ver 00.8)* | agente + owner |
 | ☑ | [01.18](01-pos-y-ventas.md) | P2 | Abrir caja sin datos avisa con un toast y no marca el campo — **hecho 2026-10-16** | agente |
-| ☐ | [01.19](01-pos-y-ventas.md) | P2 | Si falla leer la propina sugerida, el cobro la deja activa con 10% | owner |
+| ☑ | [01.19](01-pos-y-ventas.md) | P2 | Si falla leer la propina sugerida, el cobro la deja activa con 10% — **hecho 2026-10-16** | owner |
 | ☑ | [01.20](01-pos-y-ventas.md) | P3 | El aviso de boleta no impresa usa voseo y jerga ("QZ Tray", "timeout") — **hecho 2026-10-16** | agente |
 | ☑ | [01.21](01-pos-y-ventas.md) | P3 | Diez textos del POS con voseo *(lote 00.3)* — **hecho 2026-10-16** | agente |
 | ☑ | [01.22](01-pos-y-ventas.md) | P3 | Jerga en pantalla: "Tercero registrado", título repetido y "1.0000 unidad" — **hecho 2026-10-16** | agente |
@@ -558,8 +558,8 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 |---|---|---|---|---|
 | ☑ | [02.6](02-salones-y-mesas.md) | P2 | Quitar una línea de la cuenta es inmediato, sin confirmar ni deshacer — **hecho 2026-10-16** (aviso con "Deshacer", sin confirmar cada línea) | agente |
 | ☑ | [02.7](02-salones-y-mesas.md) | P2 | La precuenta solo existe en papel; si la impresora falla, no se ve el total — **hecho 2026-10-16** ("Ver precuenta": total, propina sugerida y total con propina; el IVA va con 02.10, fiscal) | owner |
-| ☐ | [02.8](02-salones-y-mesas.md) | P2 | En el cobro de una mesa, el vuelto va en la letra más chica | agente |
-| ☐ | [02.9](02-salones-y-mesas.md) | P2 | La propina del 10% viene sumada al cobrar y no hay atajos para sacarla | owner |
+| ☑ | [02.8](02-salones-y-mesas.md) | P2 | En el cobro de una mesa, el vuelto va en la letra más chica — **hecho 2026-10-16** (el botón final sigue diciendo "Confirmar venta": su rótulo lo fija 01.3) | agente |
+| ☑ | [02.9](02-salones-y-mesas.md) | P2 | La propina del 10% viene sumada al cobrar y no hay atajos para sacarla — **hecho 2026-10-16** | owner |
 | ☐ | [02.10](02-salones-y-mesas.md) | P2 | La cuenta suma sin IVA, el total lleva IVA y nadie explica la diferencia | owner |
 | ☑ | [02.11](02-salones-y-mesas.md) | P2 | Las mesas no se pueden elegir con teclado ni lector de pantalla — **hecho 2026-10-16** | agente |
 | ☐ | [02.12](02-salones-y-mesas.md) | P2 | Una mesa ocupada no muestra monto, hora ni garzón — **parcial 2026-10-16** (el plano dice hace cuánto está abierta cada mesa y marca "Tuya"; la tarjeta de la cuenta dice la hora. Falta el monto: calcularlo por cuenta desde la pantalla es un N+1 contra el motor, y que la lista lo traiga toca el motor de precios → owner) | agente |
@@ -576,7 +576,7 @@ Los P2 y P3 de cada grupo. P2 primero. Lo que ya está en "Lo primero" no se rep
 | ☑ | [02.23](02-salones-y-mesas.md) | P2 | Propinas: "Ver reparto" sin fechas no hace nada y un garzón puede salir como código — **hecho 2026-10-16** | agente |
 | ☑ | [02.24](02-salones-y-mesas.md) | P2 | El plano de salones no se refresca: dos tablets pueden abrir la misma mesa — **hecho 2026-10-16** | agente |
 | ☐ | [02.25](02-salones-y-mesas.md) | P2 | El catálogo de la cuenta no tiene categorías ni favoritos — **parcial 2026-10-16** (chips de categoría, el vacío que nombra la categoría; el asterisco lo quitó 01.26, que dice "Disponible según la opción"; quedan los favoritos: no hay una regla de qué es un favorito) | agente |
-| ☐ | [02.26](02-salones-y-mesas.md) | P2 | Al cobrar una mesa no queda total, vuelto ni folio, y espera la impresión | agente |
+| ☑ | [02.26](02-salones-y-mesas.md) | P2 | Al cobrar una mesa no queda total, vuelto ni folio, y espera la impresión — **hecho 2026-10-16** | agente |
 | ☑ | [02.27](02-salones-y-mesas.md) | P3 | Voseo en la pantalla del garzón *(lote 00.3)* — **hecho 2026-10-16** | agente |
 | ☑ | [02.28](02-salones-y-mesas.md) | P3 | Jerga y números sin formato en las pantallas del garzón — **hecho 2026-10-16** | agente |
 | ☑ | [02.29](02-salones-y-mesas.md) | P3 | "Tomar cuenta" está activo sobre una cuenta que ya es del garzón — **hecho 2026-10-16** | agente |
@@ -897,8 +897,8 @@ Hallazgos que se arreglan juntos, por componente o por causa común. Cada lote d
 
 **Qué cierra:**
 
-- Después de cobrar: 01.1, 01.5, 02.26.
-- Modal de cobro: 01.2, 01.3, 01.4, 01.6, 01.19, 02.8, 02.9 (esperan tus respuestas de propinas).
+- Después de cobrar: 01.1, 01.5, 02.26 (hechos 2026-10-16).
+- Modal de cobro: 01.2, 01.3, 01.4, 01.6, 01.7, 01.19, 02.8, 02.9 (hechos 2026-10-16, con las decisiones de propinas).
 - Cierre de caja: 03.3, 03.4.
 - Propinas, frente aparte: 02.1 (el único P0), 02.16, 02.23.
 - Impresión: 01.15, 02.5, 02.7.

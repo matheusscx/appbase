@@ -9,7 +9,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
-import { elegirEnSelector, rondaDePin, valorDelTotal } from '../support/ui'
+import { elegirEnSelector, elegirPropinaSugerida, rondaDePin, valorDelTotal } from '../support/ui'
 
 /**
  * Salones con un producto de número de serie, en un navegador de verdad: el
@@ -196,6 +196,7 @@ test('el garzón pide el celular eligiendo la unidad nueva: la línea la muestra
   // 5. Cobrar. El PIN se pide DESPUÉS de confirmar, como en `cuenta-hasta-cobro`.
   await page.getByRole('button', { name: 'Cerrar y cobrar' }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
+  await elegirPropinaSugerida(cobro)
   const respuesta = page.waitForResponse(
     r => /\/cuentas\/[^/]+\/cerrar$/.test(r.url()) && r.request().method() === 'POST',
   )
@@ -207,6 +208,7 @@ test('el garzón pide el celular eligiendo la unidad nueva: la línea la muestra
   await expect(
     page.getByText('Cuenta cerrada — propina registrada').first(),
   ).toBeVisible({ timeout: 15_000 })
+  await page.locator('[data-qa="cobro-resultado"]').getByRole('button', { name: 'Listo' }).click()
 
   // 6. ⚠️ Lo que no es de cliente: la venta que armó el cierre vendió la unidad
   //    de la línea, no otra.

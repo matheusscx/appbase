@@ -61,8 +61,15 @@ async function confirmar(wrapper: Awaited<ReturnType<typeof montar>>) {
   return wrapper.emitted('confirmar')!.at(-1) as [Record<string, unknown>[], string]
 }
 
+const MONEDA_CLP = {
+  monedaId: 'clp', nombre: 'Peso chileno', codigoIso: 'CLP', simbolo: '$', decimales: 0,
+  separadorDecimal: ',', separadorMiles: '.', locale: 'es-CL', habilitada: true, esOficial: true, valorDelDia: null,
+}
+
 beforeEach(() => {
   document.body.innerHTML = ''
+  // Sin moneda oficial `formatMonto` rinde "—" y no se puede leer ningún monto.
+  useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
 })
 
 describe('CobroModal — el número del comprobante de la máquina', () => {
@@ -208,5 +215,184 @@ describe('CobroModal — quitar pago tiene nombre', () => {
   it('cada pago ofrece "Quitar pago N"', async () => {
     await montar([EFECTIVO])
     expect(dialogo().querySelector('button[aria-label="Quitar pago 1"]')).toBeTruthy()
+  })
+})
+
+// Auditoría UX, frente de plata del cobro (01.2/02.9, 01.3, 01.4, 01.6/02.8,
+// 01.7, 01.19). La propina se ofrece con atajos y NO viene sumada (owner,
+// 2026-10-16); lo demás es cómo se ve y qué respeta el modal.
+describe('CobroModal — propina con atajos, sin sumarla (01.2, 02.9)', () => {
+  async function montarPropina(metodos: Metodo[], extra: Record<string, unknown> = {}) {
+    const wrapper = await mountSuspended(CobroModal, {
+      props: { total: '10000', ventaTotal: '10000', modoPropina: true, porcentajeSugerido: '0.10', metodos, open: false, ...extra },
+    })
+    await wrapper.setProps({ open: true })
+    await esperar()
+    return wrapper
+  }
+  const boton = (texto: string) =>
+    [...dialogo().querySelectorAll('button')].find(b => b.textContent?.includes(texto)) as HTMLButtonElement | undefined
+  const totalAPagar = () => {
+    const rotulo = [...dialogo().querySelectorAll('span')].find(s => s.textContent?.trim() === 'Total a pagar')
+    return rotulo?.nextElementSibling?.textContent?.replace(/\s/g, '')
+  }
+
+  it('abre sin propina: el total a pagar es el de la venta y el pago lo cubre justo', async () => {
+    const wrapper = await montarPropina([EFECTIVO])
+
+    expect(wrapper.emitted('update:propinaMonto')?.at(-1) ?? ['0']).toEqual(['0'])
+    expect(totalAPagar()).toContain('10.000')
+    expect(dialogo().textContent).toContain('Propina sugerida 10 %')
+    expect(boton('Sin propina')).toBeTruthy()
+    expect(boton('10 %')).toBeTruthy()
+    expect(boton('Otro monto')).toBeTruthy()
+    const [pagos] = await (async () => {
+      boton('Confirmar venta')!.click()
+      await esperar()
+      return wrapper.emitted('confirmar')!.at(-1) as [Record<string, unknown>[], string]
+    })()
+    expect(pagos).toEqual([{ metodoPagoId: 'mp-efectivo', monto: '10000.0000' }])
+  })
+
+  it('"10 %" suma la sugerida y el efectivo sin tocar la sigue', async () => {
+    const wrapper = await montarPropina([EFECTIVO])
+
+    boton('10 %')!.click()
+    await esperar()
+
+    expect(wrapper.emitted('update:propinaMonto')?.at(-1)).toEqual(['1000'])
+    expect(totalAPagar()).toContain('11.000')
+  })
+
+  it('"Sin propina" la saca otra vez', async () => {
+    const wrapper = await montarPropina([EFECTIVO])
+    boton('10 %')!.click()
+    await esperar()
+    boton('Sin propina')!.click()
+    await esperar()
+
+    expect(wrapper.emitted('update:propinaMonto')?.at(-1)).toEqual(['0'])
+  })
+
+  it('"Otro monto" muestra el campo para tipearla', async () => {
+    await montarPropina([EFECTIVO])
+    expect(dialogo().querySelector('[data-qa="propina-monto"]')).toBeNull()
+
+    boton('Otro monto')!.click()
+    await esperar()
+
+    expect(dialogo().querySelector('[data-qa="propina-monto"]')).toBeTruthy()
+  })
+
+  it.each([
+    ['sugerido en 0 %', { porcentajeSugerido: '0' }],
+    ['total tan chico que el 10 % redondea a 0', { ventaTotal: '4', total: '4' }],
+  ])('con la propina habilitada y %s, "Sin propina" y "Otro monto" siguen y no hay atajo del sugerido', async (_caso, extra) => {
+    await montarPropina([EFECTIVO], extra)
+
+    expect(boton('Sin propina')).toBeTruthy()
+    expect(boton('Otro monto')).toBeTruthy()
+    expect(dialogo().querySelector('[data-qa="propina-sugerida"]')).toBeNull()
+    boton('Otro monto')!.click()
+    await esperar()
+    expect(dialogo().querySelector('[data-qa="propina-monto"]')).toBeTruthy()
+  })
+
+  it('01.19: si no se pudo leer la configuración de propina, no hay propina y se dice', async () => {
+    await montarPropina([EFECTIVO], { modoPropina: false, propinaNoDisponible: true })
+
+    expect(dialogo().querySelector('[data-qa="aviso-propina-no-disponible"]')).toBeTruthy()
+    expect(boton('Otro monto')).toBeUndefined()
+  })
+
+  it('01.19: apagada a propósito no avisa nada', async () => {
+    await montarPropina([EFECTIVO], { modoPropina: false })
+    expect(dialogo().querySelector('[data-qa="aviso-propina-no-disponible"]')).toBeNull()
+  })
+})
+
+describe('CobroModal — lo tecleado no se pisa (01.4)', () => {
+  it('cambiar la propina deja el efectivo que la cajera ya escribió', async () => {
+    const wrapper = await mountSuspended(CobroModal, {
+      props: { total: '10000', ventaTotal: '10000', modoPropina: true, metodos: [EFECTIVO], open: false },
+    })
+    await wrapper.setProps({ open: true })
+    await esperar()
+    const vm = wrapper.vm as unknown as { pagos: { monto: string }[], setMonto: (i: number, m: string) => void }
+    vm.setMonto(0, '20000')
+
+    ;[...dialogo().querySelectorAll('button')].find(b => b.textContent?.includes('10 %'))!.click()
+    await esperar()
+
+    expect(vm.pagos[0]!.monto).toBe('20000')
+  })
+})
+
+describe('CobroModal — saldo pendiente y billetes (01.3)', () => {
+  const botonConfirmar = () =>
+    [...dialogo().querySelectorAll('button')].find(b => /Confirmar/.test(b.textContent ?? '')) as HTMLButtonElement
+  const botonDe = (texto: string) =>
+    [...dialogo().querySelectorAll('button')].find(b => b.textContent?.trim() === texto) as HTMLButtonElement | undefined
+
+  it('pagar menos del total dice "Falta $…" y el botón pasa a "Confirmar con saldo pendiente"', async () => {
+    const wrapper = await montar([EFECTIVO])
+    ;(wrapper.vm as unknown as { setMonto: (i: number, m: string) => void }).setMonto(0, '99000')
+    await esperar()
+
+    const falta = dialogo().querySelector('[data-qa="falta"]')
+    expect(falta?.textContent).toContain('Falta')
+    expect(falta?.textContent).toContain('1.000')
+    expect(falta?.className).toContain('text-warning')
+    expect(botonConfirmar().textContent).toContain('Confirmar con saldo pendiente')
+  })
+
+  it('con el total cubierto el botón sigue siendo "Confirmar venta"', async () => {
+    await montar([EFECTIVO])
+    expect(botonConfirmar().textContent).toContain('Confirmar venta')
+    expect(dialogo().querySelector('[data-qa="falta"]')).toBeNull()
+  })
+
+  it('el efectivo ofrece Exacto, $5.000, $10.000 y $20.000; la tarjeta no', async () => {
+    await montar([TARJETA, EFECTIVO])
+    expect(dialogo().querySelector('[data-qa="billetes-0"]'), 'tarjeta: sin billetes').toBeNull()
+
+    document.body.innerHTML = ''
+    await montar([EFECTIVO])
+    const billetes = dialogo().querySelector('[data-qa="billetes-0"]')!
+    expect([...billetes.querySelectorAll('button')].map(b => b.textContent?.replace(/\s/g, ''))).toEqual(
+      ['Exacto', '$5.000', '$10.000', '$20.000'],
+    )
+  })
+
+  it('un billete fija lo que entrega el cliente y dice lo que falta; Exacto lo cubre', async () => {
+    const wrapper = await montar([EFECTIVO])
+
+    botonDe('$20.000')!.click()
+    await esperar()
+
+    expect((wrapper.vm as unknown as { pagos: { monto: string }[] }).pagos[0]!.monto).toBe('20000')
+    expect(dialogo().querySelector('[data-qa="falta"]')?.textContent).toContain('80.000')
+    botonDe('Exacto')!.click()
+    await esperar()
+    expect((wrapper.vm as unknown as { pagos: { monto: string }[] }).pagos[0]!.monto).toBe('100000')
+  })
+})
+
+describe('CobroModal — lo que se dice en voz alta se ve (01.6, 02.8) y se toca (01.7)', () => {
+  it('Total a pagar y Vuelto van en text-2xl', async () => {
+    await montar([EFECTIVO])
+    const rotulo = [...dialogo().querySelectorAll('span')].find(s => s.textContent?.trim() === 'Total a pagar')!
+    expect(rotulo.parentElement!.className).toContain('text-2xl')
+    expect(dialogo().querySelector('[data-qa="vuelto"]')!.className).toContain('text-2xl')
+  })
+
+  it('Confirmar, Cancelar, Agregar pago y quitar pago miden 44 px', async () => {
+    await montar([EFECTIVO])
+    const porTexto = (t: string) => [...dialogo().querySelectorAll('button')].find(b => b.textContent?.includes(t))!
+    for (const t of ['Confirmar venta', 'Cancelar', 'Agregar pago']) {
+      expect(porTexto(t).className, t).toContain('min-h-11')
+    }
+    expect(dialogo().querySelector('button[aria-label="Quitar pago 1"]')!.className).toContain('size-11')
+    expect(dialogo().querySelector('button[aria-label="Método del pago 1"]')!.className).toContain('min-h-11')
   })
 })

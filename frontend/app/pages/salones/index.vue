@@ -26,6 +26,7 @@ import type { UnidadElegida } from '~/composables/useUnidadesSerie'
 import { turnoDeLaHora, type Turno } from '~/composables/useTurnos'
 import type { ComandaEnviadaResponse } from '~/composables/useImpresoras'
 import type { PrecuentaVista, SolicitudTestigo } from '~/composables/useSalones'
+import type { BoletaVenta } from '~/types/boleta'
 import { formatCantidadLinea, unidadBaseItem } from '~/utils/cantidad-presentacion'
 import { conTimeout } from '~/utils/con-timeout'
 import { agregarImpuestosVenta, agregarPromocionesVenta, itemsParaBoletaImpresion, type TicketAnulada } from '~/utils/ticket-builder'
@@ -400,7 +401,19 @@ const decimalesPropina = computed(
   () => monedasStore.monedaOficial?.decimals ?? 0,
 )
 const propinaPorcentaje = ref(PROPINA_PORCENTAJE_DEFAULT)
-const propinaHabilitada = ref(true)
+// Apagada hasta que llegue una lectura buena (01.19): ver `pos.vue`.
+const propinaHabilitada = ref(false)
+/** La lectura de la propina falló: parte apagada y el modal lo dice (01.19). */
+const propinaNoDisponible = ref(false)
+/**
+ * Lo que quedó registrado al cobrar la cuenta (02.26): total, vuelto y folio en una pantalla
+ * breve, sin esperar a la impresora. `null` = no hay nada que mostrar.
+ */
+const cobroTerminado = ref<{ boleta: BoletaVenta, vuelto: string } | null>(null)
+const cobroTerminadoOpen = computed({
+  get: () => cobroTerminado.value !== null,
+  set: (abierto) => { if (!abierto) cobroTerminado.value = null },
+})
 const recetaDrawerOpen = ref(false)
 const recetaItemId = ref<string | null>(null)
 
@@ -1301,10 +1314,18 @@ async function cargarCatalogo() {
 }
 
 onMounted(async () => {
+  // La propina lee lo suyo, fuera del `Promise.all`: que otra carga se caiga no la deja sin lectura, y
+  // la lectura de la propina nunca rechaza (si falla, parte apagada y avisa). Hasta que llega, apagada.
+  void fetchPorcentajeSugerido().then((sugerido) => {
+    propinaPorcentaje.value = sugerido.porcentajeSugerido
+    propinaHabilitada.value = sugerido.habilitado
+    propinaNoDisponible.value = sugerido.falloLectura
+  })
+
   // El vínculo va en el mismo `Promise.all` y no en una llamada aparte: es una
   // más de las cargas iniciales, y encadenarla sumaría un round trip antes de
   // que la pantalla sirva.
-  const [, , , , sugerido, , vinculo, miPin] = await Promise.all([
+  const [, , , , , vinculo, miPin] = await Promise.all([
     // ⚠️ Con `catch` propio, por el mismo motivo que `miVinculo` más abajo, y
     // medido en el smoke de navegador del testigo (2026-08-13): `GET
     // /caja/activa` pide `MiCaja:Leer`, y **un garzón no lo tiene**. Ese 403
@@ -1319,7 +1340,6 @@ onMounted(async () => {
     cargarSalones(),
     cargarCatalogo(),
     unidadesStore.ensureLoaded(),
-    fetchPorcentajeSugerido(),
     cargarEmisor(),
     // ⚠️ Con `catch` propio y no suelta en el `Promise.all`: la ruta pide
     // `Salones:Operar`, y esta pantalla solo exige estar autenticado. A alguien
@@ -1340,8 +1360,6 @@ onMounted(async () => {
   // **truthy**. Confiar en la truthiness apagaría el PIN para TODOS.
   garzonPersonal.value = vinculo?.garzonId ? vinculo : null
   miPinEstado.value = miPin
-  propinaPorcentaje.value = sugerido.porcentajeSugerido
-  propinaHabilitada.value = sugerido.habilitado
 
   // Aviso pasivo al entrar (spec): solo posible en modo personal, porque el
   // JWT ya dice quién es. En un tótem compartido nadie sabe todavía quién está
@@ -3329,44 +3347,9 @@ async function cerrarCuentaConPin(
     }
     void franjaEmision.value?.recargar()
 
-    try {
-      await impresorasApi.imprimirBoleta({
-        emisor: emisor.value,
-        ...paraTicket(boleta),
-        // La fecha de la VENTA: una reimpresión de ayer no puede decir hoy.
-        fecha: new Date(boleta.fecha),
-        meta: {
-          cajero: boleta.cajero ?? undefined,
-          mesa: boleta.mesa ?? undefined,
-        },
-        // `cerrarCuenta` acepta `customer` (`CerrarCuentaDto`, reenviado tal
-        // cual a `crearEnTransaccion`, que arma el `VentaCustomer` sin mirar
-        // el canal) — esta pantalla hoy no tiene formulario que lo cargue, así
-        // que `boleta.customer` sale `null` en la práctica, pero el día que lo
-        // tenga, el ticket ya sale bien: mismo criterio que `pos.vue` y
-        // `VentaDetalleDrawer.vue`, el papel sale de lo que `armarBoleta`
-        // devolvió, no de estado local.
-        cliente: boleta.customer
-          ? {
-              nombre: boleta.customer.nombre || undefined,
-              rut: boleta.customer.rut || undefined,
-              direccion: boleta.customer.direccion || undefined,
-            }
-          : undefined,
-        items: itemsParaBoletaImpresion(boleta.items, unidadesStore.esFraccionaria),
-        totales: boleta.totales,
-        impuestos: boleta.impuestos,
-        promociones: boleta.promociones,
-        ...(boleta.propina ? { propina: boleta.propina } : {}),
-        pagos: boleta.pagos,
-        vuelto: boleta.vuelto ?? undefined,
-        formatMonto: (v: string) => formatMonto(v),
-      })
-    }
-    catch {
-      // Sin cierre automático: es lo único que la persona tiene que hacer.
-      toast.add({ title: 'La cuenta quedó cerrada, pero la boleta no salió', description: 'Revisa la impresora y reimprime desde Ventas.', color: 'warning', duration: 0 })
-    }
+    // Sin `await`: el garzón no espera a la impresora para volver a la lista (02.26).
+    void imprimirBoletaDelCierre(boleta)
+    cobroTerminado.value = { boleta, vuelto: cobro.vuelto }
 
     // El filtro va sin condicionar: si el garzón se cambió de mesa, `cuentas`
     // ya es la lista de la otra y sacar un id que no está es un no-op —y al
@@ -3406,6 +3389,51 @@ async function cerrarCuentaConPin(
   finally {
     submitting.value = false
     cobroEnVueloId.value = null
+  }
+}
+
+/**
+ * Imprime la boleta que devolvió el cierre. Va aparte y sin `await` en quien la llama (02.26):
+ * si la impresora no contesta, el garzón ya está de vuelta en la lista con el resumen a la vista.
+ */
+async function imprimirBoletaDelCierre(boleta: BoletaVenta) {
+  try {
+    await impresorasApi.imprimirBoleta({
+      emisor: emisor.value,
+      ...paraTicket(boleta),
+      // La fecha de la VENTA: una reimpresión de ayer no puede decir hoy.
+      fecha: new Date(boleta.fecha),
+      meta: {
+        cajero: boleta.cajero ?? undefined,
+        mesa: boleta.mesa ?? undefined,
+      },
+      // `cerrarCuenta` acepta `customer` (`CerrarCuentaDto`, reenviado tal
+      // cual a `crearEnTransaccion`, que arma el `VentaCustomer` sin mirar
+      // el canal) — esta pantalla hoy no tiene formulario que lo cargue, así
+      // que `boleta.customer` sale `null` en la práctica, pero el día que lo
+      // tenga, el ticket ya sale bien: mismo criterio que `pos.vue` y
+      // `VentaDetalleDrawer.vue`, el papel sale de lo que `armarBoleta`
+      // devolvió, no de estado local.
+      cliente: boleta.customer
+        ? {
+            nombre: boleta.customer.nombre || undefined,
+            rut: boleta.customer.rut || undefined,
+            direccion: boleta.customer.direccion || undefined,
+          }
+        : undefined,
+      items: itemsParaBoletaImpresion(boleta.items, unidadesStore.esFraccionaria),
+      totales: boleta.totales,
+      impuestos: boleta.impuestos,
+      promociones: boleta.promociones,
+      ...(boleta.propina ? { propina: boleta.propina } : {}),
+      pagos: boleta.pagos,
+      vuelto: boleta.vuelto ?? undefined,
+      formatMonto: (v: string) => formatMonto(v),
+    })
+  }
+  catch {
+    // Sin cierre automático: es lo único que la persona tiene que hacer.
+    toast.add({ title: 'La cuenta quedó cerrada, pero la boleta no salió', description: 'Revisa la impresora y reimprime desde Ventas.', color: 'warning', duration: 0 })
   }
 }
 </script>
@@ -3998,6 +4026,7 @@ async function cerrarCuentaConPin(
         :venta-total="cobroTotal"
         v-model:propina-monto="propinaMonto"
         :porcentaje-sugerido="propinaPorcentaje"
+        :propina-no-disponible="propinaNoDisponible"
         v-model:pagador="pagador"
         :metodos="metodos"
         :submitting="submitting"
@@ -4024,6 +4053,19 @@ async function cerrarCuentaConPin(
         :loading="reimprimiendoComanda"
         @confirm="confirmarReimpresion"
       />
+
+      <!-- Lo que quedó cobrado: total, vuelto y folio, sin esperar a la impresora (02.26). -->
+      <UModal v-model:open="cobroTerminadoOpen" title="Cuenta cobrada" :ui="shellUi.modal">
+        <template #body>
+          <VentasCobroResultado
+            v-if="cobroTerminado"
+            titulo="Cuenta cerrada"
+            :boleta="cobroTerminado.boleta"
+            :vuelto-del-modal="cobroTerminado.vuelto"
+            @cerrar="cobroTerminado = null"
+          />
+        </template>
+      </UModal>
 
       <CrudModal
         v-if="!cancelTieneDespachado"

@@ -154,11 +154,7 @@ test('cobro mixto: efectivo y tarjeta con número — el documento de la máquin
   await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
 
-  // Sin propina: lo aplicado a la venta es lo cobrado.
-  await escribirMonto(
-    cobro.locator('xpath=//span[normalize-space(text())="Propina"]/following-sibling::*[1]'),
-    '0',
-  )
+  // El modal abre sin propina: lo aplicado a la venta es lo cobrado.
   await expect(valorDeFila(cobro, 'Total a pagar')).toHaveText('$11.900')
 
   // El medio por defecto es efectivo (del sistema): no hay nada que numerar.

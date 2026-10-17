@@ -396,3 +396,31 @@ describe('CarritoPanel — no muestra filas en cero (01.24)', () => {
     expect(wrapper.text()).toContain('Recargos')
   })
 })
+
+// 01.6 y 01.7: lo que la cajera dice en voz alta se ve, y lo que toca se toca. jsdom no mide
+// píxeles: se afirman las clases (`size-11`, `min-h-11`), como el resto de la guía.
+describe('CarritoPanel — el total se lee y los botones se tocan (01.6, 01.7)', () => {
+  async function conUnaLinea() {
+    return montar({ lineas: [linea('item-0', 'Papas')], resultado: resultadoConAvisoEn(0, 1), vigente: true })
+  }
+
+  it('el Total va en text-xl', async () => {
+    const wrapper = await conUnaLinea()
+    const fila = wrapper.get('[data-qa="totales-carrito"]').findAll('div').find(d => d.text().startsWith('Total'))!
+    expect(fila.classes()).toContain('text-xl')
+  })
+
+  it('Cobrar mide 44 px o más', async () => {
+    const wrapper = await conUnaLinea()
+    const cobrar = wrapper.findAll('button').find(b => b.text().includes('Cobrar'))!
+    expect(cobrar.classes()).toContain('min-h-11')
+  })
+
+  it('quitar línea, Vaciar todo y Agregar datos del cliente miden 44 px', async () => {
+    const wrapper = await conUnaLinea()
+    expect(wrapper.get('button[aria-label="Quitar Papas"]').classes()).toContain('size-11')
+    expect(wrapper.get('button[aria-label="Vaciar todo"]').classes()).toContain('size-11')
+    const agregar = wrapper.findAll('button').find(b => b.text().includes('Agregar datos del cliente'))!
+    expect(agregar.classes()).toContain('min-h-11')
+  })
+})

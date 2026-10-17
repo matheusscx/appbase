@@ -10,7 +10,7 @@ import {
   TENANTS,
 } from '../support/api'
 import { cafDePrueba, certificadoPfxDePrueba } from '../support/dte'
-import { entrarComo, escribirMonto, valorDeFila } from '../support/ui'
+import { entrarComo, valorDeFila } from '../support/ui'
 
 /**
  * El POS con la boleta electrónica prendida, como la cajera (spec
@@ -194,11 +194,7 @@ test('la cajera cobra con la emisión prendida: sin error, con folio, y la franj
   await expect(valorDeFila(page, 'Total')).toHaveText(TOTAL_VENTA)
   await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
-  // Sin propina: lo aplicado a la venta es lo cobrado.
-  await escribirMonto(
-    cobro.locator('xpath=//span[normalize-space(text())="Propina"]/following-sibling::*[1]'),
-    '0',
-  )
+  // El modal abre sin propina: lo aplicado a la venta es lo cobrado.
 
   const respuesta = page.waitForResponse(
     r => r.url().endsWith('/ventas') && r.request().method() === 'POST',

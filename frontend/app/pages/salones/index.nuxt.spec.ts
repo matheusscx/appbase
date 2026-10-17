@@ -74,7 +74,8 @@ afterAll(() => {
 const { impresionesQz, qzFalla } = vi.hoisted(() => ({
   impresionesQz: [] as string[][],
   /** `true` = QZ rechaza el `print`, como con QZ Tray cerrado. */
-  qzFalla: { activa: false },
+  /** `colgada`: el `print` no contesta nunca (02.26). */
+  qzFalla: { activa: false, colgada: false },
 }))
 vi.mock('qz-tray', () => ({
   default: {
@@ -88,7 +89,7 @@ vi.mock('qz-tray', () => ({
     print: (_config: unknown, datos: string[]) => {
       if (qzFalla.activa) return Promise.reject(new Error('QZ Tray no responde'))
       impresionesQz.push(datos)
-      return Promise.resolve()
+      return qzFalla.colgada ? new Promise<void>(() => {}) : Promise.resolve()
     },
   },
 }))
@@ -377,6 +378,10 @@ let cierreFallaSesion = false
  * una cuenta sin mirar el papel no tienen que armar el payload a mano.
  */
 let cierreBoletaOverride: Record<string, unknown> | null = null
+/** `GET /propinas/porcentaje-sugerido` falla (01.19). */
+let propinaLecturaFalla = false
+/** Si no es `null`, esa lectura no contesta hasta que se resuelva. */
+let propinaLecturaRetenida: Promise<void> | null = null
 /** Lo que devuelve `GET /tipos-documento`, en el orden del servidor (por nombre). */
 let tiposDocumentoMock: unknown[] = []
 /**
@@ -806,7 +811,8 @@ mockNuxtImport('useApiFetch', () => {
       return Promise.resolve(salonesMock)
     }
     if (ruta.endsWith('/propinas/porcentaje-sugerido')) {
-      return Promise.resolve(propinaMock)
+      if (propinaLecturaFalla) return Promise.reject(new Error('Failed to fetch'))
+      return propinaLecturaRetenida ? propinaLecturaRetenida.then(() => propinaMock) : Promise.resolve(propinaMock)
     }
     // El detalle que pide el panel de personalización al abrirse. Solo para `item-receta`: sin esto
     // la carga falla y el panel se cierra solo, y el resto de las lecturas de `/items` siguen
@@ -1037,6 +1043,7 @@ function reiniciarMock() {
   impresorasBoleta = []
   impresionesQz.length = 0
   qzFalla.activa = false
+  qzFalla.colgada = false
   reclamosDeComanda = []
   estacionesReclamadas = []
   comandaEnviadaMock = { estaciones: [], enviadaEl: null }
@@ -1051,6 +1058,8 @@ function reiniciarMock() {
   cierreRetenido = null
   cierreFallaSesion = false
   cierreBoletaOverride = null
+  propinaLecturaFalla = false
+  propinaLecturaRetenida = null
   estadoEmisionMock = { activa: false, avisos: [], sinEmitir: 0 }
   lecturasEstadoEmision = 0
   tiposDocumentoMock = [{ id: 'tipo-1', nombre: 'Boleta', customerRequerido: false, esBoleta: true }]
@@ -4906,13 +4915,23 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
    * `tipearPin`, como un `expected undefined to be truthy` sobre un teclado que
    * nunca apareció porque `confirmarCobro` cortó con `cobroCuenta` en `null`.
    */
-  async function abrirYConfirmarElCobro(wrapper: Awaited<ReturnType<typeof montar>>) {
+  async function abrirYConfirmarElCobro(
+    wrapper: Awaited<ReturnType<typeof montar>>,
+    { conPropinaSugerida = false } = {},
+  ) {
     const boton = botonEn(drawerMesa(), 'Cerrar y cobrar')
     expect(boton?.disabled).toBe(false)
     boton!.click()
     await esperar(20)
     const modal = wrapper.findComponent({ name: 'VentasCobroModal' })
     expect(modal.props('open'), 'el modal de cobro abrió').toBe(true)
+    if (conPropinaSugerida) {
+      // La propina se ofrece, no viene puesta (owner, 2026-10-16): el garzón toca el atajo del 10 %.
+      const atajo = [...document.body.querySelectorAll('button')].find(b => b.textContent?.includes('10 %'))
+      expect(atajo, 'el atajo de la propina sugerida').toBeTruthy()
+      atajo!.click()
+      await esperar(10)
+    }
     modal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '0')
   }
 
@@ -4944,7 +4963,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     })
     await esperar(20)
 
-    await abrirYConfirmarElCobro(wrapper)
+    await abrirYConfirmarElCobro(wrapper, { conPropinaSugerida: true })
     await esperar(20)
     await tipearPin()
 
@@ -4957,8 +4976,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
 
     expect(cierresDeCuenta).toEqual(['cuenta-9'])
     expect(toasts.filter(t => t.color === 'error')).toEqual([])
-    // Con propina, porque el modal abre con la sugerida puesta y el garzón la
-    // confirmó tal cual: es el aviso del camino feliz, no otro.
+    // Con propina, porque el garzón tocó el atajo del 10 %: es el aviso del camino feliz, no otro.
     expect(toasts.some(t => t.title === 'Cuenta cerrada — propina registrada')).toBe(true)
   })
 
@@ -5044,6 +5062,40 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     expect(drawerMesa()?.textContent).toContain('Cuenta 10')
   })
 
+  it('02.26: tras cobrar queda el total, el vuelto y el folio, sin esperar a la impresora', async () => {
+    catalogoItemsMock = [producto('3.0000', '1.0000')]
+    cuentasDeLaMesa = [cuentaConPedido('1.0000')]
+    impresorasBoleta = [impresoraDeBoleta()]
+    qzFalla.colgada = true
+    cierreBoletaOverride = {
+      ...boletaCierreDefault(),
+      vuelto: '2000',
+      boletaElectronica: { tipo: 39, folio: 777, monto: '5000', cubreTodo: true, ambiente: 'produccion', resolucion: { numero: 0, fecha: '2026-01-01' }, emisor: { rut: '1-9', razonSocial: 'Venka', giro: 'g', direccion: 'd', comuna: 'c' } },
+    }
+
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    const wrapper = await montar()
+    await abrirLaCuenta(wrapper)
+    await esperar(400)
+    wrapper.findAllComponents({ name: 'AppCantidadInput' })[0]!.vm.$emit('change', {
+      presentacion: '3', unidadCodigo: 'unidad', cantidadCanonica: '3.0000',
+    })
+    await esperar(20)
+    await abrirYConfirmarElCobro(wrapper)
+    await esperar(20)
+    await tipearPin()
+    await esperar(300)
+
+    expect(impresionesQz, 'la impresora recibió el trabajo y no contesta').toHaveLength(1)
+    const r = document.body.querySelector('[data-qa="cobro-resultado"]')
+    expect(r, 'el resumen está a la vista').toBeTruthy()
+    expect(r!.querySelector('[data-qa="resultado-total"]')!.textContent!.replace(/\s/g, '')).toBe('$5.000')
+    expect(r!.querySelector('[data-qa="resultado-vuelto"]')!.textContent!.replace(/\s/g, '')).toBe('$2.000')
+    expect(r!.querySelector('[data-qa="resultado-folio"]')!.textContent).toContain('777')
+    // Y la pantalla ya volvió a la lista de cuentas.
+    expect(botonEn(drawerMesa(), 'Cuentas'), 'volvió a la lista').toBeFalsy()
+  })
+
   it('la proyección de la caja usa el total de la boleta, y no resta el vuelto dos veces', async () => {
     /**
      * El garzón cobra $5.000 con $2.000 de vuelto sobre una venta de $3.000: al
@@ -5101,10 +5153,7 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     await esperar(20)
     const modal = wrapper.findComponent({ name: 'VentasCobroModal' })
     expect(modal.props('open'), 'el modal de cobro abrió').toBe(true)
-    // Sin propina: el modal abre con la sugerida puesta (10%) y acá se mide
-    // solo el vuelto, no la propina sumándose al target.
-    modal.vm.$emit('update:propinaMonto', '0')
-    await esperar(10)
+    // Sin propina (el modal abre así): acá se mide solo el vuelto, no la propina sumándose al target.
     modal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '2000')
     await esperar(20)
     await tipearPin()
@@ -5438,13 +5487,11 @@ describe('salones — el catálogo no vuelve a descontar lo que el servidor ya a
     })
     await esperar(20)
 
-    // El modal abre con la sugerida puesta (10% de 5.000) y el garzón la borra.
+    // El modal abre sin propina (se ofrece, no viene puesta); el garzón la deja así.
     const cobroModal = wrapper.findComponent({ name: 'VentasCobroModal' })
     botonEn(drawerMesa(), 'Cerrar y cobrar')!.click()
     await esperar(20)
-    expect(cobroModal.props('propinaMonto')).toBe('500')
-    cobroModal.vm.$emit('update:propinaMonto', '0')
-    await esperar(10)
+    expect(cobroModal.props('propinaMonto')).toBe('0')
     cobroModal.vm.$emit('confirmar', [{ metodoPagoId: 'mp-1', monto: '5000' }], '0')
     await esperar(20)
     await tipearPin()
@@ -9057,5 +9104,55 @@ describe('salones — auditoría UX grupo 02', () => {
     ;(item as HTMLElement).click()
     await esperar(40)
     expect(tecladoPin(), 'pide el PIN').toBeTruthy()
+  })
+})
+
+describe('salones — la propina y su lectura (01.19)', () => {
+  beforeEach(reiniciarMock)
+  const modalCobro = (w: Awaited<ReturnType<typeof montar>>) => w.findComponent({ name: 'VentasCobroModal' })
+
+  it('lectura bien: la propina se ofrece y no avisa nada', async () => {
+    const w = await montar()
+    await esperar(40)
+    expect(modalCobro(w).props('modoPropina')).toBe(true)
+    expect(modalCobro(w).props('propinaNoDisponible')).toBe(false)
+  })
+
+  it('lectura fallida: propina apagada y con aviso', async () => {
+    propinaLecturaFalla = true
+    const w = await montar()
+    await esperar(40)
+    expect(modalCobro(w).props('modoPropina')).toBe(false)
+    expect(modalCobro(w).props('propinaNoDisponible')).toBe(true)
+  })
+
+  it('otra carga del arranque que rechaza no deja la propina sin su lectura', async () => {
+    // Las demás cargas casi todas se tragan su error; una que rechace voltea el `Promise.all` del arranque.
+    const unidades = useUnidadesMedidaStore()
+    const original = unidades.ensureLoaded
+    unidades.ensureLoaded = () => Promise.reject(new Error('boom'))
+    try {
+      // El rechazo del arranque llega a Vue; acá no es lo que se mide, así que se traga.
+      const w = await mountSuspended(Salones, { global: { config: { errorHandler: () => {} } } })
+      montado = w
+      await esperar(40)
+      expect(modalCobro(w).props('modoPropina'), 'su propia lectura llegó y la encendió').toBe(true)
+      expect(modalCobro(w).props('porcentajeSugerido')).toBe('0.1')
+    }
+    finally {
+      unidades.ensureLoaded = original
+    }
+  })
+
+  it('antes de que llegue la lectura no hay propina; al llegar, sí', async () => {
+    let llegar!: () => void
+    propinaLecturaRetenida = new Promise<void>((r) => { llegar = r })
+    const w = await montar()
+    await esperar(40)
+    expect(modalCobro(w).props('modoPropina')).toBe(false)
+
+    llegar()
+    await esperar(40)
+    expect(modalCobro(w).props('modoPropina')).toBe(true)
   })
 })

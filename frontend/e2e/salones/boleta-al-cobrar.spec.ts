@@ -1,6 +1,6 @@
 import { test, expect } from '../support/sin-qz-tray'
 import { API, api, tokenDe, limpiarItems, abrirCaja, cerrarCaja, TENANTS, CLP } from '../support/api'
-import { elegirEnSelector, rondaDePin, valorDelTotal } from '../support/ui'
+import { elegirEnSelector, elegirPropinaSugerida, rondaDePin, valorDelTotal } from '../support/ui'
 
 /**
  * El caso que se perdía hasta el 2026-09-17, en un navegador de verdad —spec
@@ -195,6 +195,7 @@ test('cobra una cuenta habiendo navegado a otra mientras el cierre viajaba, y la
   // 4. Abrir el cobro y confirmar el total con la propina sugerida.
   await page.getByRole('button', { name: 'Cerrar y cobrar' }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
+  await elegirPropinaSugerida(cobro)
   await expect(cobro).toContainText(TOTAL_CON_PROPINA)
 
   // 5. Retener la respuesta del cierre: la ventana en la que el garzón puede
@@ -231,6 +232,10 @@ test('cobra una cuenta habiendo navegado a otra mientras el cierre viajaba, y la
   await expect(
     page.getByText('Cuenta cerrada — propina registrada').first(),
   ).toBeVisible({ timeout: 15_000 })
+  // Queda el resumen del cobro (02.26): total con propina, y "Listo" lo cierra para seguir.
+  const resumen = page.locator('[data-qa="cobro-resultado"]')
+  await expect(resumen.locator('[data-qa="resultado-total"]')).toHaveText('$1.309')
+  await resumen.getByRole('button', { name: 'Listo' }).click()
   await expect(page.getByText(AVISO_SIN_BOLETA)).toHaveCount(0)
 
   // 9. Y no se lo expulsa de donde está: sigue parado en la cuenta B, ajena al

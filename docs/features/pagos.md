@@ -389,6 +389,42 @@ La propina ingresada en el POS (canal `fisico` sin mesero asignado) se persiste 
 
 La ruta `GET /api/propinas/porcentaje-sugerido-venta` devuelve el porcentaje sugerido para una venta en el POS, guardado en `propina_configuracion.porcentaje_sugerido`. Requiere permiso `Ventas:Crear`.
 
+### El modal de cobro: la propina se ofrece, no viene sumada
+
+Auditoría UX 01.2 / 02.9 / 01.19 (owner, 2026-10-16). `CobroModal.vue` es **el mismo** para el mostrador
+(POS) y la mesa (salones):
+
+- **Abre sin propina.** El total a pagar es el de la venta. Debajo, "Propina sugerida 10 %" (el porcentaje
+  de la configuración del tenant) con tres atajos: **Sin propina**, **10 % · $monto** y **Otro monto**
+  (muestra el campo). El total solo incluye la propina cuando la persona toca un atajo.
+- **Qué se envía no cambió:** `POST /ventas` con `propinaDirecta { montoPagado, porcentajeSugerido }` solo si
+  el monto es mayor que 0, y el cierre de cuenta con `propinaMonto` / `propinaSugerida` /
+  `propinaPorcentajeSugerido`. El servidor sigue siendo quien suma `totalFinal + propina` como objetivo de cobro.
+- **Si falla leer la configuración** (`GET /propinas/porcentaje-sugerido[-venta]`), la propina parte
+  **apagada** y el modal dice "No se pudo leer la configuración de propina: este cobro va sin propina"
+  (`falloLectura`). Apagada a propósito por el local no avisa nada.
+- **Lo tecleado no se pisa (01.4):** los montos de los pagos siguen al total mientras nadie los toque. Si la
+  cajera teclea un monto, agrega un pago o toca un billete, cambiar la propina ya no los reescribe: el modal
+  muestra lo que falta o el vuelto.
+- **Saldo y billetes (01.3):** si queda saldo, "Falta $X" en ámbar (`text-warning`) y el botón dice
+  "Confirmar con saldo pendiente" (la venta queda `pagada_parcial`, como antes). Los pagos con un método que
+  permite vuelto ofrecen **Exacto, $5.000, $10.000 y $20.000**: el billete fija lo que entrega el cliente y
+  el sobrante es vuelto (los billetes son fijos, pensados en CLP).
+- **Lo que se dice en voz alta (01.6, 02.8):** "Total a pagar" y "Vuelto" van en `text-2xl`; el vuelto solo
+  destacado cuando hay un pago en efectivo. Todos los botones del modal miden 44 px (01.7).
+- **Una propina distinta en el reintento es otro cobro:** el modal reabre siempre en "Sin propina"; si un corte
+  obliga a reintentar, hay que volver a elegir la misma propina o el servidor contesta 422 "otros datos"
+  (idempotencia, ADR-026).
+
+### Después de cobrar (01.1, 01.5, 02.26)
+
+El cobro registrado manda: en el POS el carrito, el cliente y la propina se limpian **apenas entra el
+`POST /ventas`**, y la boleta se imprime sin esperar (`void`). Queda a la vista `CobroResultado.vue`:
+**total** (con la propina registrada), **vuelto** grande y **folio** de la boleta electrónica si salió, hasta
+que la cajera toca "Listo" o abre otro cobro. En salones el mismo resumen sale en un modal "Cuenta cobrada"
+y el garzón vuelve a la lista sin esperar a la impresora. Los datos salen de la respuesta del servidor
+(`boleta`), no de lo tecleado.
+
 ### Habilitar/deshabilitar propina por canal
 
 El admin puede apagar la propina por canal desde `/configuracion/propinas-distribucion`

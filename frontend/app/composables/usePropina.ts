@@ -35,43 +35,36 @@ export function porcentajeDecimalAHumano(decimal: string): string {
   return n.equals(n.toDecimalPlaces(0)) ? n.toFixed(0) : n.toString()
 }
 
-export async function fetchPorcentajeSugerido(): Promise<{
+export interface PropinaSugerida {
   porcentajeSugerido: string
   habilitado: boolean
-}> {
+  /** La lectura falló: `habilitado` es `false` y la pantalla lo dice (01.19). */
+  falloLectura: boolean
+}
+
+/**
+ * Si la lectura falla, la propina parte APAGADA (owner, 2026-10-16, 01.19): un local
+ * que la apagó no puede verla activa con 10 % solo porque la red falló. El
+ * `falloLectura` deja que el modal lo diga, en vez de callar como "apagada".
+ */
+async function leerPropinaSugerida(ruta: string): Promise<PropinaSugerida> {
   const apiUrl = useRuntimeConfig().public.apiUrl
   try {
-    const res = await useApiFetch<{ porcentajeSugerido: string, habilitado: boolean }>(
-      `${apiUrl}/propinas/porcentaje-sugerido`,
-    )
+    const res = await useApiFetch<{ porcentajeSugerido: string, habilitado: boolean }>(`${apiUrl}${ruta}`)
     return {
       porcentajeSugerido: res.porcentajeSugerido || PROPINA_PORCENTAJE_DEFAULT,
       habilitado: res.habilitado ?? true,
+      falloLectura: false,
     }
   }
   catch {
-    return { porcentajeSugerido: PROPINA_PORCENTAJE_DEFAULT, habilitado: true }
+    return { porcentajeSugerido: PROPINA_PORCENTAJE_DEFAULT, habilitado: false, falloLectura: true }
   }
 }
 
-export async function fetchPorcentajeSugeridoVenta(): Promise<{
-  porcentajeSugerido: string
-  habilitado: boolean
-}> {
-  const apiUrl = useRuntimeConfig().public.apiUrl
-  try {
-    const res = await useApiFetch<{ porcentajeSugerido: string, habilitado: boolean }>(
-      `${apiUrl}/propinas/porcentaje-sugerido-venta`,
-    )
-    return {
-      porcentajeSugerido: res.porcentajeSugerido || PROPINA_PORCENTAJE_DEFAULT,
-      habilitado: res.habilitado ?? true,
-    }
-  }
-  catch {
-    return { porcentajeSugerido: PROPINA_PORCENTAJE_DEFAULT, habilitado: true }
-  }
-}
+export const fetchPorcentajeSugerido = () => leerPropinaSugerida('/propinas/porcentaje-sugerido')
+
+export const fetchPorcentajeSugeridoVenta = () => leerPropinaSugerida('/propinas/porcentaje-sugerido-venta')
 
 export function usePropina() {
   return {

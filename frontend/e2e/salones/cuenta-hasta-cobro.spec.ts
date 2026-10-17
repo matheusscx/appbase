@@ -1,6 +1,6 @@
 import type { APIRequestContext } from '@playwright/test'
 import { test, expect } from '../support/sin-qz-tray'
-import { elegirEnSelector, rondaDePin, valorDelTotal } from '../support/ui'
+import { elegirEnSelector, elegirPropinaSugerida, rondaDePin, valorDelTotal } from '../support/ui'
 
 /**
  * Salones de punta a punta, en un navegador de verdad:
@@ -263,10 +263,11 @@ test('abre una cuenta en una mesa, le carga un producto y la cobra', async ({
   // 5. El total de la cuenta sale de la regla: $1.000 afecto + 19% = $1.190.
   await expect(valorDelTotal(page)).toHaveText(TOTAL_CON_IVA)
 
-  // 6. Cobrar. El modal precarga el método por defecto, el total y la propina
-  //    sugerida del 10%, así que se paga $1.309.
+  // 6. Cobrar. El modal precarga el método por defecto y el total; la propina se ofrece y la
+  //    cajera toca el atajo del 10 %, así que se paga $1.309.
   await page.getByRole('button', { name: 'Cerrar y cobrar' }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
+  await elegirPropinaSugerida(cobro)
   await expect(cobro).toContainText(TOTAL_CON_PROPINA)
 
   // 7. El PIN se pide DESPUÉS de confirmar, no antes: quién cierra la cuenta es
@@ -286,6 +287,10 @@ test('abre una cuenta en una mesa, le carga un producto y la cobra', async ({
   await expect(
     page.getByText('Cuenta cerrada — propina registrada').first(),
   ).toBeVisible({ timeout: 15_000 })
+  // Queda el resumen del cobro (02.26): total con propina, y "Listo" lo cierra para seguir.
+  const resumen = page.locator('[data-qa="cobro-resultado"]')
+  await expect(resumen.locator('[data-qa="resultado-total"]')).toHaveText('$1.309')
+  await resumen.getByRole('button', { name: 'Listo' }).click()
   await expect(
     page.getByText(
       'La mesa no tiene cuentas abiertas. Crea una nueva para empezar.',

@@ -10,7 +10,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
-import { elegirEnSelector, entrarComo, rondaDePin, valorDeFila, valorDelTotal } from '../support/ui'
+import { elegirEnSelector, elegirPropinaSugerida, entrarComo, rondaDePin, valorDeFila, valorDelTotal } from '../support/ui'
 
 /**
  * El catálogo paginado en el servidor, de punta a punta: el producto 101 de un
@@ -165,6 +165,7 @@ test.describe('POS como cajera', () => {
 
     await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
     const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
+    await elegirPropinaSugerida(cobro)
     const respuesta = page.waitForResponse(
       r => r.url().endsWith('/ventas') && r.request().method() === 'POST',
     )

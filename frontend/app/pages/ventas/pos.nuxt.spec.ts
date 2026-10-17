@@ -37,8 +37,10 @@ import { AVISO_COBRO_REPETIDO, useIntentoCobro } from '~/composables/useIntentoC
  * `websocket.connect()` a un QZ Tray que no existe—, así que se stubea acá.
  * Va con `vi.hoisted` porque `vi.mock` se iza por encima de los `const`.
  */
-const { impresionesQz } = vi.hoisted(() => ({
+const { impresionesQz, qz } = vi.hoisted(() => ({
   impresionesQz: [] as string[][],
+  /** `bloquear`: la impresora no contesta nunca (01.1, QZ colgado). */
+  qz: { bloquear: false },
 }))
 vi.mock('qz-tray', () => ({
   default: {
@@ -51,7 +53,7 @@ vi.mock('qz-tray', () => ({
     },
     print: (_config: unknown, datos: string[]) => {
       impresionesQz.push(datos)
-      return Promise.resolve()
+      return qz.bloquear ? new Promise<void>(() => {}) : Promise.resolve()
     },
   },
 }))
@@ -143,6 +145,10 @@ let urlsUnidades: string[] = []
 let estadoEmisionMock: unknown = { activa: false, avisos: [], sinEmitir: 0 }
 /** Cada lectura de `GET /dte/estado-emision`: una al entrar y otra después de cada cobro. */
 let lecturasEstadoEmision = 0
+/** `GET /propinas/porcentaje-sugerido-venta` falla (01.19). */
+let propinaVentaFalla = false
+/** Si no es `null`, esa lectura no contesta hasta que se resuelva. */
+let propinaVentaRetenida: Promise<void> | null = null
 
 mockNuxtImport('useApiFetch', () => {
   return (url: string, opts?: { method?: string, body?: unknown, headers?: Record<string, string> }) => {
@@ -151,6 +157,14 @@ mockNuxtImport('useApiFetch', () => {
 
     if (ruta.endsWith('/caja/activa')) {
       return Promise.resolve(cajaActivaMock)
+    }
+    if (ruta.endsWith('/propinas/porcentaje-sugerido-venta')) {
+      if (propinaVentaFalla) return Promise.reject(new Error('Failed to fetch'))
+      const lectura = { porcentajeSugerido: '0.10', habilitado: true }
+      return propinaVentaRetenida ? propinaVentaRetenida.then(() => lectura) : Promise.resolve(lectura)
+    }
+    if (ruta.endsWith('/movimientos/resumen')) {
+      return Promise.resolve({ ciego: false, saldoInicial: '0', totalEntradas: '0', totalSalidas: '0', totalMovimientos: 0, saldoEsperado: '0' })
     }
     if (ruta.endsWith('/dte/estado-emision')) {
       lecturasEstadoEmision++
@@ -249,6 +263,9 @@ beforeEach(() => {
   // cada test arranca sin intento abierto.
   useIntentoCobro().terminar('pos')
   impresionesQz.length = 0
+  qz.bloquear = false
+  propinaVentaFalla = false
+  propinaVentaRetenida = null
 })
 
 /**
@@ -1196,5 +1213,115 @@ describe('ventas/pos — hallazgos de la auditoría UX 01 (grupo POS)', () => {
 
     expect(bodiesDeVenta).toHaveLength(1)
     expect(toasts.some(t => t.title === 'La venta quedó registrada, pero no hay impresora de boletas configurada')).toBe(true)
+  })
+})
+
+describe('ventas/pos — tras cobrar (01.1, 01.5, 01.19)', () => {
+  const palta = {
+    id: 'item-1', nombre: 'Palta', descripcion: null, precioBase: '1000', monedaId: 'clp', monedaSimbolo: '$',
+    stock: '10', stockDisponible: '10.0000', unidadMedida: 'unidad', tipo: 'producto', activo: true,
+  }
+  const bebida = { ...palta, id: 'item-2', nombre: 'Bebida' }
+  const boletaCobrada = () => ({
+    ventaId: 'venta-1',
+    fecha: '2026-10-16T12:00:00Z',
+    cajero: 'Ana',
+    items: [{ descripcion: 'Palta', cantidad: '1', cantidadPresentacion: null, unidadCodigoPresentacion: null, unidadCodigoBase: 'unidad', precioUnitario: '1785', totalLinea: '1785' }],
+    totales: { subtotalNeto: '1500', totalDescuentos: '0', totalRecargos: '0', totalImpuestos: '285', totalFinal: '1785' },
+    impuestos: [],
+    promociones: [],
+    propina: null,
+    pagos: [{ nombre: 'Efectivo', monto: '10000' }],
+    vuelto: '8215',
+    customer: null,
+    boletaElectronica: { tipo: 39, folio: 4321, monto: '1785', cubreTodo: true, ambiente: 'produccion', resolucion: { numero: 0, fecha: '2026-01-01' }, emisor: { rut: '1-9', razonSocial: 'Venka', giro: 'g', direccion: 'd', comuna: 'c' } },
+    boletaSinEmitir: null,
+  })
+  const lineas = (w: Awaited<ReturnType<typeof montar>>) =>
+    w.findComponent({ name: 'VentasCarritoPanel' }).props('lineas') as { item: { id: string } }[]
+
+  async function cobrarUnaPalta() {
+    cajaActivaMock = { id: 'caja-1', estado: 'abierta' }
+    itemsCatalogoMock = [palta, bebida]
+    useMonedasStore().hydrate([MONEDA_CLP], 'tenant-1')
+    impresorasBoleta = [impresoraDeBoleta()]
+    ventaBoletaMock = boletaCobrada()
+    const wrapper = await montar()
+    await esperar(20)
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', palta)
+    await esperar(20)
+    expect(lineas(wrapper).map(l => l.item.id)).toEqual(['item-1'])
+    wrapper.findComponent({ name: 'VentasCobroModal' }).vm.$emit('confirmar', [{ metodoPagoId: 'mp-efectivo', monto: '10000' }], '8215')
+    return wrapper
+  }
+
+  it('01.1: el carrito vendido se vacía apenas entra el cobro, sin esperar a la impresora', async () => {
+    qz.bloquear = true
+    const wrapper = await cobrarUnaPalta()
+    await esperar(80)
+
+    expect(impresionesQz, 'la impresora sigue "imprimiendo"').toHaveLength(1)
+    expect(lineas(wrapper), 'el carrito ya es del cliente siguiente').toEqual([])
+  })
+
+  it('01.1: lo que se agrega mientras la impresora trabaja no se mezcla ni se borra después', async () => {
+    qz.bloquear = true
+    const wrapper = await cobrarUnaPalta()
+    await esperar(80)
+
+    wrapper.findComponent({ name: 'VentasCatalogoGrid' }).vm.$emit('add', bebida)
+    await esperar(80)
+
+    expect(lineas(wrapper).map(l => l.item.id)).toEqual(['item-2'])
+  })
+
+  it('01.5: queda en pantalla el total, el vuelto y el folio, aunque la impresora no conteste', async () => {
+    qz.bloquear = true
+    const wrapper = await cobrarUnaPalta()
+    await esperar(80)
+
+    const r = wrapper.find('[data-qa="cobro-resultado"]')
+    expect(r.exists()).toBe(true)
+    expect(r.get('[data-qa="resultado-total"]').text().replace(/\s/g, '')).toBe('$1.785')
+    expect(r.get('[data-qa="resultado-vuelto"]').text().replace(/\s/g, '')).toBe('$8.215')
+    expect(r.get('[data-qa="resultado-folio"]').text()).toContain('4321')
+  })
+
+  it('01.5: "Listo" saca el resumen', async () => {
+    const wrapper = await cobrarUnaPalta()
+    await esperar(80)
+    await wrapper.get('[data-qa="cobro-resultado-cerrar"]').trigger('click')
+    expect(wrapper.find('[data-qa="cobro-resultado"]').exists()).toBe(false)
+  })
+
+  it('01.19: si falla leer la propina, el cobro parte sin propina y el modal lo dice', async () => {
+    propinaVentaFalla = true
+    const wrapper = await montar()
+    await esperar(20)
+
+    const modal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    expect(modal.props('modoPropina')).toBe(false)
+    expect(modal.props('propinaNoDisponible')).toBe(true)
+  })
+
+  it('01.19: con la lectura bien, la propina se ofrece y no avisa nada', async () => {
+    const wrapper = await montar()
+    await esperar(20)
+
+    const modal = wrapper.findComponent({ name: 'VentasCobroModal' })
+    expect(modal.props('modoPropina')).toBe(true)
+    expect(modal.props('propinaNoDisponible')).toBe(false)
+  })
+
+  it('01.19: antes de que llegue la lectura de la propina no hay propina', async () => {
+    let llegar!: () => void
+    propinaVentaRetenida = new Promise<void>((r) => { llegar = r })
+    const wrapper = await montar()
+    await esperar(20)
+    expect(wrapper.findComponent({ name: 'VentasCobroModal' }).props('modoPropina')).toBe(false)
+
+    llegar()
+    await esperar(20)
+    expect(wrapper.findComponent({ name: 'VentasCobroModal' }).props('modoPropina')).toBe(true)
   })
 })

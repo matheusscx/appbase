@@ -8,7 +8,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
-import { entrarComo } from '../support/ui'
+import { elegirPropinaSugerida, entrarComo } from '../support/ui'
 
 /**
  * El cajero elige qué unidad con número de serie sale, en el POS y en un
@@ -147,6 +147,7 @@ test('el cajero elige la unidad usada: queda en el carrito y la venta sale con e
   //    última del listado": con otra corrida en el medio verificaría la de otro.
   await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
+  await elegirPropinaSugerida(cobro)
   const respuesta = page.waitForResponse(
     r => r.url().endsWith('/ventas') && r.request().method() === 'POST',
   )

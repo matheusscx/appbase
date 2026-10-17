@@ -9,7 +9,7 @@ import {
   tokenDe,
   TENANTS,
 } from '../support/api'
-import { DISPARADOR_DE_SELECTOR, elegirEnSelector, escribirMonto, valorDeFila } from '../support/ui'
+import { DISPARADOR_DE_SELECTOR, elegirEnSelector, elegirPropinaSugerida, escribirMonto, valorDeFila } from '../support/ui'
 
 /**
  * El punto de venta de punta a punta, en un navegador de verdad: catálogo →
@@ -143,15 +143,15 @@ test('cobra un afecto y un exento: el IVA sale solo del afecto, y así queda en 
   await expect(valorDeFila(page, 'Impuestos')).toHaveText(IVA)
   await expect(valorDeFila(page, 'Total')).toHaveText(TOTAL_VENTA)
 
-  // 3. Cobrar. El modal precarga método por defecto, total y propina sugerida.
+  // 3. Cobrar. El modal precarga el método por defecto y el total de la venta: la propina
+  //    se ofrece, no viene sumada (owner, 2026-10-16). La cajera toca el atajo del 10 %.
   await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
   await expect(valorDeFila(cobro, 'Total venta')).toHaveText(TOTAL_VENTA)
-  await expect(
-    cobro.locator(
-      'xpath=//span[normalize-space(text())="Propina"]/following-sibling::*[1]//input',
-    ),
-  ).toHaveValue(PROPINA_SUGERIDA)
+  await expect(valorDeFila(cobro, 'Total a pagar')).toHaveText(TOTAL_VENTA)
+  await expect(cobro.getByText('Propina sugerida 10 %')).toBeVisible()
+  await elegirPropinaSugerida(cobro)
+  await expect(valorDeFila(cobro, 'Propina')).toHaveText(`$${PROPINA_SUGERIDA}`)
   await expect(valorDeFila(cobro, 'Total a pagar')).toHaveText(TOTAL_A_PAGAR)
 
   // 4. Confirmar. El id de la venta se toma de la respuesta del POST y no del
@@ -342,6 +342,7 @@ async function carritoDeUnAfecto(
 
   await page.getByRole('button', { name: 'Cobrar', exact: true }).click()
   const cobro = page.getByRole('dialog').filter({ hasText: 'Cobrar venta' })
+  await elegirPropinaSugerida(cobro)
   await expect(valorDeFila(cobro, 'Total a pagar')).toHaveText(A_PAGAR_UN_AFECTO)
   return cobro
 }

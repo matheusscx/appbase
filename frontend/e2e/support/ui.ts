@@ -52,6 +52,17 @@ export async function escribirMonto(
 }
 
 /**
+ * En el modal de cobro, toca el atajo de la propina sugerida ("10 % · $119").
+ *
+ * La propina no viene sumada (owner, 2026-10-16, auditoría UX 01.2 y 02.9): el modal abre
+ * en "Sin propina" y el total a pagar es el de la venta. Los flujos que miden venta + propina
+ * la eligen con este gesto, igual que la cajera.
+ */
+export async function elegirPropinaSugerida(cobro: Locator): Promise<void> {
+  await cobro.getByRole('button', { name: /^10 %/ }).click()
+}
+
+/**
  * El disparador de un `USelectMenu`, por lo que NO cambia: `aria-haspopup="listbox"`.
  *
  * ⚠️ No se busca por nombre. Reka le pone `Show popup` al trigger por defecto, pero

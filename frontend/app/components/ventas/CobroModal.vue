@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import Decimal from 'decimal.js'
 import { resumenCobro, setMontoPago, sumaPagos, type PagoInput } from '~/composables/useVenta'
-import { sugerirPropina } from '~/composables/usePropina'
+import { porcentajeDecimalAHumano, sugerirPropina } from '~/composables/usePropina'
 import { comprobanteDelPago, type EmisorMedio } from '~/composables/useDocumentosVenta'
 import { LARGO_RECEPTOR, problemaDelReceptor, rutValido } from '~/composables/useReceptor'
 
@@ -27,6 +27,11 @@ const props = withDefaults(
     /** Decimal API, ej. '0.10'. Solo modoPropina. */
     porcentajeSugerido?: string
     /**
+     * No se pudo leer la configuración de propina (01.19): el cobro va sin propina y
+     * lo dice. Distinto de "apagada a propósito", que no avisa nada.
+     */
+    propinaNoDisponible?: boolean
+    /**
      * La venta pasa el umbral de la Res. Ex. SII 44/2025: si algún pago es de la
      * máquina, avisa que el voucher no lleva a quien paga (owner, 2026-10-04:
      * se registra y se avisa).
@@ -45,6 +50,7 @@ const props = withDefaults(
     total: '0',
     ventaTotal: '0',
     porcentajeSugerido: '0.10',
+    propinaNoDisponible: false,
     sobreUmbralIdentidad: false,
     pedirPagador: false,
     rutChileno: false,
@@ -84,40 +90,86 @@ const totalAPagar = computed(() => {
   return props.total || '0'
 })
 
+/**
+ * Los montos de los pagos siguen al total mientras la persona no los toque. En
+ * cuanto teclea uno, agrega un pago o elige un billete, son suyos: cambiar la
+ * propina después ya no los pisa (01.4) y el modal dice lo que falta o el vuelto.
+ */
+const montosEditados = ref(false)
+
 function resetPagos() {
   const def = metodosHabilitados.value[0]
   pagos.value = def
     ? [{ metodoPagoId: def.metodoPagoId, monto: totalAPagar.value }]
     : []
+  montosEditados.value = false
+}
+
+/** La propina se ofrece, no viene puesta (owner, 2026-10-16): 'sin' | 'sugerida' | 'otro'. */
+const seleccionPropina = ref<'sin' | 'sugerida' | 'otro'>('sin')
+const propinaSugeridaMonto = computed(() =>
+  sugerirPropina(props.ventaTotal || '0', decimalesPropina.value, props.porcentajeSugerido || '0.10'),
+)
+const hayPropinaSugerida = computed(() => new Decimal(propinaSugeridaMonto.value).gt(0))
+const porcentajeHumano = computed(() => porcentajeDecimalAHumano(props.porcentajeSugerido || '0.10'))
+
+function elegirPropina(sel: 'sin' | 'sugerida' | 'otro') {
+  seleccionPropina.value = sel
+  if (sel === 'sin') propinaMonto.value = '0'
+  else if (sel === 'sugerida') propinaMonto.value = propinaSugeridaMonto.value
 }
 
 watch(open, (v) => {
   if (v) {
     if (props.modoPropina) {
-      propinaMonto.value = sugerirPropina(
-        props.ventaTotal || '0',
-        decimalesPropina.value,
-        props.porcentajeSugerido || '0.10',
-      )
+      seleccionPropina.value = 'sin'
+      propinaMonto.value = '0'
     }
     resetPagos()
   }
 })
 
 watch(propinaMonto, () => {
-  if (open.value && props.modoPropina) resetPagos()
+  if (open.value && props.modoPropina && !montosEditados.value) resetPagos()
 })
 
 function setMonto(i: number, monto: string) {
+  montosEditados.value = true
   pagos.value = setMontoPago(totalAPagar.value, pagos.value, i, monto)
 }
 function agregarPago() {
   const def = metodosHabilitados.value[0]
   if (!def) return
+  montosEditados.value = true
   pagos.value = [...pagos.value, { metodoPagoId: def.metodoPagoId, monto: resumen.value.restante }]
 }
 function quitarPago(i: number) {
   pagos.value = pagos.value.filter((_, idx) => idx !== i)
+}
+
+/** Billetes que el cliente entrega en efectivo; el vuelto lo calcula el modal. */
+const BILLETES = ['5000', '10000', '20000']
+
+function permiteVuelto(metodoPagoId: string): boolean {
+  return props.metodos.find((m) => m.metodoPagoId === metodoPagoId)?.permiteVuelto === true
+}
+
+/** Lo que entrega el cliente en este pago es ese billete: lo que sobra es vuelto, no se reparte. */
+function entregar(i: number, monto: string) {
+  montosEditados.value = true
+  pagos.value = pagos.value.map((p, idx) => (idx === i ? { ...p, monto } : p))
+}
+
+/** "Exacto": lo que falta para cubrir el total sin contar este pago. */
+function pagarExacto(i: number) {
+  const otros = pagos.value.reduce(
+    (acc, p, idx) => (idx === i ? acc : acc.plus(p.monto || '0')),
+    new Decimal(0),
+  )
+  const exacto = Decimal.max(new Decimal(totalAPagar.value || '0').minus(otros), 0).toString()
+  pagos.value = pagos.value.map((p, idx) => (idx === i ? { ...p, monto: exacto } : p))
+  // Con un solo pago "exacto" sigue al total: es el estado de cuando abrió.
+  montosEditados.value = pagos.value.length > 1
 }
 
 const resumen = computed(() =>
@@ -128,6 +180,8 @@ const resumen = computed(() =>
   ),
 )
 const suma = computed(() => sumaPagos(pagos.value))
+const hayEfectivo = computed(() => pagos.value.some((p) => permiteVuelto(p.metodoPagoId)))
+const hayFalta = computed(() => new Decimal(resumen.value.restante || '0').gt(0))
 
 const { formatMonto } = useFormatters()
 
@@ -198,29 +252,80 @@ function confirmar() {
   <UModal v-model:open="open" title="Cobrar venta" :ui="shellUi.modal">
     <template #body>
       <div class="flex flex-col gap-4">
-        <div v-if="modoPropina" class="text-sm space-y-1">
-          <div class="flex justify-between text-muted">
+        <div v-if="modoPropina" class="flex flex-col gap-3">
+          <div class="flex justify-between text-sm text-muted">
             <span>Total venta</span>
             <span>{{ formatMonto(ventaTotal || '0') }}</span>
           </div>
-          <div class="flex items-center justify-between gap-3">
-            <span class="text-muted">Propina</span>
-            <MoneyInput
-              :model-value="propinaMonto"
-              oficial
-              class="w-32"
-              size="sm"
-              @update:model-value="propinaMonto = $event"
-            />
+          <!-- Se ofrece, no viene sumada: el total no cambia hasta que la cajera toca un atajo
+               (owner, 2026-10-16, 01.2 y 02.9). -->
+          <div data-qa="propina" class="flex flex-col gap-2">
+            <p class="text-sm text-muted">
+              {{ hayPropinaSugerida ? `Propina sugerida ${porcentajeHumano} %` : 'Propina' }}
+            </p>
+            <div class="flex flex-wrap gap-2">
+              <UButton
+                label="Sin propina"
+                size="xl"
+                class="min-h-11"
+                :color="seleccionPropina === 'sin' ? 'primary' : 'neutral'"
+                :variant="seleccionPropina === 'sin' ? 'solid' : 'outline'"
+                :aria-pressed="seleccionPropina === 'sin'"
+                data-qa="propina-sin"
+                @click="elegirPropina('sin')"
+              />
+              <UButton
+                v-if="hayPropinaSugerida"
+                size="xl"
+                class="min-h-11"
+                :color="seleccionPropina === 'sugerida' ? 'primary' : 'neutral'"
+                :variant="seleccionPropina === 'sugerida' ? 'solid' : 'outline'"
+                :aria-pressed="seleccionPropina === 'sugerida'"
+                data-qa="propina-sugerida"
+                @click="elegirPropina('sugerida')"
+              >
+                {{ porcentajeHumano }} % · {{ formatMonto(propinaSugeridaMonto) }}
+              </UButton>
+              <UButton
+                label="Otro monto"
+                size="xl"
+                class="min-h-11"
+                :color="seleccionPropina === 'otro' ? 'primary' : 'neutral'"
+                :variant="seleccionPropina === 'otro' ? 'solid' : 'outline'"
+                :aria-pressed="seleccionPropina === 'otro'"
+                data-qa="propina-otro"
+                @click="elegirPropina('otro')"
+              />
+            </div>
+            <div v-if="seleccionPropina === 'otro'" class="flex items-center justify-between gap-3">
+              <span class="text-sm text-muted">Propina</span>
+              <MoneyInput
+                :model-value="propinaMonto"
+                oficial
+                class="w-40 [&_input]:min-h-11"
+                size="xl"
+                data-qa="propina-monto"
+                @update:model-value="propinaMonto = $event"
+              />
+            </div>
+            <div v-else-if="seleccionPropina === 'sugerida'" class="flex justify-between text-sm text-muted">
+              <span>Propina</span>
+              <span>{{ formatMonto(propinaMonto) }}</span>
+            </div>
           </div>
-          <div class="flex justify-between text-base font-semibold border-t border-default pt-2">
+          <div class="flex items-baseline justify-between gap-3 border-t border-default pt-2 text-2xl font-semibold tabular-nums">
             <span>Total a pagar</span>
             <span>{{ formatMonto(totalAPagar) }}</span>
           </div>
         </div>
-        <div v-else class="flex justify-between text-base font-semibold">
-          <span>Total a pagar</span>
-          <span>{{ formatMonto(totalAPagar) }}</span>
+        <div v-else class="flex flex-col gap-2">
+          <div class="flex items-baseline justify-between gap-3 text-2xl font-semibold tabular-nums">
+            <span>Total a pagar</span>
+            <span>{{ formatMonto(totalAPagar) }}</span>
+          </div>
+          <p v-if="propinaNoDisponible" data-qa="aviso-propina-no-disponible" class="text-xs text-muted">
+            No se pudo leer la configuración de propina: este cobro va sin propina.
+          </p>
         </div>
 
         <div v-if="nadaQueCobrar" data-qa="nada-que-cobrar" class="text-sm text-muted">
@@ -242,13 +347,15 @@ function confirmar() {
                 :items="metodoItems"
                 value-key="value"
                 label-key="label"
+                size="xl"
+                :ui="{ base: 'min-h-11' }"
                 class="flex-1"
               />
               <MoneyInput
                 :model-value="pago.monto"
                 oficial
-                class="w-32"
-                size="sm"
+                class="w-40 [&_input]:min-h-11"
+                size="xl"
                 @update:model-value="setMonto(i, $event)"
               />
               <UButton
@@ -256,9 +363,35 @@ function confirmar() {
                 icon="i-lucide-trash-2"
                 color="error"
                 variant="ghost"
-                size="xs"
+                size="xl"
+                class="size-11 justify-center ms-2"
                 :disabled="pagos.length <= 1"
                 @click="quitarPago(i)"
+              />
+            </div>
+            <!-- Efectivo: lo que entrega el cliente, sin tipearlo. -->
+            <div
+              v-if="permiteVuelto(pago.metodoPagoId)"
+              :data-qa="`billetes-${i}`"
+              class="flex flex-wrap gap-2"
+            >
+              <UButton
+                label="Exacto"
+                size="xl"
+                color="neutral"
+                variant="outline"
+                class="min-h-11"
+                @click="pagarExacto(i)"
+              />
+              <UButton
+                v-for="b in BILLETES"
+                :key="b"
+                :label="formatMonto(b)"
+                size="xl"
+                color="neutral"
+                variant="outline"
+                class="min-h-11"
+                @click="entregar(i, b)"
               />
             </div>
             <!-- Solo con un medio que emite la máquina, y opcional: el voucher se
@@ -273,7 +406,8 @@ function confirmar() {
             label="Agregar pago"
             icon="i-lucide-plus"
             variant="ghost"
-            size="sm"
+            size="xl"
+            class="min-h-11"
             @click="agregarPago"
           />
         </div>
@@ -304,10 +438,20 @@ function confirmar() {
           description="El voucher de la máquina no lleva a quien paga: sobre 135 UF hay que emitir la boleta electrónica con su nombre y RUT."
         />
 
-        <div v-if="!nadaQueCobrar" class="text-sm space-y-1 border-t border-default pt-2">
+        <div v-if="!nadaQueCobrar" class="flex flex-col gap-1 border-t border-default pt-2 text-sm tabular-nums">
           <div class="flex justify-between text-muted"><span>Pagado</span><span>{{ formatMonto(suma) }}</span></div>
-          <div class="flex justify-between text-muted"><span>Restante</span><span>{{ formatMonto(resumen.restante) }}</span></div>
-          <div class="flex justify-between font-medium text-default"><span>Vuelto</span><span>{{ formatMonto(resumen.vuelto) }}</span></div>
+          <!-- Falta saldo: en ámbar, porque confirmar deja la venta con deuda. -->
+          <div v-if="hayFalta" data-qa="falta" class="flex justify-between text-base font-semibold text-warning">
+            <span>Falta</span><span>{{ formatMonto(resumen.restante) }}</span>
+          </div>
+          <div v-else class="flex justify-between text-muted"><span>Restante</span><span>{{ formatMonto(resumen.restante) }}</span></div>
+          <div
+            data-qa="vuelto"
+            class="flex items-baseline justify-between"
+            :class="hayEfectivo ? 'text-2xl font-semibold text-default' : 'font-medium text-default'"
+          >
+            <span>Vuelto</span><span>{{ formatMonto(resumen.vuelto) }}</span>
+          </div>
           <p v-if="resumen.excedenteSinVuelto" class="text-error text-xs">
             Los pagos con métodos sin vuelto superan el total: ese excedente no se puede devolver.
           </p>
@@ -317,10 +461,12 @@ function confirmar() {
 
     <template #footer>
       <AppModalFooter>
-        <UButton label="Cancelar" color="neutral" variant="ghost" @click="() => { open = false }" />
+        <UButton label="Cancelar" color="neutral" variant="ghost" size="xl" class="min-h-11" @click="() => { open = false }" />
         <UButton
-          label="Confirmar venta"
+          :label="hayFalta && !nadaQueCobrar ? 'Confirmar con saldo pendiente' : 'Confirmar venta'"
           color="primary"
+          size="xl"
+          class="min-h-11"
           :loading="submitting"
           :disabled="!puedeConfirmar"
           @click="confirmar"

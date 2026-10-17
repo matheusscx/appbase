@@ -202,7 +202,8 @@ watch(clienteDrawerOpen, (open) => {
               icon="i-lucide-eraser"
               variant="ghost"
               color="neutral"
-              size="sm"
+              size="xl"
+              class="size-11 justify-center"
               :disabled="!hayAlgoQueLimpiar"
               @click="() => { vaciarModalOpen = true }"
             />
@@ -212,7 +213,8 @@ watch(clienteDrawerOpen, (open) => {
           v-model="tipoDocumentoId"
           :items="docItems"
           placeholder="Documento"
-          size="sm"
+          size="xl"
+          :ui="{ base: 'min-h-11' }"
           class="min-w-0 flex-1 max-w-52"
         />
       </div>
@@ -233,7 +235,8 @@ watch(clienteDrawerOpen, (open) => {
             icon="i-lucide-pencil"
             variant="ghost"
             color="neutral"
-            size="xs"
+            size="xl"
+            class="size-11 justify-center"
             @click="() => { clienteDrawerOpen = true }"
           />
           <UButton
@@ -242,7 +245,8 @@ watch(clienteDrawerOpen, (open) => {
             icon="i-lucide-x"
             variant="ghost"
             color="error"
-            size="xs"
+            size="xl"
+            class="size-11 justify-center ms-2"
             @click="quitarCustomer"
           />
         </div>
@@ -253,9 +257,9 @@ watch(clienteDrawerOpen, (open) => {
         icon="i-lucide-user-plus"
         variant="soft"
         color="neutral"
-        size="sm"
+        size="xl"
         block
-        class="mb-4"
+        class="mb-4 min-h-11"
         @click="abrirClienteDrawer"
       />
       <!-- Sin el monto: el umbral lleva centavos ($5.363.274,60) y formatMonto lo redondea a la
@@ -299,7 +303,8 @@ watch(clienteDrawerOpen, (open) => {
               icon="i-lucide-trash-2"
               color="error"
               variant="ghost"
-              size="xs"
+              size="xl"
+              class="size-11 justify-center"
               @click="emit('quitar', index)"
             />
           </div>
@@ -310,8 +315,8 @@ watch(clienteDrawerOpen, (open) => {
             icon="i-lucide-list-checks"
             color="neutral"
             variant="outline"
-            size="xs"
-            class="self-start"
+            size="xl"
+            class="self-start min-h-11"
             @click="emit('cambiar-unidades', index)"
           />
           <AppCantidadInput
@@ -342,7 +347,8 @@ watch(clienteDrawerOpen, (open) => {
               label="Volver a calcular"
               color="error"
               variant="outline"
-              size="sm"
+              size="xl"
+              class="min-h-11"
               :loading="loadingCalculo"
               @click="emit('recalcular')"
             />
@@ -367,7 +373,7 @@ watch(clienteDrawerOpen, (open) => {
             <span>Impuestos</span><span>+{{ formatMonto(resultado.totales.totalImpuestos) }}</span>
           </div>
           <AdvertenciasPrecio :advertencias="calculoVigente?.advertenciasVenta ?? []" class="mb-1" />
-          <div class="flex justify-between items-center font-semibold text-default text-base pt-1 border-t border-default">
+          <div class="flex justify-between items-center font-semibold text-default text-xl tabular-nums pt-1 border-t border-default">
             <span class="flex items-center gap-1">
               Total
               <VentasMonedaTasasInfo :moneda-ids="monedaIdsEnCarrito" />
@@ -380,7 +386,8 @@ watch(clienteDrawerOpen, (open) => {
           icon="i-lucide-banknote"
           color="primary"
           block
-          size="lg"
+          size="xl"
+          class="min-h-11"
           :loading="loadingCalculo"
           :disabled="!habilitarCobro"
           @click="emit('cobrar')"

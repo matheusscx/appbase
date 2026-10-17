@@ -88,7 +88,16 @@ const cobroOpen = ref(false)
 const submitting = ref(false)
 const propinaMonto = ref('0')
 const propinaPorcentaje = ref(PROPINA_PORCENTAJE_DEFAULT)
-const propinaHabilitada = ref(true)
+// Apagada hasta que llegue una lectura buena (01.19): un cobro abierto antes, o una lectura
+// que no llega, no puede ofrecer una propina que el local quizá apagó.
+const propinaHabilitada = ref(false)
+/** La lectura de la propina falló: parte apagada y el modal lo dice (01.19). */
+const propinaNoDisponible = ref(false)
+/** Lo que quedó registrado en el último cobro; se queda hasta que la cajera lo cierra o cobra otra venta (01.5). */
+const ultimoCobro = ref<{ titulo: string, boleta: BoletaVenta | null, vuelto: string } | null>(null)
+watch(cobroOpen, (abierto) => {
+  if (abierto) ultimoCobro.value = null
+})
 const movimientoDrawerOpen = ref(false)
 const cierreDrawerOpen = ref(false)
 const recetaDrawerOpen = ref(false)
@@ -273,9 +282,10 @@ async function cargar() {
 
 onMounted(async () => {
   await Promise.all([cajaStore.cargarActiva(), cargar(), catalogo.cargar(), unidadesStore.ensureLoaded(), cargarEmisor()])
-  const { porcentajeSugerido, habilitado } = await fetchPorcentajeSugeridoVenta()
+  const { porcentajeSugerido, habilitado, falloLectura } = await fetchPorcentajeSugeridoVenta()
   propinaPorcentaje.value = porcentajeSugerido
   propinaHabilitada.value = habilitado
+  propinaNoDisponible.value = falloLectura
 })
 
 function onCambiarCantidadPresentacion(
@@ -294,6 +304,46 @@ const estadoToastTitle: Record<string, string> = {
   pagada: 'Venta pagada',
   pagada_parcial: 'Venta con pago parcial',
   pendiente: 'Venta registrada — pendiente de pago',
+}
+
+/** Imprime la boleta que devolvió el servidor; si no sale, lo dice y la venta queda igual. */
+async function imprimirBoletaDeLaVenta(boleta: BoletaVenta) {
+  try {
+    const impreso = await impresorasApi.imprimirBoleta({
+      emisor: emisor.value,
+      // Si la boleta salió: su folio y su emisor; si no salió: la línea de pendiente.
+      ...paraTicket(boleta),
+      // La fecha de la VENTA: una reimpresión de ayer no puede decir hoy.
+      fecha: new Date(boleta.fecha),
+      meta: {
+        cajero: boleta.cajero ?? undefined,
+      },
+      // Del payload del `POST` (`boleta.customer`), no del formulario: `customer.value` se
+      // vacía al limpiar el carrito. El papel sale de lo que el servidor persistió.
+      cliente: boleta.customer
+        ? {
+            nombre: boleta.customer.nombre || undefined,
+            rut: boleta.customer.rut || undefined,
+            direccion: boleta.customer.direccion || undefined,
+          }
+        : undefined,
+      items: itemsParaBoletaImpresion(boleta.items, unidadesStore.esFraccionaria),
+      totales: boleta.totales,
+      impuestos: boleta.impuestos,
+      promociones: boleta.promociones,
+      ...(boleta.propina ? { propina: boleta.propina } : {}),
+      pagos: boleta.pagos,
+      vuelto: boleta.vuelto ?? undefined,
+      formatMonto: (v: string) => formatMonto(v),
+    })
+    // Sin impresora de boletas no hay error que atrapar: simplemente no sale papel (01.15).
+    if (!impreso) {
+      toast.add({ title: 'La venta quedó registrada, pero no hay impresora de boletas configurada', color: 'warning' })
+    }
+  } catch {
+    // Sin cierre automático: es lo único que la cajera tiene que hacer.
+    toast.add({ title: 'La venta quedó registrada, pero la boleta no salió', description: 'Revisa la impresora y reimprime desde Ventas.', color: 'warning', duration: 0 })
+  }
 }
 
 async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
@@ -368,52 +418,17 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     void franjaEmision.value?.recargar()
     cobroOpen.value = false
     propinaMonto.value = '0'
+    // Primero el papel, sin `await`: nada de lo que sigue (caja local, catálogo) puede dejar
+    // la venta cobrada sin boleta, y la cajera no espera a la impresora para atender al siguiente.
+    // La boleta es la que devuelve el propio `POST /ventas` (`armarBoleta`, sobre la venta ya
+    // persistida): no se recalcula acá. Lo que puede fallar es la impresión en sí (QZ Tray).
+    void imprimirBoletaDeLaVenta(venta.boleta)
 
-    // La boleta que se imprime es la que devuelve el propio `POST /ventas`
-    // (`armarBoleta` en el backend, sobre la venta ya persistida): no se
-    // recalcula acá. Ya no hay camino sin boleta; lo que puede seguir
-    // fallando es la impresión en sí (QZ Tray sin responder), un problema de
-    // hardware ajeno al armado de la boleta.
-    try {
-      const impreso = await impresorasApi.imprimirBoleta({
-        emisor: emisor.value,
-        // Si la boleta salió: su folio y su emisor; si no salió: la línea de pendiente.
-        ...paraTicket(venta.boleta),
-        // La fecha de la VENTA: una reimpresión de ayer no puede decir hoy.
-        fecha: new Date(venta.boleta.fecha),
-        meta: {
-          cajero: venta.boleta.cajero ?? undefined,
-        },
-        // Del payload del `POST` (`venta.boleta.customer`), no del formulario:
-        // `customer.value` se vacía más abajo al limpiar el carrito, y es el
-        // mismo criterio que ya usan `items`/`totales`/`pagos` acá — el papel
-        // sale de lo que el servidor persistió, no de estado local.
-        cliente: venta.boleta.customer
-          ? {
-              nombre: venta.boleta.customer.nombre || undefined,
-              rut: venta.boleta.customer.rut || undefined,
-              direccion: venta.boleta.customer.direccion || undefined,
-            }
-          : undefined,
-        items: itemsParaBoletaImpresion(venta.boleta.items, unidadesStore.esFraccionaria),
-        totales: venta.boleta.totales,
-        impuestos: venta.boleta.impuestos,
-        promociones: venta.boleta.promociones,
-        ...(venta.boleta.propina ? { propina: venta.boleta.propina } : {}),
-        pagos: venta.boleta.pagos,
-        vuelto: venta.boleta.vuelto ?? undefined,
-        formatMonto: (v: string) => formatMonto(v),
-      })
-      // Sin impresora de boletas no hay error que atrapar: simplemente no sale papel (01.15).
-      if (!impreso) {
-        toast.add({ title: 'La venta quedó registrada, pero no hay impresora de boletas configurada', color: 'warning' })
-      }
-    } catch {
-      // Sin cierre automático: es lo único que la cajera tiene que hacer.
-      toast.add({ title: 'La venta quedó registrada, pero la boleta no salió', description: 'Revisa la impresora y reimprime desde Ventas.', color: 'warning', duration: 0 })
-    }
-
-    // Persiste la venta en el catálogo base; el carrito se limpia después.
+    // El carrito es de la venta que ya se cobró: se cierra AHORA, no cuando la
+    // impresora conteste (01.1). Esperar al papel dejaba la venta vendida a la vista
+    // hasta 10 s con QZ colgado, mezclaba lo que se agregaba para el cliente siguiente
+    // y lo borraba al terminar. Medido: `limpiar()` corría detrás del `await` de la
+    // impresión.
     items.value = descontarStockCatalogo(items.value, lineasVenta)
     const pagosConMonto = pagos.filter(p => new Decimal(p.monto || '0').gt(0))
     const bruto = pagosConMonto.reduce(
@@ -427,6 +442,12 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
     limpiar()
     customerExpandido.value = false
     customer.value = customerVacio()
+    // El vuelto, el total y el folio quedan a la vista; el toast dura 5 s (01.5).
+    ultimoCobro.value = {
+      titulo: estadoToastTitle[venta.estado] ?? 'Venta registrada',
+      boleta: venta.boleta ?? null,
+      vuelto,
+    }
   } catch (e: unknown) {
     if (intentoCobro.mostrarSiCobroConOtrosDatos(e, AMBITO_COBRO)) return
     mostrarRechazoPorStock({ error: e, fallback: 'No se pudo registrar la venta. Inténtalo de nuevo.', puedeTrasladar: puedeTrasladar.value })
@@ -443,7 +464,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         <template #right>
           <div v-if="tieneCaja" class="flex items-center gap-2 mr-2">
             <UDropdownMenu :items="cajaMenuItems">
-              <UButton variant="soft" color="success" size="sm" icon="i-lucide-banknote">
+              <UButton variant="soft" color="success" size="xl" class="min-h-11" icon="i-lucide-banknote">
                 Caja abierta
               </UButton>
             </UDropdownMenu>
@@ -481,7 +502,15 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
             @add="onCatalogoAdd"
           />
         </div>
-        <div class="lg:col-span-2 min-h-0 flex flex-col overflow-hidden">
+        <div class="lg:col-span-2 min-h-0 flex flex-col gap-3 overflow-hidden">
+          <VentasCobroResultado
+            v-if="ultimoCobro"
+            class="shrink-0"
+            :titulo="ultimoCobro.titulo"
+            :boleta="ultimoCobro.boleta"
+            :vuelto-del-modal="ultimoCobro.vuelto"
+            @cerrar="ultimoCobro = null"
+          />
           <VentasCarritoPanel
             v-model:tipo-documento-id="tipoDocumentoId"
             v-model:customer="customer"
@@ -523,6 +552,7 @@ async function confirmarCobro(pagos: PagoInput[], vuelto: string) {
         :total="totalFinal"
         :venta-total="totalFinal"
         :porcentaje-sugerido="propinaPorcentaje"
+        :propina-no-disponible="propinaNoDisponible"
         :metodos="metodos"
         :submitting="submitting"
         :sobre-umbral-identidad="sobreUmbral"
