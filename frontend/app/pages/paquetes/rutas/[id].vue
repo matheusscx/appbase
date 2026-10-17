@@ -1,6 +1,5 @@
 <script setup lang="ts">
-import type { EstadoLinea, HojaRutaDetalle, LineaHoja } from '~/types/paqueteria'
-import { shellUi } from '~/utils/ui-shell'
+import type { EstadoLinea, HojaRutaDetalle, LineaHoja, MedioCobro } from '~/types/paqueteria'
 
 // Admin-only: el backend va con `TenantAdminGuard` en todo el módulo.
 definePageMeta({ middleware: ['auth', 'admin'], layout: 'dashboard' })
@@ -10,7 +9,7 @@ const toast = useToast()
 const apiUrl = useRuntimeConfig().public.apiUrl
 const { formatOficial } = useCurrency()
 const { formatFecha } = useFormatters()
-const { textoNeto, presentarNeto, rotuloEstadoHoja, colorEstadoHoja, rotuloEstadoLinea, colorEstadoLinea } = usePaqueteria()
+const { textoNeto, presentarNeto, rotuloMedio, rotuloEstadoHoja, colorEstadoHoja, rotuloEstadoLinea, colorEstadoLinea } = usePaqueteria()
 
 const hojaId = String(route.params.id)
 const hoja = ref<HojaRutaDetalle | null>(null)
@@ -20,13 +19,12 @@ const falloCarga = ref<string | null>(null)
 // Una escritura a la vez: cada respuesta es la hoja entera, y dos en vuelo podrían llegar
 // desordenadas y pisar con la vieja. También es la guarda contra el doble clic.
 const escribiendo = ref(false)
-const rendirAbierto = ref(false)
+// El medio de cobro solo se muestra una vez entregada la línea: es lo que el servidor guardó. Antes de
+// eso no hay elección que mostrar ("Entregar todos" también deja efectivo), así que nada queda sin aplicar.
+const MEDIOS: MedioCobro[] = ['efectivo', 'transferencia']
 
 const rendida = computed(() => hoja.value?.estado === 'rendida')
 const neto = computed(() => hoja.value ? presentarNeto(hoja.value.netoARendir) : null)
-const puedeRendir = computed(() =>
-  !!hoja.value && !rendida.value && hoja.value.asignados > 0 && hoja.value.enRuta === 0 && !escribiendo.value,
-)
 const frase = computed(() => hoja.value ? textoNeto(hoja.value.repartidorNombre, hoja.value.netoARendir) : '')
 
 async function cargar() {
@@ -76,9 +74,29 @@ async function escribir(
   }
 }
 
-async function marcar(linea: LineaHoja, estado: EstadoLinea) {
+function medioDe(linea: LineaHoja): MedioCobro {
+  return linea.medioCobro ?? 'efectivo'
+}
+
+/** `medio` solo aplica a una línea con cobro en destino; sin él, el servidor deja efectivo. */
+async function marcar(linea: LineaHoja, estado: EstadoLinea, medio?: MedioCobro) {
   if (linea.estado === estado) return
-  await escribir(`paquetes/${linea.paqueteId}`, { method: 'PATCH', body: { estado } }, 'Error al marcar el paquete')
+  // `medioCobro` solo viaja con `entregado` y un cobro en destino: en cualquier otra línea el
+  // servidor lo rechaza con 400.
+  const body = estado === 'entregado' && linea.cobroEnDestino
+    ? { estado, medioCobro: medio ?? 'efectivo' }
+    : { estado }
+  await escribir(`paquetes/${linea.paqueteId}`, { method: 'PATCH', body }, 'Error al marcar el paquete')
+}
+
+/** Cambia el medio de una línea ya entregada (se puede mientras la hoja no esté rendida). */
+async function elegirMedio(linea: LineaHoja, medio: MedioCobro) {
+  if (linea.estado !== 'entregado' || medioDe(linea) === medio) return
+  await escribir(
+    `paquetes/${linea.paqueteId}`,
+    { method: 'PATCH', body: { estado: 'entregado', medioCobro: medio } },
+    'Error al cambiar el medio de cobro',
+  )
 }
 
 async function quitar(linea: LineaHoja) {
@@ -92,21 +110,6 @@ async function entregarTodos() {
   if (await escribir('entregar-todos', { method: 'POST' }, 'Error al marcar los paquetes')) {
     toast.add({ title: `${pendientes} ${pendientes === 1 ? 'paquete marcado' : 'paquetes marcados'} como entregados`, color: 'success' })
   }
-}
-
-function abrirRendir() {
-  rendirAbierto.value = true
-}
-
-function cerrarRendir() {
-  rendirAbierto.value = false
-}
-
-async function rendir() {
-  if (!puedeRendir.value) return
-  const ok = await escribir('rendir', { method: 'POST' }, 'Error al rendir la hoja')
-  rendirAbierto.value = false
-  if (ok) toast.add({ title: 'Hoja rendida', color: 'success' })
 }
 </script>
 
@@ -173,17 +176,16 @@ async function rendir() {
                 @click="entregarTodos"
               />
               <UButton
-                label="Rendir"
+                :label="`Rendir a ${hoja.repartidorNombre}`"
                 icon="i-lucide-handshake"
-                :disabled="!puedeRendir"
+                :to="`/paquetes/rendiciones/nueva?repartidorId=${hoja.repartidorId}`"
                 data-qa="hoja-rendir"
-                @click="abrirRendir"
               />
             </div>
           </div>
 
           <p v-if="!rendida && hoja.enRuta > 0" class="text-sm text-muted" data-qa="hoja-rendir-bloqueo">
-            Quedan {{ hoja.enRuta }} en ruta: márcalos como entregados o no entregados para poder rendir.
+            Quedan {{ hoja.enRuta }} en ruta: márcalos como entregados o no entregados para poder rendir esta hoja.
           </p>
 
           <section class="grid gap-4 md:grid-cols-[minmax(0,1fr)_minmax(0,1.4fr)]" aria-label="Totales de la hoja">
@@ -299,6 +301,14 @@ async function rendir() {
                 />
               </div>
 
+              <p
+                v-if="rendida && linea.estado === 'entregado' && linea.medioCobro"
+                class="text-sm text-muted"
+                :data-qa="`hoja-linea-${linea.codigo}-medio`"
+              >
+                Cobrado en {{ rotuloMedio(linea.medioCobro).toLowerCase() }}
+              </p>
+
               <UBadge
                 v-if="rendida"
                 :label="rotuloEstadoLinea(linea.estado)"
@@ -309,13 +319,22 @@ async function rendir() {
               <template v-else>
                 <UFieldGroup :aria-label="`Estado de ${linea.codigo}`">
                   <UButton
-                    label="Entregado"
+                    :label="linea.cobroEnDestino && linea.estado !== 'entregado' ? 'Entregado en efectivo' : 'Entregado'"
                     color="success"
                     :variant="linea.estado === 'entregado' ? 'solid' : 'outline'"
                     :aria-pressed="linea.estado === 'entregado'"
                     :disabled="escribiendo"
                     :data-qa="`hoja-linea-${linea.codigo}-entregado`"
                     @click="marcar(linea, 'entregado')"
+                  />
+                  <UButton
+                    v-if="linea.cobroEnDestino && linea.estado !== 'entregado'"
+                    label="Entregado por transferencia"
+                    color="success"
+                    variant="outline"
+                    :disabled="escribiendo"
+                    :data-qa="`hoja-linea-${linea.codigo}-entregado-transferencia`"
+                    @click="marcar(linea, 'entregado', 'transferencia')"
                   />
                   <UButton
                     label="No entregado"
@@ -334,6 +353,23 @@ async function rendir() {
                     :disabled="escribiendo"
                     :data-qa="`hoja-linea-${linea.codigo}-en-ruta`"
                     @click="marcar(linea, 'en_ruta')"
+                  />
+                </UFieldGroup>
+                <UFieldGroup
+                  v-if="linea.cobroEnDestino && linea.estado === 'entregado'"
+                  :aria-label="`Cómo se cobra ${linea.codigo}`"
+                >
+                  <UButton
+                    v-for="medio in MEDIOS"
+                    :key="medio"
+                    :label="rotuloMedio(medio)"
+                    color="neutral"
+                    size="sm"
+                    :variant="medioDe(linea) === medio ? 'solid' : 'outline'"
+                    :aria-pressed="medioDe(linea) === medio"
+                    :disabled="escribiendo"
+                    :data-qa="`hoja-linea-${linea.codigo}-medio-${medio}`"
+                    @click="elegirMedio(linea, medio)"
                   />
                 </UFieldGroup>
                 <UButton
@@ -363,36 +399,4 @@ async function rendir() {
       </div>
     </template>
   </UDashboardPanel>
-
-  <UModal v-model:open="rendirAbierto" title="Rendir la hoja" :ui="shellUi.modal">
-    <template #body>
-      <div class="space-y-3" data-qa="hoja-rendir-modal">
-        <p
-          class="text-lg font-semibold"
-          :class="neto?.negativo ? 'text-error' : 'text-highlighted'"
-          data-qa="hoja-rendir-texto"
-        >
-          {{ frase }}
-        </p>
-        <p class="text-sm text-muted">
-          Al rendir se cierra la hoja: no se podrán cambiar los paquetes ni los montos.
-        </p>
-      </div>
-    </template>
-    <template #footer>
-      <AppModalFooter>
-        <UButton color="neutral" variant="ghost" :disabled="escribiendo" @click="cerrarRendir">
-          Cancelar
-        </UButton>
-        <UButton
-          :loading="escribiendo"
-          :disabled="!puedeRendir && !escribiendo"
-          data-qa="hoja-rendir-confirmar"
-          @click="rendir"
-        >
-          Rendir
-        </UButton>
-      </AppModalFooter>
-    </template>
-  </UModal>
 </template>

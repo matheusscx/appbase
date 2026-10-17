@@ -69,6 +69,7 @@ const GATE_POR_RUTA: Record<string, string> = {
   '/paquetes/escanear': 'Paquetería:Leer',
   '/paquetes': 'Paquetería:Leer',
   '/paquetes/rutas': 'Paquetería:Leer',
+  '/paquetes/rendiciones': 'Paquetería:Leer',
 }
 
 /** Gates que además exigen ser admin del tenant: el backend de esas pantallas es admin-only. */
@@ -114,6 +115,7 @@ const ARBOL_DEL_ADMIN = [
     ['Escanear', '/paquetes/escanear'],
     ['Paquetes', '/paquetes'],
     ['Rutas', '/paquetes/rutas'],
+    ['Rendiciones', '/paquetes/rendiciones'],
   ]],
   ['Reportes', '/reportes'],
   ['Administración', '/admin'],
@@ -235,6 +237,7 @@ describe('useMenuLateral', () => {
           ['Escanear', '/paquetes/escanear'],
           ['Paquetes', '/paquetes'],
           ['Rutas', '/paquetes/rutas'],
+          ['Rendiciones', '/paquetes/rendiciones'],
         ]],
       ])
     })

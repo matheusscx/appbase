@@ -305,108 +305,86 @@ describe('detalle: marcar todos entregados', () => {
   })
 })
 
+describe('detalle: medio de cobro', () => {
+  const conCobro = () => hojaCon([
+    linea('ML-1', 'en_ruta'),
+    linea('ML-2', 'en_ruta', { cobroEnDestino: true }),
+  ])
+
+  it('una línea sin cobro en destino no ofrece medio y manda solo el estado', async () => {
+    await montar()
+
+    expect(qa('hoja-linea-ML-1-medio-efectivo')).toBeNull()
+    await clic('hoja-linea-ML-1-entregado')
+    expect(escrituras().map(e => e.body)).toEqual([{ estado: 'entregado' }])
+  })
+
+  it('con cobro en destino, Entregado manda efectivo y no hay medio que elegir antes de entregar', async () => {
+    servidor = conCobro()
+    await montar()
+
+    expect(qa('hoja-linea-ML-2-medio-efectivo')).toBeNull()
+    expect(qa('hoja-linea-ML-2-medio-transferencia')).toBeNull()
+    await clic('hoja-linea-ML-2-entregado')
+
+    expect(escrituras().map(e => e.body)).toEqual([{ estado: 'entregado', medioCobro: 'efectivo' }])
+  })
+
+  it('«Entregado por transferencia» marca con transferencia en un solo paso', async () => {
+    servidor = conCobro()
+    await montar()
+
+    await clic('hoja-linea-ML-2-entregado-transferencia')
+
+    expect(escrituras().map(e => e.body)).toEqual([{ estado: 'entregado', medioCobro: 'transferencia' }])
+  })
+
+  it('una línea sin cobro en destino no ofrece entregar por transferencia', async () => {
+    servidor = conCobro()
+    await montar()
+
+    expect(qa('hoja-linea-ML-1-entregado-transferencia')).toBeNull()
+  })
+
+  it('una entregada muestra el medio guardado y ya no ofrece entregar por transferencia', async () => {
+    servidor = hojaCon([linea('ML-2', 'entregado', { cobroEnDestino: true, medioCobro: 'transferencia' })])
+    await montar()
+
+    expect(boton('hoja-linea-ML-2-medio-transferencia').getAttribute('aria-pressed')).toBe('true')
+    expect(boton('hoja-linea-ML-2-medio-efectivo').getAttribute('aria-pressed')).toBe('false')
+    expect(qa('hoja-linea-ML-2-entregado-transferencia')).toBeNull()
+  })
+
+  it('en una línea ya entregada, cambiar el medio lo manda al servidor', async () => {
+    servidor = hojaCon([linea('ML-2', 'entregado', { cobroEnDestino: true, medioCobro: 'efectivo' })])
+    await montar()
+
+    await clic('hoja-linea-ML-2-medio-transferencia')
+
+    expect(escrituras().map(e => e.body)).toEqual([{ estado: 'entregado', medioCobro: 'transferencia' }])
+  })
+
+  it('no ofrece medio en una línea no entregada', async () => {
+    servidor = hojaCon([linea('ML-2', 'no_entregado', { cobroEnDestino: true })])
+    await montar()
+
+    expect(qa('hoja-linea-ML-2-medio-efectivo')).toBeNull()
+  })
+})
+
 describe('detalle: rendir', () => {
-  it('con paquetes en ruta está deshabilitado y dice cuántos quedan', async () => {
+  it('el botón lleva a rendir al repartidor, sin escribir nada', async () => {
     await montar()
 
-    expect(boton('hoja-rendir').disabled).toBe(true)
+    expect(qa('hoja-rendir')!.textContent?.trim()).toBe('Rendir a Juan Pérez')
+    expect(qa('hoja-rendir')!.getAttribute('href')).toBe('/paquetes/rendiciones/nueva?repartidorId=r-1')
+    expect(escrituras()).toEqual([])
+  })
+
+  it('con paquetes en ruta avisa que esa hoja todavía no se puede rendir', async () => {
+    await montar()
+
     expect(texto('hoja-rendir-bloqueo')).toContain('Quedan 2 en ruta')
-    boton('hoja-rendir').click()
-    await esperar(30)
-    expect(qa('hoja-rendir-modal')).toBeNull()
-    expect(escrituras()).toEqual([])
-  })
-
-  it('sin nada en ruta se habilita y el modal dice qué entrega el repartidor', async () => {
-    servidor = hojaCon([linea('ML-1', 'entregado')], { netoARendir: '50000' })
-    await montar()
-
-    expect(boton('hoja-rendir').disabled).toBe(false)
-    expect(qa('hoja-rendir-bloqueo')).toBeNull()
-    await clic('hoja-rendir')
-
-    expect(texto('hoja-rendir-texto')).toBe('Juan Pérez entrega $50.000')
-    expect(escrituras()).toEqual([])
-  })
-
-  it('con neto negativo el modal dice cuánto se le paga, en color de error', async () => {
-    servidor = hojaCon([linea('ML-1', 'entregado')], { netoARendir: '-5000' })
-    await montar()
-    await clic('hoja-rendir')
-
-    expect(texto('hoja-rendir-texto')).toBe('Se le pagan $5.000 a Juan Pérez')
-    expect(qa('hoja-rendir-texto')!.className).toContain('text-error')
-  })
-
-  it('con neto cero dice que no entrega ni recibe plata', async () => {
-    servidor = hojaCon([linea('ML-1', 'no_entregado')], { netoARendir: '0' })
-    await montar()
-    await clic('hoja-rendir')
-
-    expect(texto('hoja-rendir-texto')).toBe('Juan Pérez no entrega ni recibe plata')
-  })
-
-  it('confirmar manda POST a rendir, cierra el modal y deja la hoja sin acciones', async () => {
-    servidor = hojaCon([linea('ML-1', 'entregado')], { netoARendir: '50000' })
-    respuestas['POST h-1/rendir'] = hojaCon([linea('ML-1', 'entregado')], {
-      netoARendir: '50000',
-      estado: 'rendida',
-      rendidaEl: '2026-10-14T18:30:00.000Z',
-    })
-    await montar()
-    await clic('hoja-rendir')
-
-    await clic('hoja-rendir-confirmar')
-
-    expect(escrituras()).toEqual([{
-      url: expect.stringMatching(/\/hojas-ruta\/h-1\/rendir$/),
-      method: 'POST',
-      body: undefined,
-    }])
-    expect(qa('hoja-rendir-modal')).toBeNull()
-    expect(texto('hoja-rendida')).toMatch(/^Rendida el .*2026/)
-    expect(qa('hoja-rendir')).toBeNull()
-    expect(qa('hoja-entregar-todos')).toBeNull()
-    expect(qa('hoja-linea-ML-1-entregado')).toBeNull()
-    expect(qa('hoja-linea-quitar-ML-1')).toBeNull()
-    expect(toasts).toEqual([{ title: 'Hoja rendida', color: 'success' }])
-  })
-
-  it('un doble clic en confirmar rinde una sola vez', async () => {
-    servidor = hojaCon([linea('ML-1', 'entregado')], { netoARendir: '50000' })
-    await montar()
-    await clic('hoja-rendir')
-    let abrir!: () => void
-    compuerta = new Promise<void>((resolve) => { abrir = resolve })
-
-    boton('hoja-rendir-confirmar').click()
-    await esperar(10)
-    boton('hoja-rendir-confirmar').click()
-    await esperar(10)
-    abrir()
-    await esperar(30)
-
-    expect(escrituras()).toHaveLength(1)
-  })
-
-  it('si el servidor rechaza, avisa con su motivo, cierra el modal y vuelve a pedir la hoja', async () => {
-    servidor = hojaCon([linea('ML-1', 'entregado')], { netoARendir: '50000' })
-    fallos['POST h-1/rendir'] = { status: 400, message: 'Quedan 1 paquetes en ruta: ML-9' }
-    await montar()
-    await clic('hoja-rendir')
-
-    await clic('hoja-rendir-confirmar')
-
-    expect(toasts).toEqual([{ title: 'Quedan 1 paquetes en ruta: ML-9', color: 'error' }])
-    expect(qa('hoja-rendir-modal')).toBeNull()
-    expect(llamadas.map(l => l.method)).toEqual(['GET', 'POST', 'GET'])
-  })
-
-  it('una hoja sin paquetes no se puede rendir', async () => {
-    servidor = hojaCon([])
-    await montar()
-
-    expect(boton('hoja-rendir').disabled).toBe(true)
   })
 })
 

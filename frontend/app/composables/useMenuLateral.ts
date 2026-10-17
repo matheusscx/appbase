@@ -123,6 +123,7 @@ export function useMenuLateral() {
       esPaqueteria && { label: 'Escanear', icon: 'i-lucide-scan-barcode', to: '/paquetes/escanear' },
       esPaqueteria && { label: 'Paquetes', icon: 'i-lucide-package', to: '/paquetes' },
       esPaqueteria && { label: 'Rutas', icon: 'i-lucide-route', to: '/paquetes/rutas' },
+      esPaqueteria && { label: 'Rendiciones', icon: 'i-lucide-handshake', to: '/paquetes/rendiciones' },
     ]))
     // Visible si el usuario puede ver al menos un reporte: el catálogo y el
     // chequeo viven en `useReportes`, compartidos con el índice `/reportes`.

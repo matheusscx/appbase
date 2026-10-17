@@ -1,5 +1,5 @@
 import Decimal from 'decimal.js'
-import type { EstadoHoja, EstadoLinea, EstadoPaquete, LineaHoja, TarifaPagoFila } from '~/types/paqueteria'
+import type { MedioCobro, EstadoHoja, EstadoLinea, EstadoPaquete, LineaHoja, TarifaPagoFila } from '~/types/paqueteria'
 
 type ColorEstadoPaquete = 'neutral' | 'info' | 'success'
 type ColorEstadoLinea = 'info' | 'success' | 'warning'
@@ -17,6 +17,8 @@ const LINEA: Record<EstadoLinea, { rotulo: string, color: ColorEstadoLinea }> = 
   entregado: { rotulo: 'Entregado', color: 'success' },
   no_entregado: { rotulo: 'No entregado', color: 'warning' },
 }
+
+const MEDIO: Record<MedioCobro, string> = { efectivo: 'Efectivo', transferencia: 'Transferencia' }
 
 const HOJA: Record<EstadoHoja, { rotulo: string, color: ColorEstadoHoja }> = {
   abierta: { rotulo: 'Abierta', color: 'info' },
@@ -44,6 +46,20 @@ export function usePaqueteria() {
     if (monto.isNegative()) return `Se le pagan ${formatOficial(monto.abs().toFixed())} a ${nombre}`
     return `${nombre} entrega ${formatOficial(monto.toFixed())}`
   }
+
+  /**
+   * El saldo de una rendición (cobrado − pago − entregado a cuenta): positivo, lo debe el
+   * repartidor; negativo, la empresa le paga. Comparte con `textoNeto` la forma de leer el signo
+   * (`Decimal`: `'0.00'` también es cero), pero sin nombre: va en el pie de la planilla.
+   */
+  function presentarSaldo(saldo: string): { texto: string, negativo: boolean } {
+    const monto = new Decimal(saldo)
+    if (monto.isZero()) return { texto: 'Sin saldo', negativo: false }
+    if (monto.isNegative()) return { texto: `La empresa le paga ${formatOficial(monto.abs().toFixed())}`, negativo: true }
+    return { texto: `Debe rendir ${formatOficial(monto.toFixed())}`, negativo: false }
+  }
+
+  const textoSaldo = (saldo: string): string => presentarSaldo(saldo).texto
 
   /**
    * El neto de una hoja para una celda o un cartel (sin el nombre del repartidor): positivo y cero
@@ -74,6 +90,20 @@ export function usePaqueteria() {
     return fecha.split('-').slice(1).reverse().join('-')
   }
 
+  /** `YYYY-MM-DD` menos `dias` días, por componentes locales: una fecha pura no pasa por `toISOString` (daría el día en UTC). */
+  function diasAntes(fecha: string, dias: number): string {
+    const [anio, mes, dia] = fecha.split('-').map(Number) as [number, number, number]
+    const d = new Date(anio, mes - 1, dia - dias)
+    const dd = String(d.getDate()).padStart(2, '0')
+    const mm = String(d.getMonth() + 1).padStart(2, '0')
+    return `${d.getFullYear()}-${mm}-${dd}`
+  }
+
+  /** «05-10» si es un solo día, «05-10 al 10-10» si no; `formato` cambia cómo se escribe cada día. */
+  function periodo(desde: string, hasta: string, formato: (fecha: string) => string = fechaCorta): string {
+    return desde === hasta ? formato(desde) : `${formato(desde)} al ${formato(hasta)}`
+  }
+
   /**
    * Items de `USelect` para elegir la tarifa de pago de un paquete. La primera, con `value: null`,
    * es «Según repartidor»: el servidor resuelve al pagar (la del repartidor o la por defecto), y
@@ -99,6 +129,8 @@ export function usePaqueteria() {
   return {
     opcionesTarifa,
     fechaCorta,
+    diasAntes,
+    periodo,
     lineasConCobro,
     rotuloEstadoPaquete: (estado: EstadoPaquete) => PAQUETE[estado].rotulo,
     colorEstadoPaquete: (estado: EstadoPaquete) => PAQUETE[estado].color,
@@ -107,6 +139,9 @@ export function usePaqueteria() {
     rotuloEstadoLinea: (estado: EstadoLinea) => LINEA[estado].rotulo,
     colorEstadoLinea: (estado: EstadoLinea) => LINEA[estado].color,
     textoNeto,
+    textoSaldo,
+    presentarSaldo,
+    rotuloMedio: (medio: MedioCobro) => MEDIO[medio],
     presentarNeto,
   }
 }

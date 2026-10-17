@@ -62,6 +62,40 @@ describe('usePaqueteria', () => {
     })
   })
 
+  describe('textoSaldo: el saldo de una rendición', () => {
+    it('positivo: lo debe el repartidor', () => {
+      expect(usePaqueteria().textoSaldo('10000')).toBe('Debe rendir $10.000')
+    })
+
+    it('negativo: la empresa le paga, en positivo', () => {
+      expect(usePaqueteria().textoSaldo('-424322')).toBe('La empresa le paga $424.322')
+    })
+
+    it('cero, también con decimales: sin saldo', () => {
+      expect(usePaqueteria().textoSaldo('0')).toBe('Sin saldo')
+      expect(usePaqueteria().textoSaldo('0.00')).toBe('Sin saldo')
+    })
+
+    it('presentarSaldo marca el negativo para pintarlo', () => {
+      expect(usePaqueteria().presentarSaldo('-5000').negativo).toBe(true)
+      expect(usePaqueteria().presentarSaldo('5000').negativo).toBe(false)
+    })
+  })
+
+  describe('diasAntes y periodo: fechas puras', () => {
+    it('diasAntes resta días de calendario, cruzando mes y año', () => {
+      expect(usePaqueteria().diasAntes('2026-10-16', 29)).toBe('2026-09-17')
+      expect(usePaqueteria().diasAntes('2026-01-03', 5)).toBe('2025-12-29')
+    })
+
+    it('periodo: un día solo, o desde y hasta con el formato que se pase', () => {
+      const { periodo } = usePaqueteria()
+      expect(periodo('2026-10-05', '2026-10-05')).toBe('05-10')
+      expect(periodo('2026-10-05', '2026-10-10')).toBe('05-10 al 10-10')
+      expect(periodo('2026-10-05', '2026-10-10', f => `<${f}>`)).toBe('<2026-10-05> al <2026-10-10>')
+    })
+  })
+
   describe('presentarNeto: el neto de una hoja en una celda', () => {
     it('positivo: el monto, sin marca', () => {
       expect(usePaqueteria().presentarNeto('50000')).toEqual({ texto: '$50.000', negativo: false })
